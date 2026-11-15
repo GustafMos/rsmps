@@ -203,8 +203,23 @@ class VideoReader {
       const vf = sample.toVideoFrame();
       try {
         if (vf.displayWidth === dw && vf.displayHeight === dh) {
+          if (width === dw && height === dh && videoFrameUploadOk) {
+            try {
+              device.queue.copyExternalImageToTexture({ source: vf }, dest, [width, height]);
+              return;
+            } catch (err) {
+              // Some browsers (Firefox) do not accept a VideoFrame here: go through an ImageBitmap from now on.
+              if (!(err instanceof TypeError)) throw err;
+              videoFrameUploadOk = false;
+            }
+          }
           if (width === dw && height === dh) {
-            device.queue.copyExternalImageToTexture({ source: vf }, dest, [width, height]);
+            const same = await createImageBitmap(vf);
+            try {
+              device.queue.copyExternalImageToTexture({ source: same }, dest, [width, height]);
+            } finally {
+              same.close();
+            }
             return;
           }
           const bmp = await createImageBitmap(vf, { resizeWidth: width, resizeHeight: height, resizeQuality: 'low' });
@@ -260,6 +275,9 @@ class VideoReader {
 /* ---------------------------------------------------------------------------------------------- */
 /* Library                                                                                         */
 /* ---------------------------------------------------------------------------------------------- */
+
+/** False once the browser has refused a VideoFrame as a texture source (then frames go through ImageBitmap). */
+let videoFrameUploadOk = true;
 
 export class Library implements MediaLibrary {
   private infos = new Map<string, AssetInfo>();

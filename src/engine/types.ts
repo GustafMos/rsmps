@@ -186,6 +186,8 @@ export interface StringParam extends ParamBase {
 }
 export interface Vec2Param extends ParamBase {
   type: 'vec2';
+  /** The two numbers are the start and end of a range (start ≤ end): the UI shows one bar with two handles. */
+  range?: boolean;
   default: [number, number];
   unit?: ParamUnit;
   min?: number;
