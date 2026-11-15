@@ -56,3 +56,15 @@
 .rs-top__modes button.is-on { background: var(--accent); color: #fff; }
 
 .rs-sc__exportrow { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+
+.rs-stepper { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-3); background: var(--bg-1); border-bottom: 1px solid var(--line-strong); flex: none; }
+.rs-stepper button { height: 28px; padding: 0 var(--s-3); background: var(--bg-3); border: 1px solid var(--line-strong); color: var(--text-dim); border-radius: var(--r); font-size: var(--fs-sm); }
+.rs-stepper button b { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 6px; background: var(--bg-0); border-radius: 50%; font-size: var(--fs-xs); }
+.rs-stepper button.is-on { background: var(--accent); border-color: var(--accent-hi); color: #fff; }
+.rs-stepper__arrow { color: var(--text-faint); }
+.rs-quick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-3); background: var(--bg-2); border-bottom: 1px solid var(--line-strong); flex: none; }
+.rs-quick__f { width: 170px; }
+.rs-quick__sel { width: 160px; }
+.rs-quick__scales { display: flex; }
+.rs-quick__scales button { height: 24px; padding: 0 var(--s-2); background: var(--bg-3); border: 1px solid var(--line-strong); color: var(--text-dim); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.rs-quick__scales button.is-on { background: var(--accent); color: #fff; }

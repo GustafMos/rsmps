@@ -82,7 +82,7 @@ const cache = new WeakMap<NodeInstance, { def: AnyNodeDef | undefined; missing: 
 export function visibleParams(def: AnyNodeDef, params: Record<string, unknown>): [string, ParamDef][] {
   const out: [string, ParamDef][] = [];
   for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) {
-    if (p.type === 'json') continue;
+    if (p.type === 'json' || key === 'liveTick') continue;
     try {
       if (p.visibleIf && !p.visibleIf(params)) continue;
     } catch {

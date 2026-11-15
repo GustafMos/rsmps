@@ -16,6 +16,7 @@ import { listVideoInputs, onVideoDevicesChanged } from './live';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { ProjectStoreImpl } from './projects';
+import { RecordingController } from './recording';
 import { SignalRouter } from './signals';
 import { ScanImpl } from './scan';
 
@@ -56,6 +57,7 @@ export const createIo: CreateIo = async () => {
   library.subscribe(() => player.invalidate());
 
   const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router });
+  const recording = new RecordingController(audio, player, library);
   const plugins = new PluginManagerImpl(registry);
   const purgeOwned = (id: string, kind: 'graph' | 'scan') => {
     if (kind === 'scan') void library.removeOwned(id);
@@ -99,6 +101,11 @@ export const createIo: CreateIo = async () => {
       },
     },
     audio: {
+      arm: (id, t) => recording.arm(id, t),
+      record: () => recording.record(),
+      stop: () => recording.stop(),
+      recordingState: () => recording.recordingState(),
+      onRecordingState: (l) => recording.onRecordingState(l),
       listDevices: (kind) => audio.listDevices(kind),
       onDevicesChanged: (l) => audio.onDevicesChanged(l),
       sendNote: (id, n, v, on) => audio.sendNote(id, n, v, on),

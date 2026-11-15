@@ -4,7 +4,7 @@
  * Implementations live in the other files of src/io.
  */
 import type { Engine } from '../engine/engine';
-import type { AudioDevice } from '../engine/audio/api';
+import type { AudioDevice, PcmAudio, RecordedTake, RecordingState } from '../engine/audio/api';
 import type { Registry } from '../engine/define';
 import type { AssetInfo, GraphDoc, Host, Value } from '../engine/types';
 
@@ -30,6 +30,8 @@ export interface MediaLibrary extends Host {
    * the same asset id. Hidden from `list()`; removed by `removeOwned`.
    */
   attachSequence(owner: string, name: string, frames: Blob[], fps: number): Promise<AssetInfo>;
+  /** Store a recorded take as an audio asset (lossless 32-bit float WAV). Persisted; `assetAudio` serves it immediately. */
+  addRecording(name: string, pcm: PcmAudio): Promise<AssetInfo>;
   /** Delete every asset owned by `owner`. */
   removeOwned(owner: string): Promise<void>;
 }
@@ -136,6 +138,12 @@ export interface ExportRequest {
   /** Pack results into one ZIP when more than one file is produced. */
   zip: boolean;
   onProgress?: (p: ExportProgress) => void;
+  /**
+   * Sound-only export (when `outputs` names an `audio-out` node, or the graph has no picture output at all): 'wav' (default,
+   * 32-bit float), 'm4a' (AAC) or 'webm' (Opus). Falls back to WAV with a note in errors.txt when the browser cannot encode it.
+   * Videos always get their audio from the enabled Audio Out(s); with every Audio Out disabled they have no audio track.
+   */
+  audioFormat?: 'wav' | 'm4a' | 'webm';
   signal?: AbortSignal;
 }
 
@@ -255,7 +263,30 @@ export interface ProjectStore {
 }
 
 /** Hardware devices and the on-screen keyboard; passes straight through to the audio engine. */
+/** Result of `Io.audio.stop()`. */
+export interface RecordedResult {
+  take: RecordedTake;
+  /** One stored audio asset per audio pass (same order as the take's passes, or one for a single take); [] for MIDI takes. */
+  assets: AssetInfo[];
+}
+
+/**
+ * Recording flow (for the record button; no need to read the audio engine):
+ *  1. `arm(timelineNodeId, { track, kind })` — the Timeline node whose `recordAudio` / `recordMidi` input is wired.
+ *  2. `record()` from a click (user gesture): starts the audio engine and recording. During a count-in the player stays paused;
+ *     when recording starts the player plays from the current position (a running transport is left alone).
+ *  3. Show `recordingState()` / `onRecordingState()`: phase, seconds, countIn (seconds left), level meters, error.
+ *  4. `stop()`: pauses, stops, stores each audio pass as a WAV asset ("Take N · track · time") and returns { take, assets }.
+ *  5. Call `applyTake(timeline, take, { mode, assetIds: assets.map(a => a.id) })` (src/engine/audio/timeline.ts) and write the
+ *     result to the node's `clips` param. MIDI takes need no assets.
+ */
 export interface AudioApi {
+  arm(nodeId: string, target: { track: string; kind: 'audio' | 'midi' } | null): void;
+  record(): Promise<void>;
+  stop(): Promise<RecordedResult | null>;
+  recordingState(): RecordingState;
+  /** Called at most ~30 times a second while armed / recording. Returns an unsubscribe function. */
+  onRecordingState(listener: (state: RecordingState) => void): () => void;
   /** Works before audio is started. Never throws; [] when unsupported or denied. */
   listDevices(kind: "audio-input" | "midi-input"): Promise<AudioDevice[]>;
   /** Returns an unsubscribe function. */

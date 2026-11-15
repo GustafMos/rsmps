@@ -56,3 +56,7 @@
 .rs-loupe { position: absolute; z-index: 8; border: 2px solid #fff; outline: 1px solid #000; box-shadow: 3px 3px 0 #0008; image-rendering: pixelated; pointer-events: none; }
 .rs-viewer__pix { right: var(--s-2); top: 80px; padding: 0 var(--s-1) 0 var(--s-2); gap: var(--s-2); }
 .rs-viewer__pix .rs-btn--icon { width: 24px; min-width: 24px; height: 24px; }
+
+.rs-pts { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.rs-pts__svg { position: absolute; pointer-events: auto; overflow: visible; }
+.rs-pts__hint { left: 50%; bottom: var(--s-3); transform: translateX(-50%); color: var(--yellow); border-color: var(--yellow); background: #2a2208; }

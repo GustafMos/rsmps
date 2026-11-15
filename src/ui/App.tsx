@@ -15,6 +15,7 @@ import { Viewer } from './viewer/Viewer';
 import { trackPointer } from './lib/drag';
 import { useShortcuts } from './shortcuts';
 import { ScanView } from './scan/ScanView';
+import { ScanQuickSettings, ScanStepper } from './scan/ScanStage';
 import { usePlayKeys } from './playKeys';
 import { useRenderWatchdog } from './watchdog';
 import './app.css';
@@ -28,6 +29,7 @@ export function App() {
   useRenderWatchdog(useApp());
   const prefs = useEd((s) => s.prefs);
   const mode = useEd((s) => s.mode);
+  const scanStage = useEd((s) => s.scanStage);
   const switching = useEd((s) => s.switching);
   const center = useRef<HTMLDivElement>(null);
   const viewerPanel = useRef<HTMLDivElement>(null);
@@ -88,7 +90,9 @@ export function App() {
           <div>Loading {switching}…</div>
         </div>
       )}
-      {mode === 'scan' ? <ScanView /> : (
+      {mode === 'scan' && <ScanStepper />}
+      {mode === 'scan' && scanStage === 2 && <ScanQuickSettings />}
+      {mode === 'scan' && scanStage === 1 ? <ScanView /> : (
       <div className="rs-main">
         {prefs.leftOpen && (
           <aside className="rs-left">
@@ -118,7 +122,7 @@ export function App() {
         )}
       </div>
       )}
-      {mode === 'edit' && <Transport />}
+      {(mode === 'edit' || scanStage === 2) && <Transport />}
       <AddMenu />
       <NodeContextMenu />
       <DialogHost />

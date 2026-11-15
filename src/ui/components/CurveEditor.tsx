@@ -14,6 +14,8 @@ import {
   removeKey,
   reverse,
   sampleCurve,
+  scaleTime,
+  shiftTime,
   setHandles,
   setInterp,
 } from '../../engine/lib/util-curve';
@@ -66,6 +68,9 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
   const loop = project.loop;
   const c = useMemo(() => normalizeCurve(curve), [curve]);
   const [sel, setSel] = useState(0);
+  /** Additional selected keys (box select / Shift-click); `sel` is the primary one shown in the numeric fields. */
+  const [extra, setExtra] = useState<number[]>([]);
+  const [boxRect, setBoxRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [view, setView] = useState<View>(() => fitView(c, loop, min, max));
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [ghost, setGhost] = useState<CurveValue | null>(null);
@@ -209,14 +214,14 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
           ctx.fill();
         }
       }
-      ctx.fillStyle = i === selIdx ? '#ffffff' : '#ffd24a';
+      ctx.fillStyle = i === selIdx ? '#ffffff' : extra.includes(i) ? '#9fb0ff' : '#ffd24a';
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 1.5;
       ctx.fillRect(p.x - 5, p.y - 5, 10, 10);
       ctx.strokeRect(p.x - 5, p.y - 5, 10, 10);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [c, view, ghost, selIdx, loop, frames]);
+  }, [c, view, ghost, selIdx, loop, frames, extra]);
 
   useLayoutEffect(() => draw(), [draw]);
   useEffect(() => {
@@ -307,14 +312,24 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
     });
     if (hit >= 0) {
       e.currentTarget.setPointerCapture(e.pointerId);
+      let group = [selIdx, ...extra].includes(hit) ? [...new Set([selIdx, ...extra])] : [hit];
+      if (e.shiftKey && !group.includes(hit)) group = [...new Set([selIdx, ...extra, hit])];
       setSel(hit);
+      setExtra(group.filter((g) => g !== hit));
       ed.beginHold();
       setGhost(cur);
+      const start = cur.keys.map((k) => ({ t: k.t, v: k.v }));
       const mv = (ev: PointerEvent) => {
         const p = fromPx(ev.clientX - s.left, ev.clientY - s.top, s);
-        const t = snapT(p.t, ev.shiftKey);
+        const t = snapT(p.t, ev.shiftKey && group.length === 1);
         const v = ev.ctrlKey || ev.metaKey ? Math.round(p.v / gridStep()) * gridStep() : p.v;
-        apply(moveKey(latest.current, hit, t, v));
+        const dt = t - start[hit].t;
+        const dv = v - start[hit].v;
+        let next = latest.current;
+        // move right-most first when going right (and left-most first when going left) so neighbours never block
+        const order = [...group].sort((a, b) => (dt > 0 ? b - a : a - b));
+        for (const gi of order) next = moveKey(next, gi, start[gi].t + dt, start[gi].v + dv);
+        apply(next);
       };
       const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); ed.endHold(); setGhost(null); };
       window.addEventListener('pointermove', mv);
@@ -324,9 +339,28 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
     // empty space: a click adds a key there
     const sx = e.clientX;
     const sy = e.clientY;
+    const mvBox = (ev: PointerEvent) => {
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+      setBoxRect({ x: Math.min(sx, ev.clientX) - s.left, y: Math.min(sy, ev.clientY) - s.top, w: Math.abs(ev.clientX - sx), h: Math.abs(ev.clientY - sy) });
+    };
+    window.addEventListener('pointermove', mvBox);
     const upAdd = (ev: PointerEvent) => {
       window.removeEventListener('pointerup', upAdd);
-      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 4) return;
+      window.removeEventListener('pointermove', mvBox);
+      setBoxRect(null);
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 4) {
+        const x0 = Math.min(sx, ev.clientX) - s.left;
+        const x1 = Math.max(sx, ev.clientX) - s.left;
+        const y0 = Math.min(sy, ev.clientY) - s.top;
+        const y1 = Math.max(sy, ev.clientY) - s.top;
+        const inside = latest.current.keys.map((k, i) => ({ i, p: toPx(k.t, k.v, s) })).filter(({ p }) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1).map(({ i }) => i);
+        if (inside.length) {
+          setSel(inside[0]);
+          setExtra(inside.slice(1));
+        }
+        return;
+      }
+      setExtra([]);
       const p = fromPx(mx, my, s);
       if (p.t < 0 || p.t > 1) return;
       const r = addKey(latest.current, snapT(p.t, ev.shiftKey), p.v, 'smooth', { loop });
@@ -352,6 +386,24 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
     return () => el.removeEventListener('wheel', onWheel);
   }, [onWheel]);
 
+  /** Remove every selected key (highest index first so indices stay valid). */
+  const removeSelected = () => {
+    let next = latest.current;
+    for (const i of [...new Set([selIdx, ...extra])].sort((a, b) => b - a)) next = removeKey(next, i);
+    setExtra([]);
+    apply(next);
+  };
+  /** Scale the selected keys' times (about the first one) and/or values (about their mean). */
+  const scaleSelected = (ft: number, fv: number) => {
+    const idx = [...new Set([selIdx, ...extra])].sort((a, b) => a - b);
+    const cur = latest.current;
+    const t0 = cur.keys[idx[0]].t;
+    const mean = idx.reduce((a, i) => a + cur.keys[i].v, 0) / idx.length;
+    let next = cur;
+    const order = ft >= 1 ? [...idx].reverse() : idx;
+    for (const i of order) next = moveKey(next, i, t0 + (cur.keys[i].t - t0) * ft, mean + (cur.keys[i].v - mean) * fv);
+    apply(next);
+  };
   const insertAtPlayhead = () => {
     const st = io.player.getState();
     const t = st.totalFrames > 0 ? st.frame / st.totalFrames : 0;
@@ -367,7 +419,7 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         e.stopPropagation();
-        apply(removeKey(latest.current, selIdx));
+        removeSelected();
       } else if (e.key === 'i' || e.key === 'I') {
         e.preventDefault();
         e.stopPropagation();
@@ -403,6 +455,17 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
     ...CURVE_PRESETS.map((p) => ({ label: p.label, onClick: () => preset(p.make) })),
     { sep: true },
     { label: 'Reverse', onClick: () => apply(reverse(c)) },
+    { head: 'Selected keys' },
+    { label: 'Scale values ×1.25', onClick: () => scaleSelected(1, 1.25) },
+    { label: 'Scale values ×0.8', onClick: () => scaleSelected(1, 0.8) },
+    { label: 'Scale time ×1.25', onClick: () => scaleSelected(1.25, 1) },
+    { label: 'Scale time ×0.8', onClick: () => scaleSelected(0.8, 1) },
+    { head: 'Whole curve' },
+    { label: 'Stretch time ×1.25', onClick: () => apply(scaleTime(c, 1.25)) },
+    { label: 'Compress time ×0.8', onClick: () => apply(scaleTime(c, 0.8)) },
+    { label: 'Shift +1 frame', onClick: () => apply(shiftTime(c, 1 / frames)) },
+    { label: 'Shift −1 frame', onClick: () => apply(shiftTime(c, -1 / frames)) },
+    { sep: true },
     { label: 'Auto tangents', onClick: () => apply(autoTangents(c, { loop })) },
     { label: 'Fit to range', onClick: fit },
     { sep: true },
@@ -442,7 +505,7 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
             <div className="rs-ce__num"><NumberField label="Value" step={0.01} value={Number(k.v.toFixed(4))} onChange={(v) => apply(moveKey(c, selIdx, k.t, v))} /></div>
           </>
         )}
-        <button className="rs-btn" onClick={() => apply(removeKey(c, selIdx))} disabled={c.keys.length < 2} title="Delete key"><Icon name="trash" /></button>
+        <button className="rs-btn" onClick={removeSelected} disabled={c.keys.length < 2} title="Delete selected keys"><Icon name="trash" /></button>
         <button className="rs-btn" onClick={fit} title="Fit the view to the curve"><Icon name="fit" /></button>
         <button className="rs-btn" onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}>Presets…</button>
         <button className="rs-btn" onClick={copy}>Copy</button>
@@ -450,6 +513,7 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
       </div>
       <div className="rs-ce__plot" onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }); }}>
         <canvas ref={cv} className="rs-ce__cv" onPointerDown={down} />
+        {boxRect && <div className="rs-ce__box" style={{ left: boxRect.x, top: boxRect.y, width: boxRect.w, height: boxRect.h }} />}
         <div ref={head} className="rs-ce__head-line" />
       </div>
       {menu && <MenuPopup x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}

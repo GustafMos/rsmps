@@ -20,6 +20,7 @@ import type { Gpu } from '../engine/gpu/gpu';
 import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
 import type { LibraryAsset, MediaLibrary } from './api';
+import { encodeWav } from './wav';
 import { idbAll, idbDelete, idbPut } from './db';
 import type { SignalRouter } from './signals';
 import { TimedFrameStore } from './lru';
@@ -399,6 +400,23 @@ export class Library implements MediaLibrary {
     idbPut('assets', id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
     this.onInvalidate?.();
     this.notify(); // bumps `version`: the player's frame cache key changes
+    return info;
+  }
+
+  async addRecording(name: string, pcm: PcmAudio): Promise<AssetInfo> {
+    const frames = pcm.channels[0]?.length ?? 0;
+    if (frames === 0) throw new Error('The recording is empty.');
+    const channels = pcm.channels.slice(0, 2).map((c) => c.slice());
+    const blob = new Blob([encodeWav({ sampleRate: pcm.sampleRate, channels }, 32) as BlobPart], { type: 'audio/wav' });
+    const info: AssetInfo = { id: uniqueId('a'), name, kind: 'audio', width: 0, height: 0, duration: frames / pcm.sampleRate, fps: 0, hasAudio: true };
+    this.infos.set(info.id, info);
+    this.blobs.set(info.id, blob);
+    // Serve it to the audio engine right away, without decoding the WAV again.
+    this.audio.set(info.id, Promise.resolve({ sampleRate: pcm.sampleRate, channels }));
+    this.audioBytes.set(info.id, channels.reduce((s, c) => s + c.byteLength, 0));
+    const record: AssetRecord = { id: info.id, added: Date.now(), info, blob };
+    idbPut('assets', info.id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
+    this.notify();
     return info;
   }
 

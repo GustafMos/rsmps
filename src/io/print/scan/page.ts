@@ -312,8 +312,18 @@ export function inferHeaderFromLattice(al: Aligned, paper: PaperId, landscape: b
   const cols = lat.x.count - 1;
   const rows = lat.y.count - 1;
   if (cols < 1 || rows < 1 || cols > 63 || rows > 63) return null;
-  const rowMid = lat.y.origin + (rows >= 2 ? lat.y.pitch : 0);
-  const measured = measureGutter(al.grayR, al.rect.width, al.rect.height, al.ppm, lat.x.origin + lat.x.pitch / 2, rowMid, 9);
+  // Sample the gap at many places (frame content such as a white shape can fill a gutter locally); the smaller gaps are the truth.
+  const gaps: number[] = [];
+  for (let r = 0; r < lat.y.count; r++) {
+    for (let c = 0; c < lat.x.count - 1; c++) {
+      for (const fr of [0.2, 0.5, 0.8]) {
+        const g = measureGutter(al.grayR, al.rect.width, al.rect.height, al.ppm, lat.x.origin + lat.x.pitch * (c + fr), lat.y.origin + lat.y.pitch * r, 9);
+        if (g !== null) gaps.push(g);
+      }
+    }
+  }
+  gaps.sort((p, q) => p - q);
+  const measured = gaps.length >= 4 ? gaps[Math.floor(gaps.length * 0.25)] : null;
   const gutter = Math.min(Math.max(measured ?? 5, 3), Math.min(20, Math.min(lat.x.pitch, lat.y.pitch) - 8));
   const t10 = (v: number) => Math.round(v * 10);
   const cellW = t10(lat.x.pitch - gutter);

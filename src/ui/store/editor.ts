@@ -19,11 +19,11 @@ import {
   createGraph,
 } from '../../engine/graph';
 import type { Registry } from '../../engine/define';
-import type { Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
+import type { AssetInfo, Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
 import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
 import { outputType } from '../../engine/graph';
-import { canCreateScan, createScanProject } from '../scan/session';
+import { createScanProject } from '../scan/session';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -92,6 +92,8 @@ export interface EditorState {
   supportPrompt: 'export' | 'close' | null;
   /** Running export (progress shown in a floating bar). */
   exportJob: { label: string; fraction: number } | null;
+  /** Stage of a scan tab: 1 = photos, 2 = clean up & export (the node editor). */
+  scanStage: 1 | 2;
   /** Top-level tab: the node editor or the print-scan-back tool. */
   mode: 'edit' | 'scan';
 }
@@ -169,6 +171,7 @@ export class Editor {
       activeProject: null,
       switching: null,
       exportJob: null,
+      scanStage: 1,
       supportPrompt: null,
       socketPicker: null,
     });
@@ -823,10 +826,11 @@ export class Editor {
     let active = await this.io.projects.activeId();
     if (!active || !list.some((p) => p.id === active)) active = list[0]?.id ?? null;
     if (active && kindOf(list.find((p) => p.id === active))) {
+      const sg = await this.io.projects.loadProject(active).catch(() => null);
       this.skipSave = true;
-      this.loadGraph(createGraph());
+      this.loadGraph(sg ?? createGraph());
       await this.io.projects.setActive(active);
-      this.patch({ projects: list, activeProject: active, mode: 'scan' });
+      this.patch({ projects: list, activeProject: active, mode: 'scan', scanStage: sg && sg.nodes.length ? 2 : 1 });
       return;
     }
     const g = active ? await this.io.projects.loadProject(active).catch(() => null) : null;
@@ -877,10 +881,10 @@ export class Editor {
       const g = await this.io.switchProject(id);
       this.skipSave = true;
       const scan = kindOf(target);
-      if (scan) this.loadGraph(createGraph()); // a scan tab holds no graph: free the previous one
-      else if (g) this.loadGraph(g);
+      if (g) this.loadGraph(g);
+      else if (scan) this.loadGraph(createGraph());
       else this.newGraph();
-      this.patch({ activeProject: id, switching: null, mode: scan ? 'scan' : 'edit' });
+      this.patch({ activeProject: id, switching: null, mode: scan ? 'scan' : 'edit', scanStage: scan && g && g.nodes.length ? 2 : 1 });
       await this.refreshProjects();
       try {
         if (!localStorage.getItem('rsmps.ui.tabUndoNote')) {
@@ -918,7 +922,6 @@ export class Editor {
   /** A scan is a tab of its own kind (needs the newer project storage). */
   async newScanTab(): Promise<void> {
     if (this.state.switching) return;
-    if (!canCreateScan(this.io)) return this.toast('Scan tabs need the newer project storage, which is not available yet.', 'error');
     this.patch({ switching: 'new scan' });
     try {
       await this.saveWithThumb();
@@ -926,12 +929,64 @@ export class Editor {
       await this.io.switchProject(p.id);
       this.skipSave = true;
       this.loadGraph(createGraph());
-      this.patch({ activeProject: p.id, switching: null, mode: 'scan' });
+      this.patch({ activeProject: p.id, switching: null, mode: 'scan', scanStage: 1 });
       await this.refreshProjects();
     } catch (err) {
       this.patch({ switching: null });
       this.toast(`Could not create the scan tab: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
+  }
+
+  /** The hidden working sequence owned by the active scan tab (created by `io.scan.attach`). */
+  scanAsset(): AssetInfo | undefined {
+    const id = this.state.activeProject;
+    return this.io.library.list({ includeHidden: true }).find((a) => (a as { owner?: string }).owner === id);
+  }
+
+  setScanStage(stage: 1 | 2): void {
+    if (stage === 2 && !this.ensureScanGraph()) return;
+    this.patch({ scanStage: stage });
+  }
+
+  /**
+   * First visit to stage 2: build the scan project's own clean-up chain from the node types that exist right now.
+   * Nodes carry labels so the Quick settings strip can find them.
+   */
+  ensureScanGraph(): boolean {
+    if (this.state.graph.nodes.length) return true;
+    const asset = this.scanAsset();
+    if (!asset) {
+      this.toast('Add photos first: the clean-up graph works on the recovered frames.', 'info');
+      return false;
+    }
+    const src = sourceDefFor(this.registry, asset.kind === 'image' ? 'image' : 'video');
+    const out = this.registry.list().find((d) => d.category === 'output' && (d.params as Record<string, { type: string }>).kind?.type === 'enum' && 'codec' in d.params);
+    if (!src || !out) {
+      this.toast('The Media In or Output node type is not available.', 'error');
+      return false;
+    }
+    let g = createGraph(this.state.projects.find((p) => p.id === this.state.activeProject)?.name ?? 'Scan');
+    g = { ...g, project: { ...g.project, width: asset.width, height: asset.height, fps: asset.fps || 12, duration: asset.duration || g.project.duration, loop: false } };
+    const chain: { id: string; label: string; params: Record<string, unknown> }[] = [{ id: src.def.id, label: 'Scanned frames', params: { [src.key]: [asset.id] } }];
+    if (this.registry.get('levels')) chain.push({ id: 'levels', label: 'Contrast', params: {} });
+    if (this.registry.get('resize')) chain.push({ id: 'resize', label: 'Upscale', params: { mode: 'height', height: asset.height, filter: 'area' } });
+    chain.push({ id: out.id, label: 'Export', params: { kind: 'video', name: 'scan' } });
+    let prev: { node: string; port: string } | null = null;
+    let x = 0;
+    for (const c of chain) {
+      const added = addNode(g, this.registry, c.id, { x, y: 0 }, c.params);
+      g = { ...added.graph, nodes: added.graph.nodes.map((n) => (n.id === added.node.id ? { ...n, label: c.label } : n)) };
+      const d = this.registry.get(c.id)!;
+      if (prev) {
+        const to = Object.keys(d.inputs).find((k) => (d.inputs as InputSchema)[k].type === 'image');
+        if (to) g = connect(g, this.registry, prev, { node: added.node.id, port: to });
+      }
+      const o = Object.keys(d.outputs)[0];
+      prev = o ? { node: added.node.id, port: o } : null;
+      x += 280;
+    }
+    this.loadGraph(g);
+    return true;
   }
 
   /** A graph project with Media In (this asset) -> Output, opened in a new tab. */
@@ -985,9 +1040,9 @@ export class Editor {
       const g = await this.io.switchProject(p.id);
       this.skipSave = true;
       const scan = kindOf(p);
-      if (scan) this.loadGraph(createGraph());
-      else if (g) this.loadGraph(g);
-      this.patch({ activeProject: p.id, switching: null, mode: scan ? 'scan' : 'edit' });
+      if (g) this.loadGraph(g);
+      else if (scan) this.loadGraph(createGraph());
+      this.patch({ activeProject: p.id, switching: null, mode: scan ? 'scan' : 'edit', scanStage: scan && g && g.nodes.length ? 2 : 1 });
       await this.refreshProjects();
     } catch (err) {
       this.patch({ switching: null });

@@ -7,6 +7,7 @@ import { Icon } from '../components/Icon';
 import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { PaintOverlay } from './PaintOverlay';
+import { PointsOverlay } from './PointsOverlay';
 import { FrameControl } from './FrameControl';
 import { Loupe } from './Loupe';
 import './viewer.css';
@@ -192,6 +193,14 @@ export function Viewer() {
   const nodeTitle = viewedNode ? viewedNode.label || viewedDef?.title || viewedNode.type : null;
   const catColor = viewedDef ? CATEGORIES[viewedDef.category]?.color : undefined;
   const paint = useEd((s) => (s.selection.length === 1 ? s.graph.nodes.find((n) => n.id === s.selection[0] && n.type === 'paint-mask') : undefined));
+  // any selected node with a `points` json param and a `closed` bool gets the on-viewer path editor (detected by shape)
+  const pointsNode = useEd((s) => {
+    if (s.selection.length !== 1) return undefined;
+    const n = s.graph.nodes.find((x) => x.id === s.selection[0]);
+    const d = n && io.registry.get(n.type);
+    const ps = d?.params as Record<string, { type: string }> | undefined;
+    return n && ps?.points?.type === 'json' && ps?.closed?.type === 'bool' && n.params.mode !== 'curves' ? n : undefined;
+  });
   const emptyMsg = !hasNodes
     ? 'The graph is empty. Add nodes with Shift+A in the graph below.'
     : !viewedNode
@@ -236,6 +245,7 @@ export function Viewer() {
           <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => { setHintOff(true); try { localStorage.setItem('rsmps.ui.zoomHint', '9'); } catch { /* ignore */ } }} title="Do not show again"><Icon name="close" size={12} /></button>
         </div>
       )}
+      {pointsNode && <PointsOverlay nodeId={pointsNode.id} stage={stage} />}
       {paint && <PaintOverlay nodeId={paint.id} stage={stage} />}
 
       <div className="rs-viewer__info rs-viewer__chip" data-nodrag>

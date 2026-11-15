@@ -63,7 +63,7 @@ export function Root() {
           lastItem = s.item;
           io.player.setView({ graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active });
           void graphChanged;
-          if (edited && s.activeProject && !s.switching && s.mode === 'edit') {
+          if (edited && s.activeProject && !s.switching) {
             if (ed.skipSave) ed.skipSave = false;
             else {
               io.projects.saveProject(s.activeProject, s.graph);

@@ -15,3 +15,5 @@
 .rs-curve canvas { flex: 1; min-width: 0; height: 18px; image-rendering: auto; }
 .rs-curve--lg { height: 44px; }
 .rs-curve--lg canvas { height: 36px; }
+
+.rs-ce__box { position: absolute; border: 1px solid var(--accent-hi); background: #4f66f230; pointer-events: none; }

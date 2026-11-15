@@ -33,6 +33,7 @@ import type { AudioBridge } from './audio-bridge';
 import { fitAudio } from './audio-util';
 import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
+import { encodeWav } from './wav';
 import { OffscreenPresenter } from './encode';
 import { SILENT_TRACKS, type SignalRouter } from './signals';
 import type { EvalGate } from './gate';
@@ -107,11 +108,12 @@ export class ExporterImpl implements Exporter {
     const { registry } = this.d;
     const graph = req.graph;
     const ids = req.outputs.length ? req.outputs : enabledOutputs(graph, registry).map((n) => n.id);
-    const outs = ids
-      .map((id) => graph.nodes.find((n) => n.id === id))
-      // Picture outputs only: the audio output renders sound, which is muxed into the videos, not exported on its own.
-      .filter((n): n is NodeInstance => !!n && registry.get(n.type)?.category === 'output' && Object.values(registry.get(n.type)!.inputs).some((i) => (i as { type: string }).type === 'image'));
-    if (outs.length === 0) throw new Error('This graph has no Output node to export. Add an Output node and connect an image to it.');
+    const picked = ids.map((id) => graph.nodes.find((n) => n.id === id)).filter((n): n is NodeInstance => !!n && registry.get(n.type)?.category === 'output');
+    const outs = picked.filter((n) => this.hasInput(n, 'image'));
+    // Audio Outs are muxed into videos. They are exported as a sound file only when asked for by id, or when the graph has no
+    // picture output at all (then sound alone is the obvious intent).
+    const audioOuts = picked.filter((n) => !this.hasInput(n, 'image') && this.hasInput(n, 'audio')).filter(() => req.outputs.length > 0 || outs.length === 0);
+    if (outs.length === 0 && audioOuts.length === 0) throw new Error('This graph has no Output node to export. Add an Output node and connect an image to it.');
 
     const itemCount = batchCount(graph, registry);
     const items = req.items === 'all' ? Array.from({ length: itemCount }, (_, i) => i) : [Math.min(Math.max(0, req.item), itemCount - 1)];
@@ -129,6 +131,10 @@ export class ExporterImpl implements Exporter {
         else if (params.kind === 'auto') weight = upstreamVideo ? frames : 1;
         jobs.push({ out, params, item, itemCount, sourceName, weight, label: `${out.label || sanitizeFileName(sourceName)}${itemCount > 1 ? ` #${item + 1}` : ''}` });
       }
+    }
+
+    if (audioOuts.length) {
+      jobs.push({ out: audioOuts[0], params: this.readParams(audioOuts[0]), item: items[0], itemCount, sourceName: graph.name || 'audio', weight: 1, label: 'Audio' });
     }
 
     const run: Run = {
@@ -277,7 +283,59 @@ export class ExporterImpl implements Exporter {
 
   /* ------------------------------------- one job ------------------------------------------------ */
 
+  private hasInput(n: NodeInstance, type: string): boolean {
+    const def = this.d.registry.get(n.type);
+    return !!def && Object.values(def.inputs).some((i) => (i as { type: string }).type === type);
+  }
+
+  /** Sound-only export: everything the enabled Audio Outs play, as one file. */
+  private async exportAudio(job: Job, run: Run): Promise<ExportedFile[]> {
+    const { audio, registry, library } = this.d;
+    const graph = run.req.graph;
+    const duration = totalFramesOf(graph.project) / graph.project.fps;
+    const rendered = await audio.renderOffline(graph, registry, (id) => library.assetAudio(id), { duration, loop: graph.project.loop });
+    if (!rendered || !rendered.channels.length || !rendered.channels[0].length) throw new Error('There is no enabled Audio Out with sound wired to it.');
+    const pcm = fitAudio(rendered, 0, duration, false);
+    const base = sanitizeFileName(graph.name || 'audio');
+    const format = run.req.audioFormat ?? 'wav';
+    run.progress(0.5, `${base}`);
+    if (format !== 'wav') {
+      const blob = await this.encodeCompressedAudio(pcm, format).catch(() => null);
+      if (blob) return [{ name: this.claim(run, `${base}.${format}`), blob }];
+      run.warnings.push(`This browser cannot encode ${format === 'm4a' ? 'AAC' : 'Opus'} audio; exported WAV instead.`);
+    }
+    run.progress(1, `${base}.wav`);
+    return [{ name: this.claim(run, `${base}.wav`), blob: new Blob([encodeWav(pcm, 32) as BlobPart], { type: 'audio/wav' }) }];
+  }
+
+  private async encodeCompressedAudio(pcm: PcmAudio, format: 'm4a' | 'webm'): Promise<Blob | null> {
+    const codecs: AudioCodec[] = format === 'm4a' ? ['aac'] : ['opus', 'vorbis'];
+    const codec = await getFirstEncodableAudioCodec(codecs, { numberOfChannels: pcm.channels.length, sampleRate: pcm.sampleRate }).catch(() => null);
+    if (!codec) return null;
+    const output = new Output({ format: format === 'm4a' ? new Mp4OutputFormat() : new WebMOutputFormat(), target: new BufferTarget() });
+    const source = new AudioSampleSource({ codec, quality: new Quality({ bitrate: 192_000 }) });
+    output.addAudioTrack(source);
+    await output.start();
+    const total = pcm.channels[0].length;
+    const chunk = Math.round(pcm.sampleRate / 2);
+    for (let at = 0; at < total; at += chunk) {
+      const n = Math.min(chunk, total - at);
+      const data = new Float32Array(n * pcm.channels.length);
+      pcm.channels.forEach((c, k) => data.set(c.subarray(at, at + n), k * n));
+      const sample = new AudioSample({ data, format: 'f32-planar', numberOfChannels: pcm.channels.length, sampleRate: pcm.sampleRate, timestamp: at / pcm.sampleRate });
+      try {
+        await source.add(sample);
+      } finally {
+        sample.close();
+      }
+    }
+    await output.finalize();
+    const buffer = (output.target as BufferTarget).buffer;
+    return buffer ? new Blob([buffer], { type: format === 'm4a' ? 'audio/mp4' : 'audio/webm' }) : null;
+  }
+
   private async exportJob(job: Job, run: Run): Promise<ExportedFile[]> {
+    if (!this.hasInput(job.out, 'image')) return this.exportAudio(job, run);
     const graph = run.req.graph;
     let kind: Kind;
     if (job.params.kind === 'auto') {
@@ -701,7 +759,10 @@ export class ExporterImpl implements Exporter {
     const { audio, registry, library } = this.d;
     const graph = run.req.graph;
     try {
-      if (audio.hasAudio(graph, registry)) {
+      // Audio Outs exist but every one is switched off (or bypassed): the user asked for no sound, so no track at all.
+      const audioNodes = graph.nodes.filter((n) => this.hasInput(n, 'audio') && registry.get(n.type)?.category === 'output');
+      if (audioNodes.length > 0 && audioNodes.every((n) => n.bypass || n.params.enabled === false)) return null;
+      if (audio.hasExportAudio(graph, registry)) {
         const rendered = await audio.renderOffline(graph, registry, (id) => library.assetAudio(id), { duration, loop: graph.project.loop });
         // The offline renderer works in whole blocks: cut/pad to exactly the video's duration.
         if (rendered && rendered.channels.length && rendered.channels[0].length) return fitAudio(rendered, 0, duration, false);

@@ -4,7 +4,7 @@
  */
 import type { Registry } from '../engine/define';
 import type { GraphDoc } from '../engine/types';
-import type { AnalyzeSignalsOffline, AudioAssetProvider, AudioDevice, AudioEngine, PcmAudio, RenderAudioOffline, SignalTracks, TransportState } from '../engine/audio/api';
+import type { AnalyzeSignalsOffline, AudioAssetProvider, AudioDevice, AudioEngine, HasExportAudio, PcmAudio, RecordedTake, RecordingState, RenderAudioOffline, SignalTracks, TransportState } from '../engine/audio/api';
 import * as audioModule from '../engine/audio';
 
 export interface AudioBridge {
@@ -19,6 +19,12 @@ export interface AudioBridge {
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
   analyzeSignals(graph: GraphDoc, registry: Registry, assets: AudioAssetProvider, options: { duration: number; fps: number; sampleRate?: number; loop: boolean }): Promise<SignalTracks | null>;
   hasAudio(graph: GraphDoc, registry: Registry): boolean;
+  /** True when an export should render and mux graph audio (an enabled, wired Audio Out exists). */
+  hasExportAudio(graph: GraphDoc, registry: Registry): boolean;
+  armRecording(nodeId: string, target: { track: string; kind: 'audio' | 'midi' } | null): void;
+  startRecording(): void;
+  stopRecording(): Promise<RecordedTake | null>;
+  recordingState(): RecordingState;
   setGraph(graph: GraphDoc, registry: Registry): void;
   setAssets(provider: AudioAssetProvider): void;
   start(): Promise<void>;
@@ -38,8 +44,11 @@ export interface AudioBridge {
 type AudioModule = {
   createAudioEngine?: () => AudioEngine;
   renderAudioOffline?: RenderAudioOffline;
+  hasExportAudio?: HasExportAudio;
   analyzeSignalsOffline?: AnalyzeSignalsOffline;
 };
+
+const IDLE_RECORDING: RecordingState = { armed: false, recording: false, phase: 'idle', seconds: 0, countIn: 0, level: [0, 0], nodeId: null, error: null };
 
 export function createAudioBridge(): AudioBridge {
   const mod = audioModule as unknown as AudioModule;
@@ -64,6 +73,15 @@ export function createAudioBridge(): AudioBridge {
     get running() {
       return running;
     },
+    hasExportAudio: (g, r) => (mod.hasExportAudio ? mod.hasExportAudio(g, r) : guard(false, (e) => e.hasAudio(g, r))),
+    armRecording: (id, t) => guard(undefined, (e) => e.armRecording(id, t)),
+    startRecording: () => guard(undefined, (e) => e.startRecording()),
+    stopRecording: async () => {
+      if (!engine) return null;
+      return engine.stopRecording();
+    },
+    recordingState: () =>
+      guard(IDLE_RECORDING, (e) => e.recordingState()),
     hasSignals: (g, r) => guard(false, (e) => e.hasSignals(g, r)),
     signal: (id, name) => guard(0, (e) => e.signal(id, name)),
     async listDevices(kind) {

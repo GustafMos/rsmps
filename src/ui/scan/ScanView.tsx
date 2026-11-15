@@ -7,7 +7,7 @@ import { CheckField, SelectField, TextField } from '../components/fields';
 import { useApp } from '../store/context';
 import { PageCard } from './PageCard';
 import { useEd } from '../store/context';
-import { loadSession, restoreSession, saveSession, type ScanSessionDoc } from './session';
+import { emptySession, loadSession, saveSession, type ScanSession } from './session';
 import { MenuButton } from '../components/Menu';
 import { QUICK_KINDS, buildQuickGraph, type QuickKind } from './quickExport';
 import './scan.css';
@@ -21,13 +21,25 @@ export function ScanView() {
   const fileIn = useRef<HTMLInputElement>(null);
   const tabId = useEd((s) => s.activeProject);
   const tabName = useEd((s) => s.projects.find((p) => p.id === s.activeProject)?.name ?? 'Scan');
-  const session = useRef<ScanSessionDoc>({ files: [], manual: [], options: {} });
+  const session = useRef<ScanSession>(emptySession());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const persist = useCallback(() => {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { if (tabId) saveSession(io, tabId, session.current); }, 500);
   }, [io, tabId]);
-  const onOptions = useCallback((o: Record<string, unknown>) => { session.current.options = o; persist(); }, [persist]);
+  const onOptions = useCallback((o: Record<string, unknown>) => { session.current.options = { ...session.current.options, ui: o }; persist(); }, [persist]);
+
+  /** Keep the hidden working sequence (what the scan project's graph reads) in step with the analysis. */
+  const attach = useCallback(async (r: ScanResult) => {
+    if (!tabId) return;
+    try {
+      const asset = await io.scan.attach(tabId, r, { name: tabName, fps: r.report.fps || 12 });
+      session.current.committedAssetId = asset.id;
+      persist();
+    } catch (err) {
+      ed.toast(`Could not prepare the frames for clean-up: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }, [io, ed, tabId, tabName, persist]);
   const [restoredOptions, setRestoredOptions] = useState<Record<string, unknown>>({});
 
   // reopen a saved scan (also after a page reload)
@@ -35,12 +47,13 @@ export function ScanView() {
     if (!tabId) return;
     let live = true;
     void loadSession(io, tabId).then(async (s) => {
-      if (!s || !live || !s.files?.length) return;
+      if (!live) return;
       session.current = s;
-      setRestoredOptions(s.options ?? {});
+      if (!s.photos.length) return;
+      setRestoredOptions((s.options?.ui as Record<string, unknown>) ?? {});
       setBusy('Restoring your scan…');
       try {
-        const r = await restoreSession(io, s);
+        const r = await io.scan.restore(s);
         if (live) replace(r);
         else r.dispose();
       } catch (err) {
@@ -68,9 +81,11 @@ export function ScanView() {
     if (!files.length) return ed.toast('Choose photos or scans (JPEG, PNG, WebP…) of the printed sheets.', 'error');
     setBusy(`Looking for the page markers in ${files.length} photo${files.length === 1 ? '' : 's'}…`);
     try {
-      replace(await io.scan.analyze(files));
-      session.current = { ...session.current, files, manual: [] };
+      const r = await io.scan.analyze(files, session.current.options.analyze);
+      replace(r);
+      session.current = { ...session.current, photos: files.map((f) => ({ name: f.name, blob: f })), manual: {} };
       persist();
+      await attach(r);
     } catch (err) {
       ed.toast(`Scan failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
@@ -129,10 +144,10 @@ export function ScanView() {
             <Summary result={result} />
             <section className="rs-sc__pages">
               {result.report.pages.map((p) => (
-                <PageCard key={`${p.index}:${p.fileName}`} page={p} result={result} onResult={replace} onManual={(pageIndex, input) => { session.current.manual = [...session.current.manual.filter((m) => m.pageIndex !== pageIndex), { pageIndex, input }]; persist(); }} />
+                <PageCard key={`${p.index}:${p.fileName}`} page={p} result={result} onResult={(r) => { replace(r); void attach(r); }} onManual={(pageIndex, input) => { session.current.manual = { ...session.current.manual, [pageIndex]: input }; persist(); }} />
               ))}
             </section>
-            <Frames result={result} defaultName={tabName} initial={restoredOptions} onOptions={onOptions} onDone={() => { replace(null); session.current = { files: [], manual: [], options: {} }; persist(); }} />
+            <Frames result={result} defaultName={tabName} initial={restoredOptions} onOptions={onOptions} onDone={() => { replace(null); session.current = emptySession(); persist(); }} />
           </>
         )}
       </div>
@@ -173,6 +188,7 @@ function Frames({ result, defaultName, initial, onOptions, onDone }: { result: S
   const [loops, setLoops] = useState(num('loops', 1));
   useEffect(() => onOptions({ fps, drawingOnly, threshold, softness, missing, upscale, loops }), [fps, drawingOnly, threshold, softness, missing, upscale, loops, onOptions]);
   const [exporting, setExporting] = useState(false);
+  const isScan = true;
 
   /** Recovered frames straight to a file, without touching the open project. The temporary asset is removed afterwards unless kept. */
   const quickExport = async (kind: QuickKind) => {
@@ -180,6 +196,18 @@ function Frames({ result, defaultName, initial, onOptions, onDone }: { result: S
     let asset = done;
     const temp = !asset;
     try {
+      if (isScan && ed.ensureScanGraph()) {
+        // through the scan project's own graph, so the Quick settings (upscale, contrast…) apply; a copy carries this export's type
+        const g = ed.state.graph;
+        const outNode = g.nodes.find((n) => n.label === 'Export') ?? g.nodes.find((n) => ed.registry.get(n.type)?.category === 'output');
+        if (!outNode) throw new Error('The scan graph has no output.');
+        const fr = g.project.fps || fps;
+        const kp: Record<QuickKind, Record<string, unknown>> = { mp4: { kind: 'video', codec: 'avc' }, webm: { kind: 'video', codec: 'vp9' }, sequence: { kind: 'sequence' }, spritesheet: { kind: 'spritesheet' } };
+        const doc = { ...g, project: { ...g.project, loop: false, duration: g.project.duration * (kind === 'mp4' || kind === 'webm' ? Math.max(1, loops) : 1) }, nodes: g.nodes.map((n) => (n.id === outNode.id ? { ...n, params: { ...n.params, ...kp[kind], scale: upscale > 1 ? upscale : n.params.scale, name: (name.trim() || 'Scan').replace(/[\\/:*?"<>|]+/g, '_') } } : n)) };
+        void fr;
+        await ed.runExportGraph(doc, [outNode.id], 'current', 0, kind === 'sequence');
+        return;
+      }
       asset ??= await io.scan.commit(result, { name: name.trim() || 'Scan', fps, drawingOnly: drawingOnly && (kind === 'sequence' || kind === 'spritesheet'), threshold, softness, missing });
       const { graph, outId } = buildQuickGraph(io, asset, kind, { fps, upscale, loops, name: name.trim() || 'Scan' });
       const ok = await ed.runExportGraph(graph, [outId], 'current', 0, kind === 'sequence');

@@ -216,7 +216,7 @@ describe('scan end to end', () => {
     expect(scan0.report.layoutSource).toBe('lattice');
     expect(scan0.report.layout!.columns).toBe(3);
     expect(scan0.report.layout!.rows).toBe(4);
-    expect(scan0.report.warnings.join(' ')).toMatch(/data strip could not be read; the layout was detected from the + marks/);
+    expect(scan0.report.warnings.join(' ')).toMatch(/data strip could not be read; the layout was detected from the [+] marks/i);
     const out = assembleScan([scan0, scanPage(p1, 'p1.jpg', 1)]);
     expect(out.report.complete).toBe(true);
     expect(out.report.fps).toBe(12);
