@@ -56,20 +56,6 @@ fn hsvToRgb(c: vec3f) -> vec3f {
   return c.z * mix(vec3f(1.0), clamp(p - 1.0, vec3f(0.0), vec3f(1.0)), c.y);
 }
 
-/**
- * Scale-aware sampling for placing one image inside another. Enlarging keeps texels as crisp squares with
- * one-pixel anti-aliased edges (pixel art stays pixel art); shrinking blends smoothly.
- * texelsPerPixel = source texels covered by one output pixel on each axis (< 1 means enlarging).
- * ALWAYS use this instead of plain linear sampling when a node scales or repositions an image.
- */
-fn sampleCrisp(t: texture_2d<f32>, uv: vec2f, texelsPerPixel: vec2f) -> vec4f {
-  let size = vec2f(textureDimensions(t));
-  let p = uv * size;
-  let seam = floor(p + 0.5);
-  let q = seam + clamp((p - seam) / max(texelsPerPixel, vec2f(0.0001)), vec2f(-0.5), vec2f(0.5));
-  return textureSampleLevel(t, smp, q / size, 0.0);
-}
-
 fn hash21(p: vec2f) -> f32 {
   var q = fract(p * vec2f(123.34, 456.21));
   q += dot(q, q + 45.32);
@@ -108,4 +94,25 @@ fn loopNoise(p: vec2f, phase: f32, speed: f32) -> f32 {
   let n2 = vnoise3(vec3f(p + vec2f(37.2, 91.7), sin(a) * r));
   return clamp((n1 + n2) * 0.5 * 1.4 - 0.2, 0.0, 1.0);
 }
+`;
+
+/**
+ * Helpers that need the samplers of a full-screen pass (`smp`, `smpNearest`). Included by `gpu.pass` only,
+ * so the plain PRELUDE stays usable in compute shaders.
+ */
+export const PASS_PRELUDE = /* wgsl */ `
+/**
+ * Scale-aware sampling for placing one image inside another. Enlarging keeps texels as crisp squares with
+ * one-pixel anti-aliased edges (pixel art stays pixel art); shrinking blends smoothly.
+ * texelsPerPixel = source texels covered by one output pixel on each axis (< 1 means enlarging).
+ * ALWAYS use this instead of plain linear sampling when a node scales or repositions an image.
+ */
+fn sampleCrisp(t: texture_2d<f32>, uv: vec2f, texelsPerPixel: vec2f) -> vec4f {
+  let size = vec2f(textureDimensions(t));
+  let p = uv * size;
+  let seam = floor(p + 0.5);
+  let q = seam + clamp((p - seam) / max(texelsPerPixel, vec2f(0.0001)), vec2f(-0.5), vec2f(0.5));
+  return textureSampleLevel(t, smp, q / size, 0.0);
+}
+
 `;

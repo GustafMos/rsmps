@@ -3,7 +3,7 @@
  * cache and the full-screen pass helper nodes use. Nothing here knows about graphs.
  */
 import type { ImageValue, MaskValue, NodeGpu, PassOptions, UniformValue } from '../types';
-import { PRELUDE } from './prelude';
+import { PASS_PRELUDE, PRELUDE } from './prelude';
 
 type Format = 'rgba8unorm' | 'rgba16float';
 
@@ -159,6 +159,7 @@ export class Gpu {
 @group(0) @binding(2) var smpNearest: sampler;
 ${decls}
 ${PRELUDE}
+${PASS_PRELUDE}
 ${options.wgsl}
 ${VERTEX}`;
 
