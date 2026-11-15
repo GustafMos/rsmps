@@ -1,10 +1,13 @@
 import { memo } from 'react';
 
-/** 16x16 grid icons, drawn with square caps so they read as crisp pixel glyphs. */
+/** 16x16 grid icons on whole and half pixels, 1.75 stroke with round caps and joins so they stay legible at 16 px. */
 const PATHS = {
   eye: 'M1 8 C3 4 5.5 3 8 3 C10.5 3 13 4 15 8 C13 12 10.5 13 8 13 C5.5 13 3 12 1 8Z M8 6v4 M6.5 8h3',
   eyeOff: 'M1 8 C3 4 5.5 3 8 3 C10.5 3 13 4 15 8 C13 12 10.5 13 8 13 C5.5 13 3 12 1 8Z M2 14L14 2',
   power: 'M8 2v6 M4.5 4.5a5 5 0 1 0 7 0',
+  monitor: 'M2.5 3.5h11v7h-11z M5.5 13.5h5 M8 10.5v3',
+  bypass: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z M4 12L12 4',
+  exportBox: 'M2.5 6.5v7h11v-7 M8 10V2.5 M5 5.5L8 2.5l3 3',
   play: 'M4 2.5v11l9-5.5z',
   pause: 'M4 3v10 M12 3v10',
   stepBack: 'M3 3v10 M13 3v10L6 8z',
@@ -66,10 +69,9 @@ export const Icon = memo(function Icon({ name, size = 16, className }: { name: I
       viewBox="0 0 16 16"
       fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-      shapeRendering="crispEdges"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
       style={{ flex: 'none' }}
     >

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   addAudioClip,
+  addMidiClip,
   addTrack,
   clipEnd,
   duplicateClip,
@@ -239,7 +240,14 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
               ))}
             </div>
             {tl.tracks.map((t) => (
-              <div key={t.id} className="rs-tl__lane" data-lane={t.id} style={{ height: TRACK_H }} onDragOver={(e) => e.dataTransfer.types.includes(ASSET_MIME) && e.preventDefault()} onDrop={(e) => dropOn(e, t.id)}>
+              <div key={t.id} className="rs-tl__lane" data-lane={t.id} style={{ height: TRACK_H }} onDragOver={(e) => e.dataTransfer.types.includes(ASSET_MIME) && e.preventDefault()} onDrop={(e) => dropOn(e, t.id)} onDoubleClick={t.kind === 'midi' ? (e) => {
+                if (e.target !== e.currentTarget && !(e.target as HTMLElement).classList.contains('rs-tl__loop')) return;
+                const lane = e.currentTarget.getBoundingClientRect();
+                const r = addMidiClip(tl, { track: t.id, start: snap(Math.max(0, (e.clientX - lane.left) / pps), e.altKey), length: beat * 4, name: 'MIDI clip' });
+                write(r.timeline);
+                setSel(r.clip.id);
+                setRoll(r.clip.id);
+              } : undefined} title={t.kind === 'midi' ? 'Double-click an empty spot to add a MIDI clip' : undefined}>
                 <div className="rs-tl__loop rs-tl__loop--lane" style={{ width: project.duration * pps }} />
                 {tl.clips.filter((c) => c.track === t.id).map((c) => (
                   <div

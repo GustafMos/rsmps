@@ -969,7 +969,11 @@ export class Editor {
     const armed = this.state.armed;
     try {
       const r = await this.io.audio.stop();
-      if (!r || !armed) return;
+      if (!r) {
+        if (armed) this.toast('Nothing was recorded. Play a note or some sound after pressing Record.', 'info');
+        return;
+      }
+      if (!armed) return;
       const node = this.state.graph.nodes.find((n) => n.id === armed.nodeId);
       if (!node) return;
       const tl = normalizeTimeline(node.params.clips);

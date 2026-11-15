@@ -96,7 +96,7 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
           title={node.collapsed ? 'Expand (H)' : 'Collapse (H)'}
           onClick={() => ed.toggleCollapse([node.id])}
         >
-          <Icon name={node.collapsed ? 'chevronRight' : 'chevronDown'} size={12} />
+          <Icon name={node.collapsed ? 'chevronRight' : 'chevronDown'} size={16} />
         </button>
         {renaming ? (
           <input
@@ -123,31 +123,35 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
           </span>
         )}
         {error && (
-          <span className="rs-node__err" data-nodrag title={error}>
-            <Icon name="warn" size={13} />
+          <span className="rs-node__err" data-nodrag title={error} aria-label={`Error: ${error}`}>
+            <Icon name="warn" size={16} />
           </span>
         )}
         {debug && <NodeTiming id={node.id} />}
         {hasEnabled && (
-          <button className={`rs-node__hbtn rs-node__exp${exportOff ? '' : ' is-on'}`} data-nodrag title={exportOff ? 'Not exported: click to include in export' : 'Included in export: click to skip'} onClick={() => ed.setParam(node.id, 'enabled', exportOff)}>
-            <Icon name="check" size={13} />
+          <button className={`rs-node__hbtn rs-node__exp${exportOff ? '' : ' is-on'}`} data-nodrag title={exportOff ? 'Excluded from export: click to include' : 'Included in export: click to exclude'} aria-label={exportOff ? 'Excluded from export' : 'Included in export'} aria-pressed={!exportOff} onClick={() => ed.setParam(node.id, 'enabled', exportOff)}>
+            <Icon name="exportBox" size={16} />
           </button>
         )}
         <button
           className={`rs-node__hbtn${node.bypass ? ' is-on' : ''}`}
           data-nodrag
-          title={node.bypass ? 'Bypassed: click to enable (B)' : 'Bypass this node (B)'}
+          title={node.bypass ? 'Bypassed: click to enable (B)' : 'Bypass (B)'}
+          aria-label="Bypass"
+          aria-pressed={!!node.bypass}
           onClick={() => ed.toggleBypass(node.id)}
         >
-          <Icon name="power" size={13} />
+          <Icon name="bypass" size={16} />
         </button>
         <button
           className={`rs-node__hbtn rs-node__eye${viewed ? ' is-on' : ''}`}
           data-nodrag
-          title="View this node in the viewer (Ctrl+Shift+click)"
+          title="View this node (Ctrl+Shift+click)"
+          aria-label="View this node"
+          aria-pressed={viewed}
           onClick={() => ed.setViewed(node.id)}
         >
-          <Icon name={viewed ? 'eye' : 'eyeOff'} size={14} />
+          <Icon name="monitor" size={16} />
         </button>
         {hasAudioOut && <Meter id={node.id} />}
       </div>
