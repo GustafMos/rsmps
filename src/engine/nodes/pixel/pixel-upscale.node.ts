@@ -1,4 +1,5 @@
 import { defineNode } from '../../define';
+import { assertTextureSize } from '../../lib/pixel-gpu';
 
 /** Integer nearest-neighbour enlarge: every pixel becomes an exact factor×factor block. */
 export default defineNode({
@@ -20,12 +21,13 @@ export default defineNode({
         { value: 'fit-width', label: 'Fit to width' },
       ],
     },
-    factor: { type: 'number', default: 4, min: 1, max: 64, step: 1, integer: true, label: 'Factor', visibleIf: (p) => p.mode === 'factor' },
+    factor: { type: 'number', default: 4, min: 1, max: 256, softMax: 16, step: 1, integer: true, label: 'Factor', visibleIf: (p) => p.mode === 'factor' },
     target: {
       type: 'number',
       default: 1080,
       min: 1,
-      max: 16384,
+      max: 32768,
+      softMax: 4320,
       step: 1,
       integer: true,
       label: 'Target size',
@@ -40,7 +42,8 @@ export default defineNode({
     let k = p.factor;
     if (p.mode === 'fit-height') k = Math.floor(p.target / src.height);
     else if (p.mode === 'fit-width') k = Math.floor(p.target / src.width);
-    k = Math.max(1, Math.min(k, Math.floor(8192 / Math.max(src.width, src.height)) || 1));
+    k = Math.max(1, k);
+    assertTextureSize(ctx.gpu, src.width * k, src.height * k, 'Pixel Upscale');
     if (k === 1) return { image: src };
     const image = ctx.gpu.pass({
       label: 'pixel-upscale',

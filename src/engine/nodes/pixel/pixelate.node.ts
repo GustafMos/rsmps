@@ -1,5 +1,6 @@
 import { defineNode } from '../../define';
 import type { ImageValue } from '../../types';
+import { assertTextureSize } from '../../lib/pixel-gpu';
 import { gaussianBlur } from '../filter/blur.node';
 
 const MAX_SIDE = 4096;
@@ -77,7 +78,8 @@ export default defineNode({
       type: 'number',
       default: 180,
       min: 2,
-      max: 2048,
+      max: 4096,
+      softMax: 540,
       step: 1,
       integer: true,
       label: 'Art pixels',
@@ -172,6 +174,7 @@ export default defineNode({
     const cellW = src.width / W;
     const cellH = src.height / H;
     const cell = (cellW + cellH) / 2;
+    assertTextureSize(ctx.gpu, W, H, 'Pixelate');
     const gpu = ctx.gpu;
     const out = { width: W, height: H, unit: 1 };
 

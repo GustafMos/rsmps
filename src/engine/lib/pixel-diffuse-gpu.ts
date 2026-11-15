@@ -12,6 +12,7 @@ import { DIFFUSION_KERNELS, hilbertOrder } from './pixel-dither-data';
 import { SPACE_INDEX } from './pixel-gpu';
 
 const CHUNK = 8192;
+const SUBMIT_STEPS = CHUNK * 8;
 
 const WGSL = /* wgsl */ `
 ${PRELUDE}
@@ -188,13 +189,16 @@ export function diffuseGpu(gpu: NodeGpu, src: ImageValue, palette: Rgb[], opts: 
       { binding: 7, resource: { buffer: stateBuf } },
     ],
   });
-  const encoder = device.createCommandEncoder({ label: 'dither-diffuse' });
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  for (let start = 0; start < total; start += CHUNK) pass.dispatchWorkgroups(1);
-  pass.end();
-  device.queue.submit([encoder.finish()]);
+  // Several submits of at most SUBMIT_STEPS pixels each, so no single submission runs for long.
+  for (let from = 0; from < total; from += SUBMIT_STEPS) {
+    const encoder = device.createCommandEncoder({ label: 'dither-diffuse' });
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    for (let start = from; start < Math.min(total, from + SUBMIT_STEPS); start += CHUNK) pass.dispatchWorkgroups(1);
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+  }
   const temp = [ubo];
   for (const b of [...temp, palBuf, tapBuf, orderBuf, errBuf, stateBuf]) b.destroy();
   return dst;

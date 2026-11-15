@@ -68,7 +68,7 @@ export default defineNode({
       label: 'Colours',
       visibleIf: (p) => p.source === 'custom',
     },
-    count: { type: 'number', default: 16, min: 2, max: 64, step: 1, integer: true, label: 'Colours', visibleIf: (p) => p.source === 'extract' },
+    count: { type: 'number', default: 16, min: 2, max: 256, softMax: 64, step: 1, integer: true, label: 'Colours', visibleIf: (p) => p.source === 'extract' },
     method: {
       type: 'enum',
       default: 'kmeans',

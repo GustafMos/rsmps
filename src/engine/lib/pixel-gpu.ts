@@ -81,3 +81,17 @@ fn nearestIdx(c: vec3f) -> i32 {
 }
 `;
 
+
+/** Largest texture the pixel nodes will create: 64 megapixels (256 MB at RGBA8). */
+export const MAX_PIXELS = 64_000_000;
+
+/** Throws a readable error instead of creating a texture the device cannot hold or that would exhaust memory. */
+export function assertTextureSize(gpu: NodeGpu, width: number, height: number, what: string): void {
+  const limit = gpu.device.limits.maxTextureDimension2D;
+  if (width > limit || height > limit) {
+    throw new Error(`${what}: ${width}x${height} is larger than this device supports (${limit} px per side). Use a smaller value.`);
+  }
+  if (width * height > MAX_PIXELS) {
+    throw new Error(`${what}: ${width}x${height} is ${Math.round((width * height) / 1e6)} megapixels, over the ${MAX_PIXELS / 1e6} MP limit. Use a smaller value.`);
+  }
+}

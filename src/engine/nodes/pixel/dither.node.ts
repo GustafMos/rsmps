@@ -38,6 +38,9 @@ import { FALLBACK_PARAM, paletteSummary, resolvePalette } from '../../lib/pixel-
  *    colour is now clamped to the gamut.
  */
 
+/** Error diffusion walks pixels one at a time (~2.4 s per megapixel measured); above this it uses ordered dithering instead. */
+const DIFFUSION_BUDGET = 350_000;
+
 const WGSL = /* wgsl */ `
 ${PALETTE_WGSL}
 
@@ -170,12 +173,13 @@ export default defineNode({
       label: 'Algorithm',
       options: DITHER_ALGORITHMS.map((a) => ({ value: a.id, label: a.label })),
     },
-    strength: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Strength', hint: '0 = plain nearest colour, 1 = full dithering.' },
+    strength: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Strength', hint: '0 = plain nearest colour, 1 = full dithering. Error-diffusion algorithms fall back to Bayer 8x8 on images over 0.35 megapixels (too slow otherwise); Pixelate first.' },
     scale: {
       type: 'number',
       default: 1,
       min: 1,
-      max: 16,
+      max: 64,
+      softMax: 16,
       step: 1,
       unit: 'px',
       label: 'Pattern scale',
@@ -200,12 +204,14 @@ export default defineNode({
     const space = p.colorSpace as DitherSpace;
     const family = algorithmFamily(p.algorithm);
 
-    if (family === 'diffusion') {
+    if (family === 'diffusion' && src.width * src.height <= DIFFUSION_BUDGET) {
       return { image: diffuseGpu(ctx.gpu, src, colors, { algorithm: p.algorithm, strength: p.strength, space, serpentine: p.serpentine }) };
     }
 
-    const matrix = thresholdMatrix(p.algorithm);
-    const kind = family === 'none' ? 2 : p.algorithm === 'white-noise' ? 1 : p.algorithm === 'yliluoma' ? 3 : 0;
+    // Error diffusion is sequential and gets slow on big images; above the budget it falls back to ordered Bayer 8x8.
+    const algorithm = family === 'diffusion' ? 'bayer-8' : p.algorithm;
+    const matrix = thresholdMatrix(algorithm);
+    const kind = family === 'none' ? 2 : algorithm === 'white-noise' ? 1 : algorithm === 'yliluoma' ? 3 : 0;
     const mat = matrix ? matrixTexture(ctx.gpu, matrix.width, matrix.height, matrix.data) : matrixTexture(ctx.gpu, 1, 1, new Float32Array([0.5]));
     const image = ctx.gpu.pass({
       label: 'dither',

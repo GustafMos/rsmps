@@ -37,3 +37,10 @@ describe('pixel-upscale', () => {
     expect(px.at(3, 0)[3]).toBe(255);
   });
 });
+
+describe('pixel-upscale limits', () => {
+  it('throws a readable error instead of creating a huge texture', async () => {
+    const t = await harness();
+    await expect(t.run('pixel-upscale', { factor: 256 }, { image: t.solid(200, 200, [1, 2, 3, 255]) })).rejects.toThrow(/megapixels|device supports/);
+  });
+});
