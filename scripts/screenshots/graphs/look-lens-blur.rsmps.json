@@ -1,0 +1,94 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Look: lens blur",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "s",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Scene"
+    },
+    {
+      "id": "f0",
+      "type": "lens-blur",
+      "x": 280,
+      "y": 0,
+      "params": {
+        "radius": 22,
+        "focus": 0.55,
+        "range": 0.12,
+        "shape": "hexagon"
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 560,
+      "y": 0,
+      "params": {
+        "name": "look",
+        "kind": "image",
+        "imageFormat": "png"
+      },
+      "label": "Out"
+    },
+    {
+      "id": "dep",
+      "type": "gradient",
+      "x": 0,
+      "y": 320,
+      "params": {
+        "kind": "linear",
+        "angle": 90
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e15",
+      "from": {
+        "node": "s",
+        "port": "image"
+      },
+      "to": {
+        "node": "f0",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e16",
+      "from": {
+        "node": "f0",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e17",
+      "from": {
+        "node": "dep",
+        "port": "image"
+      },
+      "to": {
+        "node": "f0",
+        "port": "depth"
+      }
+    }
+  ],
+  "frames": []
+}

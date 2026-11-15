@@ -66,3 +66,23 @@ app menu shows the version and MIT licence. Keep these files in any repackaged b
   flags on Linux. Windows and macOS need no flags.
 - Single instance lock, window size/position saved in the user profile, menu (File, Edit, View, Window, Help, About).
 - File association for `.rsmps.json` is not set up yet (optional).
+
+## Page copy, images and prices
+
+The ready-to-paste text lives in `docs/store/`:
+
+- `docs/store/itch-page.md` and `docs/store/gumroad-page.md`: title, tagline, short description, full description, what the
+  buyer is paying for, system requirements, what is not included, FAQ, tags, price suggestion and which image goes in which
+  slot.
+- `docs/store/social-posts.md`: five short post drafts (launch, before and after, print and scan, sing to animate, CRT).
+- `docs/store/assets/`: the images, cropped to the sizes the stores ask for (itch cover 630x500, Gumroad thumbnail 600x600,
+  Gumroad cover 1280x720, screenshots 1280x800, the "looks" sheet). They come from `docs/screenshots/` and are regenerated with
+  `node scripts/screenshots/render-showcase.mjs`; the UI screenshots themselves are regenerated with
+  `npx electron scripts/screenshots/capture.mjs` (dev server running). All of them are made from `test-assets/` and generated
+  content only.
+
+Open decisions for the owner (marked TODO in those files): the store URLs, the refund policy wording, the bug-report link, the
+minimum price and the suggested price. The suggestion is a $0 to $1 minimum with a suggested $8 on both stores, because the same
+builds are free on GitHub; it is only a suggestion.
+
+When the pages exist, replace the two TODO links in the README's "Desktop app" section.

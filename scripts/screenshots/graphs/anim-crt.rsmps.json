@@ -1,0 +1,149 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Animation: CRT pixel art",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 12,
+    "duration": 2,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "s",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Scene"
+    },
+    {
+      "id": "sc",
+      "type": "scroll",
+      "x": 280,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "p",
+      "type": "pixelate",
+      "x": 560,
+      "y": 0,
+      "params": {
+        "value": 144
+      }
+    },
+    {
+      "id": "d",
+      "type": "dither",
+      "x": 840,
+      "y": 0,
+      "params": {
+        "algorithm": "bayer-4",
+        "strength": 0.5
+      }
+    },
+    {
+      "id": "pal",
+      "type": "palette",
+      "x": 840,
+      "y": 320,
+      "params": {
+        "builtin": "endesga-32"
+      }
+    },
+    {
+      "id": "c",
+      "type": "crt-display",
+      "x": 1120,
+      "y": 0,
+      "params": {
+        "preset": "consumer"
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1400,
+      "y": 0,
+      "params": {
+        "name": "anim",
+        "kind": "sequence",
+        "imageFormat": "png"
+      },
+      "label": "Out"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e31",
+      "from": {
+        "node": "s",
+        "port": "image"
+      },
+      "to": {
+        "node": "sc",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e32",
+      "from": {
+        "node": "sc",
+        "port": "image"
+      },
+      "to": {
+        "node": "p",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e33",
+      "from": {
+        "node": "p",
+        "port": "image"
+      },
+      "to": {
+        "node": "d",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e34",
+      "from": {
+        "node": "pal",
+        "port": "palette"
+      },
+      "to": {
+        "node": "d",
+        "port": "palette"
+      }
+    },
+    {
+      "id": "e35",
+      "from": {
+        "node": "d",
+        "port": "image"
+      },
+      "to": {
+        "node": "c",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e36",
+      "from": {
+        "node": "c",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

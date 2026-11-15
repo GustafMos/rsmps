@@ -1,0 +1,71 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Look: halftone",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "s",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Scene"
+    },
+    {
+      "id": "f0",
+      "type": "halftone",
+      "x": 280,
+      "y": 0,
+      "params": {
+        "mode": "cmyk",
+        "dotSize": 9
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 560,
+      "y": 0,
+      "params": {
+        "name": "look",
+        "kind": "image",
+        "imageFormat": "png"
+      },
+      "label": "Out"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e13",
+      "from": {
+        "node": "s",
+        "port": "image"
+      },
+      "to": {
+        "node": "f0",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e14",
+      "from": {
+        "node": "f0",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

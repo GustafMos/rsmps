@@ -18,7 +18,7 @@ A ground-up rewrite. Graphs and presets saved by earlier versions do not load.
 
 ### Added
 
-- About 130 nodes across Generate, Color, Filter, Stylize, Pixel Art, Transform, Composite, Mask, Layers, Detect & Track,
+- More than 160 nodes across Generate, Color, Filter, Stylize, Pixel Art, Transform, Composite, Mask, Layers, Detect & Track,
   Time, Math, Audio Source, Audio Effects and Synth & MIDI.
 - Audio and MIDI pipeline in the same graph: microphone, pitch to MIDI, synths, effects, mixing; sound can drive any
   number parameter.

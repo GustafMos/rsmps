@@ -1,0 +1,132 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Look: pixel art and dither",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "s",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Scene"
+    },
+    {
+      "id": "f0",
+      "type": "pixelate",
+      "x": 280,
+      "y": 0,
+      "params": {
+        "value": 135
+      }
+    },
+    {
+      "id": "f1",
+      "type": "dither",
+      "x": 560,
+      "y": 0,
+      "params": {
+        "algorithm": "bayer-4",
+        "strength": 0.6
+      }
+    },
+    {
+      "id": "f2",
+      "type": "pixel-upscale",
+      "x": 840,
+      "y": 0,
+      "params": {
+        "mode": "fit-height",
+        "target": 1080
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1120,
+      "y": 0,
+      "params": {
+        "name": "look",
+        "kind": "image",
+        "imageFormat": "png"
+      },
+      "label": "Out"
+    },
+    {
+      "id": "pal",
+      "type": "palette",
+      "x": 560,
+      "y": 320,
+      "params": {
+        "builtin": "endesga-32"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "s",
+        "port": "image"
+      },
+      "to": {
+        "node": "f0",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "f0",
+        "port": "image"
+      },
+      "to": {
+        "node": "f1",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "f1",
+        "port": "image"
+      },
+      "to": {
+        "node": "f2",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "f2",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "pal",
+        "port": "palette"
+      },
+      "to": {
+        "node": "f1",
+        "port": "palette"
+      }
+    }
+  ],
+  "frames": []
+}

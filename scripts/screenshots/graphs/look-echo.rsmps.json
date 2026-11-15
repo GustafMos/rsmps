@@ -1,0 +1,162 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Look: echo trail",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 2,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "s",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Scene"
+    },
+    {
+      "id": "c",
+      "type": "camera",
+      "x": 0,
+      "y": 300,
+      "params": {
+        "projection": "perspective",
+        "rig": "threeQuarter"
+      }
+    },
+    {
+      "id": "a",
+      "type": "animate",
+      "x": 280,
+      "y": 300,
+      "params": {
+        "wave": "sine",
+        "from": -1.6,
+        "to": 1.6
+      }
+    },
+    {
+      "id": "o",
+      "type": "object-3d",
+      "x": 560,
+      "y": 0,
+      "params": {
+        "shape": "torus",
+        "objectScale": 0.9,
+        "spinY": 1,
+        "baseColor": [
+          1,
+          0.55,
+          0.15,
+          1
+        ]
+      }
+    },
+    {
+      "id": "m",
+      "type": "merge",
+      "x": 840,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "e",
+      "type": "echo",
+      "x": 1120,
+      "y": 0,
+      "params": {
+        "count": 6,
+        "spacing": 0.06,
+        "decay": 0.7,
+        "style": "lighten"
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1400,
+      "y": 0,
+      "params": {
+        "name": "look",
+        "kind": "sequence",
+        "imageFormat": "png"
+      },
+      "label": "Out"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e18",
+      "from": {
+        "node": "c",
+        "port": "camera"
+      },
+      "to": {
+        "node": "o",
+        "port": "camera"
+      }
+    },
+    {
+      "id": "e19",
+      "from": {
+        "node": "a",
+        "port": "value"
+      },
+      "to": {
+        "node": "o",
+        "port": "posX"
+      }
+    },
+    {
+      "id": "e20",
+      "from": {
+        "node": "s",
+        "port": "image"
+      },
+      "to": {
+        "node": "m",
+        "port": "background"
+      }
+    },
+    {
+      "id": "e21",
+      "from": {
+        "node": "o",
+        "port": "image"
+      },
+      "to": {
+        "node": "m",
+        "port": "foreground"
+      }
+    },
+    {
+      "id": "e22",
+      "from": {
+        "node": "m",
+        "port": "image"
+      },
+      "to": {
+        "node": "e",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e23",
+      "from": {
+        "node": "e",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

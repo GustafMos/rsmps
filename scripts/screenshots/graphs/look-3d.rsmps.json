@@ -1,0 +1,186 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Look: 3D objects",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "s",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Scene"
+    },
+    {
+      "id": "c1",
+      "type": "camera",
+      "x": 0,
+      "y": 300,
+      "params": {
+        "projection": "perspective",
+        "rig": "threeQuarter"
+      }
+    },
+    {
+      "id": "c2",
+      "type": "camera",
+      "x": 0,
+      "y": 600,
+      "params": {
+        "projection": "isometric"
+      }
+    },
+    {
+      "id": "o1",
+      "type": "object-3d",
+      "x": 300,
+      "y": 300,
+      "params": {
+        "shape": "torus",
+        "posX": -1.5,
+        "posY": 0.2,
+        "objectScale": 0.8,
+        "baseColor": [
+          0.95,
+          0.4,
+          0.5,
+          1
+        ]
+      }
+    },
+    {
+      "id": "o2",
+      "type": "object-3d",
+      "x": 300,
+      "y": 600,
+      "params": {
+        "shape": "cube",
+        "posX": 1.5,
+        "posY": -0.2,
+        "objectScale": 0.8,
+        "cel": true,
+        "baseColor": [
+          0.3,
+          0.8,
+          0.9,
+          1
+        ]
+      }
+    },
+    {
+      "id": "m1",
+      "type": "merge",
+      "x": 600,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "m2",
+      "type": "merge",
+      "x": 880,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1160,
+      "y": 0,
+      "params": {
+        "name": "look",
+        "kind": "image",
+        "imageFormat": "png"
+      },
+      "label": "Out"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e24",
+      "from": {
+        "node": "c1",
+        "port": "camera"
+      },
+      "to": {
+        "node": "o1",
+        "port": "camera"
+      }
+    },
+    {
+      "id": "e25",
+      "from": {
+        "node": "c2",
+        "port": "camera"
+      },
+      "to": {
+        "node": "o2",
+        "port": "camera"
+      }
+    },
+    {
+      "id": "e26",
+      "from": {
+        "node": "s",
+        "port": "image"
+      },
+      "to": {
+        "node": "m1",
+        "port": "background"
+      }
+    },
+    {
+      "id": "e27",
+      "from": {
+        "node": "o1",
+        "port": "image"
+      },
+      "to": {
+        "node": "m1",
+        "port": "foreground"
+      }
+    },
+    {
+      "id": "e28",
+      "from": {
+        "node": "m1",
+        "port": "image"
+      },
+      "to": {
+        "node": "m2",
+        "port": "background"
+      }
+    },
+    {
+      "id": "e29",
+      "from": {
+        "node": "o2",
+        "port": "image"
+      },
+      "to": {
+        "node": "m2",
+        "port": "foreground"
+      }
+    },
+    {
+      "id": "e30",
+      "from": {
+        "node": "m2",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

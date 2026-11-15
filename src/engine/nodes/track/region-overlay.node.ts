@@ -58,7 +58,7 @@ export default defineNode({
     });
 
     // Label atlas (needs a text rasteriser from the host; absent in headless runs).
-    const raster = ctx.host.rasterizeText;
+    const raster = ctx.host.rasterizeText ? ctx.host.rasterizeText.bind(ctx.host) : undefined; // bound: the host method uses 'this'
     let atlas: { texture: GPUTexture } | null = null;
     const labelInfo: number[][] = items.map(() => [0, 0, 0, 0]);
     let cellH = 1;
