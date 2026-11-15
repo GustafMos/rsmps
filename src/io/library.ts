@@ -17,8 +17,9 @@ import {
 } from 'mediabunny';
 import type { PcmAudio } from '../engine/audio/api';
 import type { Gpu } from '../engine/gpu/gpu';
-import type { AssetInfo, TextSpec } from '../engine/types';
-import type { MediaLibrary } from './api';
+import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
+import { LiveSources, type LiveRequest } from './live';
+import type { LibraryAsset, MediaLibrary } from './api';
 import { idbAll, idbDelete, idbPut } from './db';
 import type { SignalRouter } from './signals';
 import { TimedFrameStore } from './lru';
@@ -272,6 +273,7 @@ export class Library implements MediaLibrary {
   private audioBytes = new Map<string, number>();
   private thumbs = new Map<string, Promise<string | null>>();
   private textCanvas: OffscreenCanvas | null = null;
+  readonly live: LiveSources;
   /** Bumps on every change to the asset list; the player folds it into its frame-cache key. */
   version = 0;
   /** Set by createIo: called when decoded content for an existing id may have changed. */
@@ -280,13 +282,15 @@ export class Library implements MediaLibrary {
   signals: SignalRouter | null = null;
 
   constructor(private gpu: Gpu) {
+    this.live = new LiveSources(gpu);
     this.frames = new TimedFrameStore<Frame>(FRAME_BUDGET_BYTES, (f) => this.gpu.release(f.texture));
   }
 
   /* --------------------------------- listing -------------------------------- */
 
-  list(): AssetInfo[] {
-    return [...this.infos.values()];
+  list(opts?: { includeHidden?: boolean }): AssetInfo[] {
+    const all = [...this.infos.values()];
+    return opts?.includeHidden ? all : all.filter((a) => !(a as LibraryAsset).hidden);
   }
 
   signal(nodeId: string, name: string, seconds: number): number {
@@ -370,6 +374,36 @@ export class Library implements MediaLibrary {
     idbPut('assets', info.id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
     this.notify();
     return info;
+  }
+
+  async attachSequence(owner: string, name: string, frames: Blob[], fps: number): Promise<AssetInfo> {
+    if (frames.length === 0) throw new Error('An image sequence needs at least one frame.');
+    const rate = Number.isFinite(fps) && fps > 0 ? fps : 12;
+    const probe = await createImageBitmap(frames[0]).catch(() => null);
+    if (!probe) throw new Error('The first frame of the sequence could not be decoded.');
+    const { width, height } = probe;
+    probe.close();
+    const existing = [...this.infos.values()].find((a) => (a as LibraryAsset).owner === owner);
+    const id = existing?.id ?? uniqueId('a');
+    const info: LibraryAsset = { id, name, kind: 'video', width, height, duration: frames.length / rate, fps: rate, hasAudio: false, owner, hidden: true };
+    if (existing) {
+      // Same id, new frames: drop everything decoded for the old ones so the engine and player re-render.
+      this.frames.dropGroups(`${id}|`);
+      this.readers.get(id)?.dispose();
+      this.readers.delete(id);
+    }
+    this.infos.set(id, info);
+    this.sequences.set(id, frames);
+    this.blobs.set(id, frames[0]);
+    const record: AssetRecord = { id, added: Date.now(), info, blob: frames[0], frames };
+    idbPut('assets', id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
+    this.onInvalidate?.();
+    this.notify(); // bumps `version`: the player's frame cache key changes
+    return info;
+  }
+
+  async removeOwned(owner: string): Promise<void> {
+    for (const a of [...this.infos.values()]) if ((a as LibraryAsset).owner === owner) await this.remove(a.id);
   }
 
   async restore(): Promise<void> {
@@ -521,13 +555,16 @@ export class Library implements MediaLibrary {
       bmp.close();
       return null;
     }
-    const texture = this.takeTexture(bmp.width, bmp.height);
+    // Read the size BEFORE close(): a closed ImageBitmap reports 0×0.
+    const bw = bmp.width;
+    const bh = bmp.height;
+    const texture = this.takeTexture(bw, bh);
     try {
-      this.gpu.device.queue.copyExternalImageToTexture({ source: bmp }, { texture, premultipliedAlpha: true }, [bmp.width, bmp.height]);
+      this.gpu.device.queue.copyExternalImageToTexture({ source: bmp }, { texture, premultipliedAlpha: true }, [bw, bh]);
     } finally {
       bmp.close();
     }
-    const frame: Frame = { texture, width: bmp.width, height: bmp.height };
+    const frame: Frame = { texture, width: bw, height: bh };
     this.frames.put(group, 0, Infinity, this.bytesOf(frame), frame);
     return frame;
   }
@@ -548,13 +585,16 @@ export class Library implements MediaLibrary {
           bmp.close();
           return null;
         }
-        const texture = this.takeTexture(bmp.width, bmp.height);
+        // Read the size BEFORE close(): a closed ImageBitmap reports 0×0.
+        const bw = bmp.width;
+        const bh = bmp.height;
+        const texture = this.takeTexture(bw, bh);
         try {
-          this.gpu.device.queue.copyExternalImageToTexture({ source: bmp }, { texture, premultipliedAlpha: true }, [bmp.width, bmp.height]);
+          this.gpu.device.queue.copyExternalImageToTexture({ source: bmp }, { texture, premultipliedAlpha: true }, [bw, bh]);
         } finally {
           bmp.close();
         }
-        const frame: Frame = { texture, width: bmp.width, height: bmp.height };
+        const frame: Frame = { texture, width: bw, height: bh };
         const end = idx === stills.length - 1 ? Infinity : (idx + 1) / info.fps;
         this.frames.put(group, idx / info.fps, end, this.bytesOf(frame), frame);
         return frame;
@@ -668,6 +708,11 @@ export class Library implements MediaLibrary {
 
   /* ----------------------------------- text --------------------------------- */
 
+  /** Host.liveFrame: webcam / URL pictures (see live.ts). Throws readable errors. */
+  liveFrame(source: LiveSource, maxSide: number): Promise<Frame | null> {
+    return this.live.frame(source as LiveRequest, maxSide);
+  }
+
   rasterizeText(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null {
     if (typeof OffscreenCanvas === 'undefined') return null;
     const probe = (this.textCanvas ??= new OffscreenCanvas(8, 8));
@@ -701,6 +746,7 @@ export class Library implements MediaLibrary {
    * The assets themselves stay in memory as blobs and in IndexedDB.
    */
   releaseDecodedExcept(keep: ReadonlySet<string>): void {
+    this.live.closeAll();
     for (const id of this.infos.keys()) {
       if (keep.has(id)) continue;
       this.frames.dropGroups(`${id}|`);
