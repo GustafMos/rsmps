@@ -302,7 +302,7 @@ export class Engine {
           const v = inputs[name];
           if (out) outputs[out] = Array.isArray(v) ? (v[0] ?? null) : v;
         }
-        return { key: hash(`bypass|${sigs.sort().join('|')}`), outputs };
+        return { key: hash(`bypass|${sortByPort(sigs).join('|')}`), outputs };
       }
 
       // 3. Required inputs missing → the node produces nothing.
@@ -338,7 +338,7 @@ export class Engine {
 
       // 5. Cache lookup.
       const staticSig = hash(
-        `${def.id}|${JSON.stringify(raw)}|${sigs.sort().join('|')}|u${ref.unit}|c${scope.canvas.width}x${scope.canvas.height}|${scope.quality}`,
+        `${def.id}|${JSON.stringify(raw)}|${sortByPort(sigs).join('|')}|u${ref.unit}|c${scope.canvas.width}x${scope.canvas.height}|${scope.quality}`,
       );
       const readsKey = `${id}|${staticSig}`;
       const known = this.reads.get(readsKey);
@@ -507,4 +507,10 @@ export class Engine {
     }
     if (this.reads.size > 20000) this.reads.clear();
   }
+}
+
+/** Order input signatures by port name only, keeping wire order within a port (layer order of multi inputs matters). */
+function sortByPort(sigs: string[]): string[] {
+  const port = (s: string) => s.slice(0, s.indexOf('='));
+  return [...sigs].sort((a, b) => (port(a) < port(b) ? -1 : port(a) > port(b) ? 1 : 0));
 }
