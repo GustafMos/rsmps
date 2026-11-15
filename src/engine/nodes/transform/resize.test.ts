@@ -44,6 +44,19 @@ describe('resize', () => {
     expect(big.at(2, 0)[0]).toBe(255);
   });
 
+  it('targets are literal texels, independent of the image unit, and follow the proxy', async () => {
+    const t = await harness();
+    const src = t.solid(1000, 500, [1, 2, 3, 255], 2);
+    const dims = async (p: Record<string, unknown>, proxy?: number) => {
+      const o = (await t.run('resize', p, { image: src }, { proxy })).image as { width: number; height: number; unit: number };
+      return [o.width, o.height, o.unit];
+    };
+    expect(await dims({ mode: 'exact', width: 512, height: 512 })).toEqual([512, 512, 2 * (512 / 1000)]);
+    expect(await dims({ mode: 'exact', width: 512, height: 512 }, 0.5)).toEqual([256, 256, 2 * (256 / 1000)]);
+    expect((await dims({ mode: 'width', width: 512 }))[1]).toBe(256);
+    expect((await dims({ mode: 'long', longSide: 512 }, 0.5))[0]).toBe(256);
+  });
+
   it('is a no-op at 100%', async () => {
     const t = await harness();
     const src = t.solid(8, 8, [1, 2, 3, 255]);

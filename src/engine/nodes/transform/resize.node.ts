@@ -22,9 +22,9 @@ export default defineNode({
       label: 'Resize by',
     },
     percent: { type: 'number', default: 50, min: 1, max: 1000, step: 1, unit: '%', label: 'Scale', visibleIf: (p) => p.mode === 'percent' },
-    width: { type: 'number', default: 512, min: 1, max: 16000, integer: true, unit: 'px', label: 'Width', visibleIf: (p) => p.mode === 'width' || p.mode === 'exact' },
-    height: { type: 'number', default: 512, min: 1, max: 16000, integer: true, unit: 'px', label: 'Height', visibleIf: (p) => p.mode === 'height' || p.mode === 'exact' },
-    longSide: { type: 'number', default: 512, min: 1, max: 16000, integer: true, unit: 'px', label: 'Long side', visibleIf: (p) => p.mode === 'long' },
+    width: { type: 'number', default: 512, min: 1, max: 16000, integer: true, label: 'Width', visibleIf: (p) => p.mode === 'width' || p.mode === 'exact' },
+    height: { type: 'number', default: 512, min: 1, max: 16000, integer: true, label: 'Height', visibleIf: (p) => p.mode === 'height' || p.mode === 'exact' },
+    longSide: { type: 'number', default: 512, min: 1, max: 16000, integer: true, label: 'Long side', visibleIf: (p) => p.mode === 'long' },
     filter: {
       type: 'enum',
       default: 'area',
@@ -62,24 +62,24 @@ export default defineNode({
         h = (src.height * p.percent) / 100;
         break;
       case 'height':
-        h = p.height;
+        h = p.height * ctx.proxy;
         w = (src.width * h) / src.height;
         break;
       case 'width':
-        w = p.width;
+        w = p.width * ctx.proxy;
         h = (src.height * w) / src.width;
         break;
       case 'long': {
-        const k = p.longSide / Math.max(src.width, src.height);
+        const k = (p.longSide * ctx.proxy) / Math.max(src.width, src.height);
         w = src.width * k;
         h = src.height * k;
         break;
       }
       default:
-        w = p.width;
-        h = p.height;
+        w = p.width * ctx.proxy;
+        h = p.height * ctx.proxy;
     }
-    // 'px' lengths already arrive in texels of the input (see ENGINE.md rule 3), so they are final sizes here.
+    // Targets are literal output texels (this node defines the output grid); a playback proxy scales them.
     w = Math.max(1, Math.round(w));
     h = Math.max(1, Math.round(h));
     if (w === src.width && h === src.height) return { image: src };
