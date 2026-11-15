@@ -348,6 +348,28 @@ export class PlayerImpl implements Player {
     return spec;
   }
 
+  /** Bytes held by the RAM cache of rendered frames. */
+  get cacheBytes(): number {
+    return this.cache.bytes;
+  }
+
+  /**
+   * Project switch: stop, drop every cached frame and the shown image, blank the canvas. The next `setView`
+   * renders the new project from scratch.
+   */
+  releaseCaches(): void {
+    this.pause();
+    this.cache.clear();
+    this.clearOutput();
+    this.view = null;
+    this.key = '';
+    this.keyDirty = true;
+    this.fullReal = null;
+    this.frame = 0;
+    this.audioGraph = null;
+    this.markChanged();
+  }
+
   private liveSignals(): boolean {
     return this.hasSig && this.deps.audio.running;
   }

@@ -149,10 +149,51 @@ export interface PluginManager {
 }
 
 /** Project persistence: the graph document itself (assets are referenced by id). */
+/** One open project (tab). Metadata only: the graph body is loaded on demand with `loadProject`. */
+export interface OpenProject {
+  id: string;
+  name: string;
+  /** ms since epoch of the last edit. */
+  updatedAt: number;
+  /** Small preview (object URL) of the last saved thumbnail. */
+  thumbnail?: string;
+  /** Edited since the last `markSaved(id)` (call it after `saveToFile` succeeded). */
+  dirty?: boolean;
+}
+
 export interface ProjectStore {
-  /** Last autosaved graph, or null. */
+  /**
+   * Open projects (tabs), persisted across reloads. Only metadata is held for background tabs; one graph body is
+   * read per `loadProject`. On first run after the upgrade the old single autosave becomes the first project.
+   */
+  listOpen(): Promise<OpenProject[]>;
+  activeId(): Promise<string | null>;
+  /** Remember which tab is active (does NOT load anything; use `Io.switchProject` to change the live project). */
+  setActive(id: string): Promise<void>;
+  /** Load ONE graph body on demand, or null. */
+  loadProject(id: string): Promise<GraphDoc | null>;
+  /** Debounced (~400 ms) like autosave; updates this project's body, name, time and thumbnail only. Call on every edit. */
+  saveProject(id: string, graph: GraphDoc, thumbnail?: Blob): void;
+  /** Clear the dirty flag (after a successful file save). */
+  markSaved(id: string): Promise<void>;
+  /** Add a project as a new last tab and make it active. */
+  createProject(graph: GraphDoc, name?: string): Promise<OpenProject>;
+  /** Remove from the tabs. Keeps the graph in the last 10 closed projects. Returns the id that should become active. */
+  closeProject(id: string): Promise<string | null>;
+  listClosed(): Promise<OpenProject[]>;
+  /** Bring a recently closed project back as the last tab (and make it active). */
+  reopen(id: string): Promise<OpenProject | null>;
+  renameProject(id: string, name: string): Promise<void>;
+  /** New tab order; ids not listed keep their order after the listed ones. */
+  reorderOpen(ids: string[]): Promise<void>;
+  /** Copy placed right after the original (not activated). */
+  duplicateProject(id: string): Promise<OpenProject | null>;
+  /** Write all pending saves now (await before switching or closing the page yourself). */
+  flush(): Promise<void>;
+
+  /** Legacy: the active project's graph, or null. */
   loadAutosave(): Promise<GraphDoc | null>;
-  /** Debounced internally; safe to call on every edit. */
+  /** Legacy: debounced save into the active project (creates one if there is none). */
   autosave(graph: GraphDoc): void;
   /** Save / open a `.rsmps.json` file through the browser file dialogs. */
   saveToFile(graph: GraphDoc): Promise<void>;
@@ -173,6 +214,17 @@ export interface AudioApi {
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
 }
 
+export interface MemoryInfo {
+  /** Engine node-result cache (read from a private counter: best effort). */
+  engineCacheBytes: number;
+  /** All GPU textures the pool has allocated (in use + idle). */
+  gpuPoolBytes: number;
+  /** Player RAM cache of rendered frames. */
+  frameCacheBytes: number;
+  /** Library decoded frames and PCM. */
+  decodedMediaBytes: number;
+}
+
 export interface Io {
   engine: Engine;
   registry: Registry;
@@ -184,6 +236,15 @@ export interface Io {
   /** Print-and-scan-back: photos of printed sheets to an animation asset. */
   scan: ScanApi;
   audio: AudioApi;
+  /**
+   * Switch the live project to tab `id` and release the old one's memory: flushes its pending save, pauses the
+   * player and stops audio, clears the engine cache, the player's frame cache and pooled GPU textures, and drops decoded
+   * media (frames, PCM, decoder cursors) that the new project does not use. Assets stay in IndexedDB and the asset
+   * list stays shared. Returns the new project's graph (null if unknown). The caller must then `player.setView` with it.
+   */
+  switchProject(id: string): Promise<GraphDoc | null>;
+  /** Best-effort memory readout in bytes. */
+  memory(): MemoryInfo;
   /** Evaluate once, outside the player (thumbnails, node previews). */
   evaluate(graph: GraphDoc, node: string, opts?: { port?: string; seconds?: number; item?: number; proxy?: number }): Promise<Value | null>;
 }

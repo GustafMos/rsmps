@@ -269,6 +269,7 @@ export class Library implements MediaLibrary {
   private readers = new Map<string, VideoReader>();
   private pending = new Map<string, Promise<Frame | null>>();
   private audio = new Map<string, Promise<PcmAudio | null>>();
+  private audioBytes = new Map<string, number>();
   private thumbs = new Map<string, Promise<string | null>>();
   private textCanvas: OffscreenCanvas | null = null;
   /** Bumps on every change to the asset list; the player folds it into its frame-cache key. */
@@ -604,6 +605,9 @@ export class Library implements MediaLibrary {
         return null;
       });
       this.audio.set(assetId, p);
+      void p.then((pcm) => {
+        if (pcm && this.audio.get(assetId) === p) this.audioBytes.set(assetId, pcm.channels.reduce((s, c) => s + c.byteLength, 0));
+      });
     }
     return p;
   }
@@ -690,6 +694,28 @@ export class Library implements MediaLibrary {
     lines.forEach((line, i) => ctx.fillText(line, x, pad + lineH * (i + 0.5)));
     const image = ctx.getImageData(0, 0, width, height);
     return { data: image.data, width, height };
+  }
+
+  /**
+   * Project switch: drop everything decoded (frames, textures, PCM, decoder cursors) for assets not in `keep`.
+   * The assets themselves stay in memory as blobs and in IndexedDB.
+   */
+  releaseDecodedExcept(keep: ReadonlySet<string>): void {
+    for (const id of this.infos.keys()) {
+      if (keep.has(id)) continue;
+      this.frames.dropGroups(`${id}|`);
+      this.readers.get(id)?.dispose();
+      this.readers.delete(id);
+      this.audio.delete(id);
+      this.audioBytes.delete(id);
+    }
+  }
+
+  /** Decoded frames (GPU) plus decoded PCM, in bytes. */
+  decodedBytes(): number {
+    let pcm = 0;
+    for (const n of this.audioBytes.values()) pcm += n;
+    return this.frames.bytes + pcm;
   }
 
   /** Release decoders and textures (page teardown). */

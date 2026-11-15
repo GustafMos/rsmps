@@ -7,10 +7,10 @@ import type { Registry } from '../engine/define';
 import { validateGraph } from '../engine/graph';
 import { DEFAULT_PROJECT, type GraphDoc } from '../engine/types';
 import type { ProjectStore } from './api';
+import { ProjectSession, type OpenProject } from './session';
 import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import { errorMessage, uniqueId } from './util';
 
-const AUTOSAVE_KEY = 'autosave';
 const AUTOSAVE_DELAY_MS = 400;
 const FILE_TYPES = [{ description: 'RSMPS project', accept: { 'application/json': ['.rsmps.json', '.json'] } }];
 
@@ -44,14 +44,19 @@ export function parseGraph(raw: unknown): GraphDoc {
 
 export class ProjectStoreImpl implements ProjectStore {
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private pendingGraph: GraphDoc | null = null;
+  private writing: Promise<void> = Promise.resolve();
+  private session = new ProjectSession({
+    get: (k) => idbGet('projects', k),
+    put: (k, v) => idbPut('projects', k, v),
+    delete: (k) => idbDelete('projects', k),
+  });
   private thumbUrls = new Map<string, string>();
   /** Problems found in the last opened file (unknown node types, bad wires). The nodes are kept. */
   lastOpenProblems: { nodeId?: string; message: string }[] = [];
 
   constructor(private registry: Registry) {
     if (typeof window !== 'undefined') {
-      const flush = () => this.flush();
+      const flush = () => void this.flush();
       window.addEventListener('pagehide', flush);
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') flush();
@@ -59,32 +64,104 @@ export class ProjectStoreImpl implements ProjectStore {
     }
   }
 
-  /* -------------------------------- autosave -------------------------------- */
+  /* ------------------------- session (open projects) ------------------------- */
+
+  private pending = new Map<string, { graph: GraphDoc; thumbnail?: Blob }>();
+  /** Pending autosave of "whatever project is active" (legacy API); resolved at flush time. */
+  private pendingActive: GraphDoc | null = null;
+
+  listOpen(): Promise<OpenProject[]> {
+    return this.session.listOpen();
+  }
+  listClosed(): Promise<OpenProject[]> {
+    return this.session.listClosed();
+  }
+  activeId(): Promise<string | null> {
+    return this.session.activeId();
+  }
+  setActive(id: string): Promise<void> {
+    return this.session.setActive(id);
+  }
+  loadProject(id: string): Promise<GraphDoc | null> {
+    return this.session.loadProject(id).then((g) => (g ? parseGraph(g) : null));
+  }
+  markSaved(id: string): Promise<void> {
+    return this.session.markSaved(id);
+  }
+  async createProject(graph: GraphDoc, name?: string): Promise<OpenProject> {
+    await this.flush();
+    return this.session.createProject(graph, name);
+  }
+  async closeProject(id: string): Promise<string | null> {
+    await this.flush(); // keep the latest edits in the recently-closed copy
+    return this.session.closeProject(id);
+  }
+  reopen(id: string): Promise<OpenProject | null> {
+    return this.session.reopen(id);
+  }
+  async renameProject(id: string, name: string): Promise<void> {
+    await this.flush();
+    await this.session.renameProject(id, name);
+  }
+  reorderOpen(ids: string[]): Promise<void> {
+    return this.session.reorderOpen(ids);
+  }
+  async duplicateProject(id: string): Promise<OpenProject | null> {
+    await this.flush();
+    return this.session.duplicateProject(id);
+  }
+
+  /** Debounced (~400 ms). Updates the project's body, name, time and thumbnail only. */
+  saveProject(id: string, graph: GraphDoc, thumbnail?: Blob): void {
+    const prev = this.pending.get(id);
+    this.pending.set(id, { graph, thumbnail: thumbnail ?? prev?.thumbnail });
+    this.schedule();
+  }
+
+  private schedule(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.flush(), AUTOSAVE_DELAY_MS);
+  }
+
+  /** Write every pending save now. Await it before switching projects. */
+  flush(): Promise<void> {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const jobs = [...this.pending];
+    this.pending.clear();
+    const legacy = this.pendingActive;
+    this.pendingActive = null;
+    this.writing = this.writing.then(async () => {
+      try {
+        for (const [id, p] of jobs) await this.session.saveProject(id, p.graph, p.thumbnail);
+        if (legacy) {
+          const id = await this.session.activeId();
+          if (id) await this.session.saveProject(id, legacy);
+          else await this.session.createProject(legacy);
+        }
+      } catch (err) {
+        console.warn('Autosave failed:', errorMessage(err));
+      }
+    });
+    return this.writing;
+  }
+
+  /* -------------------------------- autosave (legacy wrappers) ------------------- */
 
   async loadAutosave(): Promise<GraphDoc | null> {
     try {
-      const raw = await idbGet<unknown>('projects', AUTOSAVE_KEY);
-      return raw ? parseGraph(raw) : null;
+      const id = await this.session.activeId();
+      return id ? await this.loadProject(id) : null;
     } catch (err) {
       console.warn('Could not load the autosave:', err);
       return null;
     }
   }
 
+  /** Saves into the active project (creating one if the session is empty). */
   autosave(graph: GraphDoc): void {
-    this.pendingGraph = graph;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.flush(), AUTOSAVE_DELAY_MS);
-  }
-
-  /** Write the pending autosave now. */
-  flush(): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-    const graph = this.pendingGraph;
-    this.pendingGraph = null;
-    if (!graph) return;
-    idbPut('projects', AUTOSAVE_KEY, graph).catch((err) => console.warn('Autosave failed:', errorMessage(err)));
+    this.pendingActive = graph;
+    this.schedule();
   }
 
   /* ---------------------------------- files --------------------------------- */

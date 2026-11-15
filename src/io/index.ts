@@ -18,6 +18,20 @@ import { ProjectStoreImpl } from './projects';
 import { SignalRouter } from './signals';
 import { ScanImpl } from './scan';
 
+/** Every asset id referenced by an `assets` param anywhere in the graph. */
+export function assetIdsOf(graph: import('../engine/types').GraphDoc, registry: Registry): Set<string> {
+  const ids = new Set<string>();
+  for (const n of graph.nodes) {
+    const def = registry.get(n.type);
+    if (!def) continue;
+    for (const [key, p] of Object.entries(def.params)) {
+      const v = n.params[key];
+      if ((p as { type: string }).type === 'assets' && Array.isArray(v)) for (const x of v) if (typeof x === 'string') ids.add(x);
+    }
+  }
+  return ids;
+}
+
 export const createIo: CreateIo = async () => {
   const device = await createBrowserDevice();
   device.addEventListener?.('uncapturederror', (e) => {
@@ -53,6 +67,25 @@ export const createIo: CreateIo = async () => {
     plugins,
     projects,
     scan: new ScanImpl(library),
+    async switchProject(id) {
+      await projects.flush(); // (a) the old project's pending save
+      player.releaseCaches(); // (b) pause + audio off, (c) player frame cache
+      audio.stop();
+      const graph = await projects.loadProject(id);
+      await gate.clearEngine(); // (c) engine cache (waits for an in-flight evaluation)
+      library.releaseDecodedExcept(graph ? assetIdsOf(graph, registry) : new Set()); // (d)
+      gpu.trim(); // (c) idle pooled textures of the old project
+      if (graph) await projects.setActive(id); // (e)
+      return graph;
+    },
+    memory() {
+      return {
+        engineCacheBytes: (engine as unknown as { cacheBytes?: number }).cacheBytes ?? 0,
+        gpuPoolBytes: gpu.allocatedBytes,
+        frameCacheBytes: player.cacheBytes,
+        decodedMediaBytes: library.decodedBytes(),
+      };
+    },
     audio: {
       listDevices: (kind) => audio.listDevices(kind),
       onDevicesChanged: (l) => audio.onDevicesChanged(l),
