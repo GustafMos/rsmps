@@ -1,0 +1,14 @@
+.rs-app { display: flex; flex-direction: column; height: 100%; background: var(--bg-0); }
+.rs-main { flex: 1; display: flex; min-height: 0; }
+.rs-left { width: 264px; flex: none; border-right: 1px solid var(--line-strong); min-height: 0; }
+.rs-right { width: 320px; flex: none; border-left: 1px solid var(--line-strong); display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); }
+.rs-center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rs-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.rs-panel__head { display: flex; align-items: center; gap: var(--s-2); height: 28px; padding: 0 var(--s-1) 0 var(--s-3); background: var(--bg-2); border-bottom: 1px solid var(--line); flex: none; }
+.rs-panel__spacer { flex: 1; }
+.rs-panel__tip { color: var(--text-faint); font-size: var(--fs-xs); }
+.rs-panel__head .rs-btn--icon { width: 24px; height: 24px; min-width: 24px; }
+.rs-panel__body { flex: 1; min-height: 0; position: relative; }
+.rs-divider { height: 6px; flex: none; background: var(--bg-2); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); cursor: row-resize; position: relative; }
+.rs-divider::after { content: ''; position: absolute; left: 50%; top: 1px; width: 32px; height: 2px; margin-left: -16px; background: var(--bg-5); }
+.rs-divider:hover { background: var(--accent-lo); }

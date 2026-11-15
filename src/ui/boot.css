@@ -1,0 +1,10 @@
+.rs-boot {
+  height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-3);
+  background: var(--bg-0) var(--dither); text-align: center; padding: var(--s-6);
+}
+.rs-boot img { image-rendering: pixelated; border: 2px solid #000; }
+.rs-boot__word { font-family: var(--font-pixel); font-size: 24px; letter-spacing: 0.12em; }
+.rs-boot__big { font-size: var(--fs-lg); margin: 0; max-width: 520px; }
+.rs-boot__msg { color: var(--text-dim); max-width: 560px; margin: 0; font-family: var(--font-mono); font-size: var(--fs-sm); user-select: text; }
+.rs-boot__list { color: var(--text-dim); text-align: left; max-width: 520px; line-height: 1.7; font-size: var(--fs-md); }
+.rs-boot--error .rs-boot__word { color: var(--danger); }

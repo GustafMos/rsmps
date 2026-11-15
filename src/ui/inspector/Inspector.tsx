@@ -1,0 +1,231 @@
+import { useMemo, useState } from 'react';
+import { CATEGORIES, type AnyNodeDef, type NodeInstance, type ParamDef } from '../../engine/types';
+import { Icon } from '../components/Icon';
+import { NumberField } from '../components/NumberField';
+import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
+import { visibleParams } from '../lib/layout';
+import { useApp, useDef, useEd } from '../store/context';
+import { AssetsEditor, JsonEditor, PaletteEditor } from './editors';
+import { ProjectSettingsPanel } from './ProjectSettings';
+import './inspector.css';
+
+export function Inspector() {
+  const selection = useEd((s) => s.selection);
+  const frame = useEd((s) => s.selectedFrame);
+  return (
+    <div className="rs-insp" data-panel="inspector">
+      {selection.length === 1 ? <NodePanel id={selection[0]} /> : selection.length > 1 ? <MultiPanel count={selection.length} /> : frame ? <FramePanel id={frame} /> : <ProjectSettingsPanel />}
+    </div>
+  );
+}
+
+function MultiPanel({ count }: { count: number }) {
+  const { ed } = useApp();
+  return (
+    <div className="rs-insp__scroll">
+      <div className="rs-insp__sec">
+        <div className="rs-insp__title">{count} nodes selected</div>
+        <div className="rs-insp__actions">
+          <button className="rs-btn" onClick={() => ed.groupSelection()} title="Ctrl+G"><Icon name="frame" /> Group</button>
+          <button className="rs-btn" onClick={() => ed.autoLayout(true)}><Icon name="layout" /> Arrange</button>
+          <button className="rs-btn" onClick={() => ed.duplicate()} title="Ctrl+D">Duplicate</button>
+          <button className="rs-btn rs-btn--danger" onClick={() => ed.deleteSelection()} title="Delete"><Icon name="trash" /> Delete</button>
+        </div>
+        <p className="rs-insp__hint">Select a single node to edit its parameters.</p>
+      </div>
+    </div>
+  );
+}
+
+const FRAME_COLORS = ['#5b8def', '#c77dff', '#4dd6a8', '#f2c14e', '#ef6f9c', '#58c4dd', '#f78154', '#8fd14f'];
+
+function FramePanel({ id }: { id: string }) {
+  const { ed } = useApp();
+  const frame = useEd((s) => s.graph.frames?.find((f) => f.id === id));
+  if (!frame) return null;
+  return (
+    <div className="rs-insp__scroll">
+      <div className="rs-insp__sec">
+        <div className="rs-caps">Frame</div>
+        <TextField large value={frame.label} onChange={(v) => ed.updateFrame(id, { label: v })} />
+        <div className="rs-insp__swatches">
+          {FRAME_COLORS.map((c) => (
+            <button key={c} className={`rs-insp__swatch${c === frame.color ? ' is-on' : ''}`} style={{ background: c }} title={c} onClick={() => ed.updateFrame(id, { color: c })} />
+          ))}
+        </div>
+        <button className="rs-btn rs-btn--danger" onClick={() => ed.ungroup(id)}>Ungroup</button>
+      </div>
+    </div>
+  );
+}
+
+function NodePanel({ id }: { id: string }) {
+  const { ed } = useApp();
+  const node = useEd((s) => s.graph.nodes.find((n) => n.id === id));
+  const def = useDef(node?.type ?? '');
+  const edges = useEd((s) => s.graph.edges);
+  const viewed = useEd((s) => s.viewedNodeId === id);
+  const nodes = useEd((s) => s.graph.nodes);
+  if (!node) return null;
+  if (!def) {
+    return (
+      <div className="rs-insp__scroll">
+        <div className="rs-insp__sec">
+          <div className="rs-insp__title" style={{ color: 'var(--danger)' }}>Missing node type</div>
+          <p className="rs-insp__hint">"{node.type}" is not installed (it probably comes from a plugin). Its connections are kept, so installing the plugin restores the graph.</p>
+          <button className="rs-btn" onClick={() => ed.openDialog('plugins')}><Icon name="plug" /> Plugins…</button>
+        </div>
+      </div>
+    );
+  }
+  const cat = CATEGORIES[def.category];
+  const wired = new Map(edges.filter((e) => e.to.node === id).map((e) => [e.to.port, e] as const));
+  return (
+    <div className="rs-insp__scroll">
+      <div className="rs-insp__sec">
+        <div className="rs-insp__kind">
+          <span className="rs-insp__chip" style={{ background: cat?.color }} />
+          <span className="rs-caps">{cat?.title}</span>
+          <span className="rs-insp__id rs-mono">{def.id}</span>
+        </div>
+        <TextField large value={node.label ?? ''} placeholder={def.title} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
+        <p className="rs-insp__desc">{def.description}</p>
+        <div className="rs-insp__actions">
+          <button className={`rs-btn${viewed ? ' is-on' : ''}`} onClick={() => ed.setViewed(id)} title="Show this node in the viewer">
+            <Icon name={viewed ? 'eye' : 'eyeOff'} /> View
+          </button>
+          <button className={`rs-btn${node.bypass ? ' is-on' : ''}`} onClick={() => ed.toggleBypass(id)} title="Bypass (B)">
+            <Icon name="power" /> Bypass
+          </button>
+          <button className="rs-btn rs-btn--icon rs-btn--danger" onClick={() => ed.deleteSelection()} title="Delete (Del)">
+            <Icon name="trash" />
+          </button>
+        </div>
+        {def.cpu && <p className="rs-insp__warn">Heavy CPU node: may be slow on large images.</p>}
+      </div>
+      <ParamGroups
+        node={node}
+        def={def}
+        wired={wired}
+        label={(port) => {
+          const e = wired.get(port);
+          const src = e && nodes.find((n) => n.id === e.from.node);
+          return src ? `${src.label || ed.registry.get(src.type)?.title || src.type}` : '';
+        }}
+        onDisconnect={(port) => {
+          const e = wired.get(port);
+          if (e) ed.disconnect(e.id);
+        }}
+      />
+    </div>
+  );
+}
+
+function ParamGroups({
+  node,
+  def,
+  wired,
+  label,
+  onDisconnect,
+}: {
+  node: NodeInstance;
+  def: AnyNodeDef;
+  wired: Map<string, unknown>;
+  label: (port: string) => string;
+  onDisconnect: (port: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const groups = useMemo(() => {
+    const out: { name: string; items: [string, ParamDef][] }[] = [];
+    for (const [key, p] of visibleParams(def, node.params)) {
+      const name = p.group ?? '';
+      let g = out.find((x) => x.name === name);
+      if (!g) out.push((g = { name, items: [] }));
+      g.items.push([key, p]);
+    }
+    // jsons are skipped by visibleParams; show them last so the user can see their state
+    for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) {
+      if (p.type !== 'json') continue;
+      let g = out.find((x) => x.name === (p.group ?? ''));
+      if (!g) out.push((g = { name: p.group ?? '', items: [] }));
+      g.items.push([key, p]);
+    }
+    return out;
+  }, [def, node.params]);
+
+  if (!groups.length) return <div className="rs-insp__sec"><p className="rs-insp__hint">This node has no parameters.</p></div>;
+  return (
+    <>
+      {groups.map((g) => (
+        <div key={g.name} className="rs-insp__sec">
+          {g.name && (
+            <button className="rs-insp__group" onClick={() => setCollapsed((c) => ({ ...c, [g.name]: !c[g.name] }))}>
+              <Icon name={collapsed[g.name] ? 'chevronRight' : 'chevronDown'} size={12} />
+              <span className="rs-caps">{g.name}</span>
+            </button>
+          )}
+          {!collapsed[g.name] &&
+            g.items.map(([key, p]) => (
+              <ParamControl key={key} node={node} keyName={key} p={p} isWired={wired.has(key)} wiredFrom={label(key)} onDisconnect={() => onDisconnect(key)} />
+            ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ParamControl({ node, keyName, p, isWired, wiredFrom, onDisconnect }: { node: NodeInstance; keyName: string; p: ParamDef; isWired: boolean; wiredFrom: string; onDisconnect: () => void }) {
+  const { ed } = useApp();
+  const label = p.label ?? keyName;
+  const value = node.params[keyName] ?? p.default;
+  const set = (v: unknown) => ed.setParam(node.id, keyName, v);
+  const stacked = p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && p.multiline);
+
+  let control: React.ReactNode;
+  if (isWired) {
+    control = (
+      <div className="rs-insp__wired">
+        <Icon name="plug" size={13} />
+        <span>from {wiredFrom || 'a node'}</span>
+        <button className="rs-btn rs-btn--ghost" onClick={onDisconnect} title="Remove the connection and use the value here">Disconnect</button>
+      </div>
+    );
+  } else {
+    switch (p.type) {
+      case 'number':
+        control = <NumberField large value={value as number} min={p.min} max={p.max} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} />;
+        break;
+      case 'bool':
+        control = <CheckField value={!!value} onChange={set} label={value ? 'On' : 'Off'} />;
+        break;
+      case 'enum':
+        control = <SelectField large value={String(value)} options={p.options} onChange={set} label={label} />;
+        break;
+      case 'color':
+        control = <ColorField large value={value as [number, number, number, number]} onChange={set} />;
+        break;
+      case 'string':
+        control = <TextField large multiline={p.multiline} value={String(value ?? '')} onChange={set} />;
+        break;
+      case 'vec2':
+        control = <Vec2Field large value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;
+        break;
+      case 'palette':
+        control = <PaletteEditor value={value as [number, number, number][]} onChange={set} />;
+        break;
+      case 'assets':
+        control = <AssetsEditor value={value as string[]} accept={p.accept} onChange={set} />;
+        break;
+      case 'json':
+        control = <JsonEditor value={value} onChange={set} />;
+        break;
+    }
+  }
+  return (
+    <div className={`rs-insp__row${stacked ? ' is-stacked' : ''}`} title={p.hint}>
+      <label className="rs-insp__label">{label}</label>
+      <div className="rs-insp__ctl">{control}</div>
+      {p.hint && <div className="rs-insp__phint">{p.hint}</div>}
+    </div>
+  );
+}

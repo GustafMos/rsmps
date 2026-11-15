@@ -13,7 +13,7 @@ import type { AudioKernel } from './audio/types';
 /* Sockets and values                                                       */
 /* ----------------------------------------------------------------------- */
 
-export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'regions' | 'audio' | 'midi';
+export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'regions' | 'camera' | 'audio' | 'midi';
 
 /**
  * A GPU image. RGBA8, sRGB-encoded, PREMULTIPLIED alpha, row 0 = top.
@@ -62,6 +62,25 @@ export interface RegionsValue {
   items: Region[];
 }
 
+/** A virtual camera for 3D generator nodes. Each 3D object can take its own camera. */
+export interface CameraValue {
+  kind: 'camera';
+  /** How rays leave the camera. 'panoramic' = full 360° equirectangular; 'cylindrical' = 360° around, straight verticals. */
+  projection: 'orthographic' | 'perspective' | 'fisheye' | 'panoramic' | 'cylindrical';
+  /** Field of view in degrees (perspective, fisheye; vertical extent for cylindrical). */
+  fov: number;
+  /** Visible height in scene units for orthographic. */
+  orthoSize: number;
+  /** Camera position in scene units (objects sit around the origin, roughly unit-sized). */
+  position: [number, number, number];
+  /** Point the camera looks at. */
+  target: [number, number, number];
+  /** Roll around the view axis, degrees. */
+  roll: number;
+  /** Lens shift in normalised frame units (moves the picture without changing perspective). */
+  shift: [number, number];
+}
+
 /** Straight (non-premultiplied) sRGB colour, 0..1. */
 export type ColorValue = [number, number, number, number];
 
@@ -83,6 +102,7 @@ export interface SocketValueMap {
   color: ColorValue;
   audio: AudioValue;
   regions: RegionsValue;
+  camera: CameraValue;
   midi: MidiValue;
 }
 export type Value = SocketValueMap[SocketType];
@@ -318,6 +338,13 @@ export interface Host {
   assetFrame(assetId: string, seconds: number, maxSide: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
   /** Decoded PCM of an audio asset or a video's sound track (used by the audio engine, not by render nodes). */
   assetAudio?(assetId: string): Promise<{ sampleRate: number; channels: Float32Array[] } | null>;
+  /**
+   * Value of a named signal that a stream-domain (audio/MIDI) node publishes, at `seconds`:
+   * loudness, pitch, note, gate… This is the bridge that lets sound drive picture parameters.
+   * Live it returns the latest measured value; during export, the value analysed from the rendered audio.
+   * Returns 0 when unknown.
+   */
+  signal?(nodeId: string, name: string, seconds: number): number;
   /** Rasterise text to straight RGBA (browser canvas). Optional: missing in headless runs. */
   rasterizeText?(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null;
 }

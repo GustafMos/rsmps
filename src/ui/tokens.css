@@ -1,0 +1,74 @@
+/* RSMPS UI design tokens. Every colour, space, radius and font size lives here. */
+@font-face {
+  font-family: 'Pixeloid';
+  src: url('/fonts/PixeloidSans-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* greyscale chrome (stepped, clearly distinct) */
+  --bg-0: #08090b;
+  --bg-1: #101114;
+  --bg-2: #17191d;
+  --bg-3: #1f2227;
+  --bg-4: #292d34;
+  --bg-5: #343943;
+  --line: #2a2d33;
+  --line-strong: #3d424b;
+  --text: #ecedf0;
+  --text-dim: #a9aeb8;
+  --text-faint: #7a808b;
+
+  /* the only chromatic UI colours */
+  --accent: #4f66f2; /* logo royal blue */
+  --accent-hi: #7b8dff;
+  --accent-lo: #2a3590;
+  --accent-text: #ffffff;
+  --yellow: #f5c542; /* restrained highlight */
+  --danger: #ff5c6c;
+  --danger-bg: #3a1419;
+  --ok: #5fd68a;
+  --select: #ffd24a;
+
+  /* socket colours: defined once, used by sockets and wires */
+  --sock-image: #e6b84a;
+  --sock-mask: #aab4bd;
+  --sock-palette: #ef6f9c;
+  --sock-number: #9aa0ab;
+  --sock-color: #f28b4b;
+  --sock-audio: #2ec4b6;
+  --sock-midi: #a77dff;
+
+  /* spacing (4px scale) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  --r: 2px;
+  --ctl-h: 24px;
+  --ctl-h-lg: 28px;
+  --bar-h: 40px;
+
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, 'Liberation Mono', monospace;
+  --font-pixel: 'Pixeloid', var(--font-ui);
+
+  --shadow-hard: 3px 3px 0 rgba(0, 0, 0, 0.6);
+  --shadow-hard-sm: 2px 2px 0 rgba(0, 0, 0, 0.55);
+  --focus: 0 0 0 2px var(--bg-0), 0 0 0 3px var(--accent-hi);
+
+  /* dither / checker textures for empty areas only */
+  --dither: repeating-conic-gradient(#ffffff08 0% 25%, transparent 0% 50%) 0 0 / 4px 4px;
+}

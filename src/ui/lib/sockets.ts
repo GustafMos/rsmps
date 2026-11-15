@@ -1,0 +1,57 @@
+import { canConnect, paramSocketType } from '../../engine/define';
+import type { AnyNodeDef, InputSchema, OutputSchema, ParamSchema, SocketType } from '../../engine/types';
+import type { Registry } from '../../engine/define';
+
+/** Input ports (including wireable params) of a definition that accept a value of `src`, best match first. */
+export function inputsAccepting(def: AnyNodeDef, src: SocketType): string[] {
+  const exact: string[] = [];
+  const loose: string[] = [];
+  for (const [port, d] of Object.entries(def.inputs as InputSchema)) {
+    if (d.type === src) exact.push(port);
+    else if (canConnect(src, d.type)) loose.push(port);
+  }
+  for (const key of Object.keys(def.params)) {
+    const t = paramSocketType(def, key);
+    if (!t) continue;
+    if (t === src) loose.push(key);
+  }
+  return [...exact, ...loose];
+}
+
+/** Output ports of a definition that can feed an input of type `dst`, best match first. */
+export function outputsFeeding(def: AnyNodeDef, dst: SocketType): string[] {
+  const exact: string[] = [];
+  const loose: string[] = [];
+  for (const [port, d] of Object.entries(def.outputs as OutputSchema)) {
+    if (d.type === dst) exact.push(port);
+    else if (canConnect(d.type, dst)) loose.push(port);
+  }
+  return [...exact, ...loose];
+}
+
+export function isSourceFor(def: AnyNodeDef, kind: 'image' | 'video' | 'audio' | 'midi'): string | null {
+  if (def.category === 'output') return null;
+  if (Object.keys(def.inputs).length) return null;
+  for (const [key, p] of Object.entries(def.params as ParamSchema)) {
+    if (p.type !== 'assets') continue;
+    const ok =
+      p.accept === 'any' ||
+      (p.accept === 'image-video' && (kind === 'image' || kind === 'video')) ||
+      (p.accept === 'audio' && kind === 'audio') ||
+      (p.accept === 'midi' && kind === 'midi');
+    if (ok) return key;
+  }
+  return null;
+}
+
+/** Find a node type that can host an imported asset of this kind (no hard-coded ids). */
+export function sourceDefFor(registry: Registry, kind: 'image' | 'video' | 'audio' | 'midi'): { def: AnyNodeDef; key: string } | null {
+  const defs = registry.list();
+  // prefer category 'input' (e.g. Media In)
+  const sorted = [...defs].sort((a, b) => Number(b.category === 'input') - Number(a.category === 'input'));
+  for (const def of sorted) {
+    const key = isSourceFor(def, kind);
+    if (key) return { def, key };
+  }
+  return null;
+}

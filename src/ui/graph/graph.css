@@ -1,0 +1,60 @@
+.rs-graph {
+  position: relative; width: 100%; height: 100%; overflow: hidden; background-color: var(--bg-0); outline: none;
+  --grid: 24px; --gx: 0px; --gy: 0px;
+  background-image:
+    radial-gradient(circle, #ffffff1c 1px, transparent 1.5px),
+    linear-gradient(#ffffff06 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff06 1px, transparent 1px);
+  background-size: var(--grid) var(--grid), calc(var(--grid) * 4) calc(var(--grid) * 4), calc(var(--grid) * 4) calc(var(--grid) * 4);
+  background-position: var(--gx) var(--gy);
+  cursor: default; touch-action: none;
+}
+.rs-graph.is-panning, .rs-graph.is-space { cursor: grabbing; }
+.rs-graph.is-wiring { cursor: crosshair; }
+.rs-graph__layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
+
+.rs-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.rs-wires--pending { z-index: 5; }
+.rs-wire, .rs-wire__hit { fill: none; }
+.rs-wire { stroke: var(--sock-number); stroke-width: 2.25; stroke-linecap: round; pointer-events: none; opacity: 0.85; }
+.rs-wire__hit { stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
+.rs-wire-g:hover .rs-wire { opacity: 1; stroke-width: 3; }
+.rs-wire-g.is-hot .rs-wire { opacity: 1; stroke-width: 3; }
+.rs-wire--image { stroke: var(--sock-image); }
+.rs-wire--mask { stroke: var(--sock-mask); }
+.rs-wire--palette { stroke: var(--sock-palette); }
+.rs-wire--number { stroke: var(--sock-number); }
+.rs-wire--color { stroke: var(--sock-color); }
+.rs-wire--audio { stroke: var(--sock-audio); }
+.rs-wire--midi { stroke: var(--sock-midi); }
+.rs-wire.is-insert { stroke: var(--select); stroke-width: 4; opacity: 1; }
+.rs-wire.is-pending { stroke-dasharray: 6 4; opacity: 1; }
+.rs-wire.is-cut { stroke: var(--danger); stroke-dasharray: 3 3; opacity: 0.6; }
+
+.rs-frame {
+  position: absolute; left: 0; top: 0; pointer-events: none; border: 1px solid color-mix(in srgb, var(--fc) 70%, transparent);
+  background: color-mix(in srgb, var(--fc) 9%, transparent); border-radius: var(--r);
+}
+.rs-frame.is-selected { outline: 2px solid var(--select); outline-offset: 1px; }
+.rs-frame__head {
+  pointer-events: auto; display: flex; align-items: center; padding: 0 var(--s-3); cursor: grab;
+  background: color-mix(in srgb, var(--fc) 30%, var(--bg-2)); border-bottom: 1px solid color-mix(in srgb, var(--fc) 70%, transparent);
+}
+.rs-frame__label { font-family: var(--font-pixel); font-size: var(--fs-sm); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-frame__rename { height: 22px; background: var(--bg-0); border: 1px solid var(--accent-hi); padding: 0 4px; font-size: var(--fs-sm); width: 60%; }
+
+.rs-graph__box { position: absolute; display: none; border: 1px solid var(--select); background: #ffd24a14; pointer-events: none; z-index: 20; }
+.rs-graph__overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 19; }
+.rs-graph__hint {
+  position: fixed; display: none; z-index: 50; pointer-events: none; padding: var(--s-1) var(--s-2);
+  background: var(--danger-bg); border: 1px solid var(--danger); color: var(--text); font-size: var(--fs-sm); box-shadow: var(--shadow-hard-sm);
+}
+.rs-graph__bar {
+  position: absolute; left: var(--s-2); top: var(--s-2); display: flex; gap: var(--s-1); align-items: center; z-index: 10;
+  padding: var(--s-1); background: var(--bg-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-hard-sm);
+}
+.rs-graph__zoom { padding: 0 var(--s-2); color: var(--text-dim); font-size: var(--fs-xs); min-width: 44px; text-align: center; }
+.rs-graph__empty { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.rs-graph__empty > div { padding: var(--s-4) var(--s-6); background: var(--bg-1); border: 1px dashed var(--line-strong); color: var(--text-dim); font-size: var(--fs-md); text-align: center; line-height: 1.7; }
+.rs-graph.is-drop { box-shadow: inset 0 0 0 2px var(--accent-hi); }
+.rs-graph:focus-visible { box-shadow: none; }

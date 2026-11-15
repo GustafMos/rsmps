@@ -91,6 +91,10 @@ export class PlayerImpl implements Player {
   private shownKey = '';
   private shownFrame = -1;
   private shownProxy = 1;
+  /** Key/frame of the last job that finished without an image (null result, error, no canvas): do not retry it until something changes. */
+  private settledKey = '';
+  private settledFrame = -1;
+  private settledProxy = 1;
   private size: { width: number; height: number } | null = null;
   private errors: ReadonlyMap<string, string> = EMPTY_ERRORS;
   private timings: ReadonlyMap<string, number> = EMPTY_ERRORS as unknown as ReadonlyMap<string, number>;
@@ -383,11 +387,16 @@ export class PlayerImpl implements Player {
     const proxy = this.currentProxy();
     const upToDate = !this.dirty && this.shown && this.shownKey === this.key && this.shownFrame === this.frame && this.shownProxy >= proxy - 1e-6;
     if (upToDate) return null;
+    if (!this.dirty && this.settledKey === this.key && this.settledFrame === this.frame && this.settledProxy >= proxy - 1e-6) return null;
     return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key };
   }
 
   private async execute(job: Job): Promise<void> {
     this.dirty = false;
+    // Assume this job settles; a successful show() makes `shown` authoritative instead.
+    this.settledKey = job.key;
+    this.settledFrame = job.frame;
+    this.settledProxy = job.proxy;
     const cached = this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
       this.show(cached.image, job, cached.proxy);

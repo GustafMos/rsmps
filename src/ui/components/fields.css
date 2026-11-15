@@ -1,0 +1,68 @@
+/* Number field */
+.rs-nf {
+  position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
+  height: var(--ctl-h); padding: 0 var(--s-2); min-width: 0; overflow: hidden;
+  background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r);
+  font-size: var(--fs-sm); cursor: ew-resize;
+}
+.rs-nf:hover { border-color: var(--bg-5); background: var(--bg-0); }
+.rs-nf:focus-visible { box-shadow: var(--focus); }
+.rs-nf--lg { height: var(--ctl-h-lg); font-size: var(--fs-md); }
+.rs-nf__fill { position: absolute; inset: 0 auto 0 0; background: var(--bg-4); pointer-events: none; }
+.rs-nf.is-changed .rs-nf__fill { background: color-mix(in srgb, var(--accent) 38%, var(--bg-3)); }
+.rs-nf__label { position: relative; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rs-nf__value { position: relative; margin-left: auto; color: var(--text); white-space: nowrap; }
+.rs-nf__unit { color: var(--text-faint); margin-left: 2px; }
+.rs-nf__input {
+  position: relative; width: 100%; min-width: 0; height: 100%; border: 0; background: transparent;
+  text-align: right; padding: 0; font-size: inherit; cursor: text;
+}
+.rs-nf__input:focus-visible { box-shadow: none; }
+.rs-nf:has(.rs-nf__input) { cursor: text; border-color: var(--accent-hi); }
+.rs-nf.is-disabled { opacity: 0.45; cursor: default; }
+
+/* Toggle / checkbox */
+.rs-check {
+  display: flex; align-items: center; gap: var(--s-2); height: var(--ctl-h); min-width: 0;
+  padding: 0 var(--s-2); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r);
+  font-size: var(--fs-sm); cursor: pointer; color: var(--text-dim); text-align: left; width: 100%;
+}
+.rs-check:hover { background: var(--bg-0); border-color: var(--bg-5); }
+.rs-check__box {
+  flex: none; width: 14px; height: 14px; border: 1px solid var(--line-strong); background: var(--bg-3);
+  display: grid; place-items: center; color: transparent;
+}
+.rs-check.is-on { color: var(--text); }
+.rs-check.is-on .rs-check__box { background: var(--accent); border-color: var(--accent-hi); color: #fff; }
+.rs-check__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Select */
+.rs-select { width: 100%; height: var(--ctl-h); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r); font-size: var(--fs-sm); padding: 0 var(--s-1) 0 var(--s-2); min-width: 0; }
+.rs-select:hover { border-color: var(--bg-5); background: var(--bg-0); }
+.rs-select option { background: var(--bg-2); }
+.rs-select--lg { height: var(--ctl-h-lg); font-size: var(--fs-md); }
+
+/* Colour */
+.rs-color { display: flex; align-items: center; gap: var(--s-2); height: var(--ctl-h); width: 100%; padding: 0 var(--s-2); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r); font-size: var(--fs-sm); text-align: left; }
+.rs-color:hover { border-color: var(--bg-5); background: var(--bg-0); }
+.rs-color--lg { height: var(--ctl-h-lg); }
+.rs-swatch {
+  flex: none; width: 16px; height: 16px; border: 1px solid #000; outline: 1px solid #ffffff30; outline-offset: -2px;
+  background-image: linear-gradient(var(--c), var(--c)), repeating-conic-gradient(#888 0% 25%, #bbb 0% 50%);
+  background-size: 100% 100%, 8px 8px;
+}
+.rs-color__label { color: var(--text-dim); margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-color__hex { color: var(--text); font-size: var(--fs-xs); }
+.rs-pop {
+  position: fixed; z-index: 1000; background: var(--bg-2); border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-hard); border-radius: var(--r); padding: var(--s-3); width: 240px;
+  display: flex; flex-direction: column; gap: var(--s-2);
+}
+.rs-pop__row { display: flex; gap: var(--s-2); align-items: center; }
+
+/* Text */
+.rs-text { width: 100%; height: var(--ctl-h); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r); padding: 0 var(--s-2); font-size: var(--fs-sm); min-width: 0; }
+.rs-text:hover { border-color: var(--bg-5); }
+.rs-text:focus { border-color: var(--accent-hi); }
+textarea.rs-text { height: auto; min-height: 64px; padding: var(--s-1) var(--s-2); resize: vertical; font-family: var(--font-mono); }
+.rs-text--lg { height: var(--ctl-h-lg); font-size: var(--fs-md); }
