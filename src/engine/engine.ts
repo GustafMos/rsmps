@@ -33,6 +33,12 @@ export interface EvalRequest {
   /** 1 = full resolution; 0.5 = half-resolution proxy for smooth playback. Effects scale automatically. */
   proxy?: number;
   quality?: 'preview' | 'final';
+  /**
+   * Render with this frame size instead of the project canvas (full-resolution texels). Lets one graph be
+   * rendered as landscape, portrait, square… without editing it: generators lay out for the new frame and
+   * unit-pixel lengths keep the same look.
+   */
+  canvas?: { width: number; height: number };
 }
 
 export interface EvalResult {
@@ -167,8 +173,9 @@ export class Engine {
     const project = graph.project;
     const proxy = Math.min(1, Math.max(0.05, req.proxy ?? 1));
     const frame = Math.max(0, Math.round((req.seconds ?? 0) * project.fps));
-    const cw = Math.max(1, Math.round(project.width * proxy));
-    const ch = Math.max(1, Math.round(project.height * proxy));
+    const frame0 = req.canvas ?? project;
+    const cw = Math.max(1, Math.round(frame0.width * proxy));
+    const ch = Math.max(1, Math.round(frame0.height * proxy));
     const inbound = new Map<string, Edge[]>();
     for (const e of graph.edges) {
       const list = inbound.get(e.to.node);
@@ -446,7 +453,7 @@ export class Engine {
       .sort()
       .join(',');
     const p = scope.graph.project;
-    return hash(`${node.type}|${JSON.stringify(node.params)}|${node.bypass ? 1 : 0}|${ins}|${p.width}x${p.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
+    return hash(`${node.type}|${JSON.stringify(node.params)}|${node.bypass ? 1 : 0}|${ins}|${scope.canvas.width}x${scope.canvas.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
   }
 
   /** Fusion-style effect mask + mix, applied by the kernel for `maskable` nodes. */
