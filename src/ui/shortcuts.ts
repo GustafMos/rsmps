@@ -87,6 +87,10 @@ export const COMMANDS: Command[] = [
     defaults: ['Space'],
     run: ({ app, hover, binding }) => {
       const { io, graphCtl: ctl } = app;
+      if (io.audio.recordingState().recording) {
+        void app.ed.stopRecording();
+        return;
+      }
       if (hover) {
         ctl.spaceDown = true;
         ctl.spaceUsed = false;

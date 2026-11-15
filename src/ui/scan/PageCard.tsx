@@ -28,7 +28,7 @@ function describe(p: ScanPageReport): string[] {
 }
 
 export function PageCard({ page, result, onResult, onManual }: { page: ScanPageReport; result: ScanResult; onResult: (r: ScanResult) => void; onManual?: (pageIndex: number, input: ScanManualInput) => void }) {
-  const [fixing, setFixing] = useState(page.status === 'failed');
+  const [fixing, setFixing] = useState(page.status === 'failed' || (page as { layoutSource?: string }).layoutSource === 'lattice');
   const img = page.photoUrl ?? page.thumbnailUrl;
   const s = page.photoScale || 1;
   const w = page.photoWidth * s;
@@ -71,6 +71,14 @@ export function PageCard({ page, result, onResult, onManual }: { page: ScanPageR
           {page.skewDeg ? ` · tilt ${page.skewDeg.toFixed(1)}°` : ''}
           {page.cornersSource === 'manual' ? ' · corners set by hand' : ''}
         </div>
+        {(page as { layoutSource?: string }).layoutSource === 'lattice' && (
+          <p className="rs-sc__confirm">Layout read from the + marks: please confirm the page number, total frames and frame rate below.</p>
+        )}
+        {page.reprojectionErrorPx !== null && page.reprojectionErrorPx !== undefined && (
+          <div className="rs-sc__meta rs-num">
+            Flatness error {page.reprojectionErrorPx.toFixed(1)} px{page.reprojectionErrorPx > 6 ? ' · the paper is curled or the lens distorts: frames were aligned mark by mark' : ''}
+          </div>
+        )}
         {lines.length > 0 && (
           <ul className="rs-sc__warn">
             {lines.map((t, i) => <li key={i}>{t}</li>)}
@@ -103,6 +111,7 @@ function ManualFix({ page, result, onResult, onManual }: { page: ScanPageReport;
   const [rows, setRows] = useState(L?.rows ?? 4);
   const [pageIndex, setPageIndex] = useState((L?.pageIndex ?? page.index) + 1);
   const [fps, setFps] = useState(L?.fps ?? 12);
+  const [totalFrames, setTotalFrames] = useState(L?.totalFrames ?? columns * rows);
   const [busy, setBusy] = useState(false);
   const svg = useRef<SVGSVGElement>(null);
 
@@ -126,7 +135,7 @@ function ManualFix({ page, result, onResult, onManual }: { page: ScanPageReport;
 
   const apply = async () => {
     setBusy(true);
-    const manual: ScanManualInput = { pageIndex: pageIndex - 1, fps };
+    const manual: ScanManualInput = { pageIndex: pageIndex - 1, fps, totalFrames };
     if (useCorners) manual.corners = corners;
     if (useLayout) manual.layout = { paper: paper as 'a4', landscape, columns, rows };
     try {
@@ -170,6 +179,7 @@ function ManualFix({ page, result, onResult, onManual }: { page: ScanPageReport;
       <div className="rs-sc__layout">
         <NumberField label="Page number" integer min={1} max={999} value={pageIndex} defaultValue={1} onChange={setPageIndex} />
         <NumberField label="Frame rate" integer min={1} max={120} value={fps} defaultValue={12} onChange={setFps} />
+        <NumberField label="Total frames" integer min={1} max={9999} value={totalFrames} defaultValue={columns * rows} onChange={setTotalFrames} />
       </div>
       <button className="rs-btn rs-btn--primary" onClick={apply} disabled={busy || (!useCorners && !useLayout)}>{busy ? 'Working…' : 'Re-analyse this page'}</button>
     </div>

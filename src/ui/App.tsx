@@ -15,6 +15,7 @@ import { Viewer } from './viewer/Viewer';
 import { trackPointer } from './lib/drag';
 import { useShortcuts } from './shortcuts';
 import { ScanView } from './scan/ScanView';
+import { TimelineEditor } from './timeline/TimelineEditor';
 import { ScanQuickSettings, ScanStepper } from './scan/ScanStage';
 import { usePlayKeys } from './playKeys';
 import { useRenderWatchdog } from './watchdog';
@@ -29,6 +30,7 @@ export function App() {
   useRenderWatchdog(useApp());
   const prefs = useEd((s) => s.prefs);
   const mode = useEd((s) => s.mode);
+  const timelineNode = useEd((s) => s.timelineNode);
   const scanStage = useEd((s) => s.scanStage);
   const switching = useEd((s) => s.switching);
   const center = useRef<HTMLDivElement>(null);
@@ -126,6 +128,7 @@ export function App() {
       <AddMenu />
       <NodeContextMenu />
       <DialogHost />
+      {timelineNode && <TimelineEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} />}
       <SocketPicker />
       <ExportBar />
       <SupportCard />

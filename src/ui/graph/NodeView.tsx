@@ -10,6 +10,7 @@ import { paletteInputPort } from '../lib/sockets';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
 import { CurveField } from '../components/CurveField';
+import { RangeField } from '../components/RangeField';
 import { LayerList } from './LayerList';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
@@ -306,7 +307,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         );
         break;
       case 'vec2':
-        control = <Vec2Field value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;
+        control = p.range ? <RangeField compact nodeId={node.id} keyName={row.key} value={value as [number, number]} defaultValue={p.default} /> : <Vec2Field value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;
         break;
       case 'palette': {
         const colors = (Array.isArray(value) ? value : []) as number[][];

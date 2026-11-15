@@ -11,6 +11,10 @@ import { nodeViewStore, setPin } from '../store/nodeView';
 import { effectivePins } from '../lib/layout';
 import { isLayerType } from '../lib/layout';
 import { Piano } from './Piano';
+import { RecordButton } from '../timeline/RecordButton';
+import { isTimelineDef } from '../timeline/TimelineEditor';
+import { RangeField } from '../components/RangeField';
+import { DrumGrid, looksLikeDrumPattern } from './DrumGrid';
 import { KindPicker } from '../components/KindPicker';
 import { AUTO_COLLAPSED, KIND_GROUPS, describeOutput, hasKind } from '../lib/outputInfo';
 import { PaletteHint } from '../components/PaletteHint';
@@ -133,6 +137,18 @@ function NodePanel({ id }: { id: string }) {
         </div>
         {def.cpu && <p className="rs-insp__warn">Heavy CPU node: may be slow on large images.</p>}
       </div>
+      {isTimelineDef(def) && (
+        <div className="rs-insp__sec">
+          <div className="rs-caps">Timeline</div>
+          <div className="rs-insp__actions">
+            <button className="rs-btn rs-btn--primary" onClick={() => ed.openTimeline(id)}>Open timeline</button>
+            <RecordButton nodeId={id} />
+          </div>
+          {!wired.has('recordAudio') && <button className="rs-btn" onClick={() => ed.addRecordSource(id, 'audio')}>Record microphone</button>}
+          {!wired.has('recordMidi') && <button className="rs-btn" onClick={() => ed.addRecordSource(id, 'midi')}>Record keyboard</button>}
+          {(!wired.has('recordAudio') || !wired.has('recordMidi')) && <p className="rs-insp__hint">Nothing is wired into the record inputs yet: these buttons add the source node and connect it. Then arm a track (the ● button) and press Record.</p>}
+        </div>
+      )}
       {def.playable && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Keyboard</div>
@@ -237,7 +253,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
   const label = p.label ?? keyName;
   const value = node.params[keyName] ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, keyName, v);
-  const stacked = p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && p.multiline);
+  const stacked = (p.type === 'vec2' && p.range) || p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && p.multiline);
 
   let control: React.ReactNode;
   if (isWired) {
@@ -274,7 +290,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
         control = <TextField large multiline={p.multiline} value={String(value ?? '')} onChange={set} />;
         break;
       case 'vec2':
-        control = <Vec2Field large value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;
+        control = p.range ? <RangeField nodeId={node.id} keyName={keyName} value={value as [number, number]} defaultValue={p.default} /> : <Vec2Field large value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;
         break;
       case 'palette':
         control = <PaletteEditor value={value as [number, number, number][]} onChange={set} onStudio={() => { ed.studioTarget = { nodeId: node.id, key: keyName }; ed.openDialog('palette'); }} />;
@@ -289,7 +305,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
         control = <DeviceField large value={String(value ?? '')} kind={p.device} onChange={set} />;
         break;
       case 'json':
-        control = <JsonEditor value={value} onChange={set} />;
+        control = keyName === 'pattern' && looksLikeDrumPattern(value) ? <DrumGrid nodeId={node.id} keyName={keyName} value={value} /> : <JsonEditor value={value} onChange={set} />;
         break;
     }
   }

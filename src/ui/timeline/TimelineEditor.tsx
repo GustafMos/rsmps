@@ -1,0 +1,240 @@
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  addAudioClip,
+  addTrack,
+  clipEnd,
+  duplicateClip,
+  gridSeconds,
+  isMidiClip,
+  moveClip,
+  normalizeTimeline,
+  removeClip,
+  removeTrack,
+  snapTime,
+  splitClip,
+  trimClipEnd,
+  trimClipStart,
+  updateClip,
+  updateTrack,
+  type Grid,
+  type TimelineClip,
+  type TimelineData,
+} from '../../engine/audio/timeline';
+import { Icon } from '../components/Icon';
+import { NumberField } from '../components/NumberField';
+import { ASSET_MIME } from '../graph/gestures';
+import { useApp, useEd } from '../store/context';
+import { RecordButton } from './RecordButton';
+import './timeline.css';
+
+const TRACK_H = 52;
+const HEAD_W = 210;
+
+/** Shape detection (never a node id): a json `clips` param plus recordAudio / recordMidi inputs. */
+export function isTimelineDef(def: { params: object; inputs: object } | undefined): boolean {
+  if (!def) return false;
+  const p = def.params as Record<string, { type?: string }>;
+  const i = def.inputs as Record<string, unknown>;
+  return p.clips?.type === 'json' && 'recordAudio' in i && 'recordMidi' in i;
+}
+
+/** Arrangement-style editor: tracks, clips (move, trim, split, duplicate, delete), arm / mute / solo, recording. */
+export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: () => void }) {
+  const { ed, io } = useApp();
+  const node = useEd((s) => s.graph.nodes.find((n) => n.id === nodeId));
+  const project = useEd((s) => s.graph.project);
+  const armed = useEd((s) => s.armed);
+  const [pps, setPps] = useState(60); // pixels per second
+  const [sel, setSel] = useState<string | null>(null);
+  const head = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const tl = normalizeTimeline(node?.params.clips);
+  const tlRef = useRef(tl);
+  tlRef.current = tl;
+  const bpm = Number(node?.params.bpm ?? 120);
+  const grid = (String(node?.params.quantize ?? '1/16') as Grid) || 'off';
+  const total = Math.max(project.duration, ...tl.clips.map(clipEnd), 4) + 2;
+  const write = (next: TimelineData) => ed.setParam(nodeId, 'clips', next);
+
+  // playhead without React per frame
+  useEffect(() => {
+    const place = () => {
+      if (head.current) head.current.style.transform = `translateX(${io.player.getState().seconds * pps}px)`;
+    };
+    place();
+    return io.player.subscribe(place);
+  }, [io, pps]);
+
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'SELECT') return;
+      if (!sel) return;
+      const clip = tlRef.current.clips.find((c) => c.id === sel);
+      if (!clip) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        write(removeClip(tlRef.current, sel));
+        setSel(null);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        const r = duplicateClip(tlRef.current, sel);
+        write(r.timeline);
+        setSel(r.clip.id);
+      } else if (e.key.toLowerCase() === 's' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e')) {
+        e.preventDefault();
+        const at = io.player.getState().seconds;
+        if (at > clip.start && at < clipEnd(clip)) write(splitClip(tlRef.current, sel, at).timeline);
+      }
+    };
+    const el = scroller.current?.closest('.rs-tl');
+    el?.addEventListener('keydown', key as EventListener);
+    return () => el?.removeEventListener('keydown', key as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, nodeId]);
+
+  const snap = (t: number, alt: boolean) => (alt ? t : snapTime(t, bpm, grid));
+
+  const dragClip = (e: React.PointerEvent, clip: TimelineClip, part: 'move' | 'l' | 'r') => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSel(clip.id);
+    const x0 = e.clientX;
+    ed.beginHold();
+    const base = tlRef.current;
+    const mv = (ev: PointerEvent) => {
+      const dt = (ev.clientX - x0) / pps;
+      try {
+        if (part === 'move') {
+          const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-lane]');
+          const lane = el?.dataset.lane;
+          const target = lane && base.tracks.find((t) => t.id === lane && (t.kind === 'midi') === isMidiClip(clip)) ? lane : undefined;
+          write(moveClip(base, clip.id, snap(clip.start + dt, ev.altKey), target));
+        } else if (part === 'l') write(trimClipStart(base, clip.id, snap(clip.start + dt, ev.altKey)));
+        else write(trimClipEnd(base, clip.id, snap(clipEnd(clip) + dt, ev.altKey)));
+      } catch {
+        /* a move to an incompatible track is ignored */
+      }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', mv);
+      window.removeEventListener('pointerup', up);
+      ed.endHold();
+    };
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+  };
+
+  const dropOn = (e: React.DragEvent, trackId: string) => {
+    const raw = e.dataTransfer.getData(ASSET_MIME);
+    if (!raw) return;
+    e.preventDefault();
+    const track = tl.tracks.find((t) => t.id === trackId);
+    if (track?.kind !== 'audio') return ed.toast('Drop audio on an audio track.', 'error');
+    const lane = e.currentTarget.getBoundingClientRect();
+    const start = snap(Math.max(0, (e.clientX - lane.left) / pps), e.altKey);
+    let next = tl;
+    let at = start;
+    for (const id of JSON.parse(raw) as string[]) {
+      const info = io.library.list().find((a) => a.id === id);
+      if (!info || info.kind !== 'audio') continue;
+      next = addAudioClip(next, { track: trackId, start: at, length: info.duration || 1, asset: id, name: info.name }).timeline;
+      at += info.duration || 1;
+    }
+    write(next);
+  };
+
+  const ticks: number[] = [];
+  const beat = 60 / bpm;
+  const step = pps * beat < 24 ? beat * 4 : beat;
+  for (let t = 0; t <= total; t += step) ticks.push(t);
+
+  if (!node) return null;
+  return createPortal(
+    <div className="rs-tl" tabIndex={-1} role="dialog" aria-label="Timeline">
+      <div className="rs-tl__head">
+        <span className="rs-caps">Timeline · {node.label || 'Timeline'}</span>
+        <RecordButton nodeId={nodeId} />
+        <span className="rs-tl__sp" />
+        <button className="rs-btn" onClick={() => write(addTrack(tl, 'audio').timeline)}><Icon name="plus" /> Audio track</button>
+        <button className="rs-btn" onClick={() => write(addTrack(tl, 'midi').timeline)}><Icon name="plus" /> MIDI track</button>
+        <div style={{ width: 120 }}><NumberField label="Zoom" min={10} max={400} integer value={pps} defaultValue={60} onChange={setPps} /></div>
+        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+      </div>
+      <div className="rs-tl__body">
+        <div className="rs-tl__heads" style={{ width: HEAD_W }}>
+          <div className="rs-tl__corner" />
+          {tl.tracks.map((t) => (
+            <div key={t.id} className="rs-tl__thead" style={{ height: TRACK_H }}>
+              <div className="rs-tl__trow">
+                <Icon name={t.kind === 'midi' ? 'midi' : 'audio'} size={13} />
+                <input className="rs-tl__name" value={t.name} aria-label="Track name" onKeyDown={(e) => e.stopPropagation()} onChange={(e) => write(updateTrack(tl, t.id, { name: e.target.value }))} />
+                <button className={`rs-tl__b${t.mute ? ' is-on' : ''}`} title="Mute" onClick={() => write(updateTrack(tl, t.id, { mute: !t.mute }))}>M</button>
+                <button className={`rs-tl__b${t.solo ? ' is-on' : ''}`} title="Solo" onClick={() => write(updateTrack(tl, t.id, { solo: !t.solo }))}>S</button>
+                <button
+                  className={`rs-tl__b rs-tl__rec${armed?.track === t.id ? ' is-on' : ''}`}
+                  title={armed?.track === t.id ? 'Armed for recording: click to disarm' : 'Arm this track for recording'}
+                  onClick={() => ed.armTrack(nodeId, armed?.track === t.id ? null : { track: t.id, kind: t.kind })}
+                >●</button>
+                <button className="rs-tl__b" title="Remove track" onClick={() => { write(removeTrack(tl, t.id)); }}>×</button>
+              </div>
+              {t.kind === 'audio' && (
+                <div className="rs-tl__trow">
+                  <div style={{ flex: 1 }}><NumberField label="Gain" step={0.5} unit="db" value={t.gain} defaultValue={0} onChange={(v) => write(updateTrack(tl, t.id, { gain: v }))} /></div>
+                  <div style={{ flex: 1 }}><NumberField label="Pan" min={-1} max={1} step={0.05} value={t.pan} defaultValue={0} onChange={(v) => write(updateTrack(tl, t.id, { pan: v }))} /></div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="rs-tl__scroll" ref={scroller}>
+          <div className="rs-tl__canvas" style={{ width: total * pps }}>
+            <div
+              className="rs-tl__ruler"
+              onPointerDown={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                const seek = (cx: number) => io.player.seek(Math.max(0, (cx - r.left) / pps));
+                seek(e.clientX);
+                const mv = (ev: PointerEvent) => seek(ev.clientX);
+                const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+                window.addEventListener('pointermove', mv);
+                window.addEventListener('pointerup', up);
+              }}
+            >
+              <div className="rs-tl__loop" style={{ width: project.duration * pps }} title="Project loop" />
+              {ticks.map((t) => (
+                <span key={t} className="rs-tl__tick rs-num" style={{ left: t * pps }}>{Number(t.toFixed(2))}s</span>
+              ))}
+            </div>
+            {tl.tracks.map((t) => (
+              <div key={t.id} className="rs-tl__lane" data-lane={t.id} style={{ height: TRACK_H }} onDragOver={(e) => e.dataTransfer.types.includes(ASSET_MIME) && e.preventDefault()} onDrop={(e) => dropOn(e, t.id)}>
+                <div className="rs-tl__loop rs-tl__loop--lane" style={{ width: project.duration * pps }} />
+                {tl.clips.filter((c) => c.track === t.id).map((c) => (
+                  <div
+                    key={c.id}
+                    className={`rs-tl__clip${c.id === sel ? ' is-sel' : ''}${isMidiClip(c) ? ' is-midi' : ''}${c.muted ? ' is-muted' : ''}`}
+                    style={{ left: c.start * pps, width: Math.max(4, c.length * pps) }}
+                    onPointerDown={(e) => dragClip(e, c, 'move')}
+                    title={`${c.name ?? (isMidiClip(c) ? 'MIDI clip' : 'Audio clip')} · drag to move (Alt: no snap) · edges trim · Del · Ctrl+D · S splits at the playhead`}
+                  >
+                    <span className="rs-tl__edge rs-tl__edge--l" onPointerDown={(e) => dragClip(e, c, 'l')} />
+                    <span className="rs-tl__cname">{c.name ?? (isMidiClip(c) ? 'MIDI' : 'Audio')}</span>
+                    {isMidiClip(c) && (c.notes ?? []).slice(0, 400).map((n, i) => (
+                      <i key={i} className="rs-tl__note" style={{ left: `${(n.t / Math.max(0.001, c.srcLength ?? c.length)) * 100}%`, width: `${Math.max(0.5, (n.d / Math.max(0.001, c.srcLength ?? c.length)) * 100)}%`, bottom: `${(n.note / 127) * 70 + 4}%`, opacity: 0.4 + n.vel * 0.6 }} />
+                    ))}
+                    <span className="rs-tl__edge rs-tl__edge--r" onPointerDown={(e) => dragClip(e, c, 'r')} />
+                  </div>
+                ))}
+              </div>
+            ))}
+            {tl.tracks.length === 0 && <div className="rs-tl__empty">Add an audio or MIDI track, then drop sounds from the Media panel or record.</div>}
+            <div ref={head} className="rs-tl__playhead" />
+          </div>
+        </div>
+      </div>
+      <div className="rs-tl__foot rs-insp__hint">Grid {gridSeconds(bpm, grid) > 0 ? `1/${String(grid).split('/')[1]} note` : 'off'} · {bpm} BPM · shaded area = project loop · click the ruler to seek</div>
+    </div>,
+    document.body,
+  );
+}

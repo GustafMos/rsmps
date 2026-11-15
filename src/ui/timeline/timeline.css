@@ -1,0 +1,40 @@
+.rs-tl { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); width: min(1100px, 96vw); height: 360px; min-height: 220px; z-index: 1080; display: flex; flex-direction: column; resize: vertical; overflow: hidden; background: var(--bg-2); border: 1px solid var(--accent-hi); box-shadow: var(--shadow-hard); outline: none; }
+.rs-tl__head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2); background: var(--bg-3); border-bottom: 1px solid var(--line); flex: none; }
+.rs-tl__sp { flex: 1; }
+.rs-tl__body { flex: 1; display: flex; min-height: 0; }
+.rs-tl__heads { flex: none; overflow: hidden; border-right: 1px solid var(--line-strong); background: var(--bg-1); }
+.rs-tl__corner { height: 24px; border-bottom: 1px solid var(--line); }
+.rs-tl__thead { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px; border-bottom: 1px solid var(--line); justify-content: center; }
+.rs-tl__trow { display: flex; align-items: center; gap: 2px; }
+.rs-tl__name { flex: 1; min-width: 0; height: 20px; background: transparent; border: 1px solid transparent; padding: 0 3px; font-size: var(--fs-sm); }
+.rs-tl__name:hover, .rs-tl__name:focus { border-color: var(--line-strong); background: var(--bg-0); }
+.rs-tl__b { width: 20px; height: 20px; padding: 0; background: var(--bg-3); border: 1px solid var(--line-strong); color: var(--text-dim); font-size: var(--fs-xs); border-radius: var(--r); }
+.rs-tl__b.is-on { background: var(--accent); color: #fff; }
+.rs-tl__rec.is-on { background: var(--danger); border-color: var(--danger); color: #fff; }
+.rs-tl__scroll { flex: 1; overflow: auto; min-width: 0; }
+.rs-tl__canvas { position: relative; min-height: 100%; }
+.rs-tl__ruler { position: relative; height: 24px; background: var(--bg-1); border-bottom: 1px solid var(--line); cursor: pointer; }
+.rs-tl__tick { position: absolute; top: 6px; padding-left: 3px; border-left: 1px solid var(--line-strong); font-size: var(--fs-xs); color: var(--text-faint); height: 18px; }
+.rs-tl__loop { position: absolute; left: 0; top: 0; bottom: 0; background: #4f66f21c; pointer-events: none; }
+.rs-tl__lane { position: relative; border-bottom: 1px solid var(--line); background: var(--bg-0); }
+.rs-tl__clip { position: absolute; top: 4px; bottom: 4px; background: color-mix(in srgb, var(--sock-audio) 40%, var(--bg-3)); border: 1px solid var(--sock-audio); border-radius: var(--r); overflow: hidden; cursor: grab; }
+.rs-tl__clip.is-midi { background: color-mix(in srgb, var(--sock-midi) 38%, var(--bg-3)); border-color: var(--sock-midi); }
+.rs-tl__clip.is-sel { outline: 2px solid var(--select); z-index: 2; }
+.rs-tl__clip.is-muted { opacity: 0.45; }
+.rs-tl__cname { position: absolute; left: 6px; top: 2px; font-size: var(--fs-xs); color: var(--text); pointer-events: none; white-space: nowrap; }
+.rs-tl__edge { position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; z-index: 1; }
+.rs-tl__edge--l { left: 0; } .rs-tl__edge--r { right: 0; }
+.rs-tl__note { position: absolute; height: 2px; background: #fff; pointer-events: none; }
+.rs-tl__playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; margin-left: -1px; background: var(--yellow); pointer-events: none; z-index: 5; box-shadow: 0 0 0 1px #000; }
+.rs-tl__empty { padding: var(--s-6); color: var(--text-faint); font-size: var(--fs-sm); }
+.rs-tl__foot { padding: var(--s-1) var(--s-3); border-top: 1px solid var(--line); flex: none; margin: 0; }
+.rs-rec { display: inline-flex; align-items: center; gap: var(--s-2); }
+.rs-rec__btn { height: 24px; padding: 0 var(--s-2); }
+.rs-rec__btn.is-armed { border-color: var(--danger); color: var(--text); }
+.rs-rec__dot { width: 10px; height: 10px; background: var(--danger); border-radius: 50%; display: inline-block; }
+.rs-rec__btn.is-on { background: var(--danger); border-color: var(--danger); color: #fff; }
+.rs-rec__count { font-size: 22px; font-weight: 700; color: var(--yellow); min-width: 20px; text-align: center; }
+.rs-rec__time { color: var(--danger); font-size: var(--fs-sm); }
+.rs-rec__state { color: var(--text-dim); font-size: var(--fs-xs); }
+.rs-rec__meter { display: inline-flex; flex-direction: column; gap: 1px; width: 60px; height: 8px; background: var(--bg-0); }
+.rs-rec__meter > span { display: block; height: 3px; background: var(--ok); }

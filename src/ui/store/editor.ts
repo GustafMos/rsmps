@@ -24,6 +24,7 @@ import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
 import { outputType } from '../../engine/graph';
 import { createScanProject } from '../scan/session';
+import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/audio/timeline';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -92,6 +93,10 @@ export interface EditorState {
   supportPrompt: 'export' | 'close' | null;
   /** Running export (progress shown in a floating bar). */
   exportJob: { label: string; fraction: number } | null;
+  /** Timeline node whose editor panel is open. */
+  timelineNode: string | null;
+  /** The track armed for recording. */
+  armed: { nodeId: string; track: string; kind: 'audio' | 'midi' } | null;
   /** Stage of a scan tab: 1 = photos, 2 = clean up & export (the node editor). */
   scanStage: 1 | 2;
   /** Top-level tab: the node editor or the print-scan-back tool. */
@@ -172,6 +177,8 @@ export class Editor {
       switching: null,
       exportJob: null,
       scanStage: 1,
+      timelineNode: null,
+      armed: null,
       supportPrompt: null,
       socketPicker: null,
     });
@@ -937,6 +944,58 @@ export class Editor {
     }
   }
 
+  openTimeline(id: string | null): void {
+    this.patch({ timelineNode: id });
+  }
+
+  /* ------------------------------- recording ------------------------------- */
+
+  armTrack(nodeId: string, target: { track: string; kind: 'audio' | 'midi' } | null): void {
+    this.io.audio.arm(nodeId, target);
+    this.patch({ armed: target ? { nodeId, ...target } : null });
+  }
+
+  /** Record from a click: starts audio if needed, then capture (count-in and transport are handled by the IO layer). */
+  async startRecording(): Promise<void> {
+    try {
+      await this.io.audio.record();
+    } catch (err) {
+      this.toast(`Could not start recording: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  /** Stop, store the audio and put the take on the armed track (one undo step). */
+  async stopRecording(): Promise<void> {
+    const armed = this.state.armed;
+    try {
+      const r = await this.io.audio.stop();
+      if (!r || !armed) return;
+      const node = this.state.graph.nodes.find((n) => n.id === armed.nodeId);
+      if (!node) return;
+      const tl = normalizeTimeline(node.params.clips);
+      const trackName = tl.tracks.find((t) => t.id === armed.track)?.name ?? 'Take';
+      const mode = (String(node.params.loopRecordMode ?? 'overdub') as LoopRecordMode);
+      const res = applyTake(tl, r.take, { mode, assetIds: r.assets.map((a) => a.id), name: trackName });
+      this.setParam(armed.nodeId, 'clips', res.timeline);
+      this.toast(`Recorded ${r.take.kind === 'midi' ? 'MIDI' : 'audio'} on "${trackName}"`, 'ok');
+    } catch (err) {
+      this.toast(`Recording failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  /** One-click record source for a Timeline node: Microphone -> recordAudio or MIDI Keyboard -> recordMidi (guarded by the registry). */
+  addRecordSource(nodeId: string, kind: 'audio' | 'midi'): void {
+    const node = this.state.graph.nodes.find((n) => n.id === nodeId);
+    const type = kind === 'audio' ? 'microphone' : 'midi-keyboard';
+    const def = this.registry.get(type);
+    if (!node || !def) return this.toast(`The "${type}" node is not available.`, 'error');
+    const outPort = kind === 'audio' ? 'tap' : Object.keys(def.outputs)[0];
+    this.edit((g) => {
+      const added = addNode(g, this.registry, type, { x: node.x - 260, y: node.y + (kind === 'audio' ? 0 : 160) });
+      return connect(added.graph, this.registry, { node: added.node.id, port: outPort }, { node: nodeId, port: kind === 'audio' ? 'recordAudio' : 'recordMidi' });
+    });
+  }
+
   /** The hidden working sequence owned by the active scan tab (created by `io.scan.attach`). */
   scanAsset(): AssetInfo | undefined {
     const id = this.state.activeProject;
@@ -1136,12 +1195,12 @@ export class Editor {
   }
 
   /** Render and download. `outputs: []` means every enabled output. No dialog: progress is a floating bar. */
-  async runExport(outputs: string[], items: 'current' | 'all', zip?: boolean): Promise<void> {
-    await this.runExportGraph(this.state.graph, outputs, items, this.state.item, zip ?? this.exportPrefs(this.state.activeProject).zip);
+  async runExport(outputs: string[], items: 'current' | 'all', zip?: boolean, audioFormat?: 'wav' | 'm4a' | 'webm'): Promise<void> {
+    await this.runExportGraph(this.state.graph, outputs, items, this.state.item, zip ?? this.exportPrefs(this.state.activeProject).zip, audioFormat);
   }
 
   /** Export any graph (e.g. a throwaway one) through the floating progress bar. Resolves true on success. */
-  async runExportGraph(graph: GraphDoc, outputs: string[], items: 'current' | 'all', item: number, zip: boolean): Promise<boolean> {
+  async runExportGraph(graph: GraphDoc, outputs: string[], items: 'current' | 'all', item: number, zip: boolean, audioFormat?: 'wav' | 'm4a' | 'webm'): Promise<boolean> {
     if (this.exportAbort) {
       this.toast('An export is already running.', 'info');
       return false;
@@ -1157,6 +1216,7 @@ export class Editor {
         items,
         item: s.item,
         zip,
+        ...(audioFormat ? { audioFormat } : {}),
         signal: ac.signal,
         onProgress: (p) => this.patch({ exportJob: { label: p.label, fraction: p.fraction } }),
       });

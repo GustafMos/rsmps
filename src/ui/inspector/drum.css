@@ -1,0 +1,14 @@
+.rs-drum { display: flex; flex-direction: column; gap: var(--s-2); }
+.rs-drum__grid { display: grid; gap: 2px; align-items: center; user-select: none; }
+.rs-drum__label { font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-drum__cell { height: 20px; min-width: 0; padding: 0; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: 0; touch-action: none; }
+.rs-drum__cell.is-beat { background: var(--bg-3); }
+.rs-drum__cell.is-on { background: var(--accent); border-color: var(--accent-hi); }
+.rs-drum__cell.is-now { outline: 2px solid var(--yellow); outline-offset: -2px; z-index: 1; }
+.rs-drum__tools { display: flex; gap: 1px; padding-left: 4px; }
+.rs-drum__tools button { width: 18px; height: 20px; padding: 0; display: grid; place-items: center; background: transparent; border: 0; color: var(--text-faint); font-size: var(--fs-xs); }
+.rs-drum__tools button:hover { color: var(--text); background: var(--bg-3); }
+.rs-drum__bar { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.rs-seg2 { display: flex; border: 1px solid var(--line-strong); }
+.rs-seg2 button { height: 24px; padding: 0 var(--s-2); background: var(--bg-3); border: 0; color: var(--text-dim); font-size: var(--fs-xs); }
+.rs-seg2 button.is-on { background: var(--accent); color: #fff; }

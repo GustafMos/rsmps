@@ -1,0 +1,10 @@
+.rs-range { display: flex; flex-direction: column; gap: var(--s-2); width: 100%; }
+.rs-range__bar { position: relative; height: 22px; background: var(--bg-0); border: 1px solid var(--line-strong); touch-action: none; }
+.rs-range--compact .rs-range__bar { height: 18px; }
+.rs-range__span { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 55%, transparent); cursor: grab; }
+.rs-range__handle { position: absolute; top: -2px; bottom: -2px; width: 8px; margin-left: -4px; background: #fff; border: 1px solid #000; cursor: ew-resize; z-index: 2; }
+.rs-range__head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--yellow); pointer-events: none; z-index: 3; }
+.rs-range__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.rs-range__tc { font-size: var(--fs-xs); color: var(--text-dim); }
+.rs-range__btns { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+.rs-range__btns .rs-btn { height: 24px; padding: 0 var(--s-2); font-size: var(--fs-xs); }

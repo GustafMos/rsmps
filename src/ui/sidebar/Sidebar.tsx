@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { KIND_SHORT, describeOutput, hasKind, kindOptions } from '../lib/outputInfo';
 import { enabledOutputs, outputNodes } from '../../engine/graph';
-import { MenuPopup } from '../components/Menu';
+import { MenuPopup, type MenuItem } from '../components/Menu';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { CATEGORIES } from '../../engine/types';
 import { Icon } from '../components/Icon';
@@ -146,6 +146,11 @@ function OutputsSection() {
   const enabledCount = useEd((s) => enabledOutputs(s.graph, io.registry).length);
   const project = useEd((s) => s.graph.project);
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const isAudioOut = (id: string) => {
+    const n = ed.state.graph.nodes.find((x) => x.id === id);
+    const d = n && io.registry.get(n.type);
+    return !!d && Object.values(d.inputs as Record<string, { type: string }>)[0]?.type === 'audio';
+  };
   const errors = usePlayer((s) => s.errors);
   return (
     <section className="rs-side__sec rs-side__outputs">
@@ -177,7 +182,7 @@ function OutputsSection() {
                 }}
                 title="Select and view this output"
               >
-                <span className="rs-side__chip" style={{ background: CATEGORIES[def.category]?.color }} />
+                {isAudioOut(id) ? <Icon name="volume" size={14} /> : <span className="rs-side__chip" style={{ background: CATEGORIES[def.category]?.color }} />}
                 <span className="rs-side__name">{n.label || def.title}{fs && <span className="rs-side__sub rs-num"> {fs.width}×{fs.height}</span>}</span>
                 {active === id && <span className="rs-side__active" title="Active output: previews use its frame">active</span>}
                 {errors.has(id) && <Icon name="warn" size={13} />}
@@ -191,7 +196,7 @@ function OutputsSection() {
           })
         )}
       </div>
-      {menu && <MenuPopup x={menu.x} y={menu.y} items={[{ label: 'Export this for the whole batch', onClick: () => void ed.runExport([menu.id], 'all') }, { label: 'Export this (current item)', onClick: () => void ed.runExport([menu.id], 'current') }]} onClose={() => setMenu(null)} />}
+      {menu && <MenuPopup x={menu.x} y={menu.y} items={[{ label: 'Export this for the whole batch', onClick: () => void ed.runExport([menu.id], 'all') }, { label: 'Export this (current item)', onClick: () => void ed.runExport([menu.id], 'current') }, ...(isAudioOut(menu.id) ? [{ sep: true } as MenuItem, { label: 'Export sound only (WAV)', onClick: () => void ed.runExport([menu.id], 'current', undefined, 'wav') }, { label: 'Export sound only (M4A)', onClick: () => void ed.runExport([menu.id], 'current', undefined, 'm4a') }] : [])]} onClose={() => setMenu(null)} />}
     </section>
   );
 }
