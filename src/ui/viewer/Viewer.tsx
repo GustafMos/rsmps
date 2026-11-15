@@ -4,6 +4,7 @@ import { watchStore } from '../watchdog';
 import { batchCount } from '../../engine/graph';
 import { CATEGORIES } from '../../engine/types';
 import { Icon } from '../components/Icon';
+import { missingCapabilities } from '../lib/requirements';
 import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { PaintOverlay } from './PaintOverlay';
@@ -188,8 +189,15 @@ export function Viewer() {
       try { localStorage.setItem('rsmps.ui.zoomHint', String(hintCount + 1)); } catch { /* ignore */ }
     }
   }, [showHint, hintCount]);
-  const err = viewedId ? errors.get(viewedId) : undefined;
-  const otherErr = !err && errors.size ? [...errors][0] : undefined;
+  const reqFor = (id: string) => {
+    const n = ed.state.graph.nodes.find((x) => x.id === id);
+    return missingCapabilities(io, n && io.registry.get(n.type))[0];
+  };
+  const rawErr = viewedId ? errors.get(viewedId) : undefined;
+  const rawOther = !rawErr && errors.size ? [...errors][0] : undefined;
+  const reqErr = (rawErr && viewedId ? reqFor(viewedId) : undefined) ?? (rawOther ? reqFor(rawOther[0]) : undefined);
+  const err = rawErr && reqErr && viewedId && reqFor(viewedId) ? reqErr.explanation : rawErr;
+  const otherErr = rawOther && reqErr && !rawErr ? ([rawOther[0], reqErr.explanation] as [string, string]) : rawOther;
   const nodeTitle = viewedNode ? viewedNode.label || viewedDef?.title || viewedNode.type : null;
   const catColor = viewedDef ? CATEGORIES[viewedDef.category]?.color : undefined;
   const paint = useEd((s) => (s.selection.length === 1 ? s.graph.nodes.find((n) => n.id === s.selection[0] && n.type === 'paint-mask') : undefined));
@@ -227,8 +235,8 @@ export function Viewer() {
         <div className="rs-viewer__error" role="alert" data-nodrag>
           <Icon name="warn" size={16} />
           <div>
-            <strong>{err ? 'This node failed' : 'A node in the graph failed'}</strong>
-            <p>{err ?? `${nameOf(ed, otherErr![0])}: ${otherErr![1]}`}</p>
+            <strong>{reqErr ? reqErr.label : err ? 'This node failed' : 'A node in the graph failed'}</strong>
+            <p>{err ?? (reqErr ? `${nameOf(ed, otherErr![0])}: ${otherErr![1]}` : `${nameOf(ed, otherErr![0])}: ${otherErr![1]}`)}</p>
           </div>
         </div>
       )}

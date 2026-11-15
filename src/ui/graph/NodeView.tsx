@@ -12,6 +12,7 @@ import { DeviceField } from '../components/DeviceField';
 import { CurveField } from '../components/CurveField';
 import { RangeField } from '../components/RangeField';
 import { LayerList } from './LayerList';
+import { missingCapabilities } from '../lib/requirements';
 import { PhoneChip, hasSessionParam } from '../inspector/PhonePanel';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
@@ -36,7 +37,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   const wiredSig = useEd((s) => inboundSignature(s.graph.edges, node.id));
   const portSig = useEd((s) => (def ? '|' : portSignature(s.graph.edges, node.id)));
   const debug = useEd((s) => s.prefs.debug);
-  const error = usePlayer((s) => s.errors.get(node.id));
+  const rawError = usePlayer((s) => s.errors.get(node.id));
+  const { io } = useApp();
+  const missingReq = useMemo(() => missingCapabilities(io, def), [io, def]);
+  // one clear message instead of the raw engine error when the app cannot run this node here
+  const error = missingReq.length ? (rawError ? missingReq[0].explanation : undefined) : rawError;
   const wired = useMemo(() => new Set(wiredSig ? wiredSig.split(',') : []), [wiredSig]);
   const palPort = def ? paletteInputPort(def) : null;
   const hint = !!palPort && !wired.has(palPort);
@@ -122,7 +127,12 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
             {title}
           </span>
         )}
-        {error && (
+        {missingReq.length > 0 && (
+          <span className="rs-node__req" data-nodrag title={missingReq[0].explanation}>
+            <Icon name="warn" size={16} />{missingReq[0].label}
+          </span>
+        )}
+        {error && !missingReq.length && (
           <span className="rs-node__err" data-nodrag title={error} aria-label={`Error: ${error}`}>
             <Icon name="warn" size={16} />
           </span>

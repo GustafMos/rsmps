@@ -58,3 +58,5 @@
 
 .rs-add__drive { flex: none; padding: 1px 6px; border: 1px solid currentColor; font-size: var(--fs-xs); border-radius: var(--r); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
 .rs-add__drive:hover { background: #ffffff30; opacity: 1; }
+.rs-add__item-title.is-unavailable { color: var(--text-dim); }
+.rs-add__req { flex: none; padding: 0 var(--s-1); font-size: var(--fs-xs); color: var(--yellow); border: 1px solid #f5c54266; border-radius: var(--r); white-space: nowrap; }

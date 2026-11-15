@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORIES, type AnyNodeDef, type Category } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NODE_W } from '../lib/layout';
+import { missingCapabilities } from '../lib/requirements';
 import { inputsAccepting, outputsFeeding } from '../lib/sockets';
 import { getRecent } from '../store/editor';
 import { NODE_PREFIX, bindingsOf, eventToBinding, owners, setBindings, useKeymapVersion } from '../keymap';
@@ -43,7 +44,7 @@ export function AddMenu() {
 }
 
 function AddMenuInner() {
-  const { ed } = useApp();
+  const { ed, io } = useApp();
   const req = useEd((s) => s.addMenu)!;
   const defs = useDefs();
   const [query, setQuery] = useState('');
@@ -250,10 +251,11 @@ function AddMenuInner() {
             >
               <span className="rs-add__chip" style={{ background: CATEGORIES[d.category]?.color }} />
               <span className="rs-add__item-main">
-                <span className="rs-add__item-title">{d.title}</span>
+                <span className={`rs-add__item-title${missingCapabilities(io, d).length ? ' is-unavailable' : ''}`}>{d.title}</span>
                 {searching && <span className="rs-add__item-desc">{d.description}</span>}
               </span>
               {bindingsOf(nodeCommandId(d.id))[0] && <span className="rs-kbd rs-add__key">{bindingsOf(nodeCommandId(d.id))[0]}</span>}
+              {missingCapabilities(io, d)[0] && <span className="rs-add__req" title={missingCapabilities(io, d)[0].explanation}>{missingCapabilities(io, d)[0].label}</span>}
               {searching && <span className="rs-add__item-cat">{CATEGORIES[d.category]?.title}</span>}
               {canDrive(d) && <span className="rs-add__drive" role="button" title={`Drive a parameter of ${selTitle}… (Shift+Enter)`} onClick={(ev) => { ev.stopPropagation(); drive(d); }}>Drive {selTitle}…</span>}
               <span className="rs-add__assign" role="button" title="Assign a hotkey that adds this node (Ctrl+K)" onClick={(ev) => { ev.stopPropagation(); setAssign({ type: d.id }); input.current?.focus(); }}><Icon name="keyboard" size={14} /></span>

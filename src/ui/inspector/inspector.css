@@ -82,3 +82,6 @@
 .rs-phonechip.is-wait { color: var(--yellow); }
 .rs-phonechip.is-bad { color: var(--danger); }
 .rs-insp__err { margin: 0; padding: var(--s-2); background: var(--danger-bg); border: 1px solid var(--danger); color: var(--text); font-size: var(--fs-sm); line-height: 1.4; user-select: text; }
+.rs-insp__req { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-2); background: #f5c5421a; border: 1px solid #f5c54266; border-radius: var(--r); }
+.rs-insp__req p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--text); }
+.rs-insp__reqhead { display: flex; align-items: center; gap: var(--s-2); color: var(--yellow); }

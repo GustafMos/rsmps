@@ -24,7 +24,8 @@ import { paletteInputPort } from '../lib/sockets';
 import { visibleParams } from '../lib/layout';
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
 import { AssetsEditor, JsonEditor, PaletteEditor } from './editors';
-import { PhonePanel, hasSessionParam } from './PhonePanel';
+import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
+import { missingCapabilities } from '../lib/requirements';
 import { ProjectSettingsPanel } from './ProjectSettings';
 import './inspector.css';
 
@@ -92,6 +93,8 @@ function NodePanel({ id }: { id: string }) {
   const viewed = useEd((s) => s.viewedNodeId === id);
   const nodes = useEd((s) => s.graph.nodes);
   const error = usePlayer((s) => s.errors.get(id));
+  const { io } = useApp();
+  const missing = missingCapabilities(io, def);
   if (!node) return null;
   if (!def) {
     return (
@@ -137,7 +140,14 @@ function NodePanel({ id }: { id: string }) {
             <Icon name="trash" />
           </button>
         </div>
-        {error && <p className="rs-insp__err" role="alert">{error}</p>}
+        {error && !missing.length && <p className="rs-insp__err" role="alert">{error}</p>}
+        {missing.map((m) => (
+          <div key={m.capability} className="rs-insp__req" role="note">
+            <div className="rs-insp__reqhead"><Icon name="warn" size={16} /><strong>{m.label}</strong></div>
+            <p>{m.explanation}</p>
+            <CopyCode text={m.command} />
+          </div>
+        ))}
         {def.cpu && <p className="rs-insp__warn">Heavy CPU node: may be slow on large images.</p>}
       </div>
       {isTimelineDef(def) && (
@@ -152,7 +162,7 @@ function NodePanel({ id }: { id: string }) {
           {(!wired.has('recordAudio') || !wired.has('recordMidi')) && <p className="rs-insp__hint">Nothing is wired into the record inputs yet: these buttons add the source node and connect it. Then arm a track (the ● button) and press Record.</p>}
         </div>
       )}
-      {hasSessionParam(def) && <PhonePanel node={node} />}
+      {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
       {def.playable && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Keyboard</div>

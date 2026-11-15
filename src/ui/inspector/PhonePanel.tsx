@@ -59,7 +59,7 @@ export function PhoneChip({ node }: { node: NodeInstance }) {
   );
 }
 
-function CopyCode({ text }: { text: string }) {
+export function CopyCode({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   return (
     <div className="rs-phone__code">
