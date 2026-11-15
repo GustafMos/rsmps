@@ -1,5 +1,7 @@
 import { Icon } from '../components/Icon';
 import { MenuButton, type MenuItem } from '../components/Menu';
+import { useEffect, useState } from 'react';
+import pkg from '../../../package.json';
 import { useApp, useEd } from '../store/context';
 import './topbar.css';
 import '../scan/scan.css';
@@ -12,6 +14,21 @@ export function TopBar() {
   const mode = useEd((s) => s.mode);
   const leftOpen = useEd((s) => s.prefs.leftOpen);
   const rightOpen = useEd((s) => s.prefs.rightOpen);
+
+  // Non-personal technical context only: no project name, file names or graph contents.
+  const [gpu, setGpu] = useState('unknown');
+  useEffect(() => {
+    const nav = navigator as Navigator & { gpu?: { requestAdapter(): Promise<{ info?: { vendor?: string; architecture?: string; description?: string } } | null> } };
+    nav.gpu
+      ?.requestAdapter()
+      .then((a) => {
+        const i = a?.info;
+        if (i) setGpu([i.vendor, i.architecture, i.description].filter(Boolean).join(' ') || 'WebGPU (no description)');
+      })
+      .catch(() => undefined);
+  }, []);
+  const bugBody = ['## What happened', '', '', '## Steps', '1. ', '', '## Expected', '', '', '---', `App: RSMPS ${pkg.version}`, `Browser: ${navigator.userAgent}`, `GPU: ${gpu}`].join('\n');
+  const bugUrl = `https://github.com/GustafMos/rsmps/issues/new?body=${encodeURIComponent(bugBody)}`;
 
   const open = async () => {
     try {
@@ -42,6 +59,14 @@ export function TopBar() {
     { label: 'Palette Studio…', onClick: () => { ed.studioTarget = null; ed.openDialog('palette'); } },
     { label: 'Plugins…', onClick: () => ed.openDialog('plugins') },
     { sep: true },
+    {
+      label: 'Copy graph for bug report',
+      onClick: () =>
+        navigator.clipboard.writeText(JSON.stringify(ed.state.graph, null, 1)).then(
+          () => ed.toast('Graph copied. Paste it into the bug report yourself if you are happy to share it.', 'ok'),
+          () => ed.toast('Clipboard is not available here.', 'error'),
+        ),
+    },
     { label: 'Keyboard shortcuts', onClick: () => ed.openDialog('shortcuts'), shortcut: '?' },
     { label: 'Customise shortcuts…', onClick: () => ed.openDialog('keymap') },
   ];
@@ -49,7 +74,7 @@ export function TopBar() {
   return (
     <header className="rs-top">
       <div className="rs-top__brand">
-        <img src="/ripscorpy-logo.png" alt="" width={28} height={28} />
+        <img src="/ripscorpy-logo.png" alt="" width={34} height={34} />
         <span className="rs-top__word">RSMPS</span>
       </div>
       <div className="rs-top__modes" role="tablist" aria-label="Mode">
@@ -76,6 +101,8 @@ export function TopBar() {
       <button className="rs-btn rs-btn--ghost" onClick={() => { ed.studioTarget = null; ed.openDialog('palette'); }} title="Palette Studio: build palettes from colour harmonies or images">Palettes</button>
       <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.openDialog('plugins')} title="Plugins"><Icon name="plug" /></button>
       <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.openDialog('shortcuts')} title="Keyboard shortcuts (?)"><Icon name="help" /></button>
+      <a className="rs-btn rs-btn--ghost rs-top__link" href="https://ko-fi.com/ripscorpy" target="_blank" rel="noopener noreferrer" title="Buy me a coffee: it feeds two cats"><Icon name="coffee" /><span className="rs-top__label">Support</span></a>
+      <a className="rs-btn rs-btn--ghost rs-top__link" href={bugUrl} target="_blank" rel="noopener noreferrer" title="Report a bug on GitHub (only app version, browser and GPU are pre-filled)"><Icon name="bug" /><span className="rs-top__label">Report a bug</span></a>
       <button className="rs-btn rs-btn--primary" onClick={() => ed.openDialog('export')} title="Export (Ctrl+E)"><Icon name="export" /> Export</button>
     </header>
   );

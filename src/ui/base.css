@@ -67,3 +67,4 @@ select.rs-input { padding-right: var(--s-1); }
   color: var(--text-faint); text-align: center; padding: var(--s-6); font-size: var(--fs-sm);
   background: var(--dither);
 }
+a.rs-btn { text-decoration: none; }

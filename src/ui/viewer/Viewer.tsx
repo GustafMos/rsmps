@@ -7,6 +7,7 @@ import { Icon } from '../components/Icon';
 import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { PaintOverlay } from './PaintOverlay';
+import { FrameControl } from './FrameControl';
 import './viewer.css';
 
 type Bg = 'checker' | 'dark' | 'light';
@@ -230,6 +231,7 @@ export function Viewer() {
         </div>
       )}
 
+      <FrameControl />
       <div className="rs-viewer__tools rs-viewer__chip" data-nodrag>
         <button className={`rs-btn rs-btn--icon rs-btn--ghost${fit ? ' is-on' : ''}`} onClick={() => setFitMode(true)} title="Fit to window (F)"><Icon name="fit" /></button>
         <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={oneToOne} title="100% (1)"><Icon name="one" /></button>

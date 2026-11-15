@@ -1,18 +1,18 @@
+import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { CheckField, SelectField, TextField } from '../components/fields';
 import { useApp, useEd } from '../store/context';
 import './inspector.css';
 
 const SIZES = [
-  { value: 'custom', label: 'Custom' },
   { value: '1920x1080', label: '1920 × 1080 (HD)' },
-  { value: '1280x720', label: '1280 × 720' },
-  { value: '3840x2160', label: '3840 × 2160 (4K)' },
-  { value: '1080x1080', label: '1080 × 1080 (square)' },
   { value: '1080x1920', label: '1080 × 1920 (vertical)' },
-  { value: '512x512', label: '512 × 512' },
-  { value: '256x256', label: '256 × 256' },
-  { value: '128x128', label: '128 × 128' },
+  { value: '1080x1080', label: '1080 × 1080 (square)' },
+  { value: '3840x2160', label: '3840 × 2160 (4K)' },
+  { value: '1280x720', label: '1280 × 720' },
+  { value: '640x360', label: '640 × 360' },
+  { value: '320x180', label: '320 × 180' },
+  { value: 'custom', label: 'Custom' },
 ];
 
 export function ProjectSettingsPanel() {
@@ -29,12 +29,13 @@ export function ProjectSettingsPanel() {
       <div className="rs-insp__sec">
         <div className="rs-caps">Canvas</div>
         <div className="rs-insp__row"><label className="rs-insp__label">Size preset</label>
-          <div className="rs-insp__ctl"><SelectField large value={SIZES.some((s) => s.value === sizeKey) ? sizeKey : 'custom'} options={SIZES} onChange={(v) => { const m = /^(\d+)x(\d+)$/.exec(v); if (m) ed.setProject({ width: +m[1], height: +m[2] }); }} /></div></div>
+          <div className="rs-insp__ctl rs-insp__nowrap"><SelectField large value={SIZES.some((s) => s.value === sizeKey) ? sizeKey : 'custom'} options={SIZES} onChange={(v) => { const m = /^(\d+)x(\d+)$/.exec(v); if (m) ed.setProject({ width: +m[1], height: +m[2] }); }} />
+            <button className="rs-btn" onClick={() => ed.setProject({ width: p.height, height: p.width })} title="Swap width and height (landscape ⇄ portrait)"><Icon name="swap" size={14} /> Swap</button></div></div>
         <div className="rs-insp__row"><label className="rs-insp__label">Width</label>
           <div className="rs-insp__ctl"><NumberField large value={p.width} min={1} max={16384} integer unit="px" defaultValue={1920} onChange={(v) => ed.setProject({ width: v })} /></div></div>
         <div className="rs-insp__row"><label className="rs-insp__label">Height</label>
           <div className="rs-insp__ctl"><NumberField large value={p.height} min={1} max={16384} integer unit="px" defaultValue={1080} onChange={(v) => ed.setProject({ height: v })} /></div></div>
-        <p className="rs-insp__hint">Used by generators and as the default export size.</p>
+        <p className="rs-insp__hint">The project canvas is the default frame for every output; each Output node can override it in its own Frame settings.</p>
       </div>
       <div className="rs-insp__sec">
         <div className="rs-caps">Time</div>

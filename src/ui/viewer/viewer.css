@@ -45,3 +45,7 @@
 .rs-paint__bar { left: 50%; bottom: var(--s-3); transform: translateX(-50%); cursor: default; height: 40px; }
 
 .rs-viewer__rendering { left: 50%; top: 44px; transform: translateX(-50%); color: var(--yellow); border-color: var(--yellow); background: #2a2208; }
+
+.rs-viewer__frame { right: var(--s-2); top: 44px; padding: 0 var(--s-1) 0 var(--s-2); gap: var(--s-2); }
+.rs-viewer__fname { color: var(--text-faint); font-size: var(--fs-xs); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-viewer__preset { height: 24px; width: 120px; }

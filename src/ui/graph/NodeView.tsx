@@ -9,6 +9,7 @@ import { paletteInputPort } from '../lib/sockets';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
 import { LayerList } from './LayerList';
+import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
 import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row } from '../lib/layout';
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
@@ -63,6 +64,7 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
     }
   }, [def, node.params]);
 
+  const frameTxt = useEd((s) => (hasFrameParams(def) ? (() => { const z = frameSize(s.graph.project, node); return `${z.width}×${z.height}`; })() : ''));
   const title = node.label || def?.title || node.type;
   const missing = !def;
   const hasAudioOut = !!def && Object.values(def.outputs as OutputSchema).some((o) => o.type === 'audio');
@@ -144,7 +146,7 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
 
       {!node.collapsed && summary && layout.summaryY !== null && (
         <div className="rs-node__summary" style={{ top: layout.summaryY, height: SUMMARY_H }} title={summary}>
-          {summary}
+          {frameTxt ? `${frameTxt} · ${summary}` : summary}
         </div>
       )}
       {missing && !node.collapsed && (

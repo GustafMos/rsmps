@@ -5,7 +5,7 @@ import { App } from './App';
 import { bootIo } from './boot';
 import { GraphController } from './graph/controller';
 import { AppProvider, type AppCtx } from './store/context';
-import { Editor } from './store/editor';
+import { Editor, resolveActiveOutput } from './store/editor';
 import { createPlayerStore } from './store/playerStore';
 import { PENDING_KEY, type PendingEdit } from './watchdog';
 
@@ -47,14 +47,17 @@ export function Root() {
         let lastGraph: GraphDoc | null = null;
         let lastView: string | null | undefined;
         let lastItem = -1;
+        let lastActive: string | null | undefined;
         const sync = () => {
           const s = ed.state;
-          if (s.graph === lastGraph && s.viewedNodeId === lastView && s.item === lastItem) return;
+          const active = resolveActiveOutput(s, io.registry);
+          if (s.graph === lastGraph && s.viewedNodeId === lastView && s.item === lastItem && active === lastActive) return;
+          lastActive = active;
           const graphChanged = s.graph !== lastGraph;
           lastGraph = s.graph;
           lastView = s.viewedNodeId;
           lastItem = s.item;
-          io.player.setView({ graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry) });
+          io.player.setView({ graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active });
           if (graphChanged) io.projects.autosave(s.graph);
         };
         const unsub = ed.store.subscribe(sync);
@@ -87,7 +90,7 @@ export function Root() {
   if (boot.status === 'loading') {
     return (
       <div className="rs-boot">
-        <img src="/ripscorpy-logo.png" alt="" width={64} height={64} />
+        <img src="/ripscorpy-logo.png" alt="" width={96} height={96} />
         <div className="rs-boot__word">RSMPS</div>
         <div className="rs-boot__msg">Starting the GPU engine…</div>
       </div>
@@ -96,7 +99,7 @@ export function Root() {
   if (boot.status === 'error') {
     return (
       <div className="rs-boot rs-boot--error" role="alert">
-        <img src="/ripscorpy-logo.png" alt="" width={64} height={64} />
+        <img src="/ripscorpy-logo.png" alt="" width={96} height={96} />
         <div className="rs-boot__word">Cannot start</div>
         <p className="rs-boot__big">{/webgpu|adapter|gpu/i.test(boot.message) ? 'RSMPS needs WebGPU, and this browser could not provide it.' : 'RSMPS could not start.'}</p>
         <p className="rs-boot__msg">{boot.message}</p>

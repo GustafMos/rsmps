@@ -12,3 +12,5 @@
 .rs-divider { height: 6px; flex: none; background: var(--bg-2); border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); cursor: row-resize; position: relative; }
 .rs-divider::after { content: ''; position: absolute; left: 50%; top: 1px; width: 32px; height: 2px; margin-left: -16px; background: var(--bg-5); }
 .rs-divider:hover { background: var(--accent-lo); }
+
+.rs-safe { flex: none; padding: var(--s-2) var(--s-4); background: #3a2d05; border-bottom: 1px solid var(--yellow); color: var(--yellow); font-size: var(--fs-sm); text-align: center; font-weight: 600; }

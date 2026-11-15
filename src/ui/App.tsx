@@ -17,6 +17,8 @@ import { usePlayKeys } from './playKeys';
 import { useRenderWatchdog } from './watchdog';
 import './app.css';
 
+const SAFE = /[?&]safe/.test(location.search);
+
 export function App() {
   const { ed, io } = useApp();
   useShortcuts(useApp());
@@ -73,6 +75,9 @@ export function App() {
           .catch((err) => ed.toast(`Import failed: ${String(err)}`, 'error'));
       }}
     >
+      {SAFE && (
+        <div className="rs-safe" role="alert">Safe mode: rendering is off. Remove ?safe from the address to render.</div>
+      )}
       <TopBar />
       {mode === 'scan' ? <ScanView /> : (
       <div className="rs-main">

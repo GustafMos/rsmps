@@ -76,6 +76,8 @@ export interface EditorState {
   toasts: readonly Toast[];
   /** Bumped when a different document is loaded (views re-frame). */
   docRev: number;
+  /** Output node whose frame non-output previews use (the last selected output). */
+  activeOutput: string | null;
   /** Top-level tab: the node editor or the print-scan-back tool. */
   mode: 'edit' | 'scan';
 }
@@ -107,6 +109,13 @@ export function getRecent(): string[] {
   }
 }
 
+/** The output whose frame previews use: the last selected output, else the first output node. */
+export function resolveActiveOutput(s: EditorState, registry: Registry): string | null {
+  const isOut = (id: string | null) => !!id && registry.get(s.graph.nodes.find((n) => n.id === id)?.type ?? '')?.category === 'output';
+  if (isOut(s.activeOutput)) return s.activeOutput;
+  return s.graph.nodes.find((n) => registry.get(n.type)?.category === 'output')?.id ?? null;
+}
+
 export class Editor {
   readonly store: Store<EditorState>;
   private past: GraphDoc[] = [];
@@ -136,6 +145,7 @@ export class Editor {
       toasts: [],
       docRev: 0,
       mode: 'edit',
+      activeOutput: null,
     });
   }
 
@@ -146,6 +156,11 @@ export class Editor {
     return this.store.get();
   }
   private patch(p: Partial<EditorState>) {
+    if (p.selection) {
+      const g = p.graph ?? this.state.graph;
+      const outs = p.selection.filter((id) => this.registry.get(g.nodes.find((n) => n.id === id)?.type ?? '')?.category === 'output');
+      if (outs.length) p = { ...p, activeOutput: outs[outs.length - 1] };
+    }
     this.store.set((s) => ({ ...s, ...p }));
   }
 
@@ -294,6 +309,9 @@ export class Editor {
   }
   selectFrame(id: string | null): void {
     this.patch({ selectedFrame: id, selection: [] });
+  }
+  setActiveOutput(id: string): void {
+    this.patch({ activeOutput: id });
   }
   setViewed(id: string | null): void {
     this.patch({ viewedNodeId: id });

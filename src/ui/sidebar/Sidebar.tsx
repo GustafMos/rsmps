@@ -6,6 +6,7 @@ import { Thumb } from '../components/Thumb';
 import { ASSET_MIME } from '../graph/gestures';
 import { useApp, useAssets, useDefs, useEd, usePlayer } from '../store/context';
 import { shallowArrayEqual } from '../store/createStore';
+import { resolveActiveOutput } from '../store/editor';
 import './sidebar.css';
 
 export function Sidebar() {
@@ -138,6 +139,7 @@ function OutputsSection() {
   const nodes = useEd((s) => s.graph.nodes);
   const sel = useEd((s) => s.selection);
   const viewed = useEd((s) => s.viewedNodeId);
+  const active = useEd((s) => resolveActiveOutput(s, io.registry));
   const errors = usePlayer((s) => s.errors);
   return (
     <section className="rs-side__sec rs-side__outputs">
@@ -161,12 +163,14 @@ function OutputsSection() {
                 className={`rs-side__out${sel.includes(id) ? ' is-sel' : ''}`}
                 onClick={() => {
                   ed.select([id]);
+                  ed.setActiveOutput(id);
                   ed.setViewed(id);
                 }}
                 title="Select and view this output"
               >
                 <span className="rs-side__chip" style={{ background: CATEGORIES[def.category]?.color }} />
                 <span className="rs-side__name">{n.label || def.title}</span>
+                {active === id && <span className="rs-side__active" title="Active output: previews use its frame">active</span>}
                 {errors.has(id) && <Icon name="warn" size={13} />}
                 {viewed === id && <Icon name="eye" size={13} />}
               </button>

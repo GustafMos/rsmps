@@ -22,3 +22,5 @@
 .rs-side__out svg:last-child { color: var(--yellow); }
 .rs-side__chip { width: 8px; height: 14px; border: 1px solid #00000080; flex: none; }
 .rs-side__out .rs-side__name { flex: 1; }
+
+.rs-side__active { font-size: var(--fs-xs); color: var(--yellow); border: 1px solid var(--yellow); padding: 0 4px; }
