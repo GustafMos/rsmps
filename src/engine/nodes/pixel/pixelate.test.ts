@@ -97,3 +97,34 @@ describe('pixelate', () => {
     expect(px.at(7, 3)[0]).toBeGreaterThan(190);
   });
 });
+
+describe('pixelate silhouette', () => {
+  it('crisp (default): hard alpha, no dark fringe; soft keeps partial alpha', async () => {
+    const t = await harness();
+    // Anti-aliased orange disc on transparent background (premultiplied-correct edge).
+    const img = t.fromFn(256, 256, (x, y) => {
+      const d = Math.hypot(x - 128, y - 128);
+      const cov = Math.min(1, Math.max(0, 90 - d));
+      return [230, 120, 20, Math.round(cov * 255)];
+    });
+    const crisp = await t.pixels((await t.run('pixelate', { mode: 'fixed-height', value: 16 }, { image: img })).image as never);
+    let partial = 0;
+    let dark = 0;
+    let opaque = 0;
+    for (let i = 0; i < 256; i++) {
+      const a = crisp.data[i * 4 + 3];
+      if (a !== 0 && a !== 255) partial++;
+      if (a === 255) {
+        opaque++;
+        if (crisp.data[i * 4] < 215) dark++;
+      }
+    }
+    expect(partial).toBe(0);
+    expect(opaque).toBeGreaterThan(60);
+    expect(dark).toBe(0);
+    const soft = await t.pixels((await t.run('pixelate', { mode: 'fixed-height', value: 16, edges: 'soft' }, { image: img })).image as never);
+    let mid = 0;
+    for (let i = 0; i < 256; i++) if (soft.data[i * 4 + 3] > 10 && soft.data[i * 4 + 3] < 245) mid++;
+    expect(mid).toBeGreaterThan(5);
+  });
+});

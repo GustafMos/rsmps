@@ -101,12 +101,12 @@ export default defineNode({
     },
     preBlur: {
       type: 'number',
-      default: 0.35,
+      default: 0,
       min: 0,
       max: 2,
       step: 0.01,
       label: 'Pre-blur',
-      hint: 'Blur before sampling, in art pixels. Calms noise and texture.',
+      hint: 'Blur before sampling, in art pixels. 0 = crisp. Raise for a soft, out-of-focus look.',
       group: 'Grid',
     },
     edgeAware: { type: 'bool', default: true, label: 'Edge-aware', group: 'Edges' },
@@ -146,7 +146,7 @@ export default defineNode({
     },
     colorBlend: {
       type: 'number',
-      default: 0.7,
+      default: 0.85,
       min: 0,
       max: 1,
       step: 0.01,
@@ -155,14 +155,24 @@ export default defineNode({
       group: 'Colour',
     },
     sharpen: { type: 'number', default: 0.15, min: 0, max: 1, step: 0.01, label: 'Sharpen', group: 'Colour' },
-    alphaCutoff: {
+    edges: {
+      type: 'enum',
+      default: 'crisp',
+      label: 'Silhouette',
+      group: 'Colour',
+      options: [
+        { value: 'crisp', label: 'Crisp (hard pixel edge)' },
+        { value: 'soft', label: 'Soft (partial transparency, out of focus)' },
+      ],
+    },
+    alphaThreshold: {
       type: 'number',
-      default: 0.02,
+      default: 0.5,
       min: 0,
       max: 1,
       step: 0.01,
-      label: 'Alpha cut-off',
-      hint: 'Pixels with less coverage than this become fully transparent.',
+      label: 'Alpha threshold',
+      hint: 'Crisp: a cell more covered than this is fully opaque (coloured from its covered pixels only), otherwise fully transparent. Soft: coverage below this is dropped.',
       group: 'Colour',
     },
   },
@@ -268,7 +278,8 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
         ny: taps(cellH * 0.98),
         grid: cell > 8 ? 5 : 3,
         blend: useDominant ? p.colorBlend : 0,
-        cutoff: p.alphaCutoff,
+        crisp: p.edges === 'crisp',
+        cutoff: p.edges === 'crisp' ? p.alphaThreshold : Math.min(p.alphaThreshold, 0.02),
       },
       wgsl: /* wgsl */ `
 fn tapAt(p: vec2f) -> vec4f { return textureSampleLevel(src, smp, p / u.srcSize, 0.0); }
@@ -297,7 +308,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     for (var j = 0; j < m; j++) {
       for (var i = 0; i < m; i++) {
         let s = tapAt(centre + ((vec2f(f32(i), f32(j)) + 0.5) / f32(m) - 0.5) * span);
-        if (s.a > 0.06) { cols[count] = s.rgb / s.a; count++; }
+        if (s.a > select(0.06, 0.5, u.crisp > 0.5)) { cols[count] = s.rgb / s.a; count++; }
       }
     }
     var bestN = 0;
@@ -321,7 +332,8 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     }
   }
   var a = acc.a;
-  if (a < u.cutoff) { a = 0.0; }
+  if (u.crisp > 0.5) { a = select(0.0, 1.0, a >= max(u.cutoff, 0.0001)); }
+  else if (a < u.cutoff) { a = 0.0; }
   return premul(vec4f(clamp(colour, vec3f(0.0), vec3f(1.0)), a));
 }`,
     });
