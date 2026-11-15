@@ -11,7 +11,7 @@ export default defineNode({
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
   params: {
-    block: { type: 'number', default: 8, min: 1, max: 256, step: 1, unit: 'px', label: 'Block size' },
+    block: { type: 'number', default: 8, min: 1, max: 256, step: 1, unit: 'px', label: 'Block size', hint: 'Scales with the media; rounded to whole texels, minimum 1.' },
     mode: {
       type: 'enum',
       default: 'average',
@@ -25,7 +25,8 @@ export default defineNode({
   summary: (p) => `${p.block} px`,
   render(ctx) {
     const src = ctx.in.image;
-    const block = Math.max(1, ctx.params.block);
+    // A block is a whole number of texels, never smaller than one (coarse render grids give sub-texel lengths).
+    const block = Math.max(1, Math.round(ctx.params.block));
     const image = ctx.gpu.pass({
       label: 'mosaic',
       size: src,

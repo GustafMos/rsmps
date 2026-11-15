@@ -46,3 +46,14 @@ describe('mosaic', () => {
     expect(px.at(12, 2)).toEqual([200, 0, 0, 255]);
   });
 });
+
+describe('mosaic on coarse grids', () => {
+  it('block is at least one whole texel at unit 0.25', async () => {
+    const t = await harness();
+    const img = t.fromFn(8, 8, (x) => (x % 2 ? [255, 255, 255, 255] : [0, 0, 0, 255]), 0.25);
+    const px = await t.pixels((await t.run('mosaic', { block: 2, mode: 'center' }, { image: img })).image as never);
+    // 2 * 0.25 = 0.5 texel -> clamped to 1: image unchanged, no smearing or NaN.
+    expect(px.at(0, 0)[0]).toBe(0);
+    expect(px.at(1, 0)[0]).toBe(255);
+  });
+});

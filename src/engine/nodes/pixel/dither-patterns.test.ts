@@ -91,3 +91,45 @@ describe('dither: pattern behaviour', () => {
     expect(await t.diff(dithered, nearest)).toBe(0);
   });
 });
+
+describe('dither on coarse and fine render grids', () => {
+  it('pattern cells stay whole texels (period integer, >= 2) at unit 0.25, 1 and 4, with palette-only colours and tone kept', async () => {
+    const t = await harness();
+    for (const unit of [0.25, 4]) {
+      const W = 64;
+      const img = t.fromFn(W, 16, () => [128, 128, 128, 255], unit);
+      const px = await t.pixels(await runWithPalettes(t, 'dither', { algorithm: 'bayer-4', colorSpace: 'srgb', scale: 1 }, img, { palette: BLACK_WHITE }));
+      let white = 0;
+      let notBW = 0;
+      for (let i = 0; i < W * 16; i++) {
+        const v = px.data[i * 4];
+        if (v === 255) white++;
+        else if (v !== 0) notBW++;
+      }
+      expect(notBW).toBe(0);
+      expect(Math.abs(white / (W * 16) - 0.5)).toBeLessThan(0.02);
+      // Row 0 must repeat with an integer period >= 2 (4 for a 1-texel Bayer 4x4 cell; 1-texel cells at unit 0.25 too).
+      let period = 0;
+      for (const cand of [2, 3, 4, 5, 6, 8, 12, 16]) {
+        let ok = true;
+        for (let x = 0; x + cand < W; x++) if (px.data[x * 4] !== px.data[(x + cand) * 4]) ok = false;
+        if (ok) {
+          period = cand;
+          break;
+        }
+      }
+      expect(period).toBeGreaterThanOrEqual(2);
+      expect(Number.isInteger(period)).toBe(true);
+    }
+  });
+
+  it('fractional scales round to whole texels (unit 0.25 never gives sub-texel cells)', async () => {
+    const t = await harness();
+    const img = t.fromFn(16, 16, () => [100, 100, 100, 255], 0.25);
+    const a = await runWithPalettes(t, 'dither', { algorithm: 'bayer-4', scale: 1 }, img, { palette: BLACK_WHITE });
+    const b = await runWithPalettes(t, 'dither', { algorithm: 'bayer-4', scale: 3.6 }, t.fromFn(16, 16, () => [100, 100, 100, 255], 1), { palette: BLACK_WHITE });
+    const c = await runWithPalettes(t, 'dither', { algorithm: 'bayer-4', scale: 4 }, t.fromFn(16, 16, () => [100, 100, 100, 255], 1), { palette: BLACK_WHITE });
+    expect(await t.diff(a, await runWithPalettes(t, 'dither', { algorithm: 'bayer-4', scale: 1 }, t.fromFn(16, 16, () => [100, 100, 100, 255], 1), { palette: BLACK_WHITE }))).toBe(0);
+    expect(await t.diff(b, c)).toBe(0);
+  });
+});
