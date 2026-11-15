@@ -28,8 +28,8 @@ src/engine/
   lib/            shared helpers used by several nodes
   audio/          stream-domain engine (audio + MIDI)
 src/io/           files, decode, playback, export (implements Host)
-src/app/          React UI
-src/core/         OLD engine. Reference for porting algorithms only. Do not import it from src/engine.
+src/ui/           React UI, generated from node definitions
+src/cli/          headless renderer
 ```
 
 **Do not edit KERNEL files** unless your task says so. If the kernel is missing something, work
@@ -113,7 +113,7 @@ Exemplars to copy from (read the one closest to your node first):
    never `Math.random()`).
 10. **Every number/color/palette param is also an input socket** automatically. Do not add separate
     inputs for values that are params.
-11. Nodes never import from `src/app`, `src/io` or `src/core`. Port algorithms by rewriting them here.
+11. Nodes never import from `src/ui`, `src/io` or `src/cli`.
 12. Share code through `src/engine/lib/` or by exporting a helper from the node that owns it
     (e.g. `gaussianBlur` in `blur.node.ts`). Do not copy shaders between files.
 

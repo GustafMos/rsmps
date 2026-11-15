@@ -14,6 +14,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Node tests render on the GPU through headless WebGPU; the runner has none, so use Mesa's software Vulkan.
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libvulkan1
       - run: npm ci
       - run: npm run check
       - run: npm run build

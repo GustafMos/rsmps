@@ -1,6 +1,43 @@
 # Changelog
 
-All notable changes to PixelArtify Studio are documented here.
+All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify Studio) are documented here.
+
+## [0.4.0] - 2026-11-15
+
+A ground-up rewrite. Graphs and presets saved by earlier versions do not load.
+
+### Changed
+
+- New engine: every node is a self-contained file that receives real data on its sockets and returns real data. Node order
+  is honoured everywhere, including on video. The old fixed pipeline is gone.
+- Rendering runs on a single WebGPU device; WebGL2 and the CPU fallback are removed. WebGPU is required.
+- Lengths are authored in unit pixels and scaled per image, so mixed-resolution batches and the playback proxy match.
+- Animation loops by construction when Loop is on; nothing animates by default.
+- New interface generated from node definitions: categorised add menu, inline controls on nodes, built-in colour picker,
+  Palette Studio, rebindable shortcuts and per-node hotkeys, layer lists, chain insertion.
+
+### Added
+
+- About 130 nodes across Generate, Color, Filter, Stylize, Pixel Art, Transform, Composite, Mask, Layers, Detect & Track,
+  Time, Math, Audio Source, Audio Effects and Synth & MIDI.
+- Audio and MIDI pipeline in the same graph: microphone, pitch to MIDI, synths, effects, mixing; sound can drive any
+  number parameter.
+- Camera node (perspective, orthographic, isometric, fisheye, panoramic, cylindrical) for 3D objects.
+- Subject mask, edge-fill inpainting, layer splitting and looping parallax.
+- Detect & Track nodes with regions-to-mask, overlays, trails, follow-crop and stamping.
+- Print sheets with machine-readable markers, and a Scan tab that rebuilds frames from photos of the printed sheets.
+- Headless CLI on the same engine, with PNG sequences and ProRes 4444 with alpha.
+- Plugins are single-file node definitions, stored in the browser and restored on reload.
+- Safe mode (`?safe`) to open a project without rendering.
+
+### Fixed
+
+- The last group of dither algorithms (pattern, palette-blend, Riemersma), blue noise and Shiau–Fan were incorrect and
+  have been rebuilt.
+
+### Removed
+
+- The old engine (`src/core`), interface (`src/app`) and CLI.
 
 ## [0.2.1] - 2026-11-13
 

@@ -5,19 +5,19 @@ Headless batch rendering of RSMPS v2 graphs. It runs the same engine as the app 
 browser can encode it writes **ProRes 4444 with alpha**, **PNG sequences with alpha**, QuickTime
 Animation / PNG-in-MOV and VP9 WebM with alpha.
 
-Source: `src/cli2/`. Requires Node 20+. Video, audio and GIF input and all video output need ffmpeg
+Source: `src/cli/`. Requires Node 20+. Video, audio and GIF input and all video output need ffmpeg
 (the optional dependency `@ffmpeg-installer/ffmpeg`, else `ffmpeg` on PATH, else `$FFMPEG_PATH`).
 Still images and PNG sequences / spritesheets do not need ffmpeg.
 
 ## Running
 
 ```
-npm run build:cli2                       # bundles src/cli2 into dist-cli/rsmps.mjs
+npm run build:cli                       # bundles src/cli into dist-cli/rsmps.mjs
 node dist-cli/rsmps.mjs render graph.rsmps.json ...
-npm run cli2 -- render graph.rsmps.json ...   # rebuild (about 0.3 s) and run
+npm run cli -- render graph.rsmps.json ...   # rebuild (about 0.3 s) and run
 ```
 
-`scripts/build-cli.mjs` first regenerates `src/cli2/generated-nodes.ts` (a static import list of every
+`scripts/build-cli.mjs` first regenerates `src/cli/generated-nodes.ts` (a static import list of every
 `src/engine/nodes/**/*.node.ts`, so new node files are picked up on the next build and the list can never
 be stale). That file is a build artifact: do not edit or commit it. The bundle keeps `sharp`, `webgpu`
 and `@ffmpeg-installer/ffmpeg` external, so run it from inside the repo (or next to `node_modules`).

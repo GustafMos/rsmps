@@ -323,7 +323,7 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
-// Run when executed directly (tsx src/cli2/main.ts or the bundled dist-cli/rsmps.mjs), not when imported by tests.
+// Run when executed directly (tsx src/cli/main.ts or the bundled dist-cli/rsmps.mjs), not when imported by tests.
 const entry = process.argv[1] ?? '';
 if (/[\\/](main\.ts|rsmps\.mjs)$/.test(entry)) {
   main(process.argv.slice(2)).then(

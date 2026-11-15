@@ -1,5 +1,5 @@
 /**
- * The seam between the UI (src/app) and everything that touches files, decoding,
+ * The seam between the UI (src/ui) and everything that touches files, decoding,
  * playback and export (src/io). The UI only imports from this file and `createIo`.
  * Implementations live in the other files of src/io.
  */

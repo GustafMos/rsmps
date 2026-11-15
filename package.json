@@ -1,18 +1,17 @@
 {
   "name": "ripscorpy-media-processing-suite",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
-  "description": "RipScorpy Media Processing Suite (RSMPS) — edge-aware, resolution-independent pixel art conversion with palettes, dithering, layers, video and a node graph.",
+  "description": "RipScorpy Media Processing Suite (RSMPS) — a GPU node graph for batch image, video and audio processing: pixel art, palettes, dithering, masks, parallax, tracking, synths and effects.",
   "bin": {
-    "rsmps": "dist-cli/pixelartify.mjs",
-    "pixelartify": "dist-cli/pixelartify.mjs"
+    "rsmps": "dist-cli/rsmps.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "type": "module",
   "license": "MIT",
-  "author": "PixelArtify Studio contributors",
+  "author": "RipScorpy Media Processing Suite contributors",
   "homepage": "https://github.com/GustafMos/rsmps",
   "repository": {
     "type": "git",
@@ -25,20 +24,22 @@
     "image-processing",
     "video",
     "spritesheet",
-    "game-dev"
+    "game-dev",
+    "node-graph",
+    "webgpu",
+    "audio",
+    "midi"
   ],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=esm --outfile=dist-cli/pixelartify.mjs --external:sharp --external:@ffmpeg-installer/ffmpeg",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --pretty",
     "test": "vitest run",
     "test:watch": "vitest",
-    "cli": "tsx src/cli/index.ts",
-    "cli2": "node scripts/build-cli.mjs && node dist-cli/rsmps.mjs",
-    "build:cli2": "node scripts/build-cli.mjs",
-    "check": "tsc --noEmit && vitest run"
+    "check": "tsc --noEmit && vitest run",
+    "cli": "node scripts/build-cli.mjs && node dist-cli/rsmps.mjs",
+    "build:cli": "node scripts/build-cli.mjs"
   },
   "dependencies": {
     "fflate": "^0.8.2",

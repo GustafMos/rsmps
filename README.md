@@ -1,350 +1,115 @@
-# PixelArtify Studio
+# RipScorpy Media Processing Suite (RSMPS)
 
 [![CI](https://github.com/GustafMos/rsmps/actions/workflows/ci.yml/badge.svg)](https://github.com/GustafMos/rsmps/actions/workflows/ci.yml)
-[![Deploy](https://github.com/GustafMos/rsmps/actions/workflows/deploy.yml/badge.svg)](https://github.com/GustafMos/rsmps/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4cc9f0.svg)](LICENSE)
 
-**Edge-aware, resolution-independent pixel art at scale — with a node graph, palettes, dithering, layer separation, video and spritesheets.**
+**A GPU node graph for making game assets in batches: images, video, animation and sound.**
 
-**Live demo:** <https://gustafmos.github.io/rsmps/>
+RSMPS started as PixelArtify Studio, a pixel-art converter made for the game *Filmmaker Survivor*. It is now a general media
+processing suite built like Blender's shader nodes or DaVinci Fusion: small nodes that receive data on their inputs and pass
+results along their wires.
 
-**Changelog:** [CHANGELOG.md](CHANGELOG.md) · current version **0.2.1**
+> MIT licensed · local-first · no account · no upload · your media stays on your machine.
 
-PixelArtify Studio turns drawings, photos and videos into deliberate pixel art. It is built around the idea that pixel art is a *design resolution*, not a resized photo: a 480p and a 1080p source with the same preset produce the same art dimensions, the same feature scale and the same dither texture.
-
-![PixelArtify Studio](docs/studio.jpg)
-
-> MIT licensed · local-first · no account · no upload · images and video stay on your machine.
+**Live demo:** <https://gustafmos.github.io/rsmps/> · **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## Highlights
+## What it does
 
-- **Visual node graph** — multiple media inputs (folders or multi-selections), branching chains, merged batches and multiple output nodes. Drag a node over an existing wire to splice it into that connection automatically. Nodes whose current settings use a CPU-only bottleneck show an amber **!** with the reason in the inspector.
-- **GPU-accelerated pipeline** — WebGL2 handles Sobel/chroma edge detection, non-maximum suppression, edge-aware sampling, nearest/bilinear resize, palette matching, matrix dithering, single-pass grade/post effects (color correct, posterize, grain, scanlines, vignette, chromatic aberration, outline), and the final layer blend (offset/scale/opacity and all five blend modes), with automatic CPU fallback. Error-diffusion dithering, blur/painterly effects, occlusion inpainting and detail high-pass layers remain on the CPU because they are sequential or multi-pass.
-- **Color Correct node** — exposure, contrast, brightness, saturation, gamma, hue, temperature and tint, with look presets. Alpha is preserved and several Color Correct nodes can be chained for an ordered grade.
-- **Split workspace** — a Blender-style viewer + node graph layout with a draggable divider, plus full Studio and Graph tabs.
-- **Edge-aware sampling** — the sampler searches for cell windows that avoid cutting through edges, then blends an area average with the dominant local colour. Inspired by [pixel-mosaic](https://github.com/yogthos/pixel-mosaic).
-- **Resolution independence by construction** — all radii, dither matrices and effect sizes are measured in art pixels. The engine supersamples to a canonical working resolution derived from the art size, never from the source.
-- **Palette Studio** — extraction (median cut + OKLab k-means), Adobe Color–style harmony wheel, shades/tints, WCAG contrast checks and colour-blindness simulation. Import/export GPL, JASC-PAL, Paint.NET/Lospec `.hex`, plain hex and JSON.
-- **28 dithering algorithms** — Bayer 2/4/8/16, blue noise (void-and-cluster), clustered dot, line, checker, dot, crosshatch, white noise, Floyd–Steinberg, Atkinson, Jarvis, Stucki, Burkes, Sierra, Two-row Sierra, Sierra Lite, Shiau–Fan, Simple 2D, Riemersma, and a Yliluoma-style palette blend.
-- **10 pre-processing effects** — Kuwahara painterly, oil paint, watercolour, posterize, fractal noise displacement, grain, soften, sharpen, bloom and chunky blur. Grain and noise displacement can be set to animate over time. The Color Correct node is also available as a pre-process op.
-- **8 post-processing effects** — sprite outline, bloom, grain, scanlines, vignette, chromatic aberration, CRT and final sharpen.
-- **Crop, resize and channels** — nearest/bilinear/box/bicubic/Lanczos3 resampling, alpha-safe; channel extract/swap/pack, luma↔alpha and HSL→RGB channel encoding.
-- **Layer extraction and inpainting** — saliency, subject box/ellipse, chroma key, luma, edge and manual masks. **Magic select** paints positive/negative strokes and grows an edge-aware subject mask; on video, **Apply & track** follows the subject and caches per-frame masks. Background layers inpaint occluded regions with directional/mirrored fill, diffusion or dithered regeneration. Separate occlusion masks keep foregrounds tight while removing legs and shadows from the background.
-- **Video in, video / spritesheet out** — frame-accurate WebCodecs decoding via [Mediabunny](https://mediabunny.dev), H.264/VP9/AV1 encoding, spritesheet packing with metadata, or both in one ZIP. Long animations are split across several sheets, and A4 print pages with + registration marks are available for printing and rescanning.
-- **Presets** — save/import/export the whole graph. Built-ins include Sharp Sprite, Painterly Mosaic, 1-bit Ink, Game Boy DMG, Cinematic 32, Layered Parallax, Spritesheet Export, Chunky Sweetie and Batch Portraits.
-- **Batch CLI** — folders of images, graph evaluation, video processing with ffmpeg, layer manifests and spritesheets.
+- **Real node graph.** Every node is a pure function of its inputs and settings. An effect placed after another processes
+  that effect's result; there is no hidden fixed pipeline.
+- **Batch by design.** Put many files in a Media In node and the graph runs once per file. Lengths are authored in unit
+  pixels and scaled to each file, so a 480p and a 4K source get the same look.
+- **GPU everywhere.** One WebGPU device; images stay on the GPU from decode to display. Results are cached per node and only
+  nodes that read the clock re-render per frame.
+- **One-click looping.** Turn on Loop and every built-in animator repeats exactly over the project duration. `Make Loop`
+  cross-fades any footage into a seamless loop.
+- **Pixel art.** Edge-aware pixelation, palettes (built-in, custom, extracted), 27 dither algorithms, palette swap, crisp upscale.
+- **Masks, cut-outs and parallax.** Keys, subject mask, paint mask, inpainting that fills a cut-out from its edges, layer
+  splitting and a looping parallax camera.
+- **Detect & Track.** Blob, colour and motion detectors, a tracker, and `Regions to Mask` so any effect can be limited to
+  tracked areas; HUD overlays, trails, follow-crop and sprite stamping.
+- **3D generators with cameras.** Primitive objects with perspective, orthographic, isometric, fisheye, 360° panoramic and
+  cylindrical cameras; each object can have its own.
+- **Audio and MIDI in the same graph.** Microphone, audio files, pitch-to-MIDI, synths, compressor, EQ, delay, reverb and
+  more, mixed by wiring. Sound can drive pictures: loudness, pitch and notes become numbers for any parameter.
+- **Print and scan back.** Export animation frames as printable sheets with registration marks, draw on them, photograph
+  them, and get the frames back aligned as an image sequence.
+- **Plugins.** A plugin is one JavaScript file exporting a node definition; it appears in the menus like a built-in.
 
----
-
-## Screenshots
-
-| Split workspace | Palette Studio |
-| --- | --- |
-| ![Split workspace](docs/split.jpg) | ![Palette Studio](docs/palette.jpg) |
-
-| Full node graph |
-| --- |
-| ![Node graph](docs/graph.jpg) |
-
----
+Node families (one file per node under `src/engine/nodes/`): Input, Output, Generate, Color, Filter, Stylize, Pixel Art,
+Transform, Composite, Mask, Layers, Detect & Track, Time, Math & Utility, Audio Source, Audio Effects, Synth & MIDI.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/GustafMos/rsmps.git rsmps
-cd rsmps
 npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>. Everything runs locally. Drop images or videos onto the Media input node and connect the chain to an Output node.
+Open <http://localhost:5173>. A browser with WebGPU is required (current Chrome, Edge, Firefox or Safari).
+
+If a setting ever makes rendering hang, open `http://localhost:5173/?safe`: the project loads without rendering so you can
+fix it, then remove `?safe`.
+
+### Working in the graph
+
+- **Shift+Space** or **Shift+A**: search and add a node. With a node selected, the new node is inserted into its chain.
+- Drop a wire from one output onto another output to create a Merge with the held one on top.
+- Click a colour to open the built-in picker; **Palettes** opens Palette Studio (harmony wheel, ramps, extract from image).
+- Shortcuts are listed under **?** and can be rebound; any node type can be given its own hotkey.
+
+## Command line
+
+Batch rendering without a browser, including formats browsers cannot encode (ProRes 4444 with alpha):
 
 ```bash
-npm run build      # typecheck + production build
-npm run test       # 48 core tests
-npm run cli -- --help
-npm run build:cli  # bundle the headless CLI
+npm run cli -- render my-graph.rsmps.json sprites/ --out out/
 ```
 
-### Browser support
+See [docs/CLI.md](docs/CLI.md).
 
-The studio targets modern Chromium/Firefox/Safari. Video decoding/encoding uses **WebCodecs**, which is required for in-browser video. For older browsers or production video batches, use the CLI with ffmpeg.
+## Documentation
 
----
-
-## The graph
-
-| Node | What it does |
+| | |
 | --- | --- |
-| **Media input** | Folder / multi-selection of images and videos. Each asset flows through the graph independently. |
-| **Crop** | Normalized, percent or pixel crop. Alpha and masks are cropped with it. |
-| **Resize** | Nearest, bilinear, box, bicubic or Lanczos3. Accepts pixels, percent or a times (×) multiplier; nearest-neighbour is the default. Retains premultiplied alpha. |
-| **Channels** | Colour → channels: extract, swap, pack, luma→alpha, alpha→luma, HSL→RGB. |
-| **Color correct** | Exposure, contrast, brightness, saturation, gamma, hue, temperature and tint. Alpha is retained. |
-| **Pre-process** | Ordered effect stack applied at the canonical working resolution. |
-| **Pixelate** | Resolution policy + edge-aware sampler. Defines the art size. |
-| **Palette** | Auto-extracted or custom palette; outputs media and palette sockets. |
-| **Dither** | Algorithm, strength, pattern scale, colour space, serpentine scan, threshold and seed. |
-| **Feature extract** | Saliency, subject box/ellipse, chroma, luma, edge or manual mask. Outputs a mask bundle. **Magic select** paints positive/negative strokes and grows a subject mask; on video, **Apply & track** follows and caches per-frame masks. Enable **Only extracted** to multiply the media output by the mask. |
-| **Compose layers** | Layer stack with visibility, opacity, blend, offsets, scaling, detail high-pass, masks, occlusion masks and inpainting settings. |
-| **Background** | Generated solid colour, linear/radial gradient, checkerboard, stripes, grid, dots or noise. Connect media to place it behind the image; leave unconnected for a standalone background. |
-| **3D object** | Cube, sphere, cylinder, cone, torus or pyramid with an orthographic camera. Rotate on X/Y/Z, move on X/Y/Z, scale, zoom and light it. Connect media to composite the object on top; the generated background option applies when standalone. |
-| **Animate** | Motion input for 3D objects and Background. Formula fields for translate X/Y/Z, rotate X/Y/Z and scale, with `t`, `frame`, `lt`, math functions and a wrap/leave-frame choice. A time timeline appears in the viewer whenever the graph contains an Animate node. |
-| **Timeline** | Stretches still media across a chosen duration and frame rate. Animate effects and overlays over the image, then render the sequence from the Output inspector. |
-| **Retime** | Video stop-motion down to a lower frame rate, or block-matching optical-flow interpolation to a higher frame rate. Stop motion previews with a quantised clock; optical flow is written during video export. |
-| **Group** | Organisational container for selected nodes. Collapse to one box with combined input/output dots, duplicate the entire group, or ungroup. Members keep their normal wires and evaluation. |
-| **Post-process** | Outline, bloom, grain, scanlines, vignette, chromatic aberration, CRT, sharpen. |
-| **Merge** | Concatenate multiple media bundles into one batch. |
-| **Router** | Pure pass-through reroute for media, masks and palettes. Keeps branches intact when replacing or deleting a node. |
-| **Output** | PNG/WebP, layer ZIP, batch ZIP, video, spritesheet or both. Multiple outputs render independent variants. |
+| [docs/ENGINE.md](docs/ENGINE.md) | How the engine works and how to add a node (start here to contribute) |
+| [docs/PLUGINS.md](docs/PLUGINS.md) | Writing and installing plugins |
+| [docs/CLI.md](docs/CLI.md) | Command-line rendering |
+| [docs/PRINT_AND_SCAN.md](docs/PRINT_AND_SCAN.md) | Printing frame sheets and scanning them back |
+| [src/engine/audio/README.md](src/engine/audio/README.md) | Audio and MIDI nodes, and driving pictures with sound |
 
-**Animation:** add an **Animate** node and connect its **Motion** output to a **3D object** or **Background** motion input. Formulas are evaluated per frame with `t` (seconds), `frame`, `lt` (loop time) and functions such as `sin`, `cos`, `clamp` and `smoothstep`. Set **When it leaves the frame** to wrap horizontally, wrap both axes, or let the object leave. A timeline with play/pause, scrubbing and fps appears under the viewer whenever the graph has an Animate node.
-
-**Connecting:** drag from an output dot to anywhere on an input port row, or click an output then click an input. The **Connections** panel in the inspector is a keyboard-friendly fallback for adding and removing connections. Drag from an input to an output too — both directions work.
-
-**Adding after the selected node:** when a node is selected, adding a new one places it to the right and moves **all compatible outgoing connections** through the new node. If the selected node fans out to several targets, the new node takes over the whole fan-out and then fans it back out. The same applies to **Shift+Space**, which opens a searchable command palette with recently used node types at the top. Use ↑/↓ and Enter to add; Esc closes.
-
-**Grouping:** Ctrl/Cmd-click several nodes, then press the **Group** button in the graph toolbar (or use the group action in the inspector). A collapsed group is a single box with combined input/output dots for media, masks, palettes and motion. **Duplicate whole group** clones every member node, internal wire and input asset; **Ungroup** removes only the container.
-
-**Detaching:** hold **Shift** while dragging a node to detach it from all of its wires. The chain behind it is bridged automatically so the tree stays connected (a Router is inserted when several branches meet). Drop the node onto another wire to splice it back in, or drop it on empty canvas to leave it detached.
-
-**Inserting:** drag a node by its title bar and drop it on a wire. The wire highlights green while the drop target is valid; releasing splices the node between the two existing nodes. Nodes with an incompatible port type, an occupied single input or a would-be cycle are left untouched.
-
-**Disconnecting:** hover a wire and click the red × cut button, use the Connections panel, or double-click the wire. Deleting a node reconnects **all** of its downstream branches to the upstream node; if the node has several upstream branches, a **Router** node is inserted instead so the tree stays intact.
-
-The **Split** tab shows the viewer and the node graph at the same time with a draggable divider. Mouse wheel zooms the graph; drag the background to pan. `G` cycles Studio → Split → Node graph.
-
-An amber **!** next to a node means its current settings contain CPU-only work that is likely to dominate preview or playback time. Hover the mark (or select the node) for the reason and a suggested faster alternative. Typical examples: error-diffusion dithering, automatic palette extraction, painterly/oil/watercolour or blur-based effects, layer compositing/inpainting, box/Lanczos/Bicubic resize, bloom/CRT post effects, and CPU fallback when WebGL2 is unavailable.
-
-**Only nodes that are actually in the branch affect the image.** A graph with just a Media input wired to an Output is a lossless pass-through. Add Pixelate, Palette, Dither or effect nodes when you want them; the default look is never applied implicitly.
-
-The viewer's **Fit preview** button (active by default) keeps the image fitted with a small padding whenever you resize the split divider, switch tabs or resize the window. Zooming or panning turns auto-fit off; click the fit button to re-enable it.
-
-Video assets get a **play/pause** button next to the timeline. Playback uses a hidden `<video>` element for smooth decoding, renders with the art short side capped at 320 px, reuses the palette from the first frame and loops until paused. Pausing restores a full-quality frame. This keeps heavy graphs moving instead of appearing frozen after one frame.
-
-### Performance
-
-The heaviest parts of the pipeline run on the GPU through WebGL2 when available:
-
-- **Pixelation** — Sobel/chroma gradients, non-maximum suppression, the edge integral, per-cell edge-alignment search, offset smoothing and dominant-colour sampling. Only the percentile histogram and integral construction touch the CPU.
-- **Resize** — nearest-neighbour and bilinear resampling run as a shader pass. Nearest is the default for pixel art.
-- **Dithering** — palette matching and every matrix-based algorithm (Bayer, blue noise, clustered dot, line, checker, dot, crosshatch, white noise, threshold) are evaluated per pixel in a shader. Error-diffusion algorithms (Floyd–Steinberg, Atkinson, …) are inherently sequential and stay on the CPU.
-- **Effects** — color correct, posterize, grain, scanlines, vignette, chromatic aberration and sprite outline have single-pass shader versions. Blur-based, painterly and inpainting effects remain on the CPU.
-- **Layers** — the final offset/scale/opacity/blend pass runs in a WebGL2 ping-pong compositor. Each layer is still pixelated separately, and occlusion inpainting plus detail high-pass generation remain on the CPU.
-- Playback renders directly to the preview canvas without a PNG encode/decode or a React render per frame. The art pixel budget adapts to the dither: larger for GPU dithers, smaller for CPU error diffusion.
-- Typical end-to-end previews are about **2× faster** on large images (measured 326 → 156 ms at 405×270 art and 1.92 → 0.97 s at 1080×720 on a mid-range GPU).
-- GPU edge maps match the CPU (mean error ~0.03 levels) and roughly halve the sampling stage; GPU dithering/effects match within 1–2 8-bit levels, and GPU layer blending matches within 0–3 levels.
-- The viewer shows `GPU sampler`, `GPU dither`, `GPU effects` and `GPU layers` badges when each backend is active.
-- `1-bit Ink` uses Atkinson error diffusion, so its playback is CPU-bound (~10 fps on the test machine). `Game Boy DMG` uses Bayer and reaches ~20 fps. Preset cards now show a **! CPU** warning for presets with CPU-heavy stages; switching the 1-bit dither to a Bayer/blue-noise algorithm makes it much faster.
-- If WebGL2 is unavailable, the pipeline falls back to the CPU automatically.
-
-A standalone Electron/Tauri shell would run the same browser engine and pipeline, so it would not remove the CPU error-diffusion/resize costs by itself. Real gains beyond this require a native/WebGPU implementation (particularly for error diffusion and video decode) or pre-rendering frames before playback.
-
-### Resolution independence
-
-All look-defining values are expressed in **art pixels** or normalized units:
-
-- the art height/width/short-side/block size of the Pixelate node;
-- pre/post effect radii and amplitudes;
-- dither matrix scale;
-- layer offsets and mask feather.
-
-The pipeline resamples any source to a canonical supersampled working resolution derived from the **art size**, then samples down to the art grid. A 480p and a 1080p source therefore share the same grid and texture scale:
+## Layout
 
 ```text
-854×480   ─┐
-           ├─ fixed height 270 → 480×270 art, export 1920×1080 at 4×
-1920×1080 ─┘
+src/engine/   the engine: node contract, evaluator, GPU helpers, all nodes, audio
+src/io/       media library, playback, export, plugins, project files, print/scan
+src/ui/       the React interface (generated from node definitions)
+src/cli/      headless renderer
 ```
-
-Use **Fixed height** or **Fixed width** for mixed-resolution batches. **Block size** intentionally derives the art size from the source, for chunky pixel-per-block workflows.
-
-### Presets
-
-A preset stores the entire node graph (including crop/resize/channel nodes), palette settings, dithering, layer configuration and output/video settings. Presets are JSON and self-contained; palettes are embedded.
-
-```bash
-# apply a built-in preset in the CLI
-npm run cli -- input-folder -o out --preset layered-parallax --height 270 --layers
-```
-
-Save/load presets from the top bar. Import/export `.pixelartify.json` files. User presets and palettes persist in `localStorage`. Applying a preset keeps the current Studio/Split/Node graph tab instead of forcing a view change. Preset cards with an amber **!** use CPU-heavy stages at the current settings; hover the mark for the exact nodes and a suggested faster alternative.
-
----
-
-## Palettes
-
-- Extract from the active image with median cut + OKLab k-means.
-- Build palettes with harmony rules: monochromatic, analogous, complementary, split-complementary, triadic, tetradic, square, compound.
-- Inspect WCAG contrast grades and simulate protanopia, deuteranopia, tritanopia and achromatopsia.
-- Built-ins: PICO-8, Game Boy DMG, Sweetie 16, Endesga 32, DawnBringer 16, CGA 16, Grayscale 16, 1-bit Ink.
-- Formats: GIMP `.gpl`, JASC `.pal`, Paint.NET/Lospec `.hex`/`.txt`, plain hex, JSON.
-
-Color matching happens in OKLab by default (perceptual), with sRGB and linear-RGB options for dithering.
-
----
-
-## Dithering
-
-The catalog is inspired by **Ditherista / libdither** by Robert Kist (MIT/BSD) and the classic literature. The implementations in this repository are original TypeScript, not a port of the C/C++ code.
-
-- **Ordered**: Bayer 2×2, 4×4, 8×8, 16×16; void-and-cluster blue noise; clustered dot 4×4/8×8.
-- **Pattern**: horizontal/vertical/diagonal lines, checkerboard, dot screen, crosshatch, white noise, hard threshold.
-- **Error diffusion**: Floyd–Steinberg, Atkinson, Jarvis–Judice–Ninke, Stucki, Burkes, Sierra, Two-row Sierra, Sierra Lite, Shiau–Fan, Simple 2D, Riemersma (Hilbert curve).
-- **Palette blend**: Yliluoma-style ordered two-colour projection.
-
-Every algorithm honours `strength`, `scale` (art pixels), `threshold` bias and seed. Diffusion can be serpentine; matching can be OKLab, linear or sRGB.
-
----
-
-## Layers, masks and inpainting
-
-1. Add an **Extract** node and choose a method:
-   - **Saliency** — central, compact, high-contrast subject detection with component analysis and leg extension.
-   - **Subject box/ellipse** — predictable cutout region for characters.
-   - **Chroma / luma / edge** — keying, tonal masks, detail masks.
-   - **Manual** — paint directly on the preview with add/erase, softness, invert and feather.
-   - **Only extracted** — applies the mask to the Extract node's media output, so the subject stays and the rest becomes transparent. The mask output is still available for Compose.
-   - **Magic select** — paint over the subject with the brush; positive strokes add and erase strokes subtract. The mask grows through connected pixels with similar OKLab colour and stops at strong edges. Adjust brush size and colour tolerance, then Apply. **Box** remains available for a simple rectangular selection. **Paint mask** and **Reset mask override** refine it further.
-   - **Apply & track** (video) — after painting the subject, tracks the mask through the clip using the previous frame's colour model and local motion, then caches per-frame masks. Scrubbing and playback reuse the cache; the Extract panel shows `tracked · N frames`.
-   - On video, only-extracted is applied to every live preview and exported frame. H.264/VP9 still flatten transparency, so use PNG/spritesheet output when alpha matters.
-
-> Magic select is a deterministic local colour/edge segmentation, not a downloaded neural model. It handles solid and moderately textured subjects well; very fast motion, heavy occlusion or camouflage may need extra erase strokes or a fresh selection. Tracking runs at 12 fps and caches masks in memory for the current session.
-2. Add a **Compose layers** node and connect one or more mask bundles.
-3. Layer roles:
-   - **Background** — full image, optionally inpaints regions hidden by higher layers.
-   - **Foreground** — cut out by its mask.
-   - **Detail** — edge high-pass overlay.
-   - **Overlay** — full image or masked texture.
-4. For a character, use a tight **subject** mask for the foreground and a looser **occlusion mask** (box/ellipse or low-threshold saliency) only for background removal. The SOC (subject/occlusion) split keeps the cutout tight while ensuring legs, shadows and antialiased edges are removed from the background.
-5. Inpaint methods:
-   - **Directional / mirrored fill** — clones a coherent background patch and blends directional samples (default).
-   - **Pyramid + diffusion** — multi-scale fill + Jacobi relaxation.
-   - **Pyramid fill only**.
-   - **Dithered regeneration** — adds palette-aware texture to the regenerated area.
-
-Layer offsets and scales are in art pixels, ready for parallax rigs.
-
----
-
-## Video and spritesheets
-
-Import a video into a Media input. The Studio shows a scrubbable frame preview. The Output node can produce:
-
-- **Video** — MP4 (H.264 or AV1) or WebM (VP9), using WebCodecs + Mediabunny, with the original audio muxed in the CLI.
-- **Spritesheet** — PNG sheet + JSON metadata (frames, source size, duration, columns, rows, cell size). Explicit column counts are honoured; auto mode picks the most square layout that fits the max size. With **Split into multiple sheets** enabled, long animations are packed onto as many sheets as needed instead of failing; each sheet gets its own PNG and JSON in a ZIP.
-- **A4 print / rescan** — export white A4 pages at 150/300/600 DPI with a configurable margin, gutter and black **+** registration marks at every cell corner. The JSON map records each frame's page and pixel rectangle. Print at 100%, rescan, and align to the marks.
-- **Both** — downloaded together as a ZIP.
-
-For production video, the CLI uses the bundled ffmpeg for frame extraction and final encoding, preserving the original audio.
-
-> Browser video export is silent by design: audio is not re-muxed client-side. Use the CLI when audio matters. H.264/VP9 output flattens alpha to a solid background; use PNG spritesheets for transparency.
-
----
-
-## CLI
-
-The CLI runs the same core engine, including graph evaluation, masks, layers and geometry nodes.
-
-```bash
-# Build once
-npm run build:cli
-
-# Images
-node dist-cli/pixelartify.mjs ./art -o ./out \
-  --preset sharp-sprite --height 270 --scale 4 --layers
-
-# Custom palette + blue noise
-node dist-cli/pixelartify.mjs hero.png -o out \
-  --palette-file sweetie16.hex --dither blue-noise --dither-scale 1
-
-# Mixed-resolution batch
-node dist-cli/pixelartify.mjs ./mixed -o out --height 270 --format png
-
-# Video → MP4 + spritesheet
-node dist-cli/pixelartify.mjs clip.mp4 -o out \
-  --height 270 --fps 12 --video-output both \
-  --codec avc --crf 18 --sheet-columns 8
-
-# Introspection
-node dist-cli/pixelartify.mjs --list-presets
-node dist-cli/pixelartify.mjs --list-dithers
-```
-
-Run `npm run cli -- --help` during development. Requires Node 20+; image I/O uses `sharp`; video uses the bundled `@ffmpeg-installer/ffmpeg`.
-
----
-
-## Architecture
-
-```text
-src/
-  core/                 pure TypeScript engine (browser, worker, Node)
-    color.ts            sRGB/linear, OKLab, HSL, WCAG, harmony, CVD
-    image.ts            resampling (nearest/bilinear/box/bicubic/Lanczos3),
-                        compositing, masks, blur/sharpen, integral images
-    preprocess.ts       10 pre effects + 8 post effects + registry
-    edges.ts            Sobel + NMS + percentile threshold
-    pixelate.ts         edge-aware sampling + offset field
-    inpaint.ts          pyramid, directional/mirrored clone, diffusion, dither
-    extraction.ts       saliency / box / chroma / luma / edge masks
-    palette.ts          extraction, matching, formats, built-ins
-    dither.ts           28 algorithms + registry
-    channels.ts         channel routing and alpha retention
-    pipeline.ts         resolution policy → pre → layers → pixelate → palette →
-                        dither → post → export scale
-    graph.ts            typed DAG, multi-port evaluation, caching
-    spritesheet.ts      packing + texture metadata
-    presets.ts          built-ins, graph ↔ settings, validation/migration
-  app/                  React + Vite studio UI
-    components/         graph editor, viewer, inspector, palette studio, masks
-    store.tsx           graph/assets/presets/masks/preview state
-    video.ts            Mediabunny probe / decode / encode
-  cli/                  headless batch + video
-```
-
-The core is DOM-free. The browser UI, the CLI and future workers all call the same functions.
-
-### Adding an effect or dither
-
-- Add a definition and implementation in `src/core/preprocess.ts` (`PREPROCESS_DEFS` or `POSTPROCESS_DEFS`), and a case in the apply switch. The inspector UI is generated from the parameter metadata.
-- Add a kernel/matrix in `src/core/dither.ts` and a registry entry. `applyDither` handles ordered, diffusion and special dispatch.
-
-### Adding a node type
-
-1. Extend `GraphNodeType` in `types.ts`.
-2. Add a `NODE_DEFS` entry and `nodeParams` case in `graph.ts`.
-3. Implement its evaluation case (return typed port values).
-4. Add an inspector panel and an icon mapping.
-5. Add a test.
-
----
 
 ## Tests
 
 ```bash
-npm run test
+npm run check   # typecheck + all tests
 ```
 
-Covered: resolution independence, resampling/alpha correctness, palette formats and extraction, dither palette exactness and determinism, render pipeline, layer inpainting, crop/resize/channel/color graph nodes, resize times and nearest default, extract isolation, magic-mask growth and tracking, cycle detection, preset round-trip, multi-sheet splitting, A4 registration-mark layout and upscaling.
-
----
+Node tests run on the real GPU through headless WebGPU, so a passing test also proves the shader compiles.
 
 ## Known limitations
 
-- **Automatic subject extraction is heuristic**, not ML. Saliency works best on centered, high-contrast subjects with simple backgrounds. Use the subject box or paint masks for production sprites. Chroma/luma/edge modes cover predictable cases.
-- Inpainting is a fast classical fill, not a generative model. Large holes can show duplicated structure. Directional fill + texture is a starting point; mask painting gives the best control.
-- Browser video export does not mux audio and flattens alpha for H.264/VP9.
-- Very large art sizes (>1024) or heavy layer stacks can make interactive previews slow. Use the wand icon in the viewer to toggle full-quality preview; exports always use full quality.
-- The CLI evaluates image graphs; video uses the preset's render settings (frame-by-frame graph geometry is intentionally not applied).
-
----
+- WebGPU only; there is no fallback for browsers without it.
+- The microphone and MIDI devices are live-only. For export, record the take and use it as an audio file.
+- ProRes is available from the command line only.
+- Subject extraction and the tracker are classical methods, not neural networks: expect touch-ups when subject and
+  background share colours, and occasional id swaps when tracked objects cross.
+- Error-diffusion dithers fall back to an ordered pattern on very large images.
 
 ## Credits
 
-PixelArtify Studio stands on the shoulders of open-source work. See [CREDITS.md](CREDITS.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for full links and licenses.
+RSMPS stands on the shoulders of open-source work. See [CREDITS.md](CREDITS.md) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for full links and licenses.
 
 Special thanks to:
 
@@ -352,9 +117,10 @@ Special thanks to:
 - **Robert Kist** — [Ditherista](https://github.com/robertkist/ditherista) and [libdither](https://github.com/robertkist/libdither), the dithering catalog inspiration.
 - **Vanilagy** — [Mediabunny](https://mediabunny.dev) (MPL-2.0), browser media I/O.
 - **Björn Ottosson** — [OKLab](https://bottosson.github.io/posts/oklab/) (MIT).
+- **MaxK1920** — [stardetect](https://github.com/MaxK1920/stardetect), the inspiration for the Detect & Track nodes (no code is shared; RSMPS uses its own classical detectors).
 - The pixel-art community behind the PICO-8, Sweetie 16, Endesga 32, DawnBringer 16 and Game Boy palettes.
 
-This project is not affiliated with Adobe. Adobe Color inspired the harmony/contrast panel.
+This project is not affiliated with Adobe. Adobe Color inspired Palette Studio.
 
 ---
 
@@ -369,4 +135,3 @@ If you want to support me and my projects, help me fund tasty anti-allergenic fo
 ## License
 
 MIT. See [LICENSE](LICENSE). Third-party dependencies retain their licenses; Mediabunny is MPL-2.0 and is used unmodified as a dependency.
-
