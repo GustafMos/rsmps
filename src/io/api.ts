@@ -70,7 +70,11 @@ export interface Player {
   /** Attach the WebGPU canvas to draw into (null to detach). */
   setCanvas(canvas: HTMLCanvasElement | null): void;
   /** What to show. Call on every graph/selection change; cheap. */
-  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number }): void;
+  /**
+   * `activeOutput`: id of the Output node whose frame (aspect ratio / size) non-output views should use, so previews
+   * of intermediate nodes match what that output will export. Viewing an Output node always uses its own frame.
+   */
+  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number; activeOutput?: string | null }): void;
   play(): void;
   pause(): void;
   toggle(): void;

@@ -20,6 +20,8 @@ import { RenderedFrameCache } from './frame-cache';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
+import { conformImage } from './frame-gpu';
+import { effectiveConform, isCustomFrame, readFrameParams, resolveFrame, scaleSize, type ConformAnchor, type Size } from './frame';
 import { errorMessage, renderHash, totalFramesOf } from './util';
 
 export interface PlayerDeps {
@@ -31,7 +33,15 @@ export interface PlayerDeps {
   router: SignalRouter;
 }
 
+interface FrameSpec {
+  /** Frame size at proxy 1; undefined = the project canvas. */
+  canvas?: Size;
+  /** Conform to the frame (viewing an Output node only). */
+  conform?: { size: Size; mode: ReturnType<typeof effectiveConform>; anchor: ConformAnchor };
+}
+
 interface View {
+  activeOutput?: string | null;
   graph: GraphDoc;
   node: string | null;
   port?: string;
@@ -48,6 +58,7 @@ interface Job {
   frame: number;
   proxy: number;
   key: string;
+  frameSpec: FrameSpec;
 }
 
 type Shown = { texture: GPUTexture; width: number; height: number };
@@ -162,15 +173,15 @@ export class PlayerImpl implements Player {
     this.kick();
   }
 
-  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number }): void {
+  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number; activeOutput?: string | null }): void {
     // Safe mode: open the app with ?safe in the address to load the project WITHOUT rendering anything,
     // so a setting that makes rendering hang can be fixed. Remove ?safe and reload to render again.
     if (SAFE_MODE) view = { ...view, node: null };
     const prev = this.view;
     const changed =
-      !prev || prev.graph !== view.graph || prev.node !== view.node || prev.port !== view.port || prev.item !== view.item || prev.itemCount !== view.itemCount;
-    if (!prev || prev.node !== view.node || prev.port !== view.port) this.fullReal = null;
-    this.view = { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount };
+      !prev || prev.graph !== view.graph || prev.node !== view.node || prev.port !== view.port || prev.item !== view.item || prev.itemCount !== view.itemCount || (prev.activeOutput ?? null) !== (view.activeOutput ?? null);
+    if (!prev || prev.node !== view.node || prev.port !== view.port || (prev.activeOutput ?? null) !== (view.activeOutput ?? null)) this.fullReal = null;
+    this.view = { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, activeOutput: view.activeOutput ?? null };
     if (!changed) return;
     this.keyDirty = true;
     const p = view.graph.project;
@@ -319,6 +330,24 @@ export class PlayerImpl implements Player {
 
   /* -------------------------------- internals ------------------------------ */
 
+  /**
+   * Frame to render the viewed node in. An Output node uses its own frame and conforms to it; any other node
+   * uses the frame of the active output (no conform) so previews match what that output will export.
+   */
+  private frameSpecFor(view: View): FrameSpec {
+    const nodes = view.graph.nodes;
+    const viewed = nodes.find((n) => n.id === view.node);
+    const isOutput = !!viewed && this.deps.registry.get(viewed.type)?.category === 'output';
+    const source = isOutput ? viewed : view.activeOutput ? nodes.find((n) => n.id === view.activeOutput && this.deps.registry.get(n.type)?.category === 'output') : undefined;
+    if (!source) return {};
+    const fp = readFrameParams(source.params);
+    const size = resolveFrame(view.graph.project, fp);
+    const spec: FrameSpec = {};
+    if (isCustomFrame(view.graph.project, size)) spec.canvas = size;
+    if (isOutput) spec.conform = { size, mode: effectiveConform(fp), anchor: fp.conformAnchor };
+    return spec;
+  }
+
   private liveSignals(): boolean {
     return this.hasSig && this.deps.audio.running;
   }
@@ -423,7 +452,7 @@ export class PlayerImpl implements Player {
     if (!view || this.disposed || this.lostMessage || !this.ctx) return null;
     if (this.deps.router.exporting) return null; // an export owns Host.signal right now
     if (this.keyDirty) {
-      const key = renderHash(view.graph, view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}`);
+      const key = renderHash(view.graph, view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}/${view.activeOutput ?? ''}`);
       this.keyDirty = false;
       if (key !== this.key) {
         this.key = key;
@@ -440,7 +469,7 @@ export class PlayerImpl implements Player {
     const upToDate = !this.dirty && this.shown && this.shownKey === this.key && this.shownFrame === this.frame && this.shownProxy >= proxy - 1e-6;
     if (upToDate) return null;
     if (!this.dirty && this.settledKey === this.key && this.settledFrame === this.frame && this.settledProxy >= proxy - 1e-6) return null;
-    return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key };
+    return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key, frameSpec: this.frameSpecFor(view) };
   }
 
   private async execute(job: Job): Promise<void> {
@@ -466,6 +495,7 @@ export class PlayerImpl implements Player {
         item: job.item,
         itemCount: job.itemCount,
         proxy: job.proxy,
+        canvas: job.frameSpec.canvas,
         quality: 'preview',
       });
     } catch (err) {
@@ -482,7 +512,10 @@ export class PlayerImpl implements Player {
         this.markChanged();
         return;
       }
-      const image: Shown = { texture: v.texture, width: v.width, height: v.height };
+      let shownValue: ImageValue | MaskValue = v;
+      const cf = job.frameSpec.conform;
+      if (cf) shownValue = conformImage(this.gpu, v, scaleSize(cf.size, job.proxy), cf.mode, cf.anchor);
+      const image: Shown = { texture: shownValue.texture, width: shownValue.width, height: shownValue.height };
       this.gpu.retain(image.texture); // held for the cache / the shown slot
       let kept = false;
       try {

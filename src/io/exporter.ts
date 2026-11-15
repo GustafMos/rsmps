@@ -31,6 +31,8 @@ import type { GraphDoc, ImageValue, MaskValue, NodeInstance } from '../engine/ty
 import type { ExportRequest, ExportedFile, Exporter } from './api';
 import type { AudioBridge } from './audio-bridge';
 import { fitAudio } from './audio-util';
+import { conformImage } from './frame-gpu';
+import { effectiveConform, isCustomFrame, readFrameParams, resolveFrame } from './frame';
 import { OffscreenPresenter } from './encode';
 import { SILENT_TRACKS, type SignalRouter } from './signals';
 import type { EvalGate } from './gate';
@@ -161,6 +163,7 @@ export class ExporterImpl implements Exporter {
       await yieldToEventLoop();
     }
     } finally {
+      this.releaseConformed();
       if (sigs) {
         sigs.endExport();
         await this.d.gate.clearEngine().catch(() => undefined); // drop frames rendered with export signals
@@ -339,9 +342,20 @@ export class ExporterImpl implements Exporter {
   }
 
   /** Evaluate the output node at `frame`. The result texture is only valid until the next evaluation: retain it. */
+  private conformed: GPUTexture | null = null;
+
+  private releaseConformed(): void {
+    if (this.conformed) this.d.gpu.release(this.conformed);
+    this.conformed = null;
+  }
+
   private async renderFrame(job: Job, run: Run, frame: number): Promise<Img> {
     const graph = run.req.graph;
+    this.releaseConformed();
+    const fp = readFrameParams(job.out.params);
+    const target = resolveFrame(graph.project, fp);
     const res = await this.d.gate.evaluate({
+      canvas: isCustomFrame(graph.project, target) ? target : undefined,
       graph,
       node: job.out.id,
       seconds: frame / graph.project.fps,
@@ -351,7 +365,16 @@ export class ExporterImpl implements Exporter {
       quality: 'final',
     });
     const v = res.value;
-    if (v && typeof v === 'object' && 'texture' in v) return v as Img;
+    if (v && typeof v === 'object' && 'texture' in v) {
+      const img = v as Img;
+      const out = conformImage(this.d.gpu, img, target, effectiveConform(fp), fp.conformAnchor);
+      if (out !== img) {
+        // Held until the next renderFrame (or the end of the run): callers retain it themselves while encoding.
+        this.d.gpu.retain(out.texture);
+        this.conformed = out.texture;
+      }
+      return out;
+    }
     const firstError = [...res.errors.values()][0];
     throw new Error(firstError ?? 'Nothing is connected to this output.');
   }
