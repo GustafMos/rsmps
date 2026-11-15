@@ -8,10 +8,18 @@
  * - Failures throw readable Errors; the engine shows them on the node.
  */
 import type { Gpu } from '../engine/gpu/gpu';
+import { uploadExternal } from './upload';
 import type { LiveSource } from '../engine/types';
 
 type UrlMode = 'auto' | 'image' | 'mjpeg' | 'video';
-export type LiveRequest = LiveSource & { freeze?: boolean; mode?: UrlMode; refresh?: number };
+export type LiveRequest = LiveSource & { freeze?: boolean };
+
+/** What the phone link offers `LiveSources` (see phone.ts). */
+export interface PhoneProvider {
+  source(token: string): { video: HTMLVideoElement | null; bitmap: ImageBitmap | null; version: number; state: 'waiting' | 'connected' | 'disconnected' | 'expired' } | null;
+  /** Explains why there is no session at all (LAN mode off, unknown token). */
+  unavailable(): string;
+}
 
 export interface LiveFrame {
   texture: GPUTexture;
@@ -25,6 +33,7 @@ export const IDLE_CLOSE_MS = 5000;
 
 /** Stable key of a source: what identifies one shared stream (freeze does not). */
 export function sourceKey(s: LiveRequest): string {
+  if (s.kind === 'phone') return `phone|${s.session}`;
   if (s.kind === 'camera') return `camera|${s.deviceId}|${s.width ?? 0}x${s.height ?? 0}|${s.facing ?? ''}`;
   return `url|${s.url}|${s.mode ?? 'auto'}|${s.mode === 'image' ? (s.refresh ?? 0) : 0}`;
 }
@@ -96,6 +105,7 @@ interface Entry {
   key: string;
   req: LiveRequest;
   el: HTMLVideoElement | HTMLImageElement;
+  phoneVersion: number;
   isVideo: boolean;
   stream: MediaStream | null;
   texture: GPUTexture | null;
@@ -116,6 +126,8 @@ export class LiveSources {
   private entries = new Map<string, Entry>();
   private sweeper: ReturnType<typeof setInterval> | null = null;
   private devicesListeners = new Set<() => void>();
+  /** Set by createIo when the phone link exists. */
+  phone: PhoneProvider | null = null;
 
   constructor(private gpu: Gpu) {}
 
@@ -133,6 +145,7 @@ export class LiveSources {
       this.ensureSweeper();
     }
     e.lastUsed = performance.now();
+    if (req.kind === 'phone') return this.phoneFrame(e, req.session, maxSide, !!req.freeze);
     if (e.error) {
       const err = e.error;
       this.close(e); // the next request retries from scratch
@@ -157,7 +170,11 @@ export class LiveSources {
   /* --------------------------------------- opening ------------------------------------------- */
 
   private open(key: string, req: LiveRequest): Entry {
-    const base = { key, req, stream: null, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', refreshTimer: null, rvfc: 0, closed: false } as const;
+    const base = { key, req, phoneVersion: -1, stream: null, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', refreshTimer: null, rvfc: 0, closed: false } as const;
+    if (req.kind === 'phone') {
+      const e: Entry = { ...base, el: document.createElement('video'), isVideo: false, ready: Promise.resolve() };
+      return e;
+    }
     if (req.kind === 'camera') {
       const video = document.createElement('video');
       video.muted = true;
@@ -287,22 +304,44 @@ export class LiveSources {
       e.frame = { texture: e.texture, width, height };
     }
     try {
-      let source: ImageBitmap | HTMLVideoElement | HTMLImageElement = el;
-      let bmp: ImageBitmap | null = null;
-      if (width !== nw || height !== nh) {
-        bmp = await createImageBitmap(el, { resizeWidth: width, resizeHeight: height, resizeQuality: 'low' });
-        source = bmp;
-      }
-      try {
-        this.gpu.device.queue.copyExternalImageToTexture({ source }, { texture: e.texture, premultipliedAlpha: true }, [width, height]);
-      } finally {
-        bmp?.close();
-      }
+      await uploadExternal(this.gpu.device, el, e.texture, width, height, { width: nw, height: nh });
     } catch (err) {
       const name = (err as { name?: string })?.name;
       if (e.req.kind === 'url' && (name === 'SecurityError' || /tainted|cross-origin/i.test(String(err)))) throw new Error(corsMessage(e.req.url));
       throw new Error(`The live picture could not be read (${(err as Error)?.message ?? String(err)}).`);
     }
+    e.uploadedBucket = bucket;
+    return e.frame;
+  }
+
+  /** The phone's video (WebRTC) or its latest JPEG frame, uploaded like the camera path. */
+  private async phoneFrame(e: Entry, token: string, maxSide: number, freeze: boolean): Promise<LiveFrame | null> {
+    const src = this.phone?.source(token) ?? null;
+    if (!src) throw new Error(this.phone?.unavailable() ?? 'The phone link is not available.');
+    if (src.state === 'expired') throw new Error('The phone link expired. Make a new QR code.');
+    if (src.state === 'waiting') throw new Error('Waiting for the phone: scan the QR code and open the link on it.');
+    if (src.state === 'disconnected' && !src.bitmap && !(src.video && src.video.readyState >= 2)) throw new Error('The phone disconnected. Open the link on it again.');
+    if (freeze && e.frame) return e.frame;
+    const video = src.video && src.video.readyState >= 2 && src.video.videoWidth > 0 ? src.video : null;
+    const el = video ?? src.bitmap;
+    if (!el) return e.frame;
+    const nw = video ? video.videoWidth : (el as ImageBitmap).width;
+    const nh = video ? video.videoHeight : (el as ImageBitmap).height;
+    const { width, height } = targetSize(nw, nh, maxSide, this.gpu.device.limits.maxTextureDimension2D);
+    const bucket = `${width}x${height}`;
+    if (e.frame && src.version === e.phoneVersion && bucket === e.uploadedBucket) return e.frame;
+    if (!e.texture || e.texture.width !== width || e.texture.height !== height) {
+      if (e.texture) this.gpu.release(e.texture);
+      e.texture = this.gpu.acquire(width, height, 'rgba8unorm');
+      this.gpu.retain(e.texture);
+      e.frame = { texture: e.texture, width, height };
+    }
+    try {
+      await uploadExternal(this.gpu.device, el, e.texture, width, height, { width: nw, height: nh });
+    } catch (err) {
+      throw new Error(`The phone picture could not be read (${(err as Error)?.message ?? String(err)}).`);
+    }
+    e.phoneVersion = src.version;
     e.uploadedBucket = bucket;
     return e.frame;
   }

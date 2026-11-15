@@ -16,6 +16,7 @@ import { listVideoInputs, onVideoDevicesChanged } from './live';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { ProjectStoreImpl } from './projects';
+import { PhoneLink } from './phone';
 import { RecordingController } from './recording';
 import { SignalRouter } from './signals';
 import { ScanImpl } from './scan';
@@ -57,6 +58,9 @@ export const createIo: CreateIo = async () => {
   library.subscribe(() => player.invalidate());
 
   const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router });
+  const phone = new PhoneLink();
+  await phone.init();
+  library.live.phone = phone;
   const recording = new RecordingController(audio, player, library);
   const plugins = new PluginManagerImpl(registry);
   const purgeOwned = (id: string, kind: 'graph' | 'scan') => {
@@ -93,6 +97,7 @@ export const createIo: CreateIo = async () => {
         decodedMediaBytes: library.decodedBytes(),
       };
     },
+    phone,
     devices: {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),
       onChanged: (l) => {

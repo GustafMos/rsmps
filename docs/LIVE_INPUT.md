@@ -42,3 +42,53 @@ Run a phone app that serves MJPEG or snapshots over the LAN ("IP Webcam" style) 
 The player gives each live node a hidden `liveTick` value that grows with every render, so the evaluation
 cache cannot serve a frozen picture, and while paused it keeps re-rendering at the project fps as long as a live node
 feeds the viewed node. The RAM frame cache is bypassed for such graphs.
+
+## Phone as a camera (QR)
+
+Use a phone as a live camera without any app: scan a QR code, allow the camera, and the picture appears in the
+**Phone Camera** node (`phone-camera`). It only works when you run the suite locally in LAN mode; it does not work on the
+hosted (GitHub Pages) build.
+
+### Steps
+
+1. Stop the normal dev server and start the LAN one: `npm run dev:lan`. It prints the addresses (for example
+   `https://192.168.0.5:5173/`). Open that address on the computer (not `localhost`, so the phone can reach the same origin).
+2. Add a **Phone Camera** node, open its inspector and press **Link a phone**. A QR code appears.
+3. Scan it with the phone's camera app and open the link. The phone shows a warning that the connection is not private:
+   choose **Advanced**, then **Proceed**. This is your own computer's self-signed certificate.
+4. Allow the camera. The phone shows a big status line; when it says "Sending your camera" the picture is in the node.
+   The phone page can switch camera (rear by default), change resolution and toggle the torch where supported, and keeps the
+   screen awake. It reconnects by itself after a network hiccup.
+5. **Disconnect** in the inspector (or close the phone page) ends the session. Sessions live in memory: after reloading the app
+   make a new QR code.
+
+### Requirements and limits
+
+- **Same Wi-Fi / network.** Both devices must be on the same network. Guest Wi-Fi often has "client isolation" (AP isolation)
+  which blocks phone-to-computer traffic: use the normal network or a phone hotspot the computer joins.
+- **https is required by phones** for camera access, which is why LAN mode uses a self-signed certificate.
+- **Video travels with WebRTC** (peer to peer on the LAN, host candidates only: no STUN/TURN server is configured and nothing
+  leaves your network). If WebRTC does not connect within about 4 seconds the phone sends JPEG frames through the dev server
+  instead (lower frame rate and quality, but it works through more networks).
+- Live preview only, like the other live inputs: record it before you export.
+
+### Security notes
+
+- It is **opt-in**: plain `npm run dev` is unchanged (http, localhost only).
+- While `npm run dev:lan` runs, **the dev server (and your project's source) is reachable by every device on the network.**
+  Only use it on a network you trust, and stop it when you are done.
+- A pairing token is 128 bits of randomness made on the computer and embedded in the QR code. It is single use: one phone per
+  token, it expires 5 minutes after it was made if nobody joined, it ends when the computer page closes, and a wrong token
+  is rejected. The server only relays messages between the two sides; it stores nothing and writes nothing to disk.
+- Anyone who sees the QR code while it is valid (a screenshot, a shoulder surfer) could join first. Disconnect when finished.
+
+### Troubleshooting
+
+- **Windows firewall prompt:** when Node asks for network access, allow it on **private networks**. Without that the phone
+  cannot reach the computer.
+- **The phone cannot open the address:** check it is on the same Wi-Fi, that the address in the QR code is the computer's
+  LAN address, and that no VPN is taking over the route. If the computer has several addresses, the app puts the one of the
+  page you opened into the code (open the app via the LAN address you want).
+- **"Waiting for the phone" never ends:** the certificate warning page may still be open on the phone; proceed past it.
+- **Picture stutters:** you are probably in the JPEG fallback (the phone page says "fallback mode"); lower the resolution on
+  the phone page or use a network without client isolation.

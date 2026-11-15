@@ -23,9 +23,10 @@ export class OffscreenPresenter {
     private gpu: Gpu,
     opaque: boolean,
   ) {
+    if (typeof OffscreenCanvas === 'undefined') throw new Error('This browser has no OffscreenCanvas, which exporting needs.');
     this.canvas = new OffscreenCanvas(1, 1);
     const ctx = this.canvas.getContext('webgpu');
-    if (!ctx) throw new Error('Could not create a WebGPU canvas for encoding.');
+    if (!ctx) throw new Error('This browser cannot create a WebGPU canvas on an OffscreenCanvas (needed to encode pictures).');
     this.ctx = ctx as unknown as GPUCanvasContext;
     this.ctx.configure({
       device: gpu.device,
@@ -46,6 +47,56 @@ export class OffscreenPresenter {
   }
 }
 
+let directBlobOk = true;
+let directFrameOk = true;
+let scratch: OffscreenCanvas | null = null;
+
+/** A 2D copy of the (WebGPU) canvas, made synchronously: the texture is gone after the task ends. */
+function copyTo2d(canvas: OffscreenCanvas): OffscreenCanvas {
+  const copy = (scratch ??= new OffscreenCanvas(canvas.width, canvas.height));
+  if (copy.width !== canvas.width || copy.height !== canvas.height) {
+    copy.width = canvas.width;
+    copy.height = canvas.height;
+  }
+  const ctx = copy.getContext('2d');
+  if (!ctx) throw new Error('This browser has no 2D canvas to encode pictures with.');
+  ctx.clearRect(0, 0, copy.width, copy.height);
+  ctx.drawImage(canvas, 0, 0);
+  return copy;
+}
+
+/**
+ * Draw `image` and encode it as PNG/WebP/JPEG. Uses convertToBlob on the WebGPU canvas (fast); browsers that cannot do that
+ * get the picture copied into a 2D canvas first (remembered after the first failure).
+ */
+export async function presentToBlob(p: OffscreenPresenter, image: Drawable, mime = 'image/png', quality?: number): Promise<Blob> {
+  if (directBlobOk) {
+    const canvas = p.present(image);
+    try {
+      const blob = await canvas.convertToBlob({ type: mime, quality });
+      if (blob.size > 0) return blob;
+    } catch {
+      /* fall through to the 2D path */
+    }
+    directBlobOk = false;
+  }
+  const copy = copyTo2d(p.present(image));
+  return copy.convertToBlob({ type: mime, quality });
+}
+
+/** A VideoFrame of the canvas just drawn. Must be called in the same task as `present`. */
+export function frameFromCanvas(canvas: OffscreenCanvas, init: VideoFrameInit): VideoFrame {
+  if (typeof VideoFrame === 'undefined') throw new Error('This browser has no WebCodecs VideoFrame, so video export is unavailable. Use a current Chrome or Edge, or export an image sequence.');
+  if (directFrameOk) {
+    try {
+      return new VideoFrame(canvas, init);
+    } catch {
+      directFrameOk = false; // a WebGPU canvas is not accepted as a VideoFrame source here
+    }
+  }
+  return new VideoFrame(copyTo2d(canvas), init);
+}
+
 export async function imageToBlob(
   gpu: Gpu,
   image: Drawable,
@@ -53,7 +104,5 @@ export async function imageToBlob(
   quality?: number,
   presenter?: OffscreenPresenter,
 ): Promise<Blob> {
-  const p = presenter ?? new OffscreenPresenter(gpu, mime === 'image/jpeg');
-  const canvas = p.present(image);
-  return canvas.convertToBlob({ type: mime, quality });
+  return presentToBlob(presenter ?? new OffscreenPresenter(gpu, mime === 'image/jpeg'), image, mime, quality);
 }

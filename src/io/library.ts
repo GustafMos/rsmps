@@ -23,6 +23,7 @@ import type { LibraryAsset, MediaLibrary } from './api';
 import { encodeWav } from './wav';
 import { idbAll, idbDelete, idbPut } from './db';
 import type { SignalRouter } from './signals';
+import { uploadExternal } from './upload';
 import { TimedFrameStore } from './lru';
 import { cssFont, wrapLines } from './text';
 import { errorMessage, uniqueId } from './util';
@@ -197,37 +198,12 @@ class VideoReader {
   async upload(sample: VideoSample, width: number, height: number, texture: GPUTexture, device: GPUDevice): Promise<void> {
     const dw = sample.displayWidth;
     const dh = sample.displayHeight;
-    const dest = { texture, premultipliedAlpha: true };
     const plain = sample.rotation === 0 && !sample.flip;
     if (plain) {
       const vf = sample.toVideoFrame();
       try {
         if (vf.displayWidth === dw && vf.displayHeight === dh) {
-          if (width === dw && height === dh && videoFrameUploadOk) {
-            try {
-              device.queue.copyExternalImageToTexture({ source: vf }, dest, [width, height]);
-              return;
-            } catch (err) {
-              // Some browsers (Firefox) do not accept a VideoFrame here: go through an ImageBitmap from now on.
-              if (!(err instanceof TypeError)) throw err;
-              videoFrameUploadOk = false;
-            }
-          }
-          if (width === dw && height === dh) {
-            const same = await createImageBitmap(vf);
-            try {
-              device.queue.copyExternalImageToTexture({ source: same }, dest, [width, height]);
-            } finally {
-              same.close();
-            }
-            return;
-          }
-          const bmp = await createImageBitmap(vf, { resizeWidth: width, resizeHeight: height, resizeQuality: 'low' });
-          try {
-            device.queue.copyExternalImageToTexture({ source: bmp }, dest, [width, height]);
-          } finally {
-            bmp.close();
-          }
+          await uploadExternal(device, vf, texture, width, height, { width: dw, height: dh });
           return;
         }
       } finally {
@@ -243,7 +219,7 @@ class VideoReader {
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, width, height);
     sample.draw(ctx, 0, 0, width, height);
-    device.queue.copyExternalImageToTexture({ source: canvas }, dest, [width, height]);
+    await uploadExternal(device, canvas, texture, width, height);
   }
 
   async thumbnail(t: number, side: number): Promise<Blob | null> {
@@ -277,7 +253,6 @@ class VideoReader {
 /* ---------------------------------------------------------------------------------------------- */
 
 /** False once the browser has refused a VideoFrame as a texture source (then frames go through ImageBitmap). */
-let videoFrameUploadOk = true;
 
 export class Library implements MediaLibrary {
   private infos = new Map<string, AssetInfo>();

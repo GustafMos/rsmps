@@ -300,6 +300,35 @@ export interface DeviceApi {
   onChanged(listener: () => void): () => void;
 }
 
+/** State of a phone link session (QR code). */
+export type PhoneState = 'waiting' | 'connected' | 'disconnected' | 'expired';
+
+export interface PhoneSessionInfo {
+  /** 128-bit random pairing token (32 hex digits). Store it in the Phone Camera node's `session` param. */
+  token: string;
+  /** The address inside the QR code: https://<lan-address>:<port>/phone?token=… */
+  url: string;
+  /** Inline SVG of the QR code (give it a CSS width). */
+  qrSvg: string;
+  /** ms since epoch: an unused session expires then (5 minutes). */
+  expiresAt: number;
+}
+
+/**
+ * Use a phone as a live camera (opt-in LAN mode, `npm run dev:lan`). UI: if `available` is false show how to enable it
+ * (the node's own error says the same); otherwise `createSession()`, show the QR code with this note next to it: "Your phone
+ * will warn that the connection is not private: choose Advanced, then Proceed. This is your own computer.", show `state`,
+ * and offer Disconnect (`close`). Sessions live in memory: after a page reload the QR code must be made again.
+ */
+export interface PhoneApi {
+  /** True when the dev server runs in LAN mode (https, reachable from the network). Decided once at start-up. */
+  available: boolean;
+  createSession(): Promise<PhoneSessionInfo>;
+  state(token: string): PhoneState;
+  onState(listener: (token: string, state: PhoneState) => void): () => void;
+  close(token: string): void;
+}
+
 export interface MemoryInfo {
   /** Engine node-result cache (read from a private counter: best effort). */
   engineCacheBytes: number;
@@ -324,6 +353,8 @@ export interface Io {
   audio: AudioApi;
   /** Hardware lists. Camera names appear after the user granted camera permission (before that: "Camera 1"…). */
   devices: DeviceApi;
+  /** Phone as a camera through a QR code (LAN mode only). */
+  phone: PhoneApi;
   /**
    * Switch the live project to tab `id` and release the old one's memory: flushes its pending save, pauses the
    * player and stops audio, clears the engine cache, the player's frame cache and pooled GPU textures, and drops decoded

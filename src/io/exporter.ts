@@ -34,7 +34,7 @@ import { fitAudio } from './audio-util';
 import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
 import { encodeWav } from './wav';
-import { OffscreenPresenter } from './encode';
+import { OffscreenPresenter, frameFromCanvas, presentToBlob } from './encode';
 import { SILENT_TRACKS, type SignalRouter } from './signals';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
@@ -491,8 +491,7 @@ export class ExporterImpl implements Exporter {
     try {
       const mime = MIME[p.imageFormat];
       // present() and convertToBlob() must run in the same task: no await between them.
-      const canvas = this.presenter(p.imageFormat === 'jpeg').present(comp.drawable);
-      return await canvas.convertToBlob({ type: mime, quality: p.imageFormat === 'png' ? undefined : p.quality });
+      return await presentToBlob(this.presenter(p.imageFormat === 'jpeg'), comp.drawable, mime, p.imageFormat === 'png' ? undefined : p.quality);
     } finally {
       comp.release();
       gpu.release(img.texture);
@@ -610,7 +609,7 @@ export class ExporterImpl implements Exporter {
   }
 
   private presenterBlob(img: { texture: GPUTexture; width: number; height: number }, mime: string): Promise<Blob> {
-    return this.presenter(false).present(img).convertToBlob({ type: mime });
+    return presentToBlob(this.presenter(false), img, mime);
   }
 
   /* ------------------------------------- print sheets ------------------------------------------- */
@@ -711,7 +710,7 @@ export class ExporterImpl implements Exporter {
           }
           // present() and VideoFrame creation must happen in the same task.
           const canvas = presenter.present(comp.drawable);
-          const vf = new VideoFrame(canvas, { timestamp: Math.round((f / fps) * 1e6), duration: Math.round(1e6 / fps) });
+          const vf = frameFromCanvas(canvas, { timestamp: Math.round((f / fps) * 1e6), duration: Math.round(1e6 / fps) });
           const sample = new VideoSample(vf);
           try {
             await videoSource!.add(sample);

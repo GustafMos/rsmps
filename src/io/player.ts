@@ -15,7 +15,7 @@ import type { GraphDoc, ImageValue, MaskValue } from '../engine/types';
 import type { Player, PlayerState } from './api';
 import type { AudioBridge } from './audio-bridge';
 import { ProxyController, frameAtTime } from './clock';
-import { OffscreenPresenter } from './encode';
+import { OffscreenPresenter, presentToBlob } from './encode';
 import { RenderedFrameCache } from './frame-cache';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
@@ -296,8 +296,7 @@ export class PlayerImpl implements Player {
     this.gpu.retain(img.texture);
     try {
       this.snapshotPresenter ??= new OffscreenPresenter(this.gpu, false);
-      const canvas = this.snapshotPresenter.present(img);
-      return await canvas.convertToBlob({ type: 'image/png' });
+      return await presentToBlob(this.snapshotPresenter, img, 'image/png');
     } catch (err) {
       console.warn('Snapshot failed:', err);
       return null;
