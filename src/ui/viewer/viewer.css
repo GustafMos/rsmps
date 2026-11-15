@@ -15,7 +15,7 @@
   background-image: repeating-conic-gradient(#b9b9b9 0% 25%, #e8e8e8 0% 50%);
   background-size: 16px 16px;
 }
-.rs-viewer__canvas { display: block; image-rendering: pixelated; }
+.rs-viewer__canvas { display: block; image-rendering: auto; }
 .rs-viewer__chip {
   position: absolute; z-index: 5; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); height: 32px;
   background: var(--bg-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-hard-sm); font-size: var(--fs-sm); cursor: default;
@@ -49,3 +49,10 @@
 .rs-viewer__frame { right: var(--s-2); top: 44px; padding: 0 var(--s-1) 0 var(--s-2); gap: var(--s-2); }
 .rs-viewer__fname { color: var(--text-faint); font-size: var(--fs-xs); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rs-viewer__preset { height: 24px; width: 120px; }
+
+.rs-viewer__actual { height: 24px; padding: 0 var(--s-2); font-family: var(--font-mono); font-weight: 700; }
+.rs-viewer__fitbtn, .rs-viewer__tools .rs-btn--ghost:not(.rs-btn--icon) { height: 24px; padding: 0 var(--s-2); font-size: var(--fs-xs); }
+.rs-viewer__scaled { left: 50%; bottom: var(--s-3); transform: translateX(-50%); color: var(--yellow); border-color: var(--yellow); background: #2a2208; }
+.rs-loupe { position: absolute; z-index: 8; border: 2px solid #fff; outline: 1px solid #000; box-shadow: 3px 3px 0 #0008; image-rendering: pixelated; pointer-events: none; }
+.rs-viewer__pix { right: var(--s-2); top: 80px; padding: 0 var(--s-1) 0 var(--s-2); gap: var(--s-2); }
+.rs-viewer__pix .rs-btn--icon { width: 24px; min-width: 24px; height: 24px; }

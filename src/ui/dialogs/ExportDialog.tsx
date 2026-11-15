@@ -1,72 +1,36 @@
-import { useRef, useState } from 'react';
-import { batchCount, outputNodes } from '../../engine/graph';
+import { batchCount, enabledOutputs, outputNodes } from '../../engine/graph';
 import { CheckField } from '../components/fields';
 import { useApp, useEd } from '../store/context';
+import { frameSize, hasFrameParams } from '../viewer/FrameControl';
+import { KIND_SHORT, describeOutput, hasKind, kindOptions } from '../lib/outputInfo';
 import { Dialog } from './Dialog';
 
+/** Export dialog. The per-output checkboxes ARE the outputs' `enabled` param, so the choice lives in the project. */
 export function ExportDialog() {
   const { io, ed } = useApp();
   const graph = useEd((s) => s.graph);
-  const selection = useEd((s) => s.selection);
   const item = useEd((s) => s.item);
+  const projectId = useEd((s) => s.activeProject);
   const outputs = outputNodes(graph, io.registry);
+  const enabled = enabledOutputs(graph, io.registry);
   const count = batchCount(graph, io.registry);
-  const [chosen, setChosen] = useState<Set<string>>(() => new Set(outputs.map((o) => o.id)));
-  const [items, setItems] = useState<'current' | 'all'>(count > 1 ? 'all' : 'current');
-  const [zip, setZip] = useState(true);
-  const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
-  const abort = useRef<AbortController | null>(null);
-  const running = progress !== null;
+  const prefs = ed.exportPrefs(projectId);
+  const items = count > 1 ? prefs.items : 'current';
 
-  const selectedOutputs = outputs.filter((o) => selection.includes(o.id));
-  const toggle = (id: string) =>
-    setChosen((c) => {
-      const n = new Set(c);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-
-  const start = async () => {
-    const ac = new AbortController();
-    abort.current = ac;
-    setProgress({ fraction: 0, label: 'Starting…' });
-    try {
-      const files = await io.exporter.run({
-        graph,
-        outputs: chosen.size === outputs.length ? [] : [...chosen],
-        items,
-        item,
-        zip,
-        signal: ac.signal,
-        onProgress: (p) => setProgress({ fraction: p.fraction, label: p.label }),
-      });
-      if (ac.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-      io.exporter.download(files);
-      ed.toast(`Exported ${files.length} file${files.length === 1 ? '' : 's'}`, 'ok');
-      ed.openDialog(null);
-    } catch (err) {
-      if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) ed.toast('Export cancelled', 'info');
-      else ed.toast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
-      setProgress(null);
-    } finally {
-      abort.current = null;
-    }
-  };
-
-  const close = () => {
-    abort.current?.abort();
+  const start = () => {
     ed.openDialog(null);
+    void ed.runExport([], items, prefs.zip);
   };
 
   return (
     <Dialog
       title="Export"
-      onClose={close}
+      onClose={() => ed.openDialog(null)}
       footer={
         <>
-          <button className="rs-btn" onClick={close}>{running ? 'Cancel' : 'Close'}</button>
-          <button className="rs-btn rs-btn--primary" onClick={start} disabled={running || chosen.size === 0}>
-            Export {chosen.size} output{chosen.size === 1 ? '' : 's'}
+          <button className="rs-btn" onClick={() => ed.openDialog(null)}>Close</button>
+          <button className="rs-btn rs-btn--primary" onClick={start} disabled={enabled.length === 0}>
+            Export {enabled.length} output{enabled.length === 1 ? '' : 's'}
           </button>
         </>
       }
@@ -77,36 +41,40 @@ export function ExportDialog() {
         <>
           <div className="rs-dlg__sec">
             <div className="rs-dlg__row">
-              <span className="rs-caps">Outputs</span>
+              <span className="rs-caps">Outputs to export</span>
               <span className="rs-dlg__spacer" />
-              <button className="rs-btn rs-btn--ghost" disabled={running} onClick={() => setChosen(new Set(outputs.map((o) => o.id)))}>All</button>
-              <button className="rs-btn rs-btn--ghost" disabled={running || !selectedOutputs.length} onClick={() => setChosen(new Set(selectedOutputs.map((o) => o.id)))}>Selected</button>
+              <button className="rs-btn rs-btn--ghost" onClick={() => outputs.forEach((o) => ed.setParam(o.id, 'enabled', true))}>All on</button>
+              <button className="rs-btn rs-btn--ghost" onClick={() => outputs.forEach((o) => ed.setParam(o.id, 'enabled', false))}>All off</button>
             </div>
             <div className="rs-dlg__list">
-              {outputs.map((o) => (
-                <CheckField key={o.id} value={chosen.has(o.id)} onChange={() => toggle(o.id)} label={o.label || io.registry.get(o.type)?.title || o.type} disabled={running} />
-              ))}
+              {outputs.map((o) => {
+                const def = io.registry.get(o.type);
+                const fs = hasFrameParams(def) ? frameSize(graph.project, o) : null;
+                const px = Number(o.params.pixelSize ?? 1);
+                return (
+                  <div key={o.id} className="rs-exp__row">
+                    <CheckField value={o.params.enabled !== false} onChange={(v) => ed.setParam(o.id, 'enabled', v)} label={o.label || def?.title || o.type} />
+                    {def && hasKind(def) && <select className="rs-select rs-side__kind" value={String(o.params.kind ?? 'auto')} aria-label="Export type" onChange={(e) => ed.setParam(o.id, 'kind', e.target.value)}>{kindOptions(def).map((k) => <option key={k.value} value={k.value}>{KIND_SHORT[k.value] ?? k.label}</option>)}</select>}
+                    <span className="rs-exp__info rs-num">
+                      {def ? describeOutput(def, o, graph.project) : ''}
+                      {fs ? '' : ''}
+                      {px > 1 ? ` · pixel ${px}×` : ''}
+                      {o.bypass ? ' · bypassed' : ''}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <div className="rs-dlg__sec">
             <span className="rs-caps">What to render</span>
             <div className="rs-dlg__seg">
-              <button className={`rs-btn${items === 'current' ? ' is-on' : ''}`} disabled={running} onClick={() => setItems('current')}>Current item{count > 1 ? ` (${item + 1})` : ''}</button>
-              <button className={`rs-btn${items === 'all' ? ' is-on' : ''}`} disabled={running || count < 2} onClick={() => setItems('all')}>Whole batch{count > 1 ? ` (${count})` : ''}</button>
+              <button className={`rs-btn${items === 'current' ? ' is-on' : ''}`} onClick={() => ed.setExportPrefs(projectId, { items: 'current' })}>Current item{count > 1 ? ` (${item + 1})` : ''}</button>
+              <button className={`rs-btn${items === 'all' ? ' is-on' : ''}`} disabled={count < 2} onClick={() => ed.setExportPrefs(projectId, { items: 'all' })}>Whole batch{count > 1 ? ` (${count})` : ''}</button>
             </div>
-            <CheckField value={zip} onChange={setZip} label="Pack into a ZIP when there is more than one file" disabled={running} />
+            <CheckField value={prefs.zip} onChange={(v) => ed.setExportPrefs(projectId, { zip: v })} label="Pack into a ZIP when there is more than one file" />
+            <p className="rs-dlg__note">These choices are remembered for this project.</p>
           </div>
-          {progress && (
-            <div className="rs-dlg__progress">
-              <div className="rs-dlg__bar"><div style={{ width: `${Math.round(progress.fraction * 100)}%` }} /></div>
-              <div className="rs-dlg__row">
-                <span className="rs-mono">{progress.label}</span>
-                <span className="rs-dlg__spacer" />
-                <span className="rs-num">{Math.round(progress.fraction * 100)}%</span>
-                <button className="rs-btn rs-btn--danger" onClick={() => abort.current?.abort()}>Cancel</button>
-              </div>
-            </div>
-          )}
         </>
       )}
     </Dialog>

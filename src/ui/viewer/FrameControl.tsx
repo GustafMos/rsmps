@@ -4,6 +4,8 @@ import { Icon } from '../components/Icon';
 import { resolveActiveOutput } from '../store/editor';
 import { useApp, useEd } from '../store/context';
 
+const PIXEL_STEPS = [1, 2, 3, 4, 6, 8, 10, 12, 16, 24, 32];
+
 /** Does this output node carry the Frame params (frame + orientation)? Generic: found by param names. */
 export function hasFrameParams(def: AnyNodeDef | undefined): boolean {
   return !!def && def.category === 'output' && 'frame' in def.params && 'orientation' in def.params;
@@ -28,7 +30,16 @@ export function FrameControl() {
   const options = ((def.params as Record<string, ParamDef>).frame as unknown as { options: { value: string; label: string }[] }).options;
   const portrait = size.height > size.width;
   const name = node.label || def.title;
+  const hasPix = 'pixelSize' in (def.params as object);
+  const px = Math.max(1, Math.round(Number(node.params.pixelSize ?? 1)));
+  const stepPix = (dir: 1 | -1) => {
+    const i = PIXEL_STEPS.findIndex((v) => v >= px);
+    const cur = i < 0 ? PIXEL_STEPS.length - 1 : i;
+    const next = dir > 0 ? (PIXEL_STEPS[cur] > px ? cur : cur + 1) : cur - 1;
+    ed.setParam(node.id, 'pixelSize', PIXEL_STEPS[Math.max(0, Math.min(PIXEL_STEPS.length - 1, next))]);
+  };
   return (
+    <>
     <div className="rs-viewer__frame rs-viewer__chip" data-nodrag title={`Frame of the active output "${name}". The project canvas is the default; each Output can override it.`}>
       <span className="rs-viewer__fname">{name}</span>
       <span className="rs-num">{size.width}×{size.height}</span>
@@ -48,5 +59,15 @@ export function FrameControl() {
         ))}
       </select>
     </div>
+    {hasPix && (
+      <div className="rs-viewer__pix rs-viewer__chip" data-nodrag title="Final pixel size of the export: every art pixel becomes this many output pixels">
+        <span className="rs-viewer__fname">Pixel size</span>
+        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => stepPix(-1)} aria-label="Smaller pixels">−</button>
+        <span className="rs-num">{px}×</span>
+        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => stepPix(1)} aria-label="Bigger pixels">+</button>
+        <span className="rs-num rs-viewer__fname">{Math.max(1, Math.floor(size.width / px))}×{Math.max(1, Math.floor(size.height / px))} art px</span>
+      </div>
+    )}
+    </>
   );
 }

@@ -1,7 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORIES } from '../../engine/types';
 import type { AnyNodeDef, InputSchema, NodeInstance, OutputSchema, ParamDef, SocketType } from '../../engine/types';
-import { Icon } from '../components/Icon';
+import { Icon, type IconName } from '../components/Icon';
+import { KIND_ICON, kindOptions } from '../lib/outputInfo';
 import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
 import { hexOf } from '../lib/drag';
@@ -42,6 +43,8 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   const layout = layoutNode(node, def, def ? undefined : parsePortSignature(portSig), hint, counts);
   const [renaming, setRenaming] = useState(false);
   const kbd = useKeyboardTarget() === node.id;
+  const hasEnabled = !!def && def.category === 'output' && 'enabled' in def.params;
+  const exportOff = hasEnabled && node.params.enabled === false;
   const el = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,10 +75,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   return (
     <div
       ref={el}
-      className={`rs-node${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}`}
+      className={`rs-node${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}${exportOff ? ' is-notexported' : ''}`}
       data-node-id={node.id}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: layout.width, height: layout.height, ['--cat' as string]: catColor(def) }}
     >
+      {exportOff && <span className="rs-node__off">not exported</span>}
       {kbd && <span className="rs-node__kbd" title="Computer keys play this node. Esc or deselect to release.">Keyboard plays this node</span>}
       <div className="rs-node__head" data-node-head>
         <button
@@ -116,6 +120,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
           </span>
         )}
         {debug && <NodeTiming id={node.id} />}
+        {hasEnabled && (
+          <button className={`rs-node__hbtn rs-node__exp${exportOff ? '' : ' is-on'}`} data-nodrag title={exportOff ? 'Not exported: click to include in export' : 'Included in export: click to skip'} onClick={() => ed.setParam(node.id, 'enabled', exportOff)}>
+            <Icon name="check" size={13} />
+          </button>
+        )}
         <button
           className={`rs-node__hbtn${node.bypass ? ' is-on' : ''}`}
           data-nodrag
@@ -157,6 +166,18 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
     </div>
   );
 });
+
+function KindSelect({ node }: { node: NodeInstance }) {
+  const { ed } = useApp();
+  const def = useDef(node.type)!;
+  const value = String(node.params.kind ?? 'auto');
+  return (
+    <div className="rs-nodekind" data-nodrag>
+      <Icon name={(KIND_ICON as Record<string, IconName>)[value] ?? 'file'} size={14} />
+      <SelectField value={value} options={kindOptions(def)} onChange={(v) => ed.setParam(node.id, 'kind', v)} label="Export type" title="What this output writes" />
+    </div>
+  );
+}
 
 function NodeTiming({ id }: { id: string }) {
   const t = usePlayer((s) => s.timings.get(id));
@@ -211,6 +232,13 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
       <button className="rs-row rs-row--more" data-nodrag style={{ top: row.y, height: ROW_H }} onClick={() => ed.select([node.id])} title="Open the inspector for all parameters">
         {row.count} more…
       </button>
+    );
+  }
+  if (row.kind === 'kind') {
+    return (
+      <div className="rs-row" style={{ top: row.y, height: ROW_H + 2 }}>
+        <KindSelect node={node} />
+      </div>
     );
   }
   if (row.kind === 'layers') {

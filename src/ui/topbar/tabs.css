@@ -1,0 +1,17 @@
+.rs-tabs { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 32px; padding: 0 var(--s-2); background: var(--bg-1); border-bottom: 1px solid var(--line-strong); overflow-x: auto; overflow-y: visible; flex: none; scrollbar-width: none; }
+.rs-tab { position: relative; display: flex; align-items: center; gap: var(--s-1); height: 28px; max-width: 220px; min-width: 96px; padding: 0 var(--s-1) 0 var(--s-3); background: var(--bg-2); border: 1px solid var(--line); border-bottom: 0; border-radius: var(--r) var(--r) 0 0; color: var(--text-dim); cursor: pointer; flex: none; }
+.rs-tab:hover { background: var(--bg-3); color: var(--text); }
+.rs-tab.is-active { background: var(--bg-3); color: var(--text); border-color: var(--line-strong); box-shadow: inset 0 2px 0 var(--accent-hi); height: 30px; }
+.rs-tab__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.rs-tab__dot { width: 7px; height: 7px; background: var(--yellow); flex: none; margin-left: -4px; }
+.rs-tab__x { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; background: transparent; border: 0; color: var(--text-faint); border-radius: var(--r); flex: none; }
+.rs-tab__x:hover { background: var(--danger-bg); color: var(--danger); }
+.rs-tab__rename { flex: 1; min-width: 0; height: 22px; background: var(--bg-0); border: 1px solid var(--accent-hi); padding: 0 4px; font-size: var(--fs-sm); }
+.rs-tabs__new { align-self: center; width: 24px; min-width: 24px; height: 24px; flex: none; }
+.rs-tabs__mem { margin-left: auto; align-self: center; font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; padding-left: var(--s-2); flex: none; }
+.rs-tab__tip { position: fixed; top: 76px; z-index: 1100; width: 200px; padding: var(--s-2); display: flex; flex-direction: column; gap: 4px; background: var(--bg-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-hard); font-size: var(--fs-xs); color: var(--text-dim); pointer-events: none; }
+.rs-tab__tip img { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: var(--bg-0) var(--dither); image-rendering: pixelated; }
+.rs-tab__nothumb { aspect-ratio: 16 / 10; display: grid; place-items: center; background: var(--bg-0) var(--dither); color: var(--text-faint); }
+.rs-tab__tip strong { color: var(--text); font-size: var(--fs-sm); }
+.rs-switching { position: fixed; inset: 0; z-index: 1600; display: grid; place-items: center; background: #000000a0; background-image: var(--dither); cursor: progress; }
+.rs-switching > div { padding: var(--s-4) var(--s-6); background: var(--bg-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-hard); font-size: var(--fs-md); }

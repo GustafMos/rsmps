@@ -125,33 +125,38 @@ export const COMMANDS: Command[] = [
   { id: 'view.palette', label: 'Palette Studio', group: 'View', defaults: [], run: ({ app }) => { app.ed.studioTarget = null; app.ed.openDialog('palette'); } },
 
   { id: 'file.export', label: 'Export…', group: 'File', defaults: ['Ctrl+E'], run: (c) => c.app.ed.openDialog('export') },
+  { id: 'tab.new', label: 'New project tab', group: 'File', defaults: ['Ctrl+Alt+T'], run: (c) => void c.app.ed.newProjectTab() },
+  {
+    id: 'tab.close',
+    label: 'Close project tab',
+    group: 'File',
+    defaults: ['Ctrl+Alt+W'],
+    run: ({ app }) => app.ed.state.activeProject && void app.ed.closeTab(app.ed.state.activeProject),
+  },
+  { id: 'tab.next', label: 'Next project tab', group: 'File', defaults: ['Ctrl+Tab', 'Ctrl+Alt+ArrowRight'], run: ({ app }) => stepTab(app, 1) },
+  { id: 'tab.prev', label: 'Previous project tab', group: 'File', defaults: ['Ctrl+Shift+Tab', 'Ctrl+Alt+ArrowLeft'], run: ({ app }) => stepTab(app, -1) },
   {
     id: 'file.save',
     label: 'Save project…',
     group: 'File',
     defaults: ['Ctrl+S'],
-    run: ({ app }) => {
-      app.io.projects
-        .saveToFile(app.ed.state.graph)
-        .then(() => app.ed.toast('Project saved', 'ok'))
-        .catch((err) => {
-          if (!(err instanceof DOMException && err.name === 'AbortError')) app.ed.toast(`Could not save: ${String(err)}`, 'error');
-        });
-    },
+    run: ({ app }) => void app.ed.saveFile(),
   },
   {
     id: 'file.open',
-    label: 'Open project…',
+    label: 'Open project in a new tab…',
     group: 'File',
     defaults: ['Ctrl+O'],
-    run: ({ app }) => {
-      app.io.projects
-        .openFromFile()
-        .then((g) => g && app.ed.loadGraph(g, true))
-        .catch((err) => app.ed.toast(`Could not open: ${String(err)}`, 'error'));
-    },
+    run: ({ app }) => void app.ed.openFileTab(),
   },
 ];
+
+function stepTab(app: AppCtx, d: 1 | -1) {
+  const { projects, activeProject } = app.ed.state;
+  if (projects.length < 2) return;
+  const i = projects.findIndex((p) => p.id === activeProject);
+  void app.ed.switchTo(projects[(i + d + projects.length) % projects.length].id);
+}
 
 const lastMouse = { x: 0, y: 0 };
 const BY_ID = new Map(COMMANDS.map((c) => [c.id, c]));

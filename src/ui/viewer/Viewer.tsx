@@ -8,6 +8,7 @@ import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { PaintOverlay } from './PaintOverlay';
 import { FrameControl } from './FrameControl';
+import { Loupe } from './Loupe';
 import './viewer.css';
 
 type Bg = 'checker' | 'dark' | 'light';
@@ -20,6 +21,12 @@ export function Viewer() {
   const view = useRef({ zoom: 1, x: 0, y: 0, fit: true });
   const [zoomPct, setZoomPct] = useState(100);
   const [fit, setFit] = useState(true);
+  const [snap, setSnap] = useState(true);
+  const snapRef = useRef(true);
+  const [loupe, setLoupe] = useState<0 | 1 | 2>(0);
+  const [zHeld, setZHeld] = useState(false);
+  const [hintOff, setHintOff] = useState(false);
+  const hintCounted = useRef(false);
   const [bg, setBg] = useState<Bg>('checker');
   const imageSize = usePlayer((s) => s.imageSize);
   const fps = usePlayer((s) => s.fps);
@@ -54,12 +61,15 @@ export function Viewer() {
     const s = stage.current;
     if (!b || !s) return;
     if (v.fit) {
-      const z = Math.min((b.clientWidth - 32) / iw, (b.clientHeight - 32) / ih);
+      let z = Math.min((b.clientWidth - 32) / iw, (b.clientHeight - 32) / ih);
+      if (snapRef.current && z >= 1) z = Math.floor(z); // whole-pixel zoom keeps pixels even squares
       v.zoom = Math.max(0.02, Math.min(z, 32));
       v.x = (b.clientWidth - iw * v.zoom) / 2;
       v.y = (b.clientHeight - ih * v.zoom) / 2;
     }
     s.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
+    // nearest-neighbour only when enlarging; shrinking with it aliases fine detail into fake chunky pixels
+    if (canvas.current) canvas.current.style.imageRendering = v.zoom >= 1 ? 'pixelated' : 'auto';
     const pct = Math.round(v.zoom * 100);
     setZoomPct((p) => (p === pct ? p : pct));
   }, [iw, ih]);
@@ -126,7 +136,8 @@ export function Viewer() {
       const t = e.target as HTMLElement;
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
       const r = el.getBoundingClientRect();
-      if (e.key === 'f' || e.key === 'F' || e.key === 'Home') setFitMode(true);
+      if (e.key === 'f' || e.key === 'F' || e.key === 'Home' || e.key === '0') setFitMode(true);
+      else if (e.key === 'z' || e.key === 'Z') setZHeld(true);
       else if (e.key === '1') oneToOne();
       else if (e.key === '+' || e.key === '=') zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.25);
       else if (e.key === '-') zoomAt(r.left + r.width / 2, r.top + r.height / 2, 0.8);
@@ -136,8 +147,11 @@ export function Viewer() {
     };
     el.addEventListener('pointerenter', enter);
     el.addEventListener('pointerleave', leave);
+    const zup = (e: KeyboardEvent) => (e.key === 'z' || e.key === 'Z') && setZHeld(false);
+    window.addEventListener('keyup', zup, true);
     window.addEventListener('keydown', key, true);
     return () => {
+      window.removeEventListener('keyup', zup, true);
       el.removeEventListener('pointerenter', enter);
       el.removeEventListener('pointerleave', leave);
       window.removeEventListener('keydown', key, true);
@@ -165,6 +179,14 @@ export function Viewer() {
     }
   };
 
+  const hintCount = (() => { try { return Number(localStorage.getItem('rsmps.ui.zoomHint') ?? '0'); } catch { return 0; } })();
+  const showHint = !!imageSize && zoomPct < 100 && !hintOff && hintCount < 3;
+  useEffect(() => {
+    if (showHint && !hintCounted.current) {
+      hintCounted.current = true;
+      try { localStorage.setItem('rsmps.ui.zoomHint', String(hintCount + 1)); } catch { /* ignore */ }
+    }
+  }, [showHint, hintCount]);
   const err = viewedId ? errors.get(viewedId) : undefined;
   const otherErr = !err && errors.size ? [...errors][0] : undefined;
   const nodeTitle = viewedNode ? viewedNode.label || viewedDef?.title || viewedNode.type : null;
@@ -207,6 +229,13 @@ export function Viewer() {
           <span className="rs-ps__dot" /> Rendering…{slowest ? ` (${slowest})` : ''}
         </div>
       )}
+      <Loupe active={loupe > 0 || zHeld} scale={loupe === 1 ? 1 : 2} box={box} stage={stage} />
+      {showHint && (
+        <div className="rs-viewer__scaled rs-viewer__chip" role="status" data-nodrag>
+          Preview is scaled down to {zoomPct}%: press <span className="rs-kbd">1</span> for actual pixels
+          <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => { setHintOff(true); try { localStorage.setItem('rsmps.ui.zoomHint', '9'); } catch { /* ignore */ } }} title="Do not show again"><Icon name="close" size={12} /></button>
+        </div>
+      )}
       {paint && <PaintOverlay nodeId={paint.id} stage={stage} />}
 
       <div className="rs-viewer__info rs-viewer__chip" data-nodrag>
@@ -233,9 +262,11 @@ export function Viewer() {
 
       <FrameControl />
       <div className="rs-viewer__tools rs-viewer__chip" data-nodrag>
-        <button className={`rs-btn rs-btn--icon rs-btn--ghost${fit ? ' is-on' : ''}`} onClick={() => setFitMode(true)} title="Fit to window (F)"><Icon name="fit" /></button>
-        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={oneToOne} title="100% (1)"><Icon name="one" /></button>
-        <span className="rs-viewer__zoom rs-num">{zoomPct}%</span>
+        <button className={`rs-btn rs-btn--ghost rs-viewer__fitbtn${fit ? ' is-on' : ''}`} onClick={() => setFitMode(true)} title="Fit to window (F or 0)"><Icon name="fit" /> Fit</button>
+        <button className={`rs-btn rs-viewer__actual${zoomPct === 100 && !fit ? ' is-on' : ''}`} onClick={oneToOne} title="Actual pixels, 100% (1)">100%</button>
+        <button className={`rs-btn rs-btn--ghost${snap ? ' is-on' : ''}`} onClick={() => { snapRef.current = !snap; setSnap(!snap); apply(); }} title="Snap Fit to whole-pixel zoom (1×, 2×, 3×…) when the image is smaller than the pane">1:n</button>
+        <button className={`rs-btn rs-btn--ghost${loupe || zHeld ? ' is-on' : ''}`} onClick={() => setLoupe((l) => ((l + 1) % 3) as 0 | 1 | 2)} title="Magnifier: off → 200% → 100% (or hold Z)">{loupe === 2 ? '🔍 2×' : loupe === 1 ? '🔍 1×' : '🔍'}</button>
+        <span className="rs-viewer__zoom rs-num" title={fit ? 'Fitted to the pane' : 'Manual zoom'}>{fit ? `Fit · ${zoomPct}%` : `${zoomPct}%`}</span>
         <button
           className="rs-btn rs-btn--icon rs-btn--ghost"
           onClick={() => setBg((b) => (b === 'checker' ? 'dark' : b === 'dark' ? 'light' : 'checker'))}

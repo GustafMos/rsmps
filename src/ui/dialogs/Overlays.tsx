@@ -29,6 +29,22 @@ export function DialogHost() {
   }
 }
 
+export function ExportBar() {
+  const { ed } = useApp();
+  const job = useEd((s) => s.exportJob);
+  if (!job) return null;
+  return (
+    <div className="rs-expbar" role="status">
+      <div className="rs-dlg__bar"><div style={{ width: `${Math.round(job.fraction * 100)}%` }} /></div>
+      <div className="rs-dlg__row">
+        <span className="rs-mono" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.label}</span>
+        <span className="rs-num">{Math.round(job.fraction * 100)}%</span>
+        <button className="rs-btn rs-btn--danger" onClick={() => ed.cancelExport()}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 export function Toasts() {
   const { ed } = useApp();
   const toasts = useEd((s) => s.toasts);

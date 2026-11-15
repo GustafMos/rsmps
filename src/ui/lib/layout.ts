@@ -46,7 +46,11 @@ export interface MoreRow {
   y: number;
   count: number;
 }
-export type Row = IoRow | ParamRow | MoreRow | HintRow | LayersRow;
+export interface KindRow {
+  kind: 'kind';
+  y: number;
+}
+export type Row = IoRow | ParamRow | MoreRow | HintRow | LayersRow | KindRow;
 export const HINT_H = 56;
 
 export interface NodeLayout {
@@ -112,6 +116,11 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
     return layout;
   }
 
+  const kindRow = !!def && def.category === 'output' && (def.params as Record<string, ParamDef>).kind?.type === 'enum';
+  if (kindRow) {
+    rows.push({ kind: 'kind', y });
+    y += ROW_H + 2;
+  }
   const n = Math.max(inputs.length, outputs.length);
   for (let i = 0; i < n; i++) {
     const row: IoRow = { kind: 'io', y, input: inputs[i], output: outputs[i] };
@@ -134,7 +143,7 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
   }
 
   if (def) {
-    const params = visibleParams(def, node.params);
+    const params = visibleParams(def, node.params).filter(([k]) => !(kindRow && k === 'kind'));
     const shown = params.slice(0, MAX_PARAM_ROWS);
     for (const [key, p] of shown) {
       const socket = paramSocketType(def, key);

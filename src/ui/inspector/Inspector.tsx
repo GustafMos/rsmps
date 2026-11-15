@@ -7,6 +7,8 @@ import { parseHex, toHex } from '../lib/colorMath';
 import { LayerList } from '../graph/LayerList';
 import { isLayerType } from '../lib/layout';
 import { Piano } from './Piano';
+import { KindPicker } from '../components/KindPicker';
+import { AUTO_COLLAPSED, KIND_GROUPS, describeOutput, hasKind } from '../lib/outputInfo';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
 import { paletteInputPort } from '../lib/sockets';
@@ -93,6 +95,7 @@ function NodePanel({ id }: { id: string }) {
   }
   const cat = CATEGORIES[def.category];
   const palPort = paletteInputPort(def);
+  const project = useEd((s) => s.graph.project);
   const wired = new Map(edges.filter((e) => e.to.node === id).map((e) => [e.to.port, e] as const));
   return (
     <div className="rs-insp__scroll">
@@ -102,6 +105,12 @@ function NodePanel({ id }: { id: string }) {
           <span className="rs-caps">{cat?.title}</span>
           <span className="rs-insp__id rs-mono">{def.id}</span>
         </div>
+        {hasKind(def) && (
+          <div className="rs-kind rs-kind--inspector">
+            <KindPicker node={node} def={def} />
+            <div className="rs-kind__what">{describeOutput(def, node, project)}</div>
+          </div>
+        )}
         <TextField large value={node.label ?? ''} placeholder={def.title} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
         <p className="rs-insp__desc">{def.description}</p>
         <div className="rs-insp__actions">
@@ -169,7 +178,10 @@ function ParamGroups({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => {
     const out: { name: string; items: [string, ParamDef][] }[] = [];
+    const kindMap = hasKind(def) ? KIND_GROUPS[String(node.params.kind ?? 'auto')] : undefined;
     for (const [key, p] of visibleParams(def, node.params)) {
+      if (hasKind(def) && key === 'kind') continue; // shown as the picker at the top
+      if (kindMap && p.group && !kindMap.includes(p.group)) continue;
       const name = p.group ?? '';
       let g = out.find((x) => x.name === name);
       if (!g) out.push((g = { name, items: [] }));
@@ -191,12 +203,12 @@ function ParamGroups({
       {groups.map((g) => (
         <div key={g.name} className="rs-insp__sec">
           {g.name && (
-            <button className="rs-insp__group" onClick={() => setCollapsed((c) => ({ ...c, [g.name]: !c[g.name] }))}>
-              <Icon name={collapsed[g.name] ? 'chevronRight' : 'chevronDown'} size={12} />
+            <button className="rs-insp__group" onClick={() => setCollapsed((c) => ({ ...c, [g.name]: !(c[g.name] ?? (hasKind(def) && String(node.params.kind ?? 'auto') === 'auto' && AUTO_COLLAPSED.includes(g.name))) }))}>
+              <Icon name={(collapsed[g.name] ?? (hasKind(def) && String(node.params.kind ?? 'auto') === 'auto' && AUTO_COLLAPSED.includes(g.name))) ? 'chevronRight' : 'chevronDown'} size={12} />
               <span className="rs-caps">{g.name}</span>
             </button>
           )}
-          {!collapsed[g.name] &&
+          {!(collapsed[g.name] ?? (hasKind(def) && node.params.kind === undefined ? AUTO_COLLAPSED.includes(g.name) : hasKind(def) && String(node.params.kind) === 'auto' && AUTO_COLLAPSED.includes(g.name))) &&
             g.items.map(([key, p]) => (
               <ParamControl key={key} node={node} keyName={key} p={p} isWired={wired.has(key)} wiredFrom={label(key)} onDisconnect={() => onDisconnect(key)} />
             ))}

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Icon } from './components/Icon';
-import { DialogHost, Toasts } from './dialogs/Overlays';
+import { DialogHost, ExportBar, Toasts } from './dialogs/Overlays';
 import { GraphView } from './graph/GraphView';
 import { Inspector } from './inspector/Inspector';
 import { AddMenu } from './menus/AddMenu';
@@ -8,6 +8,7 @@ import { NodeContextMenu } from './menus/NodeContextMenu';
 import { Sidebar } from './sidebar/Sidebar';
 import { useApp, useEd } from './store/context';
 import { TopBar } from './topbar/TopBar';
+import { ProjectTabs } from './topbar/ProjectTabs';
 import { Transport } from './transport/Transport';
 import { Viewer } from './viewer/Viewer';
 import { trackPointer } from './lib/drag';
@@ -26,6 +27,7 @@ export function App() {
   useRenderWatchdog(useApp());
   const prefs = useEd((s) => s.prefs);
   const mode = useEd((s) => s.mode);
+  const switching = useEd((s) => s.switching);
   const center = useRef<HTMLDivElement>(null);
   const viewerPanel = useRef<HTMLDivElement>(null);
   const max = prefs.maximized;
@@ -79,6 +81,12 @@ export function App() {
         <div className="rs-safe" role="alert">Safe mode: rendering is off. Remove ?safe from the address to render.</div>
       )}
       <TopBar />
+      <ProjectTabs />
+      {switching && (
+        <div className="rs-switching" role="status" aria-live="polite">
+          <div>Loading {switching}…</div>
+        </div>
+      )}
       {mode === 'scan' ? <ScanView /> : (
       <div className="rs-main">
         {prefs.leftOpen && (
@@ -113,6 +121,7 @@ export function App() {
       <AddMenu />
       <NodeContextMenu />
       <DialogHost />
+      <ExportBar />
       <Toasts />
     </div>
   );

@@ -107,3 +107,11 @@
 .rs-sock[data-merge='mix']::before { content: 'mix'; }
 
 .rs-node__kbd { position: absolute; left: 0; top: -22px; padding: 1px 6px; background: #2a2208; border: 1px solid var(--yellow); color: var(--yellow); font-size: var(--fs-xs); white-space: nowrap; pointer-events: none; }
+
+.rs-node.is-notexported > :not(.rs-node__head):not(.rs-node__off) { opacity: 0.4; }
+.rs-node.is-notexported .rs-node__title { color: var(--text-dim); }
+.rs-node__off { position: absolute; right: 0; top: -22px; padding: 1px 6px; background: var(--bg-3); border: 1px dashed var(--text-faint); color: var(--text-dim); font-size: var(--fs-xs); white-space: nowrap; pointer-events: none; }
+.rs-node__exp.is-on { color: var(--ok); }
+
+.rs-nodekind { display: flex; align-items: center; gap: var(--s-2); width: 100%; padding: 0 var(--s-1); color: var(--accent-hi); }
+.rs-nodekind .rs-select { height: 24px; font-weight: 600; }

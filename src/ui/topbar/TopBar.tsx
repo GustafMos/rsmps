@@ -2,6 +2,8 @@ import { Icon } from '../components/Icon';
 import { MenuButton, type MenuItem } from '../components/Menu';
 import { useEffect, useState } from 'react';
 import pkg from '../../../package.json';
+import { enabledOutputs } from '../../engine/graph';
+import { resolveActiveOutput } from '../store/editor';
 import { useApp, useEd } from '../store/context';
 import './topbar.css';
 import '../scan/scan.css';
@@ -12,6 +14,7 @@ export function TopBar() {
   const canUndo = useEd((s) => s.canUndo);
   const canRedo = useEd((s) => s.canRedo);
   const mode = useEd((s) => s.mode);
+  const enabledCount = useEd((s) => enabledOutputs(s.graph, io.registry).length);
   const leftOpen = useEd((s) => s.prefs.leftOpen);
   const rightOpen = useEd((s) => s.prefs.rightOpen);
 
@@ -30,26 +33,14 @@ export function TopBar() {
   const bugBody = ['## What happened', '', '', '## Steps', '1. ', '', '## Expected', '', '', '---', `App: RSMPS ${pkg.version}`, `Browser: ${navigator.userAgent}`, `GPU: ${gpu}`].join('\n');
   const bugUrl = `https://github.com/GustafMos/rsmps/issues/new?body=${encodeURIComponent(bugBody)}`;
 
-  const open = async () => {
-    try {
-      const g = await io.projects.openFromFile();
-      if (g) ed.loadGraph(g, true);
-    } catch (err) {
-      ed.toast(`Could not open: ${err instanceof Error ? err.message : String(err)}`, 'error');
-    }
-  };
-  const save = async () => {
-    try {
-      await io.projects.saveToFile(ed.state.graph);
-      ed.toast('Project saved', 'ok');
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) ed.toast(`Could not save: ${err instanceof Error ? err.message : String(err)}`, 'error');
-    }
-  };
+  const open = () => ed.openFileTab();
+  const save = () => ed.saveFile();
+  const mem = io.memory();
+  const mb = Math.round((mem.engineCacheBytes + mem.gpuPoolBytes + mem.frameCacheBytes + mem.decodedMediaBytes) / 1048576);
 
   const fileItems: MenuItem[] = [
-    { label: 'New project', onClick: () => { ed.newGraph('Untitled', true); ed.toast('New project (Ctrl+Z to go back)', 'info'); } },
-    { label: 'Open…', onClick: open, shortcut: 'Ctrl+O' },
+    { label: 'New project (new tab)', onClick: () => void ed.newProjectTab(), shortcut: 'Ctrl+Alt+T' },
+    { label: 'Open file in a new tab…', onClick: open, shortcut: 'Ctrl+O' },
     { label: 'Save…', onClick: save, shortcut: 'Ctrl+S' },
     { sep: true },
     { label: 'Presets…', onClick: () => ed.openDialog('presets') },
@@ -67,6 +58,7 @@ export function TopBar() {
           () => ed.toast('Clipboard is not available here.', 'error'),
         ),
     },
+    { label: `Memory in use: ${mb} MB (this tab only)`, disabled: true },
     { label: 'Keyboard shortcuts', onClick: () => ed.openDialog('shortcuts'), shortcut: '?' },
     { label: 'Customise shortcuts…', onClick: () => ed.openDialog('keymap') },
   ];
@@ -103,7 +95,21 @@ export function TopBar() {
       <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.openDialog('shortcuts')} title="Keyboard shortcuts (?)"><Icon name="help" /></button>
       <a className="rs-btn rs-btn--ghost rs-top__link" href="https://ko-fi.com/ripscorpy" target="_blank" rel="noopener noreferrer" title="Buy me a coffee: it feeds two cats"><Icon name="coffee" /><span className="rs-top__label">Support</span></a>
       <a className="rs-btn rs-btn--ghost rs-top__link" href={bugUrl} target="_blank" rel="noopener noreferrer" title="Report a bug on GitHub (only app version, browser and GPU are pre-filled)"><Icon name="bug" /><span className="rs-top__label">Report a bug</span></a>
-      <button className="rs-btn rs-btn--primary" onClick={() => ed.openDialog('export')} title="Export (Ctrl+E)"><Icon name="export" /> Export</button>
+      <div className="rs-top__split">
+        <button className="rs-btn rs-btn--primary" onClick={() => void ed.runExport([], ed.exportPrefs(ed.state.activeProject).items)} disabled={enabledCount === 0} title="Export the outputs that are ticked (Outputs panel)"><Icon name="export" /> Export ({enabledCount})</button>
+        <MenuButton className="rs-btn rs-btn--primary rs-top__caret" title="More export options" items={[
+          { label: 'Export enabled outputs', onClick: () => void ed.runExport([], ed.exportPrefs(ed.state.activeProject).items) },
+          { label: 'Export active output only', onClick: () => { const id = resolveActiveOutput(ed.state, io.registry); if (id) void ed.runExport([id], 'current'); else ed.toast('There is no output node.', 'error'); } },
+          { sep: true },
+          { head: 'Export active output as' },
+          { label: 'Video', onClick: () => ed.exportAs('video') },
+          { label: 'Still image', onClick: () => ed.exportAs('image') },
+          { label: 'Image sequence', onClick: () => ed.exportAs('sequence') },
+          { label: 'Spritesheet', onClick: () => ed.exportAs('spritesheet') },
+          { sep: true },
+          { label: 'Export…', onClick: () => ed.openDialog('export'), shortcut: 'Ctrl+E' },
+        ]}><Icon name="chevronDown" size={12} /></MenuButton>
+      </div>
     </header>
   );
 }

@@ -20,7 +20,7 @@ import {
 } from '../../engine/graph';
 import type { Registry } from '../../engine/define';
 import type { Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
-import type { Io } from '../../io/api';
+import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
 import { outputType } from '../../engine/graph';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
@@ -78,6 +78,13 @@ export interface EditorState {
   docRev: number;
   /** Output node whose frame non-output previews use (the last selected output). */
   activeOutput: string | null;
+  /** Open projects (tabs): metadata only. Only the active one has a graph in memory. */
+  projects: OpenProject[];
+  activeProject: string | null;
+  /** Name of the project being loaded (editing is blocked meanwhile). */
+  switching: string | null;
+  /** Running export (progress shown in a floating bar). */
+  exportJob: { label: string; fraction: number } | null;
   /** Top-level tab: the node editor or the print-scan-back tool. */
   mode: 'edit' | 'scan';
 }
@@ -146,6 +153,10 @@ export class Editor {
       docRev: 0,
       mode: 'edit',
       activeOutput: null,
+      projects: [],
+      activeProject: null,
+      switching: null,
+      exportJob: null,
     });
   }
 
@@ -188,6 +199,13 @@ export class Editor {
 
   /** First-run / "New": Source → Output, viewed at the output. Found through the registry, no ids hard-coded. */
   newGraph(name = 'Untitled', keepHistory = false): void {
+    this.loadGraph(this.makeStarterGraph(name), keepHistory);
+  }
+
+  /** Set by project switching: the next graph change is a load, not an edit (do not save / mark dirty). */
+  skipSave = false;
+
+  private makeStarterGraph(name: string): GraphDoc {
     let g = createGraph(name);
     const src = sourceDefFor(this.registry, 'image');
     const out = this.registry.list().find((d) => d.category === 'output' && Object.values(d.inputs as InputSchema).some((i) => i.type === 'image'));
@@ -199,7 +217,7 @@ export class Editor {
       const to = Object.keys(out.inputs).find((k) => (out.inputs as InputSchema)[k].type === 'image');
       if (from && to) g = connect(g, this.registry, { node: a.node.id, port: from }, { node: b.node.id, port: to });
     }
-    this.loadGraph(g, keepHistory);
+    return g;
   }
 
   private defaultView(g: GraphDoc): string | null {
@@ -783,6 +801,243 @@ export class Editor {
       /* ignore */
     }
   }
+  /* ------------------------------ project tabs ------------------------------ */
+
+  /** Boot: restore the tab list and load ONLY the active project. */
+  async initProjects(): Promise<void> {
+    const list = await this.io.projects.listOpen();
+    let active = await this.io.projects.activeId();
+    if (!active || !list.some((p) => p.id === active)) active = list[0]?.id ?? null;
+    const g = active ? await this.io.projects.loadProject(active).catch(() => null) : null;
+    if (active && g && g.schema === 'rsmps/graph' && g.version === 2) {
+      this.skipSave = true;
+      this.loadGraph(g);
+      await this.io.projects.setActive(active);
+      this.patch({ projects: list, activeProject: active });
+      return;
+    }
+    this.newGraph();
+    const p = await this.io.projects.createProject(this.state.graph, this.state.graph.name);
+    this.patch({ projects: await this.io.projects.listOpen(), activeProject: p.id });
+  }
+
+  async refreshProjects(): Promise<void> {
+    const list = await this.io.projects.listOpen();
+    const active = this.state.activeProject;
+    this.patch({ projects: list.map((p) => (p.id === active ? { ...p, dirty: this.state.projects.find((x) => x.id === p.id)?.dirty || p.dirty } : p)) });
+  }
+
+  /** The active tab was edited: show its name and a dirty dot without waiting for storage. */
+  touchActive(): void {
+    const { activeProject, projects, graph } = this.state;
+    if (!activeProject) return;
+    const cur = projects.find((p) => p.id === activeProject);
+    if (!cur || (cur.name === graph.name && cur.dirty)) return;
+    this.patch({ projects: projects.map((p) => (p.id === activeProject ? { ...p, name: graph.name, dirty: true, updatedAt: Date.now() } : p)) });
+  }
+
+  /** Save the live project with a fresh thumbnail (when leaving it) and wait until it is written. */
+  private async saveWithThumb(): Promise<void> {
+    const id = this.state.activeProject;
+    if (!id) return;
+    const blob = await this.io.player.snapshot().catch(() => null);
+    this.io.projects.saveProject(id, this.state.graph, blob ?? undefined);
+    await this.io.projects.flush();
+  }
+
+  /** Make a tab live: only one graph is ever in memory. Undo history is cleared (per tab session). */
+  async switchTo(id: string): Promise<void> {
+    const s = this.state;
+    if (id === s.activeProject || s.switching) return;
+    const target = s.projects.find((p) => p.id === id);
+    this.patch({ switching: target?.name ?? 'project', addMenu: null, contextMenu: null });
+    try {
+      await this.saveWithThumb();
+      const g = await this.io.switchProject(id);
+      this.skipSave = true;
+      if (g) this.loadGraph(g);
+      else this.newGraph();
+      this.patch({ activeProject: id, switching: null });
+      await this.refreshProjects();
+      try {
+        if (!localStorage.getItem('rsmps.ui.tabUndoNote')) {
+          localStorage.setItem('rsmps.ui.tabUndoNote', '1');
+          this.toast('Undo history belongs to this session of a tab: switching tabs clears it, so background tabs use no memory.', 'info');
+        }
+      } catch {
+        /* ignore */
+      }
+    } catch (err) {
+      this.patch({ switching: null });
+      this.toast(`Could not switch tab: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  /** New tab (starter graph, or the given document) and switch to it. */
+  async newProjectTab(graph?: GraphDoc): Promise<void> {
+    if (this.state.switching) return;
+    this.patch({ switching: graph?.name ?? 'new project' });
+    try {
+      await this.saveWithThumb();
+      const doc = graph ?? this.makeStarterGraph('Untitled');
+      const p = await this.io.projects.createProject(doc, doc.name);
+      const g = (await this.io.switchProject(p.id)) ?? doc;
+      this.skipSave = true;
+      this.loadGraph(g);
+      this.patch({ activeProject: p.id, switching: null });
+      await this.refreshProjects();
+    } catch (err) {
+      this.patch({ switching: null });
+      this.toast(`Could not create the tab: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  async closeTab(id: string): Promise<void> {
+    const s = this.state;
+    if (s.switching) return;
+    const closing = s.projects.find((p) => p.id === id);
+    try {
+      if (id === s.activeProject) await this.saveWithThumb();
+      else await this.io.projects.flush();
+      const next = await this.io.projects.closeProject(id);
+      if (id === s.activeProject) {
+        if (next) {
+          this.patch({ activeProject: null });
+          await this.switchTo(next);
+        } else {
+          this.patch({ activeProject: null, projects: [] });
+          await this.newProjectTab();
+        }
+      } else await this.refreshProjects();
+      this.toast(`Closed "${closing?.name ?? 'project'}"`, 'info', [{ label: 'Reopen', run: () => void this.reopenProject(id) }]);
+    } catch (err) {
+      this.toast(`Could not close the tab: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  async reopenProject(id: string): Promise<void> {
+    if (this.state.switching) return;
+    try {
+      await this.saveWithThumb();
+      const p = await this.io.projects.reopen(id);
+      if (!p) return this.toast('That project is no longer available.', 'error');
+      this.patch({ switching: p.name });
+      const g = await this.io.switchProject(p.id);
+      this.skipSave = true;
+      if (g) this.loadGraph(g);
+      this.patch({ activeProject: p.id, switching: null });
+      await this.refreshProjects();
+    } catch (err) {
+      this.patch({ switching: null });
+      this.toast(`Could not reopen: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  async renameTab(id: string, name: string): Promise<void> {
+    const n = name.trim() || 'Untitled';
+    if (id === this.state.activeProject) this.setName(n);
+    else await this.io.projects.renameProject(id, n);
+    this.patch({ projects: this.state.projects.map((p) => (p.id === id ? { ...p, name: n } : p)) });
+  }
+
+  async duplicateTab(id: string): Promise<void> {
+    if (id === this.state.activeProject) await this.saveWithThumb();
+    await this.io.projects.duplicateProject(id);
+    await this.refreshProjects();
+  }
+
+  async reorderTabs(ids: string[]): Promise<void> {
+    this.patch({ projects: ids.map((i) => this.state.projects.find((p) => p.id === i)!).filter(Boolean) });
+    await this.io.projects.reorderOpen(ids);
+  }
+
+  /** Write the active project to a file; the tab's dirty dot clears when that succeeds. */
+  async saveFile(): Promise<void> {
+    const id = this.state.activeProject;
+    try {
+      await this.io.projects.saveToFile(this.state.graph);
+      if (id) {
+        await this.io.projects.markSaved(id);
+        this.patch({ projects: this.state.projects.map((p) => (p.id === id ? { ...p, dirty: false } : p)) });
+      }
+      this.toast('Project saved', 'ok');
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) this.toast(`Could not save: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  /** File → Open: the file becomes a NEW tab. */
+  async openFileTab(): Promise<void> {
+    try {
+      const g = await this.io.projects.openFromFile();
+      if (g) await this.newProjectTab(g);
+    } catch (err) {
+      this.toast(`Could not open: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  /* -------------------------------- export --------------------------------- */
+
+  private exportAbort: AbortController | null = null;
+
+  exportPrefs(projectId: string | null): { items: 'current' | 'all'; zip: boolean } {
+    try {
+      const all = JSON.parse(localStorage.getItem('rsmps.ui.exportPrefs') ?? '{}');
+      return { items: 'current', zip: true, ...(all[projectId ?? ''] ?? {}) };
+    } catch {
+      return { items: 'current', zip: true };
+    }
+  }
+  setExportPrefs(projectId: string | null, p: Partial<{ items: 'current' | 'all'; zip: boolean }>): void {
+    try {
+      const all = JSON.parse(localStorage.getItem('rsmps.ui.exportPrefs') ?? '{}');
+      all[projectId ?? ''] = { ...this.exportPrefs(projectId), ...p };
+      localStorage.setItem('rsmps.ui.exportPrefs', JSON.stringify(all));
+    } catch {
+      /* ignore */
+    }
+    this.patch({ toasts: this.state.toasts }); // re-render subscribers that read prefs
+  }
+
+  /** Render and download. `outputs: []` means every enabled output. No dialog: progress is a floating bar. */
+  async runExport(outputs: string[], items: 'current' | 'all', zip?: boolean): Promise<void> {
+    if (this.exportAbort) return this.toast('An export is already running.', 'info');
+    const s = this.state;
+    const ac = new AbortController();
+    this.exportAbort = ac;
+    this.patch({ exportJob: { label: 'Starting…', fraction: 0 } });
+    try {
+      const files = await this.io.exporter.run({
+        graph: s.graph,
+        outputs,
+        items,
+        item: s.item,
+        zip: zip ?? this.exportPrefs(s.activeProject).zip,
+        signal: ac.signal,
+        onProgress: (p) => this.patch({ exportJob: { label: p.label, fraction: p.fraction } }),
+      });
+      if (ac.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      this.io.exporter.download(files);
+      this.toast(`Exported ${files.length} file${files.length === 1 ? '' : 's'}`, 'ok');
+    } catch (err) {
+      if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) this.toast('Export cancelled', 'info');
+      else this.toast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      this.exportAbort = null;
+      this.patch({ exportJob: null });
+    }
+  }
+  /** Set the active output's export type (undoable) and export just that output now. */
+  exportAs(kind: string): void {
+    const id = resolveActiveOutput(this.state, this.registry);
+    if (!id) return this.toast('There is no output node.', 'error');
+    this.setParam(id, 'kind', kind);
+    void this.runExport([id], 'current');
+  }
+  cancelExport(): void {
+    this.exportAbort?.abort();
+  }
+
   setMode(mode: 'edit' | 'scan'): void {
     this.patch({ mode, addMenu: null, contextMenu: null });
   }

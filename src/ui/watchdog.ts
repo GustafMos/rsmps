@@ -46,7 +46,7 @@ export function useRenderWatchdog(app: AppCtx): void {
     };
     const start = () => {
       done();
-      if (!ed.state.viewedNodeId) return;
+      if (!ed.state.viewedNodeId || !io.player.getState().imageSize) return;
       waiting = true;
       t1 = setTimeout(() => waiting && watchStore.set({ rendering: true }), 1500);
       t2 = setTimeout(() => {

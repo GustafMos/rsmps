@@ -48,17 +48,33 @@ export function Root() {
         let lastView: string | null | undefined;
         let lastItem = -1;
         let lastActive: string | null | undefined;
+        let lastSaved: GraphDoc | null = null;
+        let lastThumb = Date.now();
         const sync = () => {
           const s = ed.state;
           const active = resolveActiveOutput(s, io.registry);
           if (s.graph === lastGraph && s.viewedNodeId === lastView && s.item === lastItem && active === lastActive) return;
           lastActive = active;
           const graphChanged = s.graph !== lastGraph;
+          const edited = s.graph !== lastSaved;
+          lastSaved = s.graph;
           lastGraph = s.graph;
           lastView = s.viewedNodeId;
           lastItem = s.item;
           io.player.setView({ graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active });
-          if (graphChanged) io.projects.autosave(s.graph);
+          void graphChanged;
+          if (edited && s.activeProject && !s.switching) {
+            if (ed.skipSave) ed.skipSave = false;
+            else {
+              io.projects.saveProject(s.activeProject, s.graph);
+              ed.touchActive();
+              if (Date.now() - lastThumb > 30000) {
+                lastThumb = Date.now();
+                const pid = s.activeProject;
+                io.player.snapshot().then((b) => b && ed.state.activeProject === pid && io.projects.saveProject(pid, ed.state.graph, b)).catch(() => undefined);
+              }
+            }
+          }
         };
         const unsub = ed.store.subscribe(sync);
         const unreg = io.registry.subscribe(() => {
@@ -66,9 +82,7 @@ export function Root() {
           sync();
         });
 
-        const saved = await io.projects.loadAutosave().catch(() => null);
-        if (saved && saved.schema === 'rsmps/graph' && saved.version === 2 && Array.isArray(saved.nodes) && saved.nodes.length > 0) ed.loadGraph(saved);
-        else ed.newGraph();
+        await ed.initProjects();
         offerRecovery(ed);
         sync();
 

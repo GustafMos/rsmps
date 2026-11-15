@@ -24,3 +24,19 @@
 .rs-side__out .rs-side__name { flex: 1; }
 
 .rs-side__active { font-size: var(--fs-xs); color: var(--yellow); border: 1px solid var(--yellow); padding: 0 4px; }
+
+.rs-side__outrow { display: flex; align-items: center; gap: 2px; }
+.rs-side__outrow .rs-side__out { flex: 1; min-width: 0; }
+.rs-side__outrow.is-off .rs-side__out { opacity: 0.5; }
+.rs-side__chk { width: 16px; height: 16px; accent-color: var(--accent); margin: 0 4px; flex: none; }
+.rs-side__exp { padding: 0 var(--s-2); height: 24px; min-width: 24px; }
+.rs-side__outrow .rs-btn--icon { width: 24px; min-width: 24px; height: 24px; }
+.rs-exp__row { display: flex; align-items: center; gap: var(--s-3); }
+.rs-exp__row > :first-child { flex: 1; min-width: 0; }
+.rs-exp__info { color: var(--text-faint); font-size: var(--fs-xs); white-space: nowrap; }
+.rs-expbar { position: fixed; left: var(--s-4); bottom: 68px; z-index: 1300; width: 320px; padding: var(--s-3); background: var(--bg-2); border: 1px solid var(--accent-hi); box-shadow: var(--shadow-hard); display: flex; flex-direction: column; gap: var(--s-2); font-size: var(--fs-sm); }
+.rs-expbar .rs-dlg__bar > div { transition: none; }
+
+.rs-side__kind { width: 78px; height: 24px; padding: 0 2px; font-size: var(--fs-xs); flex: none; }
+
+.rs-exp__info { white-space: normal; max-width: 260px; }

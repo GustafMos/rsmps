@@ -16,3 +16,8 @@
 .rs-top__name:focus { border-color: var(--accent-hi); background: var(--bg-1); }
 .rs-top .rs-btn--ghost.is-on { background: var(--bg-4); color: var(--text); border-color: var(--line-strong); }
 .rs-top .rs-btn--primary { margin-left: var(--s-2); }
+
+.rs-top__split { display: flex; margin-left: var(--s-2); }
+.rs-top__split .rs-btn--primary { margin-left: 0; }
+.rs-top__split > .rs-btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.rs-top__caret { min-width: 24px; padding: 0 var(--s-1); border-left: 1px solid var(--accent-lo); border-top-left-radius: 0; border-bottom-left-radius: 0; }

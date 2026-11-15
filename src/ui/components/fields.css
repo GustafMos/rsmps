@@ -74,3 +74,10 @@ textarea.rs-text { height: auto; min-height: 64px; padding: var(--s-1) var(--s-2
 .rs-numconfirm__text { margin: 0; font-size: var(--fs-sm); line-height: 1.5; }
 .rs-numconfirm__ask { display: flex; gap: var(--s-2); align-items: center; font-size: var(--fs-xs); color: var(--text-dim); }
 .rs-numconfirm .rs-pop__row { flex-wrap: wrap; }
+
+.rs-kind { display: flex; flex-wrap: wrap; gap: 2px; width: 100%; }
+.rs-kind__btn { flex: 1 1 auto; min-width: 54px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 var(--s-2); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r); color: var(--text-dim); font-size: var(--fs-xs); }
+.rs-kind__btn:hover { background: var(--bg-3); color: var(--text); }
+.rs-kind__btn.is-on { background: var(--accent); border-color: var(--accent-hi); color: #fff; }
+.rs-kind--inspector .rs-kind__btn { height: 32px; font-size: var(--fs-sm); }
+.rs-kind__what { font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.4; }
