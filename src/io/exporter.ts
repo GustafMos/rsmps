@@ -31,8 +31,8 @@ import type { GraphDoc, ImageValue, MaskValue, NodeInstance } from '../engine/ty
 import type { ExportRequest, ExportedFile, Exporter } from './api';
 import type { AudioBridge } from './audio-bridge';
 import { fitAudio } from './audio-util';
-import { conformImage } from './frame-gpu';
-import { effectiveConform, isCustomFrame, readFrameParams, resolveFrame } from './frame';
+import { conformImage, enlargeNearest } from './frame-gpu';
+import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
 import { OffscreenPresenter } from './encode';
 import { SILENT_TRACKS, type SignalRouter } from './signals';
 import type { EvalGate } from './gate';
@@ -64,6 +64,8 @@ interface OutParams {
   scale: number;
   columns: number;
   padding: number;
+  pixelSize: number;
+  exportArtSize: boolean;
   print: PrintParams;
 }
 
@@ -76,6 +78,8 @@ interface Job {
   sourceName: string;
   weight: number;
   label: string;
+  /** Set by sequence / spritesheet exports that deliver art-size frames. */
+  artMode?: boolean;
 }
 
 interface Run {
@@ -231,6 +235,8 @@ export class ExporterImpl implements Exporter {
       codec: typeof p.codec === 'string' ? p.codec : 'avc',
       bitrate: Math.max(0.5, num(p.bitrate, 12)),
       scale: Math.max(1, Math.round(num(p.scale, 1))),
+      pixelSize: readFrameParams(p).pixelSize,
+      exportArtSize: p.exportArtSize === true,
       columns: Math.max(0, Math.round(num(p.columns, 0))),
       padding: Math.max(0, Math.round(num(p.padding, 0))),
       print: readPrintParams(p),
@@ -361,13 +367,16 @@ export class ExporterImpl implements Exporter {
       seconds: frame / graph.project.fps,
       item: job.item,
       itemCount: job.itemCount,
-      proxy: 1,
+      proxy: 1 / fp.pixelSize,
       quality: 'final',
     });
     const v = res.value;
     if (v && typeof v === 'object' && 'texture' in v) {
       const img = v as Img;
-      const out = conformImage(this.d.gpu, img, target, effectiveConform(fp), fp.conformAnchor);
+      // Conform to the art grid, then enlarge with hard pixels to the full frame (unless art-size export).
+      const art = pixelPlan(target, fp.pixelSize).art;
+      const conformed = conformImage(this.d.gpu, img, fp.pixelSize > 1 ? art : target, effectiveConform(fp), fp.conformAnchor);
+      const out = job.artMode ? conformed : enlargeNearest(this.d.gpu, conformed, fp.pixelSize);
       if (out !== img) {
         // Held until the next renderFrame (or the end of the run): callers retain it themselves while encoding.
         this.d.gpu.retain(out.texture);
@@ -452,6 +461,7 @@ export class ExporterImpl implements Exporter {
   }
 
   private async exportSequence(job: Job, run: Run): Promise<ExportedFile[]> {
+    job.artMode = job.params.exportArtSize;
     const graph = run.req.graph;
     const frames = totalFramesOf(graph.project);
     const pattern = sequencePattern(job.params.name);
@@ -471,6 +481,7 @@ export class ExporterImpl implements Exporter {
   /* ------------------------------------- spritesheet -------------------------------------------- */
 
   private async exportSheet(job: Job, run: Run): Promise<ExportedFile[]> {
+    job.artMode = job.params.exportArtSize;
     const { gpu } = this.d;
     const graph = run.req.graph;
     const project = graph.project;

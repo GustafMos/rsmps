@@ -16,6 +16,10 @@ export interface FrameParams {
   frameHeight: number;
   conform: ConformMode;
   conformAnchor: ConformAnchor;
+  /** Render on a grid this many times coarser, then enlarge with hard pixels (1 = off). */
+  pixelSize: number;
+  /** Sequences and spritesheets: deliver the small art-resolution frames, no enlargement. */
+  exportArtSize: boolean;
 }
 
 export interface Size {
@@ -30,6 +34,8 @@ export interface Rect {
 }
 
 const MAX_SIDE = 16384;
+/** The engine clamps the playback proxy at 0.05, so a coarser grid than 1/20 cannot be rendered exactly. */
+export const MAX_PIXEL_SIZE = 20;
 const pick = <T extends string>(v: unknown, list: readonly T[], d: T): T => (list.includes(v as T) ? (v as T) : d);
 const int = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : d);
 
@@ -42,6 +48,8 @@ export function readFrameParams(params: Record<string, unknown>): FrameParams {
     frameHeight: Math.min(MAX_SIDE, Math.max(1, int(params.frameHeight, 1080))),
     conform: pick(params.conform, ['auto', 'none', 'fill', 'fit', 'stretch'] as const, 'auto'),
     conformAnchor: pick(params.conformAnchor, ['center', 'top', 'bottom', 'left', 'right'] as const, 'center'),
+    pixelSize: Math.min(MAX_PIXEL_SIZE, Math.max(1, int(params.pixelSize, 1))),
+    exportArtSize: params.exportArtSize === true,
   };
 }
 
@@ -73,7 +81,24 @@ export function resolveFrame(project: Size, p: FrameParams): Size {
     h = even(h);
   }
   if ((p.orientation === 'landscape' && w < h) || (p.orientation === 'portrait' && h < w)) [w, h] = [h, w];
-  return { width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) };
+  w = Math.max(1, Math.round(w));
+  h = Math.max(1, Math.round(h));
+  const k = p.pixelSize;
+  if (k > 1) {
+    // The frame must be a whole number of art pixels in both directions.
+    w = Math.max(k, Math.round(w / k) * k);
+    h = Math.max(k, Math.round(h / k) * k);
+  }
+  return { width: w, height: h };
+}
+
+/**
+ * Pixel size plan: the whole graph is evaluated at proxy 1/k (so the art grid is frame/k) and the result is
+ * enlarged k times with nearest-neighbour to the full frame. `frame` must come from resolveFrame (a multiple of k).
+ */
+export function pixelPlan(frame: Size, pixelSize: number): { proxy: number; art: Size; final: Size } {
+  const k = Math.max(1, Math.round(pixelSize));
+  return { proxy: 1 / k, art: { width: Math.max(1, Math.round(frame.width / k)), height: Math.max(1, Math.round(frame.height / k)) }, final: frame };
 }
 
 /** True when the frame differs from the project canvas, i.e. the engine needs an explicit canvas. */

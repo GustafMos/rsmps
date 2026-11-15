@@ -51,6 +51,11 @@ export interface PlayerState {
    * Taken from the last proxy-1 render of the viewed node; until one exists it is rendered size / proxy.
    */
   imageSize: { width: number; height: number } | null;
+  /**
+   * Output "Pixel size" in effect for the current view (1 = off). When > 1 the player renders the graph at exactly
+   * 1/pixelSize and enlarges with hard pixels, so `imageSize` / the canvas are already the final frame size.
+   */
+  pixelSize: number;
   /** Actual size of the texture currently drawn (smaller than imageSize at a lowered proxy), or null. For diagnostics only. */
   renderedSize: { width: number; height: number } | null;
   /**
@@ -65,6 +70,11 @@ export interface PlayerState {
  * Owns the render loop. Evaluates the viewed node and blits the result to the canvas with
  * no React involvement per frame. Coalesces requests: at most one evaluation in flight,
  * always the latest state.
+ */
+/**
+ * VIEWER RULE for the UI: draw the canvas with nearest-neighbour scaling (CSS `image-rendering: pixelated`) when the
+ * zoom is >= 100 %, and with smooth scaling (`image-rendering: auto`) when the zoom is below 100 %. Shrinking a
+ * dithered image with nearest-neighbour is what made the preview look different from the export.
  */
 export interface Player {
   /** Attach the WebGPU canvas to draw into (null to detach). */

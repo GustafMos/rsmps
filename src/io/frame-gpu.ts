@@ -7,6 +7,19 @@ import { conformRect, type ConformAnchor, type ConformMode, type Size } from './
  * shrinking is smooth. Returns the input itself when nothing needs to change. The result is NOT retained:
  * retain it right away if it must outlive the current task.
  */
+/** Enlarge by a whole factor with hard pixels. Returns the input for k = 1. Not retained (see conformImage). */
+export function enlargeNearest(gpu: Gpu, img: ImageValue | MaskValue, k: number): ImageValue | MaskValue {
+  if (k <= 1) return img;
+  const out = gpu.pass({
+    label: 'pixel-size',
+    size: { width: img.width * k, height: img.height * k, unit: img.unit * k },
+    textures: { src: img },
+    uniforms: { k },
+    wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureLoad(src, vec2i(floor(px / u.k)), 0); }',
+  });
+  return { ...out, kind: img.kind } as ImageValue | MaskValue;
+}
+
 export function conformImage(
   gpu: Gpu,
   img: ImageValue | MaskValue,

@@ -20,7 +20,7 @@ import { RenderedFrameCache } from './frame-cache';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
-import { conformImage } from './frame-gpu';
+import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, readFrameParams, resolveFrame, scaleSize, type ConformAnchor, type Size } from './frame';
 import { errorMessage, renderHash, totalFramesOf } from './util';
 
@@ -37,6 +37,8 @@ interface FrameSpec {
   /** Frame size at proxy 1; undefined = the project canvas. */
   canvas?: Size;
   /** Conform to the frame (viewing an Output node only). */
+  /** Output pixel size (> 1 only): render at 1/k and enlarge k times. */
+  pixelSize?: number;
   conform?: { size: Size; mode: ReturnType<typeof effectiveConform>; anchor: ConformAnchor };
 }
 
@@ -112,6 +114,7 @@ export class PlayerImpl implements Player {
   private hasSig = false;
   private micNodes = 0;
   private clearPending = false;
+  private curPixel = 1;
   private settledKey = '';
   private settledFrame = -1;
   private settledProxy = 1;
@@ -344,6 +347,7 @@ export class PlayerImpl implements Player {
     const size = resolveFrame(view.graph.project, fp);
     const spec: FrameSpec = {};
     if (isCustomFrame(view.graph.project, size)) spec.canvas = size;
+    if (fp.pixelSize > 1) spec.pixelSize = fp.pixelSize;
     if (isOutput) spec.conform = { size, mode: effectiveConform(fp), anchor: fp.conformAnchor };
     return spec;
   }
@@ -487,11 +491,13 @@ export class PlayerImpl implements Player {
       if (this.shown || this.size) this.clearOutput();
       return null;
     }
-    const proxy = this.currentProxy();
+    const spec = this.frameSpecFor(view);
+    this.curPixel = spec.pixelSize ?? 1;
+    const proxy = spec.pixelSize ? 1 / spec.pixelSize : this.currentProxy();
     const upToDate = !this.dirty && this.shown && this.shownKey === this.key && this.shownFrame === this.frame && this.shownProxy >= proxy - 1e-6;
     if (upToDate) return null;
     if (!this.dirty && this.settledKey === this.key && this.settledFrame === this.frame && this.settledProxy >= proxy - 1e-6) return null;
-    return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key, frameSpec: this.frameSpecFor(view) };
+    return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key, frameSpec: spec };
   }
 
   private async execute(job: Job): Promise<void> {
@@ -503,7 +509,7 @@ export class PlayerImpl implements Player {
     const live = this.liveSignals();
     const cached = live ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
-      this.show(cached.image, job, cached.proxy);
+      this.show(cached.image, job, cached.proxy, job.frameSpec.pixelSize ? 1 : cached.proxy);
       return;
     }
     const started = performance.now();
@@ -537,16 +543,17 @@ export class PlayerImpl implements Player {
       let shownValue: ImageValue | MaskValue = v;
       const cf = job.frameSpec.conform;
       if (cf) shownValue = conformImage(this.gpu, v, scaleSize(cf.size, job.proxy), cf.mode, cf.anchor);
+      if (job.frameSpec.pixelSize) shownValue = enlargeNearest(this.gpu, shownValue, job.frameSpec.pixelSize);
       const image: Shown = { texture: shownValue.texture, width: shownValue.width, height: shownValue.height };
       this.gpu.retain(image.texture); // held for the cache / the shown slot
       let kept = false;
       try {
         if (!live && this.cache.put(job.frame, image, job.proxy, bytesOf(image))) kept = true;
-        this.show(image, job, job.proxy);
+        this.show(image, job, job.proxy, job.frameSpec.pixelSize ? 1 : job.proxy);
       } finally {
         if (!kept) this.gpu.release(image.texture);
       }
-      if (this.playing && this.proxyMode === 'auto') {
+      if (this.playing && this.proxyMode === 'auto' && !job.frameSpec.pixelSize) {
         // Wait for the GPU so the measurement is real and the queue cannot run away.
         await this.gpu.device.queue.onSubmittedWorkDone().catch(() => undefined);
         const budget = 1000 / job.graph.project.fps;
@@ -559,10 +566,11 @@ export class PlayerImpl implements Player {
   }
 
   /** Put `image` on screen and remember what is showing. */
-  private show(image: Shown, job: Job, proxy: number): void {
+  /** `proxy`: what the cache/settle logic compares; `sizeProxy`: scale of the image relative to the full frame. */
+  private show(image: Shown, job: Job, proxy: number, sizeProxy: number = proxy): void {
     this.rendered = { width: image.width, height: image.height };
-    if (proxy >= 0.999) this.fullReal = this.rendered;
-    const full = this.fullReal ?? { width: Math.max(1, Math.round(image.width / proxy)), height: Math.max(1, Math.round(image.height / proxy)) };
+    if (sizeProxy >= 0.999) this.fullReal = this.rendered;
+    const full = this.fullReal ?? { width: Math.max(1, Math.round(image.width / sizeProxy)), height: Math.max(1, Math.round(image.height / sizeProxy)) };
     if (!this.size || this.size.width !== full.width || this.size.height !== full.height) this.size = full;
     if (!this.present(image)) return;
     this.setShown(image);
@@ -667,6 +675,7 @@ export class PlayerImpl implements Player {
       timings: this.timings,
       imageSize: this.size,
       renderedSize: this.rendered,
+      pixelSize: this.curPixel,
       audio: { needed: this.audioNeeded, running: this.deps.audio.running, micNodes: this.micNodes },
     };
   }

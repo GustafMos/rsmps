@@ -94,3 +94,36 @@ describe('conformImage on the GPU', () => {
     expect(conformImage(t.gpu, img, { width: 4, height: 2 }, 'fill', 'center')).toBe(img);
   });
 });
+
+describe('pixel size', () => {
+  it('rounds the frame to a multiple and plans the art grid', async () => {
+    const { pixelPlan } = await import('./frame');
+    expect(frame({ pixelSize: 4 })).toEqual({ width: 1920, height: 1080 });
+    const f = frame({ pixelSize: 7 });
+    expect(f.width % 7).toBe(0);
+    expect(f.height % 7).toBe(0);
+    expect(f).toEqual({ width: 1918, height: 1078 });
+    const plan = pixelPlan(frame({ pixelSize: 4 }), 4);
+    expect(plan.proxy).toBe(0.25);
+    expect(plan.art).toEqual({ width: 480, height: 270 });
+    expect(plan.final).toEqual({ width: 1920, height: 1080 });
+  });
+  it('works with presets and orientation, and is off by default', () => {
+    expect(frame({ frame: '9:16', pixelSize: 8 })).toEqual({ width: 1080, height: 1920 });
+    expect(frame({ pixelSize: 1 })).toEqual(P);
+    expect(readFrameParams({ pixelSize: 500 }).pixelSize).toBe(20); // engine proxy floor is 0.05
+    expect(readFrameParams({ pixelSize: 0 }).pixelSize).toBe(1);
+    expect(readFrameParams({ exportArtSize: true }).exportArtSize).toBe(true);
+  });
+  it('enlargeNearest makes hard k x k blocks on the GPU', async () => {
+    const { enlargeNearest } = await import('./frame-gpu');
+    const t = await harness();
+    const img = t.fromFn(2, 1, (x) => (x === 0 ? [255, 0, 0, 255] : [0, 255, 0, 255]));
+    const big = enlargeNearest(t.gpu, img, 3);
+    expect([big.width, big.height]).toEqual([6, 3]);
+    const px = await t.pixels(big);
+    expect(px.at(2, 2)).toEqual([255, 0, 0, 255]);
+    expect(px.at(3, 0)).toEqual([0, 255, 0, 255]);
+    expect(enlargeNearest(t.gpu, img, 1)).toBe(img);
+  });
+});
