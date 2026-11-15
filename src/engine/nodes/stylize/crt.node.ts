@@ -3,7 +3,7 @@ import { gaussianBlur } from '../filter/blur.node';
 
 export default defineNode({
   id: 'crt',
-  title: 'CRT Monitor',
+  title: 'CRT (simple)',
   category: 'stylize',
   description: 'Old tube-television look in one node: curved screen, scanlines, RGB phosphor mask, glow and edge falloff.',
   keywords: ['retro', 'television', 'monitor', 'tube', 'scanlines', 'curvature', 'phosphor', 'arcade'],
