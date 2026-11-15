@@ -1,4 +1,4 @@
-import type { RenderAudioOffline } from './api';
+import type { AnalyzeSignalsOffline, RenderAudioOffline, SignalTracks } from './api';
 import { AudioGraphRunner, audioAssetIds, hasAudioOutput } from './runner';
 import { BLOCK_SIZE } from './types';
 
@@ -34,4 +34,60 @@ export const renderAudioOffline: RenderAudioOffline = async (graph, registry, as
     }
   }
   return { sampleRate, channels: [left, right] };
+};
+
+/** Per-frame signal tracks. See `AnalyzeSignalsOffline` for the sampling rule. */
+export const analyzeSignalsOffline: AnalyzeSignalsOffline = async (graph, registry, assets, options) => {
+  const sampleRate = options.sampleRate ?? 48000;
+  const fps = options.fps;
+  const frames = Math.max(0, Math.ceil(options.duration * fps - 1e-9));
+  const tracks = new Map<string, Float32Array>();
+  const runner = new AudioGraphRunner(registry, { sampleRate, fadeOnRebuild: false });
+  runner.setGraph(graph);
+  for (const id of audioAssetIds(graph, registry)) {
+    const pcm = await assets(id);
+    if (pcm) runner.setAsset(id, pcm);
+  }
+  runner.setTransport({ playing: true, seconds: 0, duration: options.duration, loop: options.loop });
+  const bl = new Float32Array(BLOCK_SIZE);
+  const br = new Float32Array(BLOCK_SIZE);
+  let done = 0;
+  let sinceYield = 0;
+  for (let f = 0; f < frames; f++) {
+    const end = Math.round(((f + 1) * sampleRate) / fps);
+    while (done < end) {
+      const n = Math.min(BLOCK_SIZE, end - done);
+      runner.process(bl, br, n);
+      done += n;
+      sinceYield += n;
+    }
+    runner.forEachSignal((nodeId, name, value) => {
+      const key = nodeId + '\u0000' + name;
+      let t = tracks.get(key);
+      if (!t) {
+        t = new Float32Array(frames);
+        tracks.set(key, t);
+      }
+      t[f] = value;
+    });
+    if (sinceYield >= sampleRate * 2) {
+      sinceYield = 0;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  const result: SignalTracks = {
+    frames,
+    fps,
+    value(nodeId, name, frameIndex) {
+      const t = tracks.get(nodeId + '\u0000' + name);
+      if (!t || frames === 0) return 0;
+      return t[Math.min(frames - 1, Math.max(0, Math.floor(frameIndex)))];
+    },
+    keys: () =>
+      [...tracks.keys()].map((k) => {
+        const [nodeId, name] = k.split('\u0000');
+        return { nodeId, name };
+      }),
+  };
+  return result;
 };

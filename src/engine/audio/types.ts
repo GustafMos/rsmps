@@ -102,6 +102,12 @@ export interface AudioIO {
   /** MIDI outputs by name. Push events with `offset` inside the block. The array is cleared by the host each block. */
   midiOut: Record<string, MidiEvent[]>;
   params: AudioParams;
+  /**
+   * Publish a named scalar for the picture side (sound -> picture bridge). Latest value per block wins.
+   * Frame-domain bridge nodes read it back through `Host.signal(nodeId, name, seconds)`.
+   * Allocation-free after the first call with a given name; call it every block.
+   */
+  signal(name: string, value: number): void;
   time: AudioTime;
   assets: AudioAssets;
   live: AudioLive;

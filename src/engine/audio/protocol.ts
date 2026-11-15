@@ -12,6 +12,7 @@ export type ToWorklet =
 
 export type FromWorklet =
   | { type: 'meters'; meters: Record<string, [number, number]> }
+  | { type: 'signals'; signals: Record<string, Record<string, number>> }
   | { type: 'error'; message: string };
 
 export const WORKLET_NAME = 'rsmps-audio';

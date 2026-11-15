@@ -117,14 +117,63 @@ and the synth to `audio-out`. `audio-to-midi` is a monophonic McLeod pitch track
 lowest note, 10 ms hop) with a level gate, clarity threshold (Sensitivity), note confirmation and hysteresis
 (Steadiness), optional scale snap and optional pitch-bend output.
 
+## Sound to picture: the bridge
+
+Goal: sing into the microphone and let the loudness (or pitch, or notes) move anything in the picture.
+
+```
+ stream domain (worklet / offline loop)              frame domain (per video frame)
+ microphone.tap ─► audio-level kernel ─ io.signal('level', v) ─►  Host.signal(nodeId, 'level', seconds)
+                                                                    │
+                                          audio-level.render() ─► number output ─► (wire) ─► object-3d position
+```
+
+* A kernel publishes named scalars with `io.signal(name, value)` (latest value per block wins).
+* The bridge nodes live in `src/engine/nodes/bridge/`, category `math`, and have BOTH an `audio` kernel (measure and
+  publish) and a frame-domain `render` that only does `ctx.host.signal?.(ctx.nodeId, name, ctx.time.seconds) ?? 0`
+  (reading `ctx.time` makes the node re-render every frame; the files import only audio code so the worklet stays clean).
+* Nodes: **`audio-level`** (Sound to Numbers: `level` loudness, `peak`, `low`/`mid`/`high` bands, `pitch`),
+  **`midi-value`** (MIDI to Numbers: `note`, `velocity`, `gate`, `count`, `cc`), **`midi-trigger`** (Note Pulse:
+  `envelope` fired by every note-on).
+* Loudness is RMS (20 ms mean-square window) followed by attack/release in ms, converted to dB and mapped from
+  `floor`..`ceiling` (dB) to `from`..`to`, clamped. `pitch` is a 0..1 position between the lowest and highest note (then
+  mapped to From..To), smoothed, and holds the last pitch while the voice is silent or unvoiced.
+* **Tap nodes**: stream nodes with a stream input but no stream output are "analysis taps". The runner compiles and runs
+  them (and everything upstream) even with no `audio-out`. `AudioEngine.hasSignals(graph, registry)` tells the host to
+  start the engine for them; `hasAudio` still means "there is an audio output".
+* **Live**: the worklet posts all signals ~60 Hz; `AudioEngine.signal(nodeId, name)` returns the latest value (0 if
+  unknown). Wire the host's `Host.signal` to it.
+* **Export**: `analyzeSignalsOffline(graph, registry, assets, { duration, fps, loop })` runs the same runner faster than
+  real time and samples every signal once per video frame `f`: the value held at the END of that frame's span (sample
+  `round((f+1)*sampleRate/fps)`). Kernels smooth their own measurements, so this is the smoothed value at that moment,
+  not an average over the frame. `SignalTracks.value(nodeId, name, frameIndex)` looks it up. The host's `Host.signal` during
+  export should return `tracks.value(nodeId, name, Math.round(seconds * fps))`.
+* **Export limitation: live sources are silent offline.** A graph driven by the *microphone* or a *MIDI device*
+  exports as the quiet values (zeros, or `From`), because there is no live input to analyse. To export an animation
+  driven by singing: record the singing, import it as an audio file, and use `audio-file` instead of `microphone`
+  (and `audio-to-midi` on the file for note-driven animation). The offline analysis of an `audio-file` is exact and
+  repeatable.
+
+### Worked example: sing to move a cube up and down
+
+1. Add **Microphone** (turn on nothing else; leave "Hear myself" off) and **Sound to Numbers**.
+2. Wire `Microphone.Silent tap` into `Sound to Numbers.Sound`.
+3. Set Sound to Numbers: Quietest -50 dB, Loudest -10 dB, From `-1`, To `1` (the cube's vertical range), Rise 15 ms,
+   Fall 200 ms.
+4. Wire `Sound to Numbers.Loudness` into the 3D object's Position Y.
+5. Press play and sing: the cube follows your volume. Wire `Pitch` into another setting (rotation, colour) to
+   steer it with the pitch of your voice.
+6. To export, record the take, add an **Audio File** with the recording and wire it into `Sound to Numbers` instead of
+   the microphone.
+
+For notes: Microphone.tap, Audio to MIDI, then `MIDI to Numbers` (`Note` for height, `Key down` for visibility) or
+`Note Pulse` for a bounce on every note.
+
 ## Not in v1
 
 * **Plugins cannot add audio nodes.** The worklet only knows the built-in nodes (functions cannot be sent to it).
 * **Number sockets are not wired in the stream domain**: params use the stored value. (Frame-domain number nodes cannot
   be read deterministically from the worklet.)
-* **`audio-level` (audio drives visuals)** is future work for the same reason: the frame domain cannot read the live
-  worklet deterministically. A deterministic route would be an offline analysis pass (per-frame level of the rendered
-  audio) cached as an asset-like value.
 * Sample-accurate transport inside the worklet is block-based; the main thread re-sends the transport on play, pause,
   seek and loop wrap.
 * Topology rebuilds fade in over 10 ms (no fade-out of the old graph).

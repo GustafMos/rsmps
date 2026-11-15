@@ -59,6 +59,7 @@ interface PlanNode {
   merges: Record<string, MidiEvent[]>;
   uiPending: MidiEvent[];
   peak: [number, number];
+  signals: Record<string, number>;
 }
 
 const isAudioNode = (def: AnyNodeDef | undefined): def is AnyNodeDef => !!def && !!def.audio;
@@ -68,6 +69,19 @@ export function hasAudioOutput(graph: GraphDoc, registry: Registry): boolean {
   for (const n of graph.nodes) {
     const def = registry.get(n.type);
     if (isAudioNode(def) && def.category === 'output' && graph.edges.some((e) => e.to.node === n.id)) return true;
+  }
+  return false;
+}
+
+/** True if the graph has an analysis tap (stream node with a stream input but no stream output) that something feeds. */
+export function hasSignalTap(graph: GraphDoc, registry: Registry): boolean {
+  for (const n of graph.nodes) {
+    const def = registry.get(n.type);
+    if (!isAudioNode(def) || def.category === 'output') continue;
+    const outs = Object.values(def.outputs as OutputSchema);
+    if (outs.some((o) => o.type === 'audio' || o.type === 'midi')) continue;
+    const ins = def.inputs as InputSchema;
+    if (graph.edges.some((e) => e.to.node === n.id && ins[e.to.port] && (ins[e.to.port].type === 'audio' || ins[e.to.port].type === 'midi'))) return true;
   }
   return false;
 }
@@ -181,9 +195,16 @@ export class AudioGraphRunner {
       const i = db.inputs[e.to.port];
       return !!o && !!i && o.type === i.type && (o.type === 'audio' || o.type === 'midi');
     });
-    // Upstream closure of the sinks.
+    // Roots: the audio sinks, plus analysis taps (stream nodes with a stream input but no stream output, e.g. the
+    // sound -> picture bridge nodes). Taps run even when nothing is wired to an audio-out.
+    const hasStreamOut = (d: AnyNodeDef) => Object.values(d.outputs as OutputSchema).some((o) => o.type === 'audio' || o.type === 'midi');
+    const tapIds = doc.nodes.filter((n) => {
+      const d = registry.get(n.type);
+      return isAudioNode(d) && d.category !== 'output' && !hasStreamOut(d) && edges.some((e) => e.to.node === n.id);
+    });
+    // Upstream closure of the roots.
     const needed = new Set<string>();
-    const stack = sinkIds.map((n) => n.id);
+    const stack = [...sinkIds, ...tapIds].map((n) => n.id);
     while (stack.length) {
       const id = stack.pop()!;
       if (needed.has(id)) continue;
@@ -233,7 +254,7 @@ export class AudioGraphRunner {
       for (const list of [...Object.values(pn.audioSrcs), ...Object.values(pn.midiSrcs)]) for (const s of list) visit(s.node);
       order.push(pn);
     };
-    for (const s of sinkIds) visit(next.get(s.id)!);
+    for (const s of [...sinkIds, ...tapIds]) visit(next.get(s.id)!);
     this.order = order;
     this.sinks = order.filter((n) => n.sink);
     this.signature = sig;
@@ -266,7 +287,11 @@ export class AudioGraphRunner {
       }
     }
     const params: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const signals: Record<string, number> = {};
     const io: AudioIO = {
+      signal: (name, value) => {
+        signals[name] = value;
+      },
       frames: bs,
       sampleRate: this.sampleRate,
       in: ins,
@@ -299,6 +324,7 @@ export class AudioGraphRunner {
       merges,
       uiPending: [],
       peak: [0, 0],
+      signals,
     };
   }
 
@@ -469,6 +495,26 @@ export class AudioGraphRunner {
         io.out.master[1].set(src[1].subarray(0, frames));
       }
     }
+  }
+
+  /** Latest published signals of every running node: { nodeId: { name: value } }. Allocates; call at ~60 Hz at most. */
+  signalSnapshot(): Record<string, Record<string, number>> {
+    const out: Record<string, Record<string, number>> = {};
+    for (const pn of this.order) {
+      const keys = Object.keys(pn.signals);
+      if (keys.length) out[pn.id] = { ...pn.signals };
+    }
+    return out;
+  }
+
+  /** Latest published value of one signal (0 if unknown). */
+  signal(nodeId: string, name: string): number {
+    return this.nodes.get(nodeId)?.signals[name] ?? 0;
+  }
+
+  /** Visit every published signal without allocating. */
+  forEachSignal(fn: (nodeId: string, name: string, value: number) => void): void {
+    for (const pn of this.order) for (const k in pn.signals) fn(pn.id, k, pn.signals[k]);
   }
 
   /** Peak levels since the last call (then reset), by node id. */

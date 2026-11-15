@@ -20,6 +20,7 @@ declare function registerProcessor(name: string, ctor: new () => AudioWorkletPro
 class RsmpsProcessor extends AudioWorkletProcessor {
   private runner: AudioGraphRunner;
   private sinceMeters = 0;
+  private sinceSignals = 0;
   private reportedError = false;
   private scratch = new Float32Array(BLOCK_SIZE * 4);
 
@@ -93,6 +94,12 @@ class RsmpsProcessor extends AudioWorkletProcessor {
     if (this.sinceMeters >= sampleRate / 30) {
       this.sinceMeters = 0;
       this.post({ type: 'meters', meters: this.runner.takeMeters() });
+    }
+    this.sinceSignals += total;
+    if (this.sinceSignals >= sampleRate / 60) {
+      this.sinceSignals = 0;
+      const signals = this.runner.signalSnapshot();
+      if (Object.keys(signals).length) this.post({ type: 'signals', signals });
     }
     return true;
   }

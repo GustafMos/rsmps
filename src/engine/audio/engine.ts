@@ -9,7 +9,7 @@ import type { AudioAssetProvider, AudioEngine, CreateAudioEngine, TransportState
 import { toAudioAsset } from './pcm';
 import type { FromWorklet, ToWorklet } from './protocol';
 import { WORKLET_NAME } from './protocol';
-import { audioAssetIds, hasAudioOutput } from './runner';
+import { audioAssetIds, hasAudioOutput, hasSignalTap } from './runner';
 import type { MidiEvent } from './types';
 // Vite bundles the worklet (and everything it imports) as its own module and returns its URL.
 // (`new URL('./worklet.ts', import.meta.url)` would copy the file unbundled in production builds.)
@@ -36,6 +36,7 @@ class WebAudioEngine implements AudioEngine {
   private transport: TransportState = { playing: false, seconds: 0, duration: 0, loop: false };
   private volume = 1;
   private meters = new Map<string, [number, number]>();
+  private signals = new Map<string, number>();
   private disposed = false;
 
   hasAudio(graph: GraphDoc, registry: Registry): boolean {
@@ -79,6 +80,8 @@ class WebAudioEngine implements AudioEngine {
       const m = e.data;
       if (m.type === 'meters') {
         for (const [id, v] of Object.entries(m.meters)) this.meters.set(id, v);
+      } else if (m.type === 'signals') {
+        for (const [id, values] of Object.entries(m.signals)) for (const [name, v] of Object.entries(values)) this.signals.set(id + '\u0000' + name, v);
       } else if (m.type === 'error') {
         console.warn('Audio worklet error:', m.message);
       }
@@ -108,6 +111,14 @@ class WebAudioEngine implements AudioEngine {
   setVolume(volume: number): void {
     this.volume = Math.max(0, volume);
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.01);
+  }
+
+  hasSignals(graph: GraphDoc, registry: Registry): boolean {
+    return hasSignalTap(graph, registry);
+  }
+
+  signal(nodeId: string, name: string): number {
+    return this.signals.get(nodeId + '\u0000' + name) ?? 0;
   }
 
   meter(nodeId: string): [number, number] | null {

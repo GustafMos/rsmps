@@ -115,6 +115,10 @@ export interface KernelRun {
 export interface KernelResult {
   out: Record<string, [Float32Array, Float32Array]>;
   midiOut: Record<string, MidiEvent[]>;
+  /** Last published value of each signal after the run. */
+  signals: Record<string, number>;
+  /** Value of each signal after every block (index = block number), for shape assertions. */
+  signalHistory: Record<string, number[]>;
   state: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
@@ -138,10 +142,15 @@ export function runKernel(def: AnyNodeDef, run: KernelRun): KernelResult {
   const bufMidiOut: Record<string, MidiEvent[]> = {};
   for (const k of Object.keys(midiOut)) bufMidiOut[k] = [];
   const assets = run.assets ?? {};
+  const signals: Record<string, number> = {};
+  const signalHistory: Record<string, number[]> = {};
   const live = { mic: null as StereoBlock | null, deviceMidi: [] as MidiEvent[], uiMidi: [] as MidiEvent[] };
   const io: AudioIO = {
     frames: BLOCK_SIZE,
     sampleRate: sr,
+    signal: (name, value) => {
+      signals[name] = value;
+    },
     in: {},
     midiIn: {},
     out: bufOut,
@@ -193,13 +202,14 @@ export function runKernel(def: AnyNodeDef, run: KernelRun): KernelResult {
     }
     for (const list of Object.values(bufMidiOut)) list.length = 0;
     kernel.process(state, io);
+    for (const k of Object.keys(signals)) (signalHistory[k] ??= []).push(signals[k]);
     for (const k of Object.keys(out)) {
       out[k][0].set(bufOut[k][0].subarray(0, n), start);
       out[k][1].set(bufOut[k][1].subarray(0, n), start);
     }
     for (const k of Object.keys(midiOut)) for (const e of bufMidiOut[k]) midiOut[k].push({ ...e, offset: e.offset + start });
   }
-  return { out, midiOut, state };
+  return { out, midiOut, signals, signalHistory, state };
 }
 
 let cachedRegistry: Registry | null = null;
