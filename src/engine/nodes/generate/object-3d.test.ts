@@ -1,0 +1,88 @@
+import { expect, it } from 'vitest';
+import { harness } from '../../testing';
+
+let shared: ReturnType<typeof harness> | null = null;
+const H = () => (shared ??= harness());
+const proj = { width: 64, height: 64 };
+const base = { rotX: 0, rotY: 0, rotZ: 0, spinX: 0, spinY: 0, spinZ: 0, camera: 'orthographic', scale: 0.5, baseColor: [1, 1, 1, 1] };
+
+async function draw(params: Record<string, unknown>) {
+  const t = await H();
+  return t.pixels((await t.run('object-3d', { ...base, ...params }, {}, { project: proj })).image as never);
+}
+const alphaAt = (px: { data: Uint8ClampedArray; width: number }, x: number, y: number) => px.data[(y * px.width + x) * 4 + 3];
+
+it('every shape is drawn in the middle, with a transparent background', async () => {
+  for (const shape of ['cube', 'sphere', 'cylinder', 'cone', 'torus', 'pyramid', 'capsule', 'octahedron']) {
+    const px = await draw({ shape, rotX: 20, rotY: 30 });
+    let opaque = 0;
+    for (let i = 3; i < px.data.length; i += 4) if (px.data[i] > 250) opaque++;
+    expect(opaque, shape).toBeGreaterThan(80);
+    expect(alphaAt(px, 0, 0), shape).toBe(0);
+    expect(alphaAt(px, 63, 63), shape).toBe(0);
+    if (shape !== 'torus') expect(alphaAt(px, 32, 32), shape).toBe(255);
+  }
+});
+
+it('sphere has the expected radius and an antialiased edge (orthographic and perspective)', async () => {
+  for (const camera of ['orthographic', 'perspective']) {
+    const px = await draw({ shape: 'sphere', scale: 0.5, camera });
+    // radius = 0.95 * 16 = 15.2 texels
+    expect(alphaAt(px, 32 + 14, 32), camera).toBe(255);
+    expect(alphaAt(px, 32 + 17, 32), camera).toBe(0);
+    const edge = alphaAt(px, 32 + 15, 32);
+    expect(edge, camera).toBeGreaterThan(40);
+    expect(edge, camera).toBeLessThan(250);
+  }
+});
+
+it('cube: a flat front face with square outline when not rotated', async () => {
+  const px = await draw({ shape: 'cube', scale: 0.5 });
+  // half width 0.55 * 16 = 8.8
+  expect(alphaAt(px, 32 + 7, 32 + 7)).toBe(255);
+  expect(alphaAt(px, 32 + 11, 32)).toBe(0);
+  expect(alphaAt(px, 32, 32 - 11)).toBe(0);
+  const rolled = await draw({ shape: 'cube', scale: 0.5, rotZ: 45 });
+  expect(alphaAt(rolled, 32 + 10, 32)).toBe(255); // corner now points right
+});
+
+it('position and size move and scale the object', async () => {
+  const t = await H();
+  const px = await t.pixels((await t.run('object-3d', { ...base, shape: 'sphere', x: 0.25, y: 0.75, scale: 0.3 }, {}, { project: proj })).image as never);
+  expect(alphaAt(px, 16, 48)).toBe(255);
+  expect(alphaAt(px, 48, 16)).toBe(0);
+  expect(alphaAt(px, 16 + 9, 48)).toBe(0);
+});
+
+it('lighting: the lit side is brighter than the shadow side; ambient lifts shadows; cel shading is banded', async () => {
+  const lit = await draw({ shape: 'sphere', lightAzimuth: -60, lightElevation: 0, ambient: 0.1, specular: 0 });
+  const left = lit.data[(32 * 64 + 24) * 4];
+  const right = lit.data[(32 * 64 + 40) * 4];
+  expect(left).toBeGreaterThan(right + 80);
+  const amb = await draw({ shape: 'sphere', lightAzimuth: -60, lightElevation: 0, ambient: 0.6, specular: 0 });
+  expect(amb.data[(32 * 64 + 40) * 4]).toBeGreaterThan(right + 60);
+  const cel = await draw({ shape: 'sphere', cel: true, celSteps: 3, specular: 0 });
+  const levels = new Set<number>();
+  for (let y = 20; y < 44; y++) for (let x = 20; x < 44; x++) if (cel.data[(y * 64 + x) * 4 + 3] === 255) levels.add(cel.data[(y * 64 + x) * 4]);
+  expect(levels.size).toBeLessThanOrEqual(3);
+  expect(levels.size).toBeGreaterThanOrEqual(2);
+});
+
+it('base colour tints the object and its alpha is kept', async () => {
+  const px = await draw({ shape: 'sphere', baseColor: [1, 0, 0, 0.5], ambient: 1, specular: 0 });
+  const i = (32 * 64 + 32) * 4;
+  expect(px.data[i + 1]).toBeLessThan(10);
+  expect(Math.abs(px.data[i + 3] - 128)).toBeLessThan(3);
+});
+
+it('spinning loops exactly (whole turns) and moves', async () => {
+  const t = await H();
+  const size = { size: t.solid(64, 64, [0, 0, 0, 255], 1) };
+  for (const shape of ['cube', 'torus', 'pyramid']) {
+    const r = await t.loopCheck('object-3d', { shape, spinY: 1, spinX: 2, camera: 'perspective' }, size);
+    expect(r.seam, shape).toBeLessThan(0.05);
+    expect(r.motion, shape).toBeGreaterThan(1);
+  }
+  const still = await t.loopCheck('object-3d', { spinY: 0 }, size);
+  expect(still.motion).toBe(0);
+});
