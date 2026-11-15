@@ -14,11 +14,15 @@ export class GraphController {
   readonly frameEls = new Map<string, HTMLElement>();
   readonly edgeEls = new Map<string, SVGPathElement[]>();
   pointer = { x: 0, y: 0 };
+  /** An output clicked (not dragged): the next click on another output merges the two. */
+  pendingOut: { node: string; port: string } | null = null;
   hovering = false;
   /** True until the graph has been framed with a real panel size. */
   needsFit = true;
   spaceDown = false;
   spaceUsed = false;
+  /** Binding that started the current hold-to-pan (so its release can be matched). */
+  spaceKey: string | null = null;
   private listeners = new Set<() => void>();
   private zoomPct = 100;
 

@@ -29,7 +29,7 @@
 .rs-pal__sw.is-sel { outline: 2px solid var(--select); outline-offset: 1px; z-index: 1; }
 .rs-pal__add { background: var(--bg-3); color: var(--text-dim); display: grid; place-items: center; border-color: var(--line-strong); }
 .rs-pal__edit { display: flex; gap: var(--s-1); align-items: center; }
-.rs-pal__edit input[type='color'] { width: 32px; height: 28px; padding: 0; background: none; border: 1px solid var(--line-strong); }
+.rs-pal__cur { width: 32px; height: 28px; padding: 0; border: 1px solid #000; outline: 1px solid var(--line-strong); outline-offset: 1px; }
 .rs-pal__tools { display: flex; flex-direction: column; gap: var(--s-1); }
 .rs-pal__btns { display: flex; flex-wrap: wrap; gap: var(--s-1); }
 .rs-pal__btns .rs-btn { height: var(--ctl-h); padding: 0 var(--s-2); }

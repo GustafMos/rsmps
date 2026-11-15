@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ColorValue } from '../../engine/types';
-import { hexOf, rgbOf } from '../lib/drag';
+import { hexOf } from '../lib/drag';
+import { ColorPopover } from './ColorPicker';
 import { Icon } from './Icon';
 import { NumberField } from './NumberField';
 import './fields.css';
@@ -113,75 +114,16 @@ declare global {
 export function ColorField({ value, onChange, label, large }: { value: ColorValue; onChange: (v: ColorValue) => void; label?: string; large?: boolean }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
   const css = `rgba(${Math.round(value[0] * 255)},${Math.round(value[1] * 255)},${Math.round(value[2] * 255)},${value[3]})`;
   return (
     <>
-      <button ref={btn} type="button" className={`rs-color${large ? ' rs-color--lg' : ''}`} data-nodrag onClick={() => setOpen((o) => !o)} title="Edit colour">
+      <button ref={btn} type="button" className={`rs-color${large ? ' rs-color--lg' : ''}`} data-nodrag onClick={() => setOpen((o) => !o)} title="Edit colour" aria-haspopup="dialog" aria-expanded={open}>
         <span className="rs-swatch" style={{ ['--c' as string]: css }} />
         {label && <span className="rs-color__label">{label}</span>}
         <span className="rs-color__hex rs-mono">{hexOf(value).toUpperCase()}</span>
       </button>
-      {open && (
-        <Popover anchor={btn.current} onClose={() => setOpen(false)}>
-          <ColorEditor value={value} onChange={onChange} />
-        </Popover>
-      )}
-    </>
-  );
-}
-
-function ColorEditor({ value, onChange }: { value: ColorValue; onChange: (v: ColorValue) => void }) {
-  const [hex, setHex] = useState(hexOf(value));
-  useEffect(() => setHex(hexOf(value)), [value]);
-  const ch = (i: number, v: number) => {
-    const next = [...value] as ColorValue;
-    next[i] = i === 3 ? v : v / 255;
-    onChange(next);
-  };
-  const pick = async () => {
-    if (!window.EyeDropper) return;
-    try {
-      const r = await new window.EyeDropper().open();
-      const rgb = rgbOf(r.sRGBHex);
-      if (rgb) onChange([rgb[0], rgb[1], rgb[2], value[3]]);
-    } catch {
-      /* cancelled */
-    }
-  };
-  return (
-    <>
-      <div className="rs-pop__row">
-        <input
-          type="color"
-          value={hexOf(value)}
-          style={{ width: 40, height: 28, padding: 0, border: '1px solid var(--line-strong)', background: 'none' }}
-          onChange={(e) => {
-            const rgb = rgbOf(e.target.value);
-            if (rgb) onChange([rgb[0], rgb[1], rgb[2], value[3]]);
-          }}
-        />
-        <input
-          className="rs-input rs-mono"
-          style={{ flex: 1 }}
-          value={hex}
-          spellCheck={false}
-          onKeyDown={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            setHex(e.target.value);
-            const rgb = rgbOf(e.target.value);
-            if (rgb) onChange([rgb[0], rgb[1], rgb[2], value[3]]);
-          }}
-        />
-        {window.EyeDropper && (
-          <button className="rs-btn rs-btn--icon" type="button" onClick={pick} title="Pick a colour from the screen (eyedropper)">
-            <Icon name="eyedrop" />
-          </button>
-        )}
-      </div>
-      <NumberField label="Red" value={Math.round(value[0] * 255)} min={0} max={255} integer onChange={(v) => ch(0, v)} />
-      <NumberField label="Green" value={Math.round(value[1] * 255)} min={0} max={255} integer onChange={(v) => ch(1, v)} />
-      <NumberField label="Blue" value={Math.round(value[2] * 255)} min={0} max={255} integer onChange={(v) => ch(2, v)} />
-      <NumberField label="Alpha" value={value[3]} min={0} max={1} step={0.01} onChange={(v) => ch(3, v)} />
+      {open && <ColorPopover anchor={btn.current} value={value} onChange={onChange} onClose={close} />}
     </>
   );
 }

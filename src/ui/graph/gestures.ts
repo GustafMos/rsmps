@@ -3,7 +3,7 @@
  * store is only touched when a gesture ends (or when selection changes).
  */
 import type { DragEvent as RDragEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from 'react';
-import { connectError, disconnect, connect, inputType, outputType } from '../../engine/graph';
+import { connectError, disconnect, inputType, outputType, wiresInto } from '../../engine/graph';
 import type { AppCtx } from '../store/context';
 import { trackPointer } from '../lib/drag';
 import {
@@ -200,7 +200,8 @@ export function createGestures(app: AppCtx) {
     } else {
       const it = inputType(g, reg, node, port);
       if (!it) return;
-      const existing = !it.multi ? g.edges.find((x) => x.to.node === node && x.to.port === port) : undefined;
+      const slotAttr = sock.dataset.slot;
+      const existing = slotAttr !== undefined ? wiresInto(g, node, port)[Number(slotAttr)] : !it.multi ? g.edges.find((x) => x.to.node === node && x.to.port === port) : undefined;
       if (existing) {
         const t = outputType(g, reg, existing.from.node, existing.from.port);
         if (!t) return;
@@ -225,17 +226,26 @@ export function createGestures(app: AppCtx) {
       if (d !== 'out') return 'Drop on an output socket';
       return connectError(g, reg, { node: n, port: p }, { node: fixed.node, port: fixed.port });
     };
-    for (const s of sockets) if (errorFor(s)) s.dataset.dim = '1';
+    /** Dropping an output on another output merges them (image/mask -> Merge, audio -> Mixer). */
+    const mergeTarget = (el: HTMLElement): boolean => {
+      if (fixed.side !== 'out' || detached || el.dataset.dir !== 'out' || el.dataset.node === fixed.node) return false;
+      const t = el.dataset.type as SocketType;
+      const vis = (x: SocketType) => x === 'image' || x === 'mask';
+      if (vis(fixed.type) && vis(t)) return !!reg.get('merge');
+      return fixed.type === 'audio' && t === 'audio' && !!reg.get('mixer');
+    };
+    for (const s of sockets) if (errorFor(s) && !mergeTarget(s)) s.dataset.dim = '1';
     cls('is-wiring', true);
     const path = ctl.pending;
     path?.setAttribute('class', `rs-wire rs-wire--${fixed.type} is-pending`);
     let target: HTMLElement | null = null;
+    let mergeTo: HTMLElement | null = null;
     let moved = false;
 
-    const findTarget = (ev: PointerEvent): { el: HTMLElement; err: string | null } | null => {
+    const findTarget = (ev: PointerEvent): { el: HTMLElement; err: string | null; merge?: boolean } | null => {
       const hit = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
       const s = hit?.closest<HTMLElement>('[data-sock]');
-      if (s) return { el: s, err: errorFor(s) };
+      if (s) return { el: s, err: errorFor(s), merge: mergeTarget(s) };
       const nodeEl = hit?.closest<HTMLElement>('[data-node-id]');
       if (nodeEl) {
         const cand = Array.from(nodeEl.querySelectorAll<HTMLElement>('[data-sock]')).find((c) => !errorFor(c));
@@ -264,13 +274,16 @@ export function createGestures(app: AppCtx) {
           delete target.dataset.ok;
           delete target.dataset.bad;
         }
+        mergeTo?.removeAttribute('data-merge');
+        mergeTo = found?.merge ? found.el : null;
+        if (mergeTo) mergeTo.dataset.merge = fixed.type === 'audio' ? 'mix' : 'merge';
         target = found && !found.err ? found.el : null;
-        if (found?.el) {
+        if (found?.el && !found.merge) {
           if (found.err) found.el.dataset.bad = '1';
           else found.el.dataset.ok = '1';
         }
         if (ctl.hint) {
-          if (found?.err) {
+          if (found?.err && !found.merge) {
             ctl.hint.textContent = found.err;
             ctl.hint.style.display = 'block';
             ctl.hint.style.left = `${ev.clientX + 14}px`;
@@ -282,6 +295,7 @@ export function createGestures(app: AppCtx) {
       (ev) => {
         sockets.forEach((s) => {
           delete s.dataset.dim;
+          delete s.dataset.merge;
           delete s.dataset.ok;
           delete s.dataset.bad;
         });
@@ -289,15 +303,26 @@ export function createGestures(app: AppCtx) {
         if (ctl.hint) ctl.hint.style.display = 'none';
         path?.removeAttribute('d');
         if (detached) ctl.edgeEls.get(detached)?.forEach((p) => (p.style.display = ''));
+        if (mergeTo) {
+          ed.mergeOutputs({ node: fixed.node, port: fixed.port }, { node: mergeTo.dataset.node!, port: mergeTo.dataset.port! });
+          return;
+        }
         if (target) {
           const to = { node: target.dataset.node!, port: target.dataset.port! };
           const from = fixed.side === 'out' ? { node: fixed.node, port: fixed.port } : to;
           const dst = fixed.side === 'out' ? to : { node: fixed.node, port: fixed.port };
-          if (detached) ed.edit((gr) => connect(disconnect(gr, detached!), reg, from, dst));
-          else ed.connect(from, dst);
+          const slot = target.dataset.slot !== undefined ? Number(target.dataset.slot) : undefined;
+          if (detached) ed.edit((gr) => ed.connectSlot(disconnect(gr, detached!), from, dst, slot));
+          else ed.connect(from, dst, slot);
           return;
         }
-        if (!moved) return;
+        if (!moved) {
+          if (fixed.side === 'out' && !detached) {
+            ctl.pendingOut = { node: fixed.node, port: fixed.port };
+            ed.toast('Click another output to merge the two (the first one ends up on top).', 'info');
+          }
+          return;
+        }
         const hit = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
         const onSocket = hit?.closest('[data-sock]');
         if (onSocket) {
@@ -440,6 +465,13 @@ export function createGestures(app: AppCtx) {
         return;
       }
       const sock = t.closest<HTMLElement>('[data-sock]');
+      const pend = ctl.pendingOut;
+      ctl.pendingOut = null;
+      if (sock && pend && sock.dataset.dir === 'out' && sock.dataset.node !== pend.node) {
+        e.preventDefault();
+        ed.mergeOutputs(pend, { node: sock.dataset.node!, port: sock.dataset.port! });
+        return;
+      }
       if (sock) {
         e.preventDefault();
         startWire(e, sock);

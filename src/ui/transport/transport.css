@@ -16,3 +16,7 @@
 .rs-tp__head::before { content: ''; position: absolute; left: -4px; top: -2px; width: 10px; height: 6px; background: var(--yellow); box-shadow: 0 0 0 1px #000; }
 .rs-tp__field { width: 92px; }
 .rs-tp__field--wide { width: 116px; }
+
+.rs-tp__kbd { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 var(--s-2); background: #2a2208; border: 1px solid var(--yellow); color: var(--yellow); font-size: var(--fs-xs); white-space: nowrap; }
+.rs-tp__audio { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; }
+.rs-tp__note { font-size: var(--fs-xs); color: var(--text-faint); white-space: nowrap; }

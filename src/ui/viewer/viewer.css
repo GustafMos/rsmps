@@ -43,3 +43,5 @@
 .rs-paint__cursor { position: absolute; left: 0; top: 0; display: none; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 0 1px #000; pointer-events: none; }
 .rs-paint__cursor.is-erase { border-color: var(--danger); }
 .rs-paint__bar { left: 50%; bottom: var(--s-3); transform: translateX(-50%); cursor: default; height: 40px; }
+
+.rs-viewer__rendering { left: 50%; top: 44px; transform: translateX(-50%); color: var(--yellow); border-color: var(--yellow); background: #2a2208; }

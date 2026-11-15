@@ -3,6 +3,7 @@
  * computed (not measured): wires can be drawn and updated without touching the DOM.
  */
 import { paramSocketType } from '../../engine/define';
+import { paletteInputPort } from './sockets';
 import type { AnyNodeDef, Edge, GraphDoc, InputSchema, NodeInstance, OutputSchema, ParamDef, SocketType } from '../../engine/types';
 
 export const NODE_W = 216;
@@ -15,7 +16,7 @@ export const MAX_PARAM_ROWS = 6;
 export interface IoRow {
   kind: 'io';
   y: number;
-  input?: { port: string; label: string; type: SocketType };
+  input?: { port: string; label: string; type: SocketType; multi?: boolean };
   output?: { port: string; label: string; type: SocketType };
 }
 export interface ParamRow {
@@ -25,12 +26,28 @@ export interface ParamRow {
   def: ParamDef;
   socket: SocketType | null;
 }
+export interface LayersRow {
+  kind: 'layers';
+  y: number;
+  port: string;
+  type: SocketType;
+  /** number of wires; the list has count + 1 rows (the last is the empty drop row) */
+  count: number;
+}
+export const LAYER_H = 24;
+/** Image and mask stacks are listed top layer first, like a layer panel; other types keep wire order. */
+export const isLayerType = (t: SocketType) => t === 'image' || t === 'mask';
+export interface HintRow {
+  kind: 'hint';
+  y: number;
+}
 export interface MoreRow {
   kind: 'more';
   y: number;
   count: number;
 }
-export type Row = IoRow | ParamRow | MoreRow;
+export type Row = IoRow | ParamRow | MoreRow | HintRow | LayersRow;
+export const HINT_H = 56;
 
 export interface NodeLayout {
   width: number;
@@ -47,7 +64,7 @@ export interface MissingPorts {
   outputs: string[];
 }
 
-const cache = new WeakMap<NodeInstance, { def: AnyNodeDef | undefined; missing: string; collapsed: boolean; layout: NodeLayout }>();
+const cache = new WeakMap<NodeInstance, { def: AnyNodeDef | undefined; missing: string; collapsed: boolean; hint: boolean; counts: string; layout: NodeLayout }>();
 
 export function visibleParams(def: AnyNodeDef, params: Record<string, unknown>): [string, ParamDef][] {
   const out: [string, ParamDef][] = [];
@@ -63,20 +80,22 @@ export function visibleParams(def: AnyNodeDef, params: Record<string, unknown>):
   return out;
 }
 
-export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, missing?: MissingPorts, hasSummary = true): NodeLayout {
+export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, missing?: MissingPorts, hint = false, counts: Record<string, number> = {}): NodeLayout {
+  const hasSummary = true;
+  const countsKey = JSON.stringify(counts);
   const missKey = missing ? missing.inputs.join(',') + '|' + missing.outputs.join(',') : '';
   const hit = cache.get(node);
-  if (hit && hit.def === def && hit.missing === missKey && hit.collapsed === !!node.collapsed) return hit.layout;
+  if (hit && hit.def === def && hit.missing === missKey && hit.collapsed === !!node.collapsed && hit.hint === hint && hit.counts === countsKey) return hit.layout;
 
   const sockets: NodeLayout['sockets'] = {};
   const rows: Row[] = [];
   let y = HEAD_H + PAD_Y;
   let summaryY: number | null = null;
 
-  const inputs: { port: string; label: string; type: SocketType }[] = [];
+  const inputs: { port: string; label: string; type: SocketType; multi?: boolean }[] = [];
   const outputs: { port: string; label: string; type: SocketType }[] = [];
   if (def) {
-    for (const [port, d] of Object.entries(def.inputs as InputSchema)) inputs.push({ port, label: d.label ?? port, type: d.type });
+    for (const [port, d] of Object.entries(def.inputs as InputSchema)) inputs.push({ port, label: d.label ?? port, type: d.type, multi: !!d.multi });
     for (const [port, d] of Object.entries(def.outputs as OutputSchema)) outputs.push({ port, label: d.label ?? port, type: d.type });
   } else if (missing) {
     for (const port of missing.inputs) inputs.push({ port, label: port, type: 'image' });
@@ -89,17 +108,29 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
     for (const o of outputs) sockets[`out:${o.port}`] = { x: NODE_W, y: cy };
     if (def) for (const key of Object.keys(def.params)) if (paramSocketType(def, key)) sockets[`in:${key}`] = { x: 0, y: cy };
     const layout = { width: NODE_W, height: HEAD_H, rows: [], summaryY: null, sockets };
-    cache.set(node, { def, missing: missKey, collapsed: true, layout });
+    cache.set(node, { def, missing: missKey, collapsed: true, hint, counts: countsKey, layout });
     return layout;
   }
 
   const n = Math.max(inputs.length, outputs.length);
   for (let i = 0; i < n; i++) {
     const row: IoRow = { kind: 'io', y, input: inputs[i], output: outputs[i] };
-    if (row.input) sockets[`in:${row.input.port}`] = { x: 0, y: y + ROW_H / 2 };
+    if (row.input && !row.input.multi) sockets[`in:${row.input.port}`] = { x: 0, y: y + ROW_H / 2 };
     if (row.output) sockets[`out:${row.output.port}`] = { x: NODE_W, y: y + ROW_H / 2 };
     rows.push(row);
     y += ROW_H;
+  }
+
+  for (const i of inputs) {
+    if (!i.multi) continue;
+    const n = counts[i.port] ?? 0;
+    rows.push({ kind: 'layers', y, port: i.port, type: i.type, count: n });
+    for (let k = 0; k < n; k++) {
+      const r = isLayerType(i.type) ? n - 1 - k : k;
+      sockets[`in:${i.port}#${k}`] = { x: 0, y: y + r * LAYER_H + LAYER_H / 2 };
+    }
+    sockets[`in:${i.port}`] = { x: 0, y: y + n * LAYER_H + LAYER_H / 2 };
+    y += (n + 1) * LAYER_H;
   }
 
   if (def) {
@@ -119,13 +150,17 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
       rows.push({ kind: 'more', y, count: params.length - MAX_PARAM_ROWS });
       y += ROW_H;
     }
+    if (hint) {
+      rows.push({ kind: 'hint', y });
+      y += HINT_H;
+    }
     if (def.summary && hasSummary) {
       summaryY = y;
       y += SUMMARY_H;
     }
   }
   const layout: NodeLayout = { width: NODE_W, height: y + PAD_Y, rows, summaryY, sockets };
-  cache.set(node, { def, missing: missKey, collapsed: false, layout });
+  cache.set(node, { def, missing: missKey, collapsed: false, hint, counts: countsKey, layout });
   return layout;
 }
 
@@ -135,8 +170,9 @@ export function socketWorld(
   dir: 'in' | 'out',
   port: string,
   offset?: { x: number; y: number },
+  slot?: number,
 ): { x: number; y: number } {
-  const s = layout.sockets[`${dir}:${port}`] ?? { x: dir === 'in' ? 0 : layout.width, y: HEAD_H / 2 };
+  const s = (slot !== undefined ? layout.sockets[`${dir}:${port}#${slot}`] : undefined) ?? layout.sockets[`${dir}:${port}`] ?? { x: dir === 'in' ? 0 : layout.width, y: HEAD_H / 2 };
   return { x: node.x + s.x + (offset?.x ?? 0), y: node.y + s.y + (offset?.y ?? 0) };
 }
 
@@ -203,8 +239,17 @@ export function parsePortSignature(sig: string): MissingPorts {
   return { inputs: a ? a.split(',') : [], outputs: b ? b.split(',') : [] };
 }
 
+/** Wire count per multi input port. */
+export function multiCounts(def: AnyNodeDef, edges: Edge[], nodeId: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [port, d] of Object.entries(def.inputs as InputSchema)) if (d.multi) out[port] = edges.filter((e) => e.to.node === nodeId && e.to.port === port).length;
+  return out;
+}
+
 export function layoutFor(graph: GraphDoc, node: NodeInstance, def: AnyNodeDef | undefined): NodeLayout {
-  return layoutNode(node, def, def ? undefined : parsePortSignature(portSignature(graph.edges, node.id)));
+  const pp = def ? paletteInputPort(def) : null;
+  const hint = !!pp && !graph.edges.some((e) => e.to.node === node.id && e.to.port === pp);
+  return layoutNode(node, def, def ? undefined : parsePortSignature(portSignature(graph.edges, node.id)), hint, def ? multiCounts(def, graph.edges, node.id) : {});
 }
 
 export function nodeRect(graph: GraphDoc, node: NodeInstance, def: AnyNodeDef | undefined) {

@@ -16,7 +16,7 @@
 .rs-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .rs-wires--pending { z-index: 5; }
 .rs-wire, .rs-wire__hit { fill: none; }
-.rs-wire { stroke: var(--sock-number); stroke-width: 2.25; stroke-linecap: round; pointer-events: none; opacity: 0.85; }
+.rs-wire { stroke: var(--sock-unknown); stroke-width: 2.25; stroke-linecap: round; pointer-events: none; opacity: 0.85; }
 .rs-wire__hit { stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
 .rs-wire-g:hover .rs-wire { opacity: 1; stroke-width: 3; }
 .rs-wire-g.is-hot .rs-wire { opacity: 1; stroke-width: 3; }
@@ -27,6 +27,8 @@
 .rs-wire--color { stroke: var(--sock-color); }
 .rs-wire--audio { stroke: var(--sock-audio); }
 .rs-wire--midi { stroke: var(--sock-midi); }
+.rs-wire--regions { stroke: var(--sock-regions); }
+.rs-wire--camera { stroke: var(--sock-camera); }
 .rs-wire.is-insert { stroke: var(--select); stroke-width: 4; opacity: 1; }
 .rs-wire.is-pending { stroke-dasharray: 6 4; opacity: 1; }
 .rs-wire.is-cut { stroke: var(--danger); stroke-dasharray: 3 3; opacity: 0.6; }

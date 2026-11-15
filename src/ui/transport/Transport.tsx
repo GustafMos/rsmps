@@ -4,6 +4,8 @@ import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { formatTime } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
+import { useKeyboardTarget } from '../playKeys';
+import '../palette/studio.css';
 import './transport.css';
 
 export function Transport() {
@@ -12,6 +14,12 @@ export function Transport() {
   const project = useEd((s) => s.graph.project);
   const hasAudio = useEd((s) => s.graph.nodes.some((n) => hasAudioSockets(io.registry.get(n.type))));
   const [volume, setVolume] = useState(1);
+  const audio = usePlayer((s) => s.audio);
+  const kbdTarget = useKeyboardTarget();
+  const kbdName = useEd((s) => {
+    const n = s.graph.nodes.find((x) => x.id === kbdTarget);
+    return n ? n.label || io.registry.get(n.type)?.title || n.type : '';
+  });
 
   return (
     <footer className="rs-tp">
@@ -40,15 +48,25 @@ export function Transport() {
       <div className="rs-tp__group">
         <div className="rs-tp__field"><NumberField label="FPS" value={project.fps} min={1} max={120} integer defaultValue={24} onChange={(v) => ed.setProject({ fps: v })} /></div>
         <div className="rs-tp__field rs-tp__field--wide"><NumberField label="Length" value={project.duration} min={0.1} max={600} step={0.1} unit="s" defaultValue={4} onChange={(v) => ed.setProject({ duration: v })} /></div>
-        {hasAudio && (
+        {kbdTarget && (
+          <span className="rs-tp__kbd" title="Computer keys play the selected node: A–; notes, 1–9 octave, Z/X octave down/up, C/V softer/harder. Esc or deselect to release the keys.">
+            <Icon name="keyboard" size={14} /> Keyboard plays {kbdName}
+          </span>
+        )}
+        {(hasAudio || audio.needed) && (
           <>
-            <button
-              className="rs-btn"
-              onClick={() => io.player.enableAudio().catch((e) => ed.toast(`Audio: ${e instanceof Error ? e.message : String(e)}`, 'error'))}
-              title="Browsers need a click before they allow sound"
-            >
-              <Icon name="volume" /> Enable audio
-            </button>
+            {!audio.running ? (
+              <button
+                className="rs-btn rs-btn--primary"
+                onClick={() => io.player.enableAudio().catch((e) => ed.toast(`Audio: ${e instanceof Error ? e.message : String(e)}`, 'error'))}
+                title={audio.micNodes > 0 ? 'Starts sound. The browser will ask for permission to use the microphone.' : 'Browsers need a click before they allow sound'}
+              >
+                <Icon name="volume" /> Enable audio{audio.micNodes > 0 ? ' + mic' : ''}
+              </button>
+            ) : (
+              <span className="rs-tp__audio" title="The audio engine is running"><span className="rs-ps__dot" /> Audio on</span>
+            )}
+            {audio.needed && !audio.running && audio.micNodes > 0 && <span className="rs-tp__note">asks for the microphone</span>}
             <div className="rs-tp__field">
               <NumberField label="Vol" value={volume} min={0} max={1} step={0.01} defaultValue={1} onChange={(v) => { setVolume(v); io.player.setVolume(v); }} />
             </div>

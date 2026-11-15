@@ -39,3 +39,8 @@
 .rs-menu__item .rs-kbd { margin-left: var(--s-4); }
 .rs-menu__sep { height: 1px; background: var(--line); margin: var(--s-1) 0; }
 .rs-menu__head { padding: var(--s-1) var(--s-2); }
+.rs-add__key { flex: none; }
+.rs-add__assign { display: none; place-items: center; width: 22px; height: 22px; flex: none; color: inherit; opacity: 0.8; }
+.rs-add__item:hover .rs-add__assign, .rs-add__item.is-active .rs-add__assign { display: grid; }
+.rs-add__assign:hover { background: #ffffff30; }
+.rs-add__assign-bar { padding: var(--s-2) var(--s-3); background: #2a2208; border-top: 1px solid var(--yellow); color: var(--text); font-size: var(--fs-sm); }

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSelector } from '../store/createStore';
+import { watchStore } from '../watchdog';
 import { batchCount } from '../../engine/graph';
 import { CATEGORIES } from '../../engine/types';
 import { Icon } from '../components/Icon';
@@ -30,6 +32,16 @@ export function Viewer() {
   const projW = useEd((s) => s.graph.project.width);
   const projH = useEd((s) => s.graph.project.height);
   const hasNodes = useEd((s) => s.graph.nodes.length > 0);
+  const rendering = useSelector(watchStore, (s) => s.rendering);
+  const timings = usePlayer((s) => s.timings);
+  const slowest = useMemo(() => {
+    let best = '';
+    let ms = 0;
+    for (const [id, t] of timings) if (t > ms) { ms = t; best = id; }
+    const n = ed.state.graph.nodes.find((x) => x.id === best);
+    return n ? n.label || io.registry.get(n.type)?.title || n.type : '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timings, rendering]);
   const viewedDef = viewedNode ? io.registry.get(viewedNode.type) : undefined;
 
   const iw = imageSize?.width ?? projW;
@@ -189,6 +201,11 @@ export function Viewer() {
         </div>
       )}
 
+      {rendering && (
+        <div className="rs-viewer__rendering rs-viewer__chip" role="status" data-nodrag>
+          <span className="rs-ps__dot" /> Rendering…{slowest ? ` (${slowest})` : ''}
+        </div>
+      )}
       {paint && <PaintOverlay nodeId={paint.id} stage={stage} />}
 
       <div className="rs-viewer__info rs-viewer__chip" data-nodrag>

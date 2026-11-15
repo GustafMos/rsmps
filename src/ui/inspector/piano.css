@@ -1,0 +1,8 @@
+.rs-piano { display: flex; flex-direction: column; gap: var(--s-2); }
+.rs-piano__keys { position: relative; height: 96px; user-select: none; touch-action: none; }
+.rs-piano__white, .rs-piano__black { position: absolute; top: 0; padding: 0; border: 1px solid #000; display: flex; align-items: flex-end; justify-content: center; }
+.rs-piano__white { height: 100%; background: #e9e9ec; color: #222; border-radius: 0 0 2px 2px; padding-bottom: 4px; }
+.rs-piano__black { height: 60%; background: #1b1d22; color: #cfd2d8; z-index: 2; border-radius: 0 0 2px 2px; padding-bottom: 3px; }
+.rs-piano__white.is-lit { background: var(--accent-hi); color: #fff; }
+.rs-piano__black.is-lit { background: var(--accent); }
+.rs-piano__label { font: 600 var(--fs-xs) var(--font-mono); pointer-events: none; }

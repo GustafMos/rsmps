@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { clamp } from '../lib/drag';
+import { NumberConfirm, isQuiet } from './NumberConfirm';
 import './fields.css';
 
 export interface NumberFieldProps {
@@ -12,6 +13,12 @@ export interface NumberFieldProps {
   unit?: string;
   integer?: boolean;
   defaultValue?: number;
+  /** Typical maximum: scrubbing stops here and typed values above it ask for confirmation. */
+  softMax?: number;
+  /** Identifies the field for "don't ask again" (defaults to the label). */
+  askKey?: string;
+  /** Name used in the confirmation text (defaults to the label). */
+  name?: string;
   disabled?: boolean;
   title?: string;
   /** Larger variant for the inspector. */
@@ -38,13 +45,15 @@ export function NumberField(p: NumberFieldProps) {
   const bounded = min !== undefined && max !== undefined && Number.isFinite(min) && Number.isFinite(max) && max > min;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [confirm, setConfirm] = useState<number | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ x0: number; v0: number; moved: boolean; w: number } | null>(null);
 
-  const fix = (v: number) => {
+  const fix = (v: number, scrub = false) => {
     let n = v;
     if (min !== undefined) n = Math.max(min, n);
-    if (max !== undefined) n = Math.min(max, n);
+    const top = scrub ? (p.softMax ?? max) : max;
+    if (top !== undefined) n = Math.min(top, n);
     if (integer) n = Math.round(n);
     else if (step > 0) {
       const decimals = Math.max(0, Math.min(6, Math.ceil(-Math.log10(step)) + 1));
@@ -66,9 +75,10 @@ export function NumberField(p: NumberFieldProps) {
     g.moved = true;
     const fine = e.shiftKey ? 0.1 : e.ctrlKey || e.metaKey ? 10 : 1;
     let v: number;
-    if (bounded) v = g.v0 + (dx / Math.max(80, g.w)) * (max! - min!) * fine;
-    else v = g.v0 + (dx / 3) * step * fine * (integer ? 1 : 1);
-    p.onChange(fix(v));
+    const span = (p.softMax ?? max!) - min!;
+    if (bounded) v = g.v0 + (dx / Math.max(80, g.w)) * span * fine;
+    else v = g.v0 + (dx / 3) * step * fine;
+    p.onChange(fix(v, true));
   };
   const up = (e: PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
@@ -83,7 +93,13 @@ export function NumberField(p: NumberFieldProps) {
   const commit = () => {
     setEditing(false);
     const n = parseFloat(draft.replace(',', '.'));
-    if (Number.isFinite(n)) p.onChange(fix(n));
+    if (!Number.isFinite(n)) return;
+    const fixed = fix(n);
+    const key = p.askKey ?? p.label ?? '';
+    const overSoft = p.softMax !== undefined && fixed > p.softMax;
+    const jump = Math.abs(value) > 0 && fixed > Math.abs(value) * 20 && fixed > Math.abs(p.defaultValue ?? 0) * 20;
+    if ((overSoft || jump) && !isQuiet(key)) setConfirm(fixed);
+    else p.onChange(fixed);
   };
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
     if (editing) return;
@@ -108,7 +124,7 @@ export function NumberField(p: NumberFieldProps) {
   };
 
   const unit = p.unit ? (UNIT_LABEL[p.unit] ?? p.unit) : '';
-  const frac = bounded ? clamp((value - min!) / (max! - min!), 0, 1) : 0;
+  const frac = bounded ? clamp((value - min!) / ((p.softMax ?? max!) - min!), 0, 1) : 0;
   const changed = p.defaultValue !== undefined && Math.abs(p.defaultValue - value) > 1e-9;
 
   return (
@@ -129,6 +145,21 @@ export function NumberField(p: NumberFieldProps) {
     >
       {bounded && <div className="rs-nf__fill" style={{ width: `${frac * 100}%` }} />}
       {p.label && <span className="rs-nf__label">{p.label}</span>}
+      {confirm !== null && (
+        <NumberConfirm
+          anchor={root.current}
+          value={confirm}
+          label={p.name ?? p.label ?? 'this field'}
+          softMax={p.softMax}
+          askKey={p.askKey ?? p.label ?? ''}
+          format={(n) => formatNumber(n, integer)}
+          onUse={(v) => {
+            setConfirm(null);
+            p.onChange(v);
+          }}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
       {editing ? (
         <input
           className="rs-nf__input rs-num"

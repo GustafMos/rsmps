@@ -4,6 +4,8 @@ import { Icon } from '../components/Icon';
 import { NODE_W } from '../lib/layout';
 import { inputsAccepting, outputsFeeding } from '../lib/sockets';
 import { getRecent } from '../store/editor';
+import { NODE_PREFIX, bindingsOf, eventToBinding, owners, setBindings, useKeymapVersion } from '../keymap';
+import { allCommandIds, commandLabel, nodeCommandId } from '../shortcuts';
 import { useApp, useDefs, useEd } from '../store/context';
 import './menus.css';
 
@@ -49,6 +51,8 @@ function AddMenuInner() {
   const [item, setItem] = useState(0);
   const [focus, setFocus] = useState<'cats' | 'items'>('cats');
   const [pos, setPos] = useState({ x: req.clientX, y: req.clientY });
+  const [assign, setAssign] = useState<{ type: string; pending?: { binding: string; other: string } } | null>(null);
+  useKeymapVersion();
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const link = req.link;
@@ -99,6 +103,10 @@ function AddMenuInner() {
   }, [req.clientX, req.clientY]);
   useEffect(() => input.current?.focus(), []);
   useEffect(() => {
+    if (req.quick && groups[0]?.key === '_recent') setFocus('items');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
     const down = (e: PointerEvent) => {
       if (root.current && !root.current.contains(e.target as Node)) ed.openAddMenu(null);
     };
@@ -118,6 +126,28 @@ function AddMenuInner() {
   const onKey = (e: React.KeyboardEvent) => {
     e.stopPropagation();
     const n = items.length;
+    if (assign) {
+      e.preventDefault();
+      const id = nodeCommandId(assign.type);
+      if (e.key === 'Escape') return setAssign(null);
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        setBindings(id, []);
+        return setAssign(null);
+      }
+      const binding = eventToBinding(e.nativeEvent);
+      if (!binding) return;
+      const other = owners(binding, allCommandIds(), id)[0];
+      if (other && assign.pending?.binding !== binding) {
+        return setAssign({ type: assign.type, pending: { binding, other: commandLabel(other, (t) => defs.find((d) => d.id === t)?.title) } });
+      }
+      if (other) setBindings(other, bindingsOf(other).filter((b) => b !== binding));
+      setBindings(id, [binding]);
+      return setAssign(null);
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && items[item]) {
+      e.preventDefault();
+      return setAssign({ type: items[item].id });
+    }
     if (e.key === 'Escape') {
       ed.openAddMenu(null);
     } else if (e.key === 'ArrowDown') {
@@ -208,15 +238,23 @@ function AddMenuInner() {
                 <span className="rs-add__item-title">{d.title}</span>
                 {searching && <span className="rs-add__item-desc">{d.description}</span>}
               </span>
+              {bindingsOf(nodeCommandId(d.id))[0] && <span className="rs-kbd rs-add__key">{bindingsOf(nodeCommandId(d.id))[0]}</span>}
               {searching && <span className="rs-add__item-cat">{CATEGORIES[d.category]?.title}</span>}
+              <span className="rs-add__assign" role="button" title="Assign a hotkey that adds this node (Ctrl+K)" onClick={(ev) => { ev.stopPropagation(); setAssign({ type: d.id }); input.current?.focus(); }}><Icon name="keyboard" size={14} /></span>
             </button>
           ))}
         </div>
       </div>
+      {assign && (
+        <div className="rs-add__assign-bar" role="status">
+          {assign.pending ? `${assign.pending.binding} is used by “${assign.pending.other}”. Press it again to take it over, or another key.` : `Press the key for “${defs.find((d) => d.id === assign.type)?.title ?? assign.type}”. Esc cancels, Backspace clears.`}
+        </div>
+      )}
       <div className="rs-add__foot">
         <span><span className="rs-kbd">↑↓</span> move</span>
         <span><span className="rs-kbd">→</span> open</span>
         <span><span className="rs-kbd">Enter</span> add</span>
+        <span><span className="rs-kbd">Ctrl+K</span> assign hotkey</span>
       </div>
     </div>
   );

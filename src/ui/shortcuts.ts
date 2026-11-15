@@ -1,138 +1,226 @@
+/**
+ * ONE table of every keyboard command: id, label, group, default bindings and handler.
+ * It drives the key handling, the cheat-sheet and the key-binding editor. Node hotkeys
+ * ("add:<node id>") are generated from the user's assignments and the registry.
+ */
 import { useEffect } from 'react';
 import { frameGraph } from './graph/gestures';
 import { isTypingTarget } from './lib/drag';
-import { useApp } from './store/context';
+import { NODE_DEFAULTS, NODE_PREFIX, bindingsOf, eventToBinding, overrideIds, setDefaultsLookup } from './keymap';
+import type { AppCtx } from './store/context';
 
-/** Global keyboard shortcuts. Typing in any field is never intercepted. */
-export function useShortcuts(): void {
-  const app = useApp();
-  const { ed, io, graphCtl: ctl } = app;
+export interface KeyCtx {
+  app: AppCtx;
+  e: KeyboardEvent;
+  /** The pointer is over the node graph. */
+  hover: boolean;
+  binding: string;
+}
 
-  useEffect(() => {
-    const mouse = { x: 0, y: 0 };
-    const track = (e: PointerEvent) => {
-      mouse.x = e.clientX;
-      mouse.y = e.clientY;
-    };
-    const panelUnderPointer = () => (document.elementFromPoint(mouse.x, mouse.y) as HTMLElement | null)?.closest<HTMLElement>('[data-panel]')?.dataset.panel;
+export interface Command {
+  id: string;
+  label: string;
+  group: 'Add nodes' | 'Edit' | 'Graph' | 'Playback' | 'View' | 'File';
+  defaults: string[];
+  run: (c: KeyCtx) => void;
+  /** Fires on key release (used by Space, which pans the graph while held). */
+  up?: (c: { app: AppCtx; e: KeyboardEvent }) => void;
+}
 
-    const keydown = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) return;
-      if (document.querySelector('.rs-dlg')) return;
-      const mod = e.ctrlKey || e.metaKey;
-      const k = e.key.toLowerCase();
-      const hoverGraph = ctl.hovering;
-      const used = () => e.preventDefault();
+const sel = (a: AppCtx) => a.ed.state.selection;
 
-      if (e.code === 'Space') {
-        used();
-        if (e.repeat) return;
-        if (hoverGraph) {
-          ctl.spaceDown = true;
-          ctl.spaceUsed = false;
-          ctl.root?.classList.add('is-space');
-        } else io.player.toggle();
-        return;
-      }
-      if (mod && k === 'z') return used(), e.shiftKey ? ed.redo() : ed.undo();
-      if (mod && k === 'y') return used(), ed.redo();
-      if (mod && k === 'c') return used(), ed.copy();
-      if (mod && k === 'v') {
-        used();
-        ed.paste(hoverGraph ? ctl.toWorld(ctl.pointer.x, ctl.pointer.y) : undefined);
-        return;
-      }
-      if (mod && k === 'd') return used(), ed.duplicate();
-      if (mod && k === 'a') return used(), ed.selectAll();
-      if (mod && k === 'g') {
-        used();
-        if (e.altKey) ed.removeFromFrame(ed.state.selection);
-        else if (e.shiftKey && ed.state.selectedFrame) ed.ungroup(ed.state.selectedFrame);
-        else ed.groupSelection();
-        return;
-      }
-      if (mod && k === 'e') return used(), ed.openDialog('export');
-      if (mod && k === 's') {
-        used();
-        io.projects.saveToFile(ed.state.graph).then(() => ed.toast('Project saved', 'ok')).catch((err) => {
-          if (!(err instanceof DOMException && err.name === 'AbortError')) ed.toast(`Could not save: ${String(err)}`, 'error');
-        });
-        return;
-      }
-      if (mod && k === 'o') {
-        used();
-        io.projects.openFromFile().then((g) => g && ed.loadGraph(g, true)).catch((err) => ed.toast(`Could not open: ${String(err)}`, 'error'));
-        return;
-      }
-      if (mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return used(), ed.setItem(ed.state.item + (e.key === 'ArrowRight' ? 1 : -1));
-      if (mod) return;
+function openAdd(c: KeyCtx, quick: boolean) {
+  const { ed, graphCtl: ctl } = c.app;
+  const r = ctl.rect();
+  const cx = c.hover ? ctl.pointer.x : r.left + r.width / 2;
+  const cy = c.hover ? ctl.pointer.y : r.top + r.height / 2;
+  ed.openAddMenu({ clientX: cx, clientY: cy, world: ctl.toWorld(cx, cy), quick });
+}
 
-      switch (e.key) {
-        case 'Delete':
-        case 'Backspace':
-          used();
-          ed.deleteSelection();
-          return;
-        case 'ArrowLeft':
-          used();
-          io.player.step(-1);
-          return;
-        case 'ArrowRight':
-          used();
-          io.player.step(1);
-          return;
-        case '`':
-        case '¬': {
-          used();
-          const panel = panelUnderPointer();
-          const cur = ed.state.prefs.maximized;
-          if (cur) ed.setPrefs({ maximized: null });
-          else if (panel === 'viewer' || panel === 'graph') ed.setPrefs({ maximized: panel });
-          return;
-        }
-        case '?':
-          used();
-          ed.openDialog('shortcuts');
-          return;
-        case 'Escape':
-          ed.openAddMenu(null);
-          ed.openContextMenu(null);
-          if (ed.state.selection.length) ed.select([]);
-          return;
-        case 'Home':
-          used();
-          frameGraph(app);
-          return;
-      }
-      if (e.shiftKey && k === 'a') {
-        used();
-        const r = ctl.rect();
-        const inside = hoverGraph;
-        const cx = inside ? ctl.pointer.x : r.left + r.width / 2;
-        const cy = inside ? ctl.pointer.y : r.top + r.height / 2;
-        ed.openAddMenu({ clientX: cx, clientY: cy, world: ctl.toWorld(cx, cy) });
-        return;
-      }
-      if (e.altKey || e.shiftKey) return;
-      if (k === 'f') {
-        used();
-        frameGraph(app, ed.state.selection.length > 0);
-      } else if (k === 'b') {
-        used();
-        ed.state.selection.forEach((id) => ed.toggleBypass(id));
-      } else if (k === 'h') {
-        used();
-        if (ed.state.selection.length) ed.toggleCollapse(ed.state.selection);
-      } else if (k === 'l') {
-        used();
-        ed.autoLayout(true);
-      }
-    };
-    const keyup = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || !ctl.spaceDown) return;
+export const COMMANDS: Command[] = [
+  { id: 'add.menu', label: 'Add node menu', group: 'Add nodes', defaults: ['Shift+A'], run: (c) => openAdd(c, false) },
+  { id: 'add.quick', label: 'Quick add: search and add a node', group: 'Add nodes', defaults: ['Shift+Space'], run: (c) => openAdd(c, true) },
+
+  { id: 'edit.undo', label: 'Undo', group: 'Edit', defaults: ['Ctrl+Z'], run: (c) => c.app.ed.undo() },
+  { id: 'edit.redo', label: 'Redo', group: 'Edit', defaults: ['Ctrl+Y', 'Ctrl+Shift+Z'], run: (c) => c.app.ed.redo() },
+  { id: 'edit.copy', label: 'Copy nodes', group: 'Edit', defaults: ['Ctrl+C'], run: (c) => c.app.ed.copy() },
+  {
+    id: 'edit.paste',
+    label: 'Paste nodes',
+    group: 'Edit',
+    defaults: ['Ctrl+V'],
+    run: (c) => c.app.ed.paste(c.hover ? c.app.graphCtl.toWorld(c.app.graphCtl.pointer.x, c.app.graphCtl.pointer.y) : undefined),
+  },
+  { id: 'edit.duplicate', label: 'Duplicate nodes', group: 'Edit', defaults: ['Ctrl+D'], run: (c) => c.app.ed.duplicate() },
+  { id: 'edit.selectAll', label: 'Select all', group: 'Edit', defaults: ['Ctrl+A'], run: (c) => c.app.ed.selectAll() },
+  { id: 'edit.delete', label: 'Delete selection (heals the chain)', group: 'Edit', defaults: ['Delete', 'Backspace'], run: (c) => c.app.ed.deleteSelection() },
+  {
+    id: 'edit.deselect',
+    label: 'Close menus / clear selection',
+    group: 'Edit',
+    defaults: ['Escape'],
+    run: ({ app }) => {
+      app.ed.openAddMenu(null);
+      app.ed.openContextMenu(null);
+      if (sel(app).length) app.ed.select([]);
+    },
+  },
+
+  { id: 'graph.group', label: 'Group selection in a frame', group: 'Graph', defaults: ['Ctrl+G'], run: (c) => c.app.ed.groupSelection() },
+  {
+    id: 'graph.ungroup',
+    label: 'Ungroup the selected frame',
+    group: 'Graph',
+    defaults: ['Ctrl+Shift+G'],
+    run: ({ app }) => app.ed.state.selectedFrame && app.ed.ungroup(app.ed.state.selectedFrame),
+  },
+  { id: 'graph.unframe', label: 'Remove selection from its frame', group: 'Graph', defaults: ['Ctrl+Alt+G'], run: (c) => c.app.ed.removeFromFrame(sel(c.app)) },
+  { id: 'graph.frame', label: 'Frame all (or selection)', group: 'Graph', defaults: ['F', 'Home'], run: ({ app }) => frameGraph(app, sel(app).length > 0) },
+  { id: 'graph.bypass', label: 'Bypass selected nodes', group: 'Graph', defaults: ['B'], run: ({ app }) => sel(app).forEach((id) => app.ed.toggleBypass(id)) },
+  { id: 'graph.collapse', label: 'Collapse / expand selected nodes', group: 'Graph', defaults: ['H'], run: ({ app }) => sel(app).length && app.ed.toggleCollapse(sel(app)) },
+  { id: 'graph.layout', label: 'Auto-layout', group: 'Graph', defaults: ['L'], run: (c) => c.app.ed.autoLayout(true) },
+
+  {
+    id: 'play.toggle',
+    label: 'Play / pause (hold over the graph to pan)',
+    group: 'Playback',
+    defaults: ['Space'],
+    run: ({ app, hover, binding }) => {
+      const { io, graphCtl: ctl } = app;
+      if (hover) {
+        ctl.spaceDown = true;
+        ctl.spaceUsed = false;
+        ctl.spaceKey = binding;
+        ctl.root?.classList.add('is-space');
+      } else io.player.toggle();
+    },
+    up: ({ app }) => {
+      const ctl = app.graphCtl;
+      if (!ctl.spaceDown) return;
       ctl.spaceDown = false;
       ctl.root?.classList.remove('is-space');
-      if (!ctl.spaceUsed && !isTypingTarget(e.target)) io.player.toggle();
+      if (!ctl.spaceUsed) app.io.player.toggle();
+    },
+  },
+  { id: 'play.back', label: 'Previous frame', group: 'Playback', defaults: ['ArrowLeft'], run: (c) => c.app.io.player.step(-1) },
+  { id: 'play.fwd', label: 'Next frame', group: 'Playback', defaults: ['ArrowRight'], run: (c) => c.app.io.player.step(1) },
+  { id: 'play.itemPrev', label: 'Previous batch item', group: 'Playback', defaults: ['Ctrl+ArrowLeft'], run: ({ app }) => app.ed.setItem(app.ed.state.item - 1) },
+  { id: 'play.itemNext', label: 'Next batch item', group: 'Playback', defaults: ['Ctrl+ArrowRight'], run: ({ app }) => app.ed.setItem(app.ed.state.item + 1) },
+
+  {
+    id: 'view.maximise',
+    label: 'Maximise the panel under the cursor',
+    group: 'View',
+    defaults: ['`'],
+    run: ({ app }) => {
+      const m = app.ed.state.prefs.maximized;
+      if (m) return app.ed.setPrefs({ maximized: null });
+      const el = document.elementFromPoint(lastMouse.x, lastMouse.y) as HTMLElement | null;
+      const panel = el?.closest<HTMLElement>('[data-panel]')?.dataset.panel;
+      if (panel === 'viewer' || panel === 'graph') app.ed.setPrefs({ maximized: panel });
+    },
+  },
+  { id: 'view.shortcuts', label: 'Show the shortcut cheat-sheet', group: 'View', defaults: ['?'], run: (c) => c.app.ed.openDialog('shortcuts') },
+  { id: 'view.keymap', label: 'Edit keyboard shortcuts', group: 'View', defaults: [], run: (c) => c.app.ed.openDialog('keymap') },
+  { id: 'view.palette', label: 'Palette Studio', group: 'View', defaults: [], run: ({ app }) => { app.ed.studioTarget = null; app.ed.openDialog('palette'); } },
+
+  { id: 'file.export', label: 'Export…', group: 'File', defaults: ['Ctrl+E'], run: (c) => c.app.ed.openDialog('export') },
+  {
+    id: 'file.save',
+    label: 'Save project…',
+    group: 'File',
+    defaults: ['Ctrl+S'],
+    run: ({ app }) => {
+      app.io.projects
+        .saveToFile(app.ed.state.graph)
+        .then(() => app.ed.toast('Project saved', 'ok'))
+        .catch((err) => {
+          if (!(err instanceof DOMException && err.name === 'AbortError')) app.ed.toast(`Could not save: ${String(err)}`, 'error');
+        });
+    },
+  },
+  {
+    id: 'file.open',
+    label: 'Open project…',
+    group: 'File',
+    defaults: ['Ctrl+O'],
+    run: ({ app }) => {
+      app.io.projects
+        .openFromFile()
+        .then((g) => g && app.ed.loadGraph(g, true))
+        .catch((err) => app.ed.toast(`Could not open: ${String(err)}`, 'error'));
+    },
+  },
+];
+
+const lastMouse = { x: 0, y: 0 };
+const BY_ID = new Map(COMMANDS.map((c) => [c.id, c]));
+setDefaultsLookup((id) => BY_ID.get(id)?.defaults);
+
+export function nodeTypeOf(id: string): string | null {
+  return id.startsWith(NODE_PREFIX) ? id.slice(NODE_PREFIX.length) : null;
+}
+export const nodeCommandId = (type: string) => NODE_PREFIX + type;
+
+/** Ids of node-hotkey commands: shipped defaults plus anything the user assigned. */
+export function nodeCommandIds(): string[] {
+  return [...new Set([...Object.keys(NODE_DEFAULTS), ...overrideIds().filter((i) => i.startsWith(NODE_PREFIX))])];
+}
+export function allCommandIds(): string[] {
+  return [...COMMANDS.map((c) => c.id), ...nodeCommandIds()];
+}
+export function commandLabel(id: string, titleOf?: (type: string) => string | undefined): string {
+  const t = nodeTypeOf(id);
+  if (t) return `Add ${titleOf?.(t) ?? t}`;
+  return BY_ID.get(id)?.label ?? id;
+}
+export function commandGroup(id: string): string {
+  return nodeTypeOf(id) ? 'Add nodes' : (BY_ID.get(id)?.group ?? 'Other');
+}
+
+/** binding -> command id, built from the current key map. */
+function buildIndex(app: AppCtx): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const id of allCommandIds()) {
+    const t = nodeTypeOf(id);
+    if (t && !app.io.registry.get(t)) continue;
+    for (const b of bindingsOf(id)) if (!m.has(b)) m.set(b, id);
+  }
+  return m;
+}
+
+/** Global keyboard handling. Typing in any field is never intercepted. */
+export function useShortcuts(app: AppCtx): void {
+  useEffect(() => {
+    const { ed, graphCtl: ctl } = app;
+    const track = (e: PointerEvent) => {
+      lastMouse.x = e.clientX;
+      lastMouse.y = e.clientY;
+    };
+    const keydown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target) || document.querySelector('.rs-dlg')) return;
+      const binding = eventToBinding(e);
+      if (!binding) return;
+      const id = buildIndex(app).get(binding);
+      if (!id) return;
+      e.preventDefault();
+      if (e.repeat && id !== 'play.back' && id !== 'play.fwd') return;
+      const nodeType = nodeTypeOf(id);
+      if (nodeType) {
+        const r = ctl.rect();
+        const x = ctl.hovering ? ctl.pointer.x : r.left + r.width / 2;
+        const y = ctl.hovering ? ctl.pointer.y : r.top + r.height / 2;
+        const w = ctl.toWorld(x, y);
+        ed.addNodeAt(nodeType, { x: Math.round(w.x), y: Math.round(w.y - 14) });
+        return;
+      }
+      BY_ID.get(id)?.run({ app, e, hover: ctl.hovering, binding });
+    };
+    const keyup = (e: KeyboardEvent) => {
+      if (!ctl.spaceDown) return;
+      const base = (ctl.spaceKey ?? '').split('+').pop();
+      const k = e.key === ' ' ? 'Space' : e.key.toUpperCase();
+      if (k === base?.toUpperCase()) BY_ID.get('play.toggle')?.up?.({ app, e });
     };
     window.addEventListener('pointermove', track);
     window.addEventListener('keydown', keydown);
@@ -142,5 +230,5 @@ export function useShortcuts(): void {
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('keyup', keyup);
     };
-  }, [app, ed, io, ctl]);
+  }, [app]);
 }

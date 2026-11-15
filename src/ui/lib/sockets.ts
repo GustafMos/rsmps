@@ -55,3 +55,13 @@ export function sourceDefFor(registry: Registry, kind: 'image' | 'video' | 'audi
   }
   return null;
 }
+
+/** The palette input port of a node that also takes an image (Dither, Quantize…), or null. Generic: found by socket type. */
+export function paletteInputPort(def: AnyNodeDef): string | null {
+  const ins = Object.entries(def.inputs as InputSchema);
+  if (!ins.some(([, d]) => d.type === 'image')) return null;
+  return ins.find(([, d]) => d.type === 'palette')?.[0] ?? null;
+}
+export function firstImagePort(def: AnyNodeDef): string | null {
+  return Object.entries(def.inputs as InputSchema).find(([, d]) => d.type === 'image')?.[0] ?? null;
+}

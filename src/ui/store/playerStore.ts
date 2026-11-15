@@ -13,6 +13,7 @@ export interface PlayerSlice {
   proxyPct: number;
   imageSize: { width: number; height: number } | null;
   totalFrames: number;
+  audio: { needed: boolean; running: boolean; micNodes: number };
 }
 
 const EMPTY: ReadonlyMap<string, never> = new Map<string, never>();
@@ -33,6 +34,7 @@ export function createPlayerStore(io: Io): Store<PlayerSlice> {
     proxyPct: 100,
     imageSize: null,
     totalFrames: 1,
+    audio: { needed: false, running: false, micNodes: 0 },
   });
   const apply = (s: PlayerState) => {
     const cur = store.get();
@@ -49,6 +51,10 @@ export function createPlayerStore(io: Io): Store<PlayerSlice> {
           ? cur.imageSize
           : s.imageSize,
       totalFrames: s.totalFrames,
+      audio:
+        cur.audio.needed === s.audio.needed && cur.audio.running === s.audio.running && cur.audio.micNodes === s.audio.micNodes
+          ? cur.audio
+          : { needed: s.audio.needed, running: s.audio.running, micNodes: s.audio.micNodes },
     };
     if (
       next.playing !== cur.playing ||
@@ -57,7 +63,8 @@ export function createPlayerStore(io: Io): Store<PlayerSlice> {
       next.fps !== cur.fps ||
       next.proxyPct !== cur.proxyPct ||
       next.imageSize !== cur.imageSize ||
-      next.totalFrames !== cur.totalFrames
+      next.totalFrames !== cur.totalFrames ||
+      next.audio !== cur.audio
     ) {
       store.set(next);
     }

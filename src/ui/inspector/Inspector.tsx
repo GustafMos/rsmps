@@ -1,8 +1,15 @@
 import { useMemo, useState } from 'react';
-import { CATEGORIES, type AnyNodeDef, type NodeInstance, type ParamDef } from '../../engine/types';
+import { CATEGORIES, type AnyNodeDef, type InputSchema, type NodeInstance, type ParamDef } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
+import { parseHex, toHex } from '../lib/colorMath';
+import { LayerList } from '../graph/LayerList';
+import { isLayerType } from '../lib/layout';
+import { Piano } from './Piano';
+import { PaletteHint } from '../components/PaletteHint';
+import { DeviceField } from '../components/DeviceField';
+import { paletteInputPort } from '../lib/sockets';
 import { visibleParams } from '../lib/layout';
 import { useApp, useDef, useEd } from '../store/context';
 import { AssetsEditor, JsonEditor, PaletteEditor } from './editors';
@@ -53,10 +60,16 @@ function FramePanel({ id }: { id: string }) {
             <button key={c} className={`rs-insp__swatch${c === frame.color ? ' is-on' : ''}`} style={{ background: c }} title={c} onClick={() => ed.updateFrame(id, { color: c })} />
           ))}
         </div>
+        <FrameColor color={frame.color} onChange={(c) => ed.updateFrame(id, { color: c })} />
         <button className="rs-btn rs-btn--danger" onClick={() => ed.ungroup(id)}>Ungroup</button>
       </div>
     </div>
   );
+}
+
+function FrameColor({ color, onChange }: { color: string; onChange: (c: string) => void }) {
+  const rgb = parseHex(color)?.rgb ?? [0.4, 0.5, 0.9];
+  return <ColorField large label="Custom colour" value={[rgb[0], rgb[1], rgb[2], 1]} onChange={(v) => onChange(toHex(v))} />;
 }
 
 function NodePanel({ id }: { id: string }) {
@@ -79,6 +92,7 @@ function NodePanel({ id }: { id: string }) {
     );
   }
   const cat = CATEGORIES[def.category];
+  const palPort = paletteInputPort(def);
   const wired = new Map(edges.filter((e) => e.to.node === id).map((e) => [e.to.port, e] as const));
   return (
     <div className="rs-insp__scroll">
@@ -103,6 +117,24 @@ function NodePanel({ id }: { id: string }) {
         </div>
         {def.cpu && <p className="rs-insp__warn">Heavy CPU node: may be slow on large images.</p>}
       </div>
+      {def.playable && (
+        <div className="rs-insp__sec">
+          <div className="rs-caps">Keyboard</div>
+          <Piano nodeId={id} />
+        </div>
+      )}
+      {palPort && !wired.has(palPort) && (
+        <div className="rs-insp__sec">
+          <PaletteHint nodeId={id} />
+        </div>
+      )}
+      {Object.entries(def.inputs as InputSchema).filter(([, d]) => d.multi).map(([port, d]) => (
+        <div key={port} className="rs-insp__sec">
+          <div className="rs-caps">{isLayerType(d.type) ? 'Layers' : 'Inputs'}: {d.label ?? port}</div>
+          {isLayerType(d.type) && <p className="rs-insp__hint">Top of the list is drawn on top. Drag rows or use the arrows to reorder.</p>}
+          <LayerList nodeId={id} port={port} type={d.type} variant="inspector" />
+        </div>
+      ))}
       <ParamGroups
         node={node}
         def={def}
@@ -175,7 +207,7 @@ function ParamGroups({
 }
 
 function ParamControl({ node, keyName, p, isWired, wiredFrom, onDisconnect }: { node: NodeInstance; keyName: string; p: ParamDef; isWired: boolean; wiredFrom: string; onDisconnect: () => void }) {
-  const { ed } = useApp();
+  const { ed, io } = useApp();
   const label = p.label ?? keyName;
   const value = node.params[keyName] ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, keyName, v);
@@ -193,7 +225,15 @@ function ParamControl({ node, keyName, p, isWired, wiredFrom, onDisconnect }: { 
   } else {
     switch (p.type) {
       case 'number':
-        control = <NumberField large value={value as number} min={p.min} max={p.max} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} />;
+        control = <NumberField large name={label} askKey={`${node.id}:${keyName}`} softMax={p.softMax} value={value as number} min={p.min} max={p.max} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} />;
+        if (p.unit === 's') {
+          control = (
+            <div className="rs-insp__nowrap">
+              {control}
+              <button className="rs-btn" onClick={() => set(Math.round(io.player.getState().seconds * 100) / 100)} title="Set to the current playhead time">Now</button>
+            </div>
+          );
+        }
         break;
       case 'bool':
         control = <CheckField value={!!value} onChange={set} label={value ? 'On' : 'Off'} />;
@@ -211,10 +251,13 @@ function ParamControl({ node, keyName, p, isWired, wiredFrom, onDisconnect }: { 
         control = <Vec2Field large value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;
         break;
       case 'palette':
-        control = <PaletteEditor value={value as [number, number, number][]} onChange={set} />;
+        control = <PaletteEditor value={value as [number, number, number][]} onChange={set} onStudio={() => { ed.studioTarget = { nodeId: node.id, key: keyName }; ed.openDialog('palette'); }} />;
         break;
       case 'assets':
         control = <AssetsEditor value={value as string[]} accept={p.accept} onChange={set} />;
+        break;
+      case 'device':
+        control = <DeviceField large value={String(value ?? '')} kind={p.device} onChange={set} />;
         break;
       case 'json':
         control = <JsonEditor value={value} onChange={set} />;

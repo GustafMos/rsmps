@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { ACCEPT_ATTR, Thumb, fileMatches } from '../components/Thumb';
 import { Popover } from '../components/fields';
+import { ColorPopover } from '../components/ColorPicker';
 import { hexOf, rgbOf } from '../lib/drag';
 import { useAssets, useEditor, useIo } from '../store/context';
 
@@ -29,7 +30,9 @@ export function parseHexList(text: string): RGB[] {
   return out;
 }
 
-export function PaletteEditor({ value, onChange }: { value: RGB[]; onChange: (v: RGB[]) => void }) {
+export function PaletteEditor({ value, onChange, onStudio }: { value: RGB[]; onChange: (v: RGB[]) => void; onStudio?: () => void }) {
+  const editBtn = useRef<HTMLButtonElement>(null);
+  const [picking, setPicking] = useState(false);
   const colors = Array.isArray(value) ? value : [];
   const [sel, setSel] = useState(0);
   const [paste, setPaste] = useState('');
@@ -81,7 +84,8 @@ export function PaletteEditor({ value, onChange }: { value: RGB[]; onChange: (v:
       </div>
       {cur && (
         <div className="rs-pal__edit">
-          <input type="color" value={hexOf(cur)} onChange={(e) => { const rgb = rgbOf(e.target.value); if (rgb) update(idx, rgb); }} />
+          <button ref={editBtn} className="rs-pal__cur" style={{ background: hexOf(cur) }} title="Edit this colour" aria-label="Edit colour" onClick={() => setPicking((p) => !p)} />
+          {picking && <ColorPopover anchor={editBtn.current} alpha={false} extra={colors} value={[cur[0], cur[1], cur[2], 1]} onChange={(v) => update(idx, [v[0], v[1], v[2]])} onClose={() => setPicking(false)} />}
           <input
             className="rs-input rs-mono"
             style={{ width: 84 }}
@@ -122,6 +126,7 @@ export function PaletteEditor({ value, onChange }: { value: RGB[]; onChange: (v:
         </div>
       )}
       <div className="rs-pal__count rs-caps">{colors.length} colours</div>
+      {onStudio && <button className="rs-btn rs-btn--primary" onClick={onStudio}>Edit in Palette Studio</button>}
     </div>
   );
 }

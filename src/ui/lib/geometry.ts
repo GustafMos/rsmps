@@ -62,9 +62,12 @@ export function edgeEndpoints(
   const lb = layouts?.get(b.id) ?? layoutFor(graph, b, registry.get(b.type));
   const oa = offsets?.get(a.id);
   const ob = offsets?.get(b.id);
+  const bdef = registry.get(b.type);
+  const multi = !!bdef && !!(bdef.inputs as Record<string, { multi?: boolean }>)[e.to.port]?.multi;
+  const slot = multi ? graph.edges.filter((x) => x.to.node === b.id && x.to.port === e.to.port).findIndex((x) => x.id === e.id) : undefined;
   return {
     from: socketWorld(a, la, 'out', e.from.port, oa ? { x: oa.dx, y: oa.dy } : undefined),
-    to: socketWorld(b, lb, 'in', e.to.port, ob ? { x: ob.dx, y: ob.dy } : undefined),
+    to: socketWorld(b, lb, 'in', e.to.port, ob ? { x: ob.dx, y: ob.dy } : undefined, slot),
   };
 }
 

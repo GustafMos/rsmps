@@ -11,6 +11,8 @@ import {
   disconnect,
   outputNodes,
   removeNodes,
+  moveWire,
+  wiresInto,
   setParam,
   uid,
   updateNode,
@@ -20,16 +22,19 @@ import type { Registry } from '../../engine/define';
 import type { Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
 import type { Io } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
-import { inputsAccepting, outputsFeeding, sourceDefFor } from '../lib/sockets';
+import { outputType } from '../../engine/graph';
+import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
 
-export type DialogId = 'export' | 'plugins' | 'presets' | 'savePreset' | 'shortcuts' | null;
+export type DialogId = 'export' | 'plugins' | 'presets' | 'savePreset' | 'shortcuts' | 'keymap' | 'palette' | null;
 
 export interface AddMenuRequest {
   clientX: number;
   clientY: number;
   world: { x: number; y: number };
+  /** Opened with Shift+Space: focus lands on the recent nodes so Enter adds one at once. */
+  quick?: boolean;
   /** Set when a wire was dropped on empty space. side = which end is fixed. */
   link?: { side: 'out' | 'in'; node: string; port: string; type: SocketType };
 }
@@ -44,6 +49,7 @@ export interface Toast {
   id: number;
   kind: 'info' | 'error' | 'ok';
   text: string;
+  actions?: { label: string; run: () => void }[];
 }
 
 export interface UiPrefs {
@@ -70,6 +76,8 @@ export interface EditorState {
   toasts: readonly Toast[];
   /** Bumped when a different document is loaded (views re-frame). */
   docRev: number;
+  /** Top-level tab: the node editor or the print-scan-back tool. */
+  mode: 'edit' | 'scan';
 }
 
 interface Clip {
@@ -107,6 +115,10 @@ export class Editor {
   private lastTime = 0;
   private clip: Clip | null = null;
   private toastId = 0;
+  private holds = 0;
+  private holdPushed = false;
+  /** Palette studio target (node + palette param) when opened from an inspector. */
+  studioTarget: { nodeId: string; key: string } | null = null;
 
   constructor(readonly io: Io) {
     this.store = createStore<EditorState>({
@@ -123,6 +135,7 @@ export class Editor {
       dialog: null,
       toasts: [],
       docRev: 0,
+      mode: 'edit',
     });
   }
 
@@ -185,8 +198,9 @@ export class Editor {
     const s = this.state;
     if (next === s.graph) return;
     const now = performance.now();
-    const coalesce = key && key === this.lastKey && now - this.lastTime < 900 && this.past.length > 0;
+    const coalesce = key && key === this.lastKey && (this.holds > 0 ? this.holdPushed : now - this.lastTime < 900) && this.past.length > 0;
     if (!coalesce) {
+      if (this.holds > 0) this.holdPushed = true;
       this.past.push(s.graph);
       if (this.past.length > 300) this.past.shift();
     }
@@ -194,6 +208,26 @@ export class Editor {
     this.lastKey = key ?? '';
     this.lastTime = now;
     this.applyGraph(next);
+  }
+
+  /** While held, edits sharing a key form ONE undo step (a whole drag or popover session). */
+  beginHold(): void {
+    if (this.holds++ === 0) {
+      this.holdPushed = false;
+      this.lastKey = '';
+    }
+  }
+  /** cancel = drop the edits made during the hold (Esc in a picker). */
+  endHold(cancel = false): void {
+    if (this.holds === 0) return;
+    this.holds--;
+    if (this.holds > 0) return;
+    if (cancel && this.holdPushed) {
+      const prev = this.past.pop();
+      if (prev) this.applyGraph(prev);
+    }
+    this.holdPushed = false;
+    this.lastKey = '';
   }
 
   edit(fn: (g: GraphDoc) => GraphDoc, key?: string): void {
@@ -272,7 +306,23 @@ export class Editor {
   /* -------------------------------- editing ------------------------------- */
 
   setParam(nodeId: string, key: string, value: unknown): void {
+    this.rememberPending(nodeId, key, value);
     this.commit(setParam(this.state.graph, nodeId, key, value), `p:${nodeId}:${key}`);
+  }
+  /** Remember the in-flight edit so a reload after a render that never finished can offer to revert it. */
+  private rememberPending(nodeId: string, key: string, value: unknown): void {
+    try {
+      const node = this.state.graph.nodes.find((n) => n.id === nodeId);
+      if (!node || JSON.stringify(value).length > 300) return;
+      const prevRaw = sessionStorage.getItem('rsmps.pendingEdit');
+      const prev = prevRaw ? JSON.parse(prevRaw) : null;
+      const same = prev && prev.nodeId === nodeId && prev.key === key && Date.now() - prev.at < 15000;
+      const def = this.registry.get(node.type);
+      const label = `${node.label || def?.title || node.type} · ${(def?.params as Record<string, { label?: string }> | undefined)?.[key]?.label ?? key}`;
+      sessionStorage.setItem('rsmps.pendingEdit', JSON.stringify({ nodeId, key, label, oldValue: same ? prev.oldValue : node.params[key], newValue: value, at: Date.now() }));
+    } catch {
+      /* storage unavailable */
+    }
   }
   setNode(nodeId: string, patch: Partial<NodeInstance>, key?: string): void {
     this.commit(updateNode(this.state.graph, nodeId, patch), key);
@@ -296,13 +346,26 @@ export class Editor {
     });
   }
 
-  connect(from: Edge['from'], to: Edge['to']): boolean {
+  /** Connect, then (for multi inputs) place the new wire at layer position `slot`. */
+  connectSlot(g: GraphDoc, from: Edge['from'], to: Edge['to'], slot?: number): GraphDoc {
+    let next = connect(g, this.registry, from, to);
+    if (slot !== undefined) {
+      const group = wiresInto(next, to.node, to.port);
+      const mine = group[group.length - 1];
+      if (mine) next = moveWire(next, mine.id, slot - (group.length - 1));
+    }
+    return next;
+  }
+  moveLayerPure(g: GraphDoc, edgeId: string, delta: number): GraphDoc {
+    return moveWire(g, edgeId, delta);
+  }
+  connect(from: Edge['from'], to: Edge['to'], slot?: number): boolean {
     const err = connectError(this.state.graph, this.registry, from, to);
     if (err) {
       this.toast(err, 'error');
       return false;
     }
-    this.edit((g) => connect(g, this.registry, from, to));
+    this.edit((g) => this.connectSlot(g, from, to, slot));
     return true;
   }
   disconnect(edgeId: string): void {
@@ -357,20 +420,174 @@ export class Editor {
       } else if (this.state.selection.length === 1) {
         const src = next.nodes.find((n) => n.id === this.state.selection[0]);
         const sdef = src && this.registry.get(src.type);
-        if (src && sdef) {
-          outer: for (const [out, od] of Object.entries(sdef.outputs as OutputSchema)) {
-            for (const port of inputsAccepting(def, od.type)) {
-              if (!(port in def.inputs)) continue; // auto-wire only real inputs, never param sockets
-              if (tryConnect({ node: src.id, port: out }, { node: node.id, port })) break outer;
-            }
-          }
-        }
+        if (src && sdef) next = this.insertInChain(next, src.id, node.id);
       }
-      return next;
+      return this.withPalette(next, node.id, false) ?? next;
     });
     if (id) this.patch({ selection: [id], selectedFrame: null });
     this.pushRecent(type);
     return id || null;
+  }
+
+  /**
+   * Insert a freshly added node into the chain after `srcId`: wire the source's first output into the new node's
+   * first compatible input, then re-route every wire that left that output so it comes from the new node instead
+   * (when the types fit), keeping layer order on multi inputs. Downstream nodes are pushed right when needed.
+   */
+  private insertInChain(g: GraphDoc, srcId: string, newId: string): GraphDoc {
+    const src = g.nodes.find((n) => n.id === srcId)!;
+    const nn = g.nodes.find((n) => n.id === newId)!;
+    const sdef = this.registry.get(src.type)!;
+    const ndef = this.registry.get(nn.type)!;
+    const srcOuts = Object.entries(sdef.outputs as OutputSchema);
+    const GAP = 60;
+    const srcW = layoutFor(g, src, sdef).width;
+    const newW = layoutFor(g, nn, ndef).width;
+    const move = (gr: GraphDoc, id: string, x: number, y: number): GraphDoc => ({ ...gr, nodes: gr.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)) });
+    if (!srcOuts.length) return g;
+    const [outPort, outDef] = srcOuts[0];
+    const from = { node: srcId, port: outPort };
+    const inPort = inputsAccepting(ndef, outDef.type).find((p) => p in ndef.inputs);
+    if (!inPort) return move(g, newId, src.x, src.y + layoutFor(g, src, sdef).height + 40); // a generator: just sits next to the selection
+    const downstream = g.edges.filter((e) => e.from.node === srcId && e.from.port === outPort);
+    let next = connect(g, this.registry, from, { node: newId, port: inPort });
+    const newOut = Object.keys(ndef.outputs)[0];
+    const rerouted: Edge[] = [];
+    if (newOut) {
+      for (const e of downstream) {
+        const target = { node: newId, port: newOut };
+        if (connectError(disconnect(next, e.id), this.registry, target, e.to)) continue;
+        const tdef = this.registry.get(next.nodes.find((n) => n.id === e.to.node)?.type ?? '');
+        const multi = !!(tdef?.inputs as Record<string, { multi?: boolean }> | undefined)?.[e.to.port]?.multi;
+        const pos = wiresInto(next, e.to.node, e.to.port).findIndex((x) => x.id === e.id);
+        next = connect(disconnect(next, e.id), this.registry, target, e.to);
+        if (multi && pos >= 0) {
+          const group = wiresInto(next, e.to.node, e.to.port);
+          next = moveWire(next, group[group.length - 1].id, pos - (group.length - 1));
+        }
+        rerouted.push(e);
+      }
+    }
+    // place the new node between the source and its former consumers, pushing everything downstream right if needed
+    let x = src.x + srcW + GAP;
+    const y = src.y;
+    if (rerouted.length) {
+      const consumers = new Set(rerouted.map((e) => e.to.node));
+      const minX = Math.min(...[...consumers].map((id) => next.nodes.find((n) => n.id === id)!.x));
+      const shift = x + newW + GAP - minX;
+      if (shift > 0) {
+        const down = new Set<string>();
+        const stack = [...consumers];
+        while (stack.length) {
+          const id = stack.pop()!;
+          if (down.has(id) || id === newId || id === srcId) continue;
+          down.add(id);
+          for (const e of next.edges) if (e.from.node === id) stack.push(e.to.node);
+        }
+        next = { ...next, nodes: next.nodes.map((n) => (down.has(n.id) ? { ...n, x: n.x + shift } : n)) };
+      }
+    }
+    x = Math.round(x);
+    return move(next, newId, x, Math.round(y));
+  }
+
+  /**
+   * Generic palette wiring: when a node has an unwired palette input and an image feed, add a Palette node
+   * (extracted once at the current time, not following) wired into it. Returns null when not applicable.
+   */
+  private withPalette(g: GraphDoc, nodeId: string, custom: boolean): GraphDoc | null {
+    const node = g.nodes.find((n) => n.id === nodeId);
+    const def = node && this.registry.get(node.type);
+    const palDef = this.registry.get('palette');
+    if (!node || !def || !palDef) return null;
+    const pp = paletteInputPort(def);
+    if (!pp || g.edges.some((e) => e.to.node === nodeId && e.to.port === pp)) return null;
+    const ip = firstImagePort(def);
+    const feed = ip ? g.edges.find((e) => e.to.node === nodeId && e.to.port === ip) : undefined;
+    if (!custom && !feed) return null;
+    const t = Math.round(this.io.player.getState().seconds * 100) / 100;
+    const params = custom ? { source: 'custom' } : { source: 'extract', frame: t, follow: false };
+    const at = { x: node.x - 250, y: node.y + 150 };
+    const added = addNode(g, this.registry, 'palette', at, params);
+    let next = added.graph;
+    const palIn = Object.keys(palDef.inputs).find((k) => (palDef.inputs as Record<string, { type: string }>)[k].type === 'image');
+    const palOut = Object.keys(palDef.outputs)[0];
+    if (feed && palIn) next = connect(next, this.registry, feed.from, { node: added.node.id, port: palIn });
+    next = connect(next, this.registry, { node: added.node.id, port: palOut }, { node: nodeId, port: pp });
+    this.lastPaletteId = added.node.id;
+    return next;
+  }
+  private lastPaletteId = '';
+
+  /** "Extract from image" on a node with no palette: one undo step. */
+  extractPaletteFor(nodeId: string): void {
+    const next = this.withPalette(this.state.graph, nodeId, false);
+    if (!next) return this.toast('Connect an image to this node first, then extract a palette from it.', 'info');
+    this.commit(next);
+    this.patch({ selection: [this.lastPaletteId], selectedFrame: null });
+  }
+  /** "Create palette…": a custom Palette node wired in, then Palette Studio on it. */
+  createPaletteFor(nodeId: string): void {
+    const next = this.withPalette(this.state.graph, nodeId, true);
+    if (!next) return this.toast('The Palette node type is not available.', 'error');
+    this.commit(next);
+    this.patch({ selection: [this.lastPaletteId], selectedFrame: null });
+    this.studioTarget = { nodeId: this.lastPaletteId, key: 'custom' };
+    this.openDialog('palette');
+  }
+
+  /**
+   * Two outputs joined: the one you HELD goes on top (foreground), the one you dropped ONTO is the base.
+   * Images/masks make a Merge, audio makes a Mixer. One undo step. Returns false when the pair is not mergeable.
+   */
+  mergeOutputs(held: Edge['from'], base: Edge['from']): boolean {
+    const g0 = this.state.graph;
+    const ta = outputType(g0, this.registry, held.node, held.port);
+    const tb = outputType(g0, this.registry, base.node, base.port);
+    const visual = (t: SocketType | null) => t === 'image' || t === 'mask';
+    const kind = visual(ta) && visual(tb) ? 'merge' : ta === 'audio' && tb === 'audio' ? 'mixer' : null;
+    const def = kind ? this.registry.get(kind) : undefined;
+    if (!kind || !def || held.node === base.node) {
+      if (kind && !def) this.toast(`The "${kind}" node type is not available.`, 'error');
+      return false;
+    }
+    const nodeA = g0.nodes.find((n) => n.id === held.node)!;
+    const nodeB = g0.nodes.find((n) => n.id === base.node)!;
+    const wA = layoutFor(g0, nodeA, this.registry.get(nodeA.type)).width;
+    const at = { x: Math.round(Math.max(nodeA.x, nodeB.x) + wA + 70), y: Math.round((nodeA.y + nodeB.y) / 2) };
+    let newId = '';
+    const viewed = this.state.viewedNodeId;
+    let viewMerge = false;
+    this.edit((g) => {
+      const added = addNode(g, this.registry, kind, at);
+      newId = added.node.id;
+      let next = added.graph;
+      const ins = def.inputs as Record<string, { type: string; multi?: boolean }>;
+      const keys = Object.keys(ins);
+      const to = (port: string) => ({ node: newId, port });
+      if (kind === 'merge') {
+        const bg = keys.includes('background') ? 'background' : keys[0];
+        const fg = keys.includes('foreground') ? 'foreground' : keys.find((k) => k !== bg)!;
+        next = connect(next, this.registry, base, to(bg));
+        next = connect(next, this.registry, held, to(fg));
+      } else {
+        const multi = keys.find((k) => ins[k].multi) ?? keys[0];
+        next = connect(next, this.registry, base, to(multi));
+        next = connect(next, this.registry, held, to(multi));
+      }
+      const out = { node: newId, port: Object.keys(def.outputs)[0] };
+      if (viewed === base.node) viewMerge = true;
+      else if (viewed) {
+        const feeding = next.edges.filter((e) => e.from.node === base.node && e.from.port === base.port && e.to.node === viewed);
+        if (feeding.length === 1 && next.edges.filter((e) => e.to.node === viewed && e.from.node === base.node).length === 1) {
+          next = connect(disconnect(next, feeding[0].id), this.registry, out, feeding[0].to);
+        }
+      }
+      return next;
+    });
+    if (!newId) return false;
+    this.patch({ selection: [newId], selectedFrame: null, ...(viewMerge ? { viewedNodeId: newId } : {}) });
+    return true;
   }
 
   /** Create a source node holding imported assets (all of one kind) at a position. */
@@ -548,6 +765,9 @@ export class Editor {
       /* ignore */
     }
   }
+  setMode(mode: 'edit' | 'scan'): void {
+    this.patch({ mode, addMenu: null, contextMenu: null });
+  }
   openAddMenu(req: AddMenuRequest | null): void {
     this.patch({ addMenu: req, contextMenu: null });
   }
@@ -557,10 +777,10 @@ export class Editor {
   openDialog(d: DialogId): void {
     this.patch({ dialog: d, addMenu: null, contextMenu: null });
   }
-  toast(text: string, kind: Toast['kind'] = 'info'): void {
+  toast(text: string, kind: Toast['kind'] = 'info', actions?: Toast['actions']): void {
     const id = ++this.toastId;
-    this.patch({ toasts: [...this.state.toasts.slice(-3), { id, kind, text }] });
-    setTimeout(() => this.dismissToast(id), kind === 'error' ? 7000 : 3000);
+    this.patch({ toasts: [...this.state.toasts.slice(-3), { id, kind, text, actions }] });
+    setTimeout(() => this.dismissToast(id), actions ? 20000 : kind === 'error' ? 7000 : 3000);
   }
   dismissToast(id: number): void {
     this.patch({ toasts: this.state.toasts.filter((t) => t.id !== id) });

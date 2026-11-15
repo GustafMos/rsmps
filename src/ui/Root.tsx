@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { batchCount, upstream } from '../engine/graph';
-import type { Registry } from '../engine/define';
+import { batchCount } from '../engine/graph';
 import type { GraphDoc } from '../engine/types';
 import { App } from './App';
 import { bootIo } from './boot';
@@ -8,22 +7,24 @@ import { GraphController } from './graph/controller';
 import { AppProvider, type AppCtx } from './store/context';
 import { Editor } from './store/editor';
 import { createPlayerStore } from './store/playerStore';
+import { PENDING_KEY, type PendingEdit } from './watchdog';
 
-/**
- * Viewing a node fed by an empty media source can only produce nothing. Passing null shows the
- * viewer's empty state instead (and keeps the player from re-rendering a result that never comes).
- */
-function viewable(graph: GraphDoc, id: string | null, registry: Registry): boolean {
-  if (!id) return false;
-  for (const nid of upstream(graph, id)) {
-    const n = graph.nodes.find((x) => x.id === nid);
-    const def = n && registry.get(n.type);
-    if (!n || !def || Object.keys(def.inputs as object).length) continue;
-    for (const [key, p] of Object.entries(def.params as Record<string, { type: string }>)) {
-      if (p.type === 'assets' && Array.isArray(n.params[key]) && (n.params[key] as unknown[]).length === 0) return false;
-    }
+/** A param edit whose render never finished last time (page reloaded within seconds): offer to revert it. */
+function offerRecovery(ed: Editor): void {
+  try {
+    const raw = sessionStorage.getItem(PENDING_KEY);
+    sessionStorage.removeItem(PENDING_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw) as PendingEdit;
+    if (Date.now() - p.at > 30000 || !ed.state.graph.nodes.some((n) => n.id === p.nodeId)) return;
+    const show = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
+    ed.toast(`The last change (${p.label}: ${show(p.oldValue)} → ${show(p.newValue)}) did not finish rendering last time. Revert it?`, 'error', [
+      { label: 'Revert', run: () => ed.setParam(p.nodeId, p.key, p.oldValue) },
+      { label: 'Keep', run: () => undefined },
+    ]);
+  } catch {
+    /* ignore */
   }
-  return true;
 }
 
 type Boot = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; app: AppCtx };
@@ -53,7 +54,7 @@ export function Root() {
           lastGraph = s.graph;
           lastView = s.viewedNodeId;
           lastItem = s.item;
-          io.player.setView({ graph: s.graph, node: viewable(s.graph, s.viewedNodeId, io.registry) ? s.viewedNodeId : null, item: s.item, itemCount: batchCount(s.graph, io.registry) });
+          io.player.setView({ graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry) });
           if (graphChanged) io.projects.autosave(s.graph);
         };
         const unsub = ed.store.subscribe(sync);
@@ -65,6 +66,7 @@ export function Root() {
         const saved = await io.projects.loadAutosave().catch(() => null);
         if (saved && saved.schema === 'rsmps/graph' && saved.version === 2 && Array.isArray(saved.nodes) && saved.nodes.length > 0) ed.loadGraph(saved);
         else ed.newGraph();
+        offerRecovery(ed);
         sync();
 
         stop = () => {
@@ -96,13 +98,15 @@ export function Root() {
       <div className="rs-boot rs-boot--error" role="alert">
         <img src="/ripscorpy-logo.png" alt="" width={64} height={64} />
         <div className="rs-boot__word">Cannot start</div>
-        <p className="rs-boot__big">RSMPS needs WebGPU, and this browser could not provide it.</p>
+        <p className="rs-boot__big">{/webgpu|adapter|gpu/i.test(boot.message) ? 'RSMPS needs WebGPU, and this browser could not provide it.' : 'RSMPS could not start.'}</p>
         <p className="rs-boot__msg">{boot.message}</p>
+        {/webgpu|adapter|gpu/i.test(boot.message) && (
         <ul className="rs-boot__list">
           <li>Use a recent Chrome or Edge (113 or newer), or another browser with WebGPU enabled.</li>
           <li>Make sure hardware acceleration is turned on in the browser settings.</li>
           <li>Serve the page from localhost or https: WebGPU is disabled on plain http.</li>
         </ul>
+        )}
         <button className="rs-btn rs-btn--primary" onClick={() => location.reload()}>Try again</button>
       </div>
     );

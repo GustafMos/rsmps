@@ -41,6 +41,9 @@
   --sock-color: #f28b4b;
   --sock-audio: #2ec4b6;
   --sock-midi: #a77dff;
+  --sock-regions: #e85d75;
+  --sock-camera: #7fd1ff;
+  --sock-unknown: #8b9099; /* any socket type the UI has no colour for */
 
   /* spacing (4px scale) */
   --s-1: 4px;

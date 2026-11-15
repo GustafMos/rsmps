@@ -5,9 +5,15 @@ import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
 import { hexOf } from '../lib/drag';
-import { inboundSignature, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row } from '../lib/layout';
+import { paletteInputPort } from '../lib/sockets';
+import { PaletteHint } from '../components/PaletteHint';
+import { DeviceField } from '../components/DeviceField';
+import { LayerList } from './LayerList';
+import { useKeyboardTarget } from '../playKeys';
+import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row } from '../lib/layout';
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
 import './node.css';
+import '../layers.css';
 
 const catColor = (def: AnyNodeDef | undefined) => (def ? (CATEGORIES[def.category]?.color ?? '#7f8c9b') : '#ff5c6c');
 
@@ -25,8 +31,16 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   const debug = useEd((s) => s.prefs.debug);
   const error = usePlayer((s) => s.errors.get(node.id));
   const wired = useMemo(() => new Set(wiredSig ? wiredSig.split(',') : []), [wiredSig]);
-  const layout = layoutNode(node, def, def ? undefined : parsePortSignature(portSig));
+  const palPort = def ? paletteInputPort(def) : null;
+  const hint = !!palPort && !wired.has(palPort);
+  const counts = useMemo(() => {
+    const m: Record<string, number> = {};
+    if (def) for (const p of Object.keys(multiCounts(def, [], node.id))) m[p] = wiredSig.split(',').filter((x) => x === p).length;
+    return m;
+  }, [def, wiredSig, node.id]);
+  const layout = layoutNode(node, def, def ? undefined : parsePortSignature(portSig), hint, counts);
   const [renaming, setRenaming] = useState(false);
+  const kbd = useKeyboardTarget() === node.id;
   const el = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,6 +74,7 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
       data-node-id={node.id}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: layout.width, height: layout.height, ['--cat' as string]: catColor(def) }}
     >
+      {kbd && <span className="rs-node__kbd" title="Computer keys play this node. Esc or deselect to release.">Keyboard plays this node</span>}
       <div className="rs-node__head" data-node-head>
         <button
           className="rs-node__hbtn rs-node__chev"
@@ -176,7 +191,7 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
       <div className="rs-row rs-row--io" style={{ top: row.y, height: ROW_H }}>
         {row.input && (
           <>
-            <Socket node={node.id} port={row.input.port} type={row.input.type} dir="in" />
+            {!row.input.multi && <Socket node={node.id} port={row.input.port} type={row.input.type} dir="in" />}
             <span className="rs-row__label">{row.input.label}</span>
           </>
         )}
@@ -194,6 +209,20 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
       <button className="rs-row rs-row--more" data-nodrag style={{ top: row.y, height: ROW_H }} onClick={() => ed.select([node.id])} title="Open the inspector for all parameters">
         {row.count} more…
       </button>
+    );
+  }
+  if (row.kind === 'layers') {
+    return (
+      <div className="rs-row rs-row--layers" style={{ top: row.y, height: (row.count + 1) * LAYER_H }}>
+        <LayerList nodeId={node.id} port={row.port} type={row.type} variant="node" />
+      </div>
+    );
+  }
+  if (row.kind === 'hint') {
+    return (
+      <div className="rs-row rs-row--hint" style={{ top: row.y, height: 56 }}>
+        <PaletteHint nodeId={node.id} compact />
+      </div>
     );
   }
   return <ParamRowView row={row} node={node} isWired={wired.has(row.key)} />;
@@ -216,7 +245,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
   } else {
     switch (p.type) {
       case 'number':
-        control = <NumberField label={label} value={value as number} min={p.min} max={p.max} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} title={p.hint} />;
+        control = <NumberField label={label} value={value as number} min={p.min} max={p.max} softMax={p.softMax} askKey={`${node.id}:${row.key}`} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} title={p.hint} />;
         break;
       case 'bool':
         control = <CheckField label={label} value={!!value} onChange={set} title={p.hint} />;
@@ -257,6 +286,14 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         );
         break;
       }
+      case 'device':
+        control = (
+          <div className="rs-row__pair">
+            <span className="rs-row__label">{label}</span>
+            <DeviceField value={String(value ?? '')} kind={p.device} onChange={set} hint={false} />
+          </div>
+        );
+        break;
       case 'assets': {
         const n = Array.isArray(value) ? value.length : 0;
         control = (

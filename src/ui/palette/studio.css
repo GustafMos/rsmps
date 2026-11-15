@@ -1,0 +1,48 @@
+.rs-ps { display: grid; grid-template-columns: 372px 1fr; gap: var(--s-4); min-height: 0; }
+.rs-ps__left { display: flex; flex-direction: column; gap: var(--s-2); }
+.rs-ps__right { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
+.rs-wheel { display: block; cursor: crosshair; touch-action: none; background: var(--bg-1); border: 1px solid var(--line-strong); }
+.rs-ps__rules { display: flex; flex-wrap: wrap; gap: 3px; }
+.rs-ps__rule { height: 24px; padding: 0 var(--s-2); background: var(--bg-3); border: 1px solid var(--line-strong); color: var(--text-dim); font-size: var(--fs-xs); border-radius: var(--r); }
+.rs-ps__rule:hover { background: var(--bg-4); color: var(--text); }
+.rs-ps__rule.is-on { background: var(--accent); border-color: var(--accent-hi); color: #fff; }
+.rs-ps__help, .rs-ps__hint { margin: 0; color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.5; }
+.rs-ps__strip { display: flex; height: 84px; border: 1px solid #000; }
+.rs-ps__tile { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 4px; cursor: pointer; }
+.rs-ps__tile.is-sel { outline: 3px solid var(--select); outline-offset: -3px; z-index: 1; }
+.rs-ps__tilehex { font-size: var(--fs-xs); overflow: hidden; }
+.rs-ps__tilebtns { display: flex; justify-content: space-between; }
+.rs-ps__tilebtns button { background: transparent; border: 0; padding: 0 3px; min-width: 20px; height: 20px; font-size: var(--fs-sm); }
+.rs-ps__edit, .rs-ps__card { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3); background: var(--bg-1); border: 1px solid var(--line); }
+.rs-ps__edithead { display: flex; align-items: center; gap: var(--s-2); }
+.rs-ps__spacer { flex: 1; }
+.rs-ps__seg { display: flex; border: 1px solid var(--line-strong); }
+.rs-ps__seg button { height: 24px; padding: 0 var(--s-2); background: var(--bg-3); border: 0; color: var(--text-dim); font-size: var(--fs-xs); }
+.rs-ps__seg button.is-on { background: var(--accent); color: #fff; }
+.rs-ps__sliders { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-2); }
+.rs-ps__actions, .rs-ps__row { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rs-ps__row > * { flex: 1; min-width: 0; }
+.rs-ps__actions .rs-btn { height: 24px; padding: 0 var(--s-2); }
+.rs-ps__tabbar { display: flex; border-bottom: 1px solid var(--line-strong); }
+.rs-ps__tabbar button { height: 32px; padding: 0 var(--s-3); background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-dim); }
+.rs-ps__tabbar button.is-on { color: var(--text); border-bottom-color: var(--accent-hi); }
+.rs-ps__tabbody { padding-top: var(--s-3); }
+.rs-ps__grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
+.rs-ps__live { flex: 1; display: flex; align-items: center; gap: var(--s-2); color: var(--text-dim); font-size: var(--fs-sm); }
+.rs-ps__dot { width: 8px; height: 8px; background: var(--ok); display: inline-block; }
+.rs-ps__contrast { display: grid; gap: 2px; }
+.rs-ps__ch { height: 22px; border: 1px solid #000; }
+.rs-ps__cc { height: 22px; display: grid; place-items: center; font-size: var(--fs-xs); border: 1px solid #000; }
+.rs-ps__cc.is-self { background: var(--bg-0) var(--dither); }
+.rs-ps__cc.is-fail { text-decoration: line-through; opacity: 0.8; }
+.rs-ps__cvd { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); color: var(--text-dim); }
+.rs-ps__cvd > div { display: flex; height: 22px; border: 1px solid #000; }
+.rs-ps__cvd > div > span { flex: 1; }
+.rs-ps__liblist { display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; }
+.rs-ps__lib { display: flex; gap: var(--s-1); align-items: center; }
+.rs-ps__libmain { flex: 1; display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: var(--s-2); background: var(--bg-2); border: 1px solid var(--line); padding: 3px var(--s-2); text-align: left; min-height: 28px; }
+.rs-ps__libmain:hover { border-color: var(--accent-hi); }
+.rs-ps__libname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.rs-ps__libstrip { display: flex; height: 16px; border: 1px solid #000; }
+.rs-ps__libstrip > span { flex: 1; }
+@media (max-width: 1100px) { .rs-ps { grid-template-columns: 1fr; } }

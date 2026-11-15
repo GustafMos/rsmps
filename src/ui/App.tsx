@@ -12,12 +12,18 @@ import { Transport } from './transport/Transport';
 import { Viewer } from './viewer/Viewer';
 import { trackPointer } from './lib/drag';
 import { useShortcuts } from './shortcuts';
+import { ScanView } from './scan/ScanView';
+import { usePlayKeys } from './playKeys';
+import { useRenderWatchdog } from './watchdog';
 import './app.css';
 
 export function App() {
   const { ed, io } = useApp();
-  useShortcuts();
+  useShortcuts(useApp());
+  usePlayKeys(useApp());
+  useRenderWatchdog(useApp());
   const prefs = useEd((s) => s.prefs);
+  const mode = useEd((s) => s.mode);
   const center = useRef<HTMLDivElement>(null);
   const viewerPanel = useRef<HTMLDivElement>(null);
   const max = prefs.maximized;
@@ -68,6 +74,7 @@ export function App() {
       }}
     >
       <TopBar />
+      {mode === 'scan' ? <ScanView /> : (
       <div className="rs-main">
         {prefs.leftOpen && (
           <aside className="rs-left">
@@ -96,7 +103,8 @@ export function App() {
           </aside>
         )}
       </div>
-      <Transport />
+      )}
+      {mode === 'edit' && <Transport />}
       <AddMenu />
       <NodeContextMenu />
       <DialogHost />
