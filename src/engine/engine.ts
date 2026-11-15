@@ -150,7 +150,16 @@ export class Engine {
     this.host = host;
   }
 
-  async evaluate(req: EvalRequest): Promise<EvalResult> {
+  private queue: Promise<unknown> = Promise.resolve();
+
+  /** Evaluations never overlap: calls are queued, so callers need no locking of their own. */
+  evaluate(req: EvalRequest): Promise<EvalResult> {
+    const run = this.queue.then(() => this.evaluateNow(req));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async evaluateNow(req: EvalRequest): Promise<EvalResult> {
     this.tick++;
     this.evict();
     const { graph } = req;
