@@ -36,6 +36,12 @@ export default defineNode({
       label: 'Frame rate',
       hint: 'Play the clip at this many of ITS frames per second (slower or faster than recorded). 0 = the rate stored in the file. Handy for scanned sequences and stop motion.',
     },
+    fullRes: {
+      type: 'bool',
+      default: false,
+      label: 'Full source resolution',
+      hint: 'Off: media larger than the project frame is read at project size, which saves a lot of memory and looks the same. Turn on to crop or zoom into a large source.',
+    },
     loopVideo: { type: 'bool', default: true, label: 'Loop video', hint: 'Repeat the clip when the project is longer than it.' },
     offset: { type: 'number', default: 0, unit: 's', step: 0.01, label: 'Start offset' },
   },
@@ -57,7 +63,11 @@ export default defineNode({
       const local = (ctx.time.seconds + ctx.params.offset) * rate;
       seconds = info.duration > 0 ? a + (ctx.params.loopVideo ? ((local % span) + span) % span : Math.min(Math.max(local, 0), span - 1e-4)) : 0;
     }
-    const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(info.width, info.height) * ctx.proxy) : 0;
+    // Decode no larger than needed. A 4K clip in a 1080p project is read at project size (a quarter of the
+    // memory at every node downstream) unless the user asks for full resolution, e.g. to crop into it.
+    const srcLong = Math.max(info.width, info.height);
+    const wanted = ctx.params.fullRes ? srcLong * ctx.proxy : Math.min(srcLong * ctx.proxy, Math.max(ctx.canvas.width, ctx.canvas.height));
+    const maxSide = wanted < srcLong - 0.5 ? Math.ceil(wanted) : 0;
     const frame = await ctx.host.assetFrame(assetId, seconds, maxSide);
     if (!frame) throw new Error(`Could not decode "${info.name}".`);
     return {

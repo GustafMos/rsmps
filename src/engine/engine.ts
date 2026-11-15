@@ -145,7 +145,7 @@ export class Engine {
   readonly registry: Registry;
   host: Host;
   /** Cache budget for node results, in bytes of texture memory. */
-  cacheBudget = 768 * 1024 * 1024;
+  cacheBudget = 384 * 1024 * 1024;
 
   private cache = new Map<string, Entry>();
   private cacheBytes = 0;
