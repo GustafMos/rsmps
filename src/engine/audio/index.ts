@@ -4,4 +4,5 @@
  */
 export { createAudioEngine } from './engine';
 export { renderAudioOffline, analyzeSignalsOffline } from './offline';
-export type { AudioEngine, AudioAssetProvider, PcmAudio, TransportState, CreateAudioEngine, RenderAudioOffline, AnalyzeSignalsOffline, SignalTracks } from './api';
+export * from './keyboard-map';
+export type { AudioDevice, AudioEngine, AudioAssetProvider, PcmAudio, TransportState, CreateAudioEngine, RenderAudioOffline, AnalyzeSignalsOffline, SignalTracks } from './api';

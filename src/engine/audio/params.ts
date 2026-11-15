@@ -26,6 +26,7 @@ export function resolveParams(def: AnyNodeDef, raw: Record<string, unknown> | un
       case 'enum':
         out[key] = typeof v === 'string' && p.options.some((o) => o.value === v) ? v : p.default;
         break;
+      case 'device':
       case 'string':
         out[key] = typeof v === 'string' ? v : p.default;
         break;

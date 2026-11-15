@@ -5,10 +5,10 @@
  */
 import type { Registry } from '../define';
 import type { GraphDoc } from '../types';
-import type { AudioAssetProvider, AudioEngine, CreateAudioEngine, TransportState } from './api';
+import type { AudioAssetProvider, AudioDevice, AudioEngine, CreateAudioEngine, TransportState } from './api';
 import { toAudioAsset } from './pcm';
 import type { FromWorklet, ToWorklet } from './protocol';
-import { WORKLET_NAME } from './protocol';
+import { MAX_MICS, WORKLET_NAME } from './protocol';
 import { audioAssetIds, hasAudioOutput, hasSignalTap } from './runner';
 import type { MidiEvent } from './types';
 // Vite bundles the worklet (and everything it imports) as its own module and returns its URL.
@@ -23,8 +23,17 @@ class WebAudioEngine implements AudioEngine {
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private master: GainNode | null = null;
-  private mic: { stream: MediaStream; source: MediaStreamAudioSourceNode } | null = null;
-  private micPending = false;
+  /**
+   * One live microphone per microphone node (up to MAX_MICS): node i's source feeds worklet INPUT i, and the runner is
+   * told which node reads which input ('micSlots'). Each node has its own MediaStream, so nodes can use different
+   * devices. A stream is reopened whenever its device or browser-processing options change.
+   */
+  private mics = new Map<string, { slot: number; key: string; stream: MediaStream; source: MediaStreamAudioSourceNode }>();
+  private micBusy = false;
+  private micAgain = false;
+  private deviceListeners = new Set<() => void>();
+  private devicePlumbing = false;
+  private midiProbe: MIDIAccess | null = null;
   private midi: MIDIAccess | null = null;
   private midiPending = false;
   private starting: Promise<void> | null = null;
@@ -75,7 +84,7 @@ class WebAudioEngine implements AudioEngine {
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     this.ctx = ctx;
     await ctx.audioWorklet.addModule(workletUrl);
-    const node = new AudioWorkletNode(ctx, WORKLET_NAME, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    const node = new AudioWorkletNode(ctx, WORKLET_NAME, { numberOfInputs: MAX_MICS, numberOfOutputs: 1, outputChannelCount: [2] });
     node.port.onmessage = (e: MessageEvent<FromWorklet>) => {
       const m = e.data;
       if (m.type === 'meters') {
@@ -100,7 +109,7 @@ class WebAudioEngine implements AudioEngine {
 
   stop(): void {
     void this.ctx?.suspend();
-    this.releaseMic();
+    this.releaseAllMics();
   }
 
   setTransport(state: TransportState): void {
@@ -131,7 +140,8 @@ class WebAudioEngine implements AudioEngine {
 
   dispose(): void {
     this.disposed = true;
-    this.releaseMic();
+    this.releaseAllMics();
+    this.deviceListeners.clear();
     if (this.midi) for (const input of this.midi.inputs.values()) input.onmidimessage = null;
     this.node?.disconnect();
     void this.ctx?.close();
@@ -169,49 +179,172 @@ class WebAudioEngine implements AudioEngine {
   private async ensureLiveInputs(): Promise<void> {
     const { graph, registry, ctx, node } = this;
     if (!graph || !registry || !ctx || !node) return;
-    if (graphUses(graph, registry, 'microphone')) await this.acquireMic();
+    if (graphUses(graph, registry, 'microphone') || this.mics.size) await this.acquireMic(); // also closes streams of removed nodes
     if (graphUses(graph, registry, 'midi-device')) await this.acquireMidi();
   }
 
+  /** Open, reopen or close microphone streams so they match the microphone nodes in the graph. Serialised. */
   private async acquireMic(): Promise<void> {
-    if (this.mic || this.micPending || !this.ctx || !this.node) return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    this.micPending = true;
+    if (this.micBusy) {
+      this.micAgain = true;
+      return;
+    }
+    this.micBusy = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      });
+      do {
+        this.micAgain = false;
+        await this.reconcileMics();
+      } while (this.micAgain && !this.disposed);
+    } finally {
+      this.micBusy = false;
+    }
+  }
+
+  private async reconcileMics(): Promise<void> {
+    const { graph, registry, ctx, node } = this;
+    if (!graph || !registry || !ctx || !node || !navigator.mediaDevices?.getUserMedia) return;
+    const wanted = graph.nodes.filter((n) => n.type === 'microphone' && registry.get(n.type)?.audio).slice(0, MAX_MICS);
+    // close streams of removed nodes or whose settings changed
+    const want = new Map<string, { slot: number; key: string; device: string; opts: MediaTrackConstraints }>();
+    wanted.forEach((n, slot) => {
+      const p = n.params as Record<string, unknown>;
+      const device = typeof p.device === 'string' ? p.device : '';
+      const opts = {
+        echoCancellation: p.echoCancellation === true,
+        noiseSuppression: p.noiseSuppression === true,
+        autoGainControl: p.autoGainControl === true,
+      };
+      want.set(n.id, { slot, key: JSON.stringify([device, opts]), device, opts });
+    });
+    for (const [id, m] of [...this.mics]) {
+      const w = want.get(id);
+      if (!w || w.key !== m.key || w.slot !== m.slot) {
+        m.source.disconnect();
+        m.stream.getTracks().forEach((t) => t.stop());
+        this.mics.delete(id);
+      }
+    }
+    for (const [id, w] of want) {
+      if (this.mics.has(id)) continue;
+      const stream = await this.openMic(w.device, w.opts);
+      if (!stream) continue;
       if (this.disposed || !this.ctx || !this.node) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
       const source = this.ctx.createMediaStreamSource(stream);
-      source.connect(this.node);
-      this.mic = { stream, source };
+      source.connect(this.node, 0, w.slot);
+      this.mics.set(id, { slot: w.slot, key: w.key, stream, source });
+      void this.refreshDeviceLabels();
+    }
+    const slots: Record<string, number> = {};
+    for (const [id, m] of this.mics) slots[id] = m.slot;
+    this.post({ type: 'micSlots', slots });
+  }
+
+  /** getUserMedia with an exact device; falls back to the system default (with a warning) if that device is gone. */
+  private async openMic(device: string, opts: MediaTrackConstraints): Promise<MediaStream | null> {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: device ? { ...opts, deviceId: { exact: device } } : { ...opts } });
     } catch (err) {
+      if (device) {
+        console.warn('Chosen microphone is not available, using the system default instead:', err);
+        try {
+          return await navigator.mediaDevices.getUserMedia({ audio: { ...opts } });
+        } catch (err2) {
+          console.warn('Microphone unavailable:', err2);
+          return null;
+        }
+      }
       console.warn('Microphone unavailable:', err);
-    } finally {
-      this.micPending = false;
+      return null;
     }
   }
 
-  private releaseMic(): void {
-    if (!this.mic) return;
-    this.mic.source.disconnect();
-    this.mic.stream.getTracks().forEach((t) => t.stop());
-    this.mic = null;
+  private releaseAllMics(): void {
+    for (const m of this.mics.values()) {
+      m.source.disconnect();
+      m.stream.getTracks().forEach((t) => t.stop());
+    }
+    this.mics.clear();
+  }
+
+  /* ------------------------------ devices ------------------------------ */
+
+  async listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]> {
+    try {
+      if (kind === 'audio-input') {
+        if (!navigator.mediaDevices?.enumerateDevices) return [];
+        const all = await navigator.mediaDevices.enumerateDevices();
+        const inputs = all.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+        return inputs.map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
+      }
+      const access = this.midi ?? this.midiProbe ?? (await this.probeMidi());
+      if (!access) return [];
+      return [...access.inputs.values()].map((i) => ({ id: i.id, label: i.name || i.id }));
+    } catch {
+      return [];
+    }
+  }
+
+  onDevicesChanged(listener: () => void): () => void {
+    this.deviceListeners.add(listener);
+    this.plumbDeviceEvents();
+    return () => this.deviceListeners.delete(listener);
+  }
+
+  private fireDevicesChanged = (): void => {
+    for (const l of [...this.deviceListeners]) {
+      try {
+        l();
+      } catch (err) {
+        console.warn('Device listener failed:', err);
+      }
+    }
+    // a vanished microphone should fall back, a returning one should be picked up again
+    if (this.node) void this.acquireMic();
+  };
+
+  private plumbDeviceEvents(): void {
+    if (this.devicePlumbing) return;
+    this.devicePlumbing = true;
+    try {
+      navigator.mediaDevices?.addEventListener?.('devicechange', this.fireDevicesChanged);
+    } catch {
+      /* unsupported */
+    }
+    void this.probeMidi().then((access) => {
+      if (access) access.addEventListener('statechange', this.fireDevicesChanged);
+    });
+  }
+
+  /** Web MIDI access for listing only (does not attach message handlers). null if unsupported or denied. */
+  private async probeMidi(): Promise<MIDIAccess | null> {
+    if (this.midiProbe) return this.midiProbe;
+    if (!navigator.requestMIDIAccess) return null;
+    try {
+      this.midiProbe = await navigator.requestMIDIAccess();
+      return this.midiProbe;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Once a microphone is open the browser reveals device names: tell dropdowns to refresh. */
+  private async refreshDeviceLabels(): Promise<void> {
+    for (const l of [...this.deviceListeners]) l();
   }
 
   private async acquireMidi(): Promise<void> {
     if (this.midi || this.midiPending || !navigator.requestMIDIAccess) return;
     this.midiPending = true;
     try {
-      const access = await navigator.requestMIDIAccess();
+      const access = this.midiProbe ?? (await navigator.requestMIDIAccess());
       if (this.disposed) return;
       this.midi = access;
       const attach = () => {
         for (const input of access.inputs.values()) {
-          input.onmidimessage = (e) => this.onMidiMessage(input.name ?? input.id, e.data);
+          input.onmidimessage = (e) => this.onMidiMessage(input.id, input.name ?? input.id, e.data);
         }
       };
       attach();
@@ -223,17 +356,17 @@ class WebAudioEngine implements AudioEngine {
     }
   }
 
-  private onMidiMessage(device: string, data: Uint8Array | null): void {
+  private onMidiMessage(device: string, deviceName: string, data: Uint8Array | null): void {
     if (!data || data.length < 2) return;
     const status = data[0] & 0xf0;
     const channel = data[0] & 0x0f;
     let ev: MidiEvent | null = null;
-    if (status === 0x90 && data[2] > 0) ev = { type: 'on', note: data[1], velocity: data[2] / 127, value: 0, offset: 0, channel, device };
-    else if (status === 0x80 || status === 0x90) ev = { type: 'off', note: data[1], velocity: 0, value: 0, offset: 0, channel, device };
-    else if (status === 0xb0) ev = { type: 'cc', note: data[1], velocity: 0, value: (data[2] ?? 0) / 127, offset: 0, channel, device };
+    if (status === 0x90 && data[2] > 0) ev = { type: 'on', note: data[1], velocity: data[2] / 127, value: 0, offset: 0, channel, device, deviceName };
+    else if (status === 0x80 || status === 0x90) ev = { type: 'off', note: data[1], velocity: 0, value: 0, offset: 0, channel, device, deviceName };
+    else if (status === 0xb0) ev = { type: 'cc', note: data[1], velocity: 0, value: (data[2] ?? 0) / 127, offset: 0, channel, device, deviceName };
     else if (status === 0xe0) {
       const v = ((data[2] << 7) | data[1]) - 8192;
-      ev = { type: 'bend', note: 0, velocity: 0, value: v / 8192, offset: 0, channel, device };
+      ev = { type: 'bend', note: 0, velocity: 0, value: v / 8192, offset: 0, channel, device, deviceName };
     }
     if (ev) this.post({ type: 'midi', events: [ev] });
   }

@@ -169,6 +169,28 @@ Goal: sing into the microphone and let the loudness (or pitch, or notes) move an
 For notes: Microphone.tap, Audio to MIDI, then `MIDI to Numbers` (`Note` for height, `Key down` for visibility) or
 `Note Pulse` for a bounce on every note.
 
+## Devices, microphones and the playable keyboard
+
+* **Device dropdowns**: `microphone.device` and `midi-device.device` are `type: 'device'` params (value = device id,
+  `''` = system default microphone / all MIDI devices). The UI fills the dropdown with
+  `AudioEngine.listDevices('audio-input' | 'midi-input')` and refreshes it on `onDevicesChanged`. Microphone names are
+  hidden by browsers until permission is granted, so before that the list has generic labels ("Microphone 1"); the engine
+  announces a change as soon as a microphone is opened so labels fill in. Both calls never throw.
+* **Several microphones**: the worklet has 4 inputs (`MAX_MICS`). The engine gives each microphone node its own
+  MediaStream (exact `deviceId`, falling back to the default device with a console warning if it is gone), connects its source
+  to worklet input *i* and tells the runner `{ nodeId: i }` ('micSlots'). The stream is reopened when the device or the
+  browser-processing options change, and closed when the node is removed. Echo cancellation, noise suppression and auto gain
+  are OFF by default (they ruin singing and pitch tracking); three bool params switch them on.
+* **MIDI devices** are matched by `MidiEvent.device` = Web MIDI input id (`deviceName` carries the name, so old projects
+  that stored part of a name still work).
+* **Keyboard node** (`midi-keyboard`, `playable: true`): while selected, the UI turns computer keys into notes using
+  `keyboard-map.ts` and calls `sendNote(nodeId, note, velocity, on)`. Layout (Ableton/GarageBand): A W S E D F T G Y H U J
+  K O L P ; ' = C C# D D# E F F# G G# A A# B C C# D D# E F; digits 1-9 set `baseOctave` (5 is the normal range, the A
+  key plays middle C = MIDI 60 at octave 5, `octave * 12` in general); Z / X octave down/up; C / V velocity down/up
+  (`velocity` param, "key strength"). `sustain` (e.g. UI maps Shift to it) holds released notes; `latch` makes each key a
+  toggle. The kernel only applies strength, `transpose`, sustain and latch: the UI sends absolute notes.
+  `synth`, `pluck` and `drum` are deliberately NOT playable: they take MIDI from a Keyboard node (one clean path).
+
 ## Not in v1
 
 * **Plugins cannot add audio nodes.** The worklet only knows the built-in nodes (functions cannot be sent to it).

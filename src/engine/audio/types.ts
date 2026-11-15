@@ -32,6 +32,8 @@ export interface MidiEvent {
   channel: number;
   /** Hardware device id (set by the live host for Web MIDI events; used by the MIDI Device node filter). */
   device?: string;
+  /** Human-readable name of that device (for the legacy name filter). */
+  deviceName?: string;
 }
 
 /** Transport and clock, identical in live playback, export and tests. */

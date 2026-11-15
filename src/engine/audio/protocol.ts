@@ -8,6 +8,8 @@ export type ToWorklet =
   | { type: 'asset'; id: string; sampleRate: number; channels: Float32Array[] }
   | { type: 'transport'; playing: boolean; seconds: number; duration: number; loop: boolean }
   | { type: 'midi'; events: MidiEvent[] }
+  /** Which worklet input carries which microphone node. */
+  | { type: 'micSlots'; slots: Record<string, number> }
   | { type: 'note'; nodeId: string; note: number; velocity: number; on: boolean };
 
 export type FromWorklet =
@@ -16,3 +18,6 @@ export type FromWorklet =
   | { type: 'error'; message: string };
 
 export const WORKLET_NAME = 'rsmps-audio';
+
+/** Number of microphone nodes that can be live at once (one worklet input each). */
+export const MAX_MICS = 4;

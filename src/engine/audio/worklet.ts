@@ -5,7 +5,7 @@
  */
 import { registerAudioNodes } from './nodes';
 import type { FromWorklet, ToWorklet } from './protocol';
-import { WORKLET_NAME } from './protocol';
+import { MAX_MICS, WORKLET_NAME } from './protocol';
 import { AudioGraphRunner } from './runner';
 import { BLOCK_SIZE } from './types';
 
@@ -23,6 +23,7 @@ class RsmpsProcessor extends AudioWorkletProcessor {
   private sinceSignals = 0;
   private reportedError = false;
   private scratch = new Float32Array(BLOCK_SIZE * 4);
+  private slotBlocks: ([Float32Array, Float32Array] | null)[] = Array.from({ length: MAX_MICS }, () => null);
 
   constructor() {
     super();
@@ -55,6 +56,9 @@ class RsmpsProcessor extends AudioWorkletProcessor {
       case 'midi':
         for (const ev of m.events) r.sendMidi(null, ev);
         break;
+      case 'micSlots':
+        r.setMicSlots(m.slots);
+        break;
       case 'note':
         r.sendMidi(m.nodeId, { type: m.on ? 'on' : 'off', note: m.note, velocity: m.on ? m.velocity : 0, value: 0, offset: 0, channel: 0 });
         break;
@@ -70,15 +74,21 @@ class RsmpsProcessor extends AudioWorkletProcessor {
     const micL = inp && inp.length > 0 ? inp[0] : undefined;
     const micR = inp && inp.length > 1 ? inp[1] : micL;
     const total = outL.length;
+    // One worklet input per microphone node: build [L, R] pairs for slots that carry audio.
+    const slots = this.slotBlocks;
+    for (let k = 0; k < MAX_MICS; k++) {
+      const ch = inputs[k];
+      slots[k] = ch && ch.length > 0 ? [ch[0], ch.length > 1 ? ch[1] : ch[0]] : null;
+    }
     try {
       for (let p = 0; p < total; p += BLOCK_SIZE) {
         const n = Math.min(BLOCK_SIZE, total - p);
         const l = outL.subarray(p, p + n);
         if (outR) {
-          this.runner.process(l, outR.subarray(p, p + n), n, micL?.subarray(p, p + n), micR?.subarray(p, p + n));
+          this.runner.process(l, outR.subarray(p, p + n), n, micL?.subarray(p, p + n), micR?.subarray(p, p + n), total <= BLOCK_SIZE ? slots : undefined);
         } else {
           const tmpR = this.scratch.subarray(0, n);
-          this.runner.process(l, tmpR, n, micL?.subarray(p, p + n), micR?.subarray(p, p + n));
+          this.runner.process(l, tmpR, n, micL?.subarray(p, p + n), micR?.subarray(p, p + n), total <= BLOCK_SIZE ? slots : undefined);
           for (let i = 0; i < n; i++) l[i] = (l[i] + tmpR[i]) * 0.5;
         }
       }

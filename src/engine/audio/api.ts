@@ -21,6 +21,13 @@ export interface TransportState {
   loop: boolean;
 }
 
+export interface AudioDevice {
+  /** Value stored in a 'device' param. */
+  id: string;
+  /** Name to show in the dropdown. */
+  label: string;
+}
+
 export interface AudioEngine {
   /** True if the graph contains an audio output that something is wired to. */
   hasAudio(graph: GraphDoc, registry: Registry): boolean;
@@ -43,6 +50,14 @@ export interface AudioEngine {
   hasSignals(graph: GraphDoc, registry: Registry): boolean;
   /** Latest value of a signal published by a stream node (loudness, pitch, note...), or 0 when unknown. Feeds `Host.signal` while playing. */
   signal(nodeId: string, name: string): number;
+  /**
+   * Available hardware inputs for a 'device' param dropdown. Microphone names are only known after the user has
+   * granted microphone permission: before that you get generic labels ("Microphone 1"). Never throws: [] when
+   * unsupported or denied. Does not include the "System default" / "All devices" entry (that is the empty id).
+   */
+  listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]>;
+  /** Call `listener` when devices are plugged or unplugged (or labels become available). Returns an unsubscribe function. */
+  onDevicesChanged(listener: () => void): () => void;
   /** Peak level 0..1 per channel at a node's first audio output, or null when unknown. */
   meter(nodeId: string): [number, number] | null;
   /** Send a note from the UI (on-screen keyboard) into a MIDI-producing node. */

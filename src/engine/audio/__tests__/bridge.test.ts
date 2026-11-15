@@ -129,3 +129,34 @@ describe('analyzeSignalsOffline', () => {
     expect(z.frames).toBe(0);
   });
 });
+
+describe('several microphones', () => {
+  it('each microphone node reads its own worklet input slot', () => {
+    const g = makeGraph({
+      nodes: [
+        { id: 'm1', type: 'microphone' },
+        { id: 'm2', type: 'microphone' },
+        { id: 'a', type: 'audio-level', params: { floor: -60, ceiling: 0 } },
+        { id: 'b', type: 'audio-level', params: { floor: -60, ceiling: 0 } },
+      ],
+      edges: ['m1.tap -> a.audio', 'm2.tap -> b.audio'],
+    });
+    const r = new AudioGraphRunner(audioRegistry(), { sampleRate: SR, fadeOnRebuild: false });
+    r.setGraph(g);
+    r.setMicSlots({ m1: 0, m2: 1 });
+    const loud = sine(300, 128, SR, 0.5);
+    const quiet = sine(300, 128, SR, 0.01);
+    const L = new Float32Array(128);
+    const R = new Float32Array(128);
+    const loudPhase = new Float32Array(128);
+    for (let i = 0; i < 300; i++) {
+      for (let k = 0; k < 128; k++) loudPhase[k] = loud[k];
+      r.process(L, R, 128, undefined, undefined, [[loudPhase, loudPhase], [quiet, quiet]]);
+    }
+    expect(r.signal('a', 'level')).toBeGreaterThan(r.signal('b', 'level') + 0.3);
+    // a slot with no stream is silent (nothing leaks in from the default input)
+    r.setMicSlots({ m1: 0, m2: 3 });
+    for (let i = 0; i < 300; i++) r.process(L, R, 128, undefined, undefined, [[loudPhase, loudPhase], null]);
+    expect(r.signal('b', 'level')).toBe(0);
+  });
+});

@@ -120,6 +120,7 @@ export class AudioGraphRunner {
   private fadeLeft = 0;
   private fadeTotal: number;
   private faults = 0;
+  private micSlots = new Map<string, number>();
 
   constructor(registry: Registry, options: RunnerOptions) {
     this.registry = registry;
@@ -163,6 +164,15 @@ export class AudioGraphRunner {
       tm.sample = Math.max(0, Math.round(t.seconds * this.sampleRate));
       tm.seconds = tm.sample / this.sampleRate;
     }
+  }
+
+  /**
+   * Route microphone nodes to host input slots (worklet input k carries one microphone): { nodeId: slot }.
+   * Nodes without a slot read the default microphone block passed to `process` (slot-less hosts, tests).
+   */
+  setMicSlots(slots: Record<string, number>): void {
+    this.micSlots.clear();
+    for (const k of Object.keys(slots)) this.micSlots.set(k, slots[k]);
   }
 
   /** Queue a MIDI event for the next block. `nodeId` null = hardware device input (all device nodes see it). */
@@ -332,7 +342,14 @@ export class AudioGraphRunner {
    * Process one block (`frames` <= blockSize) into outL/outR (overwritten).
    * `micL`/`micR` are the live input for this block (R defaults to L); omit offline.
    */
-  process(outL: Float32Array, outR: Float32Array, frames: number, micL?: Float32Array | null, micR?: Float32Array | null): void {
+  process(
+    outL: Float32Array,
+    outR: Float32Array,
+    frames: number,
+    micL?: Float32Array | null,
+    micR?: Float32Array | null,
+    slotMics?: ([Float32Array, Float32Array] | null)[],
+  ): void {
     outL.fill(0, 0, frames);
     outR.fill(0, 0, frames);
     if (frames > this.blockSize) throw new Error(`frames ${frames} exceeds block size ${this.blockSize}`);
@@ -348,7 +365,8 @@ export class AudioGraphRunner {
     for (const pn of this.order) {
       const io = pn.io;
       io.frames = frames;
-      io.live.mic = mic;
+      const slot = this.micSlots.size ? this.micSlots.get(pn.id) : undefined;
+      io.live.mic = slot === undefined ? mic : (slotMics?.[slot] ?? null);
       io.live.uiMidi.length = 0;
       for (let i = 0; i < pn.uiPending.length; i++) io.live.uiMidi.push(pn.uiPending[i]);
       pn.uiPending.length = 0;

@@ -13,13 +13,38 @@ describe('midi-keyboard', () => {
     expect(summary(ev)).toEqual(['on:60@10', 'off:60@500']);
     expect(ev[0].velocity).toBeCloseTo(0.5, 5);
   });
-  it('octave shift applies, and the release matches the shifted note even if the octave changes', () => {
-    expect(summary(k({ octave: 1 }, [on(60, 0), off(60, 100)]))).toEqual(['on:72@0', 'off:72@100']);
-    expect(summary(k({ octave: -2 }, [on(60, 0), off(60, 100)]))).toEqual(['on:36@0', 'off:36@100']);
+  it('transpose applies, and the release matches the transposed note', () => {
+    expect(summary(k({ transpose: 12 }, [on(60, 0), off(60, 100)]))).toEqual(['on:72@0', 'off:72@100']);
+    expect(summary(k({ transpose: -24 }, [on(60, 0), off(60, 100)]))).toEqual(['on:36@0', 'off:36@100']);
+  });
+  it('sustain holds released notes until it is turned off', () => {
+    const r = runKernel(getDef('midi-keyboard'), { params: { sustain: true }, uiMidi: [on(60, 0), off(60, 100)], frames: 256 });
+    expect(summary(r.midiOut.midi)).toEqual(['on:60@0']);
+    // a second kernel run cannot share state, so drive the pedal change through two params in sequence:
+    const def = getDef('midi-keyboard');
+    const st = def.audio!.create({ sampleRate: SR, blockSize: 128, nodeId: 'k' });
+    const io = (params: Record<string, unknown>, ui: MidiEvent[]) => {
+      const out: MidiEvent[] = [];
+      def.audio!.process(st, { frames: 128, sampleRate: SR, in: {}, midiIn: {}, out: {}, midiOut: { midi: out }, params: { baseOctave: 5, velocity: 1, transpose: 0, sustain: false, latch: false, ...params }, signal: () => {}, time: { seconds: 0, sample: 0, bpm: 120, playing: false, loop: false, duration: 0 }, assets: { get: () => undefined }, live: { mic: null, deviceMidi: [], uiMidi: ui } });
+      return summary(out);
+    };
+    expect(io({ sustain: true }, [on(60, 0), off(60, 5)])).toEqual(['on:60@0']);
+    expect(io({ sustain: true }, [])).toEqual([]);
+    expect(io({ sustain: false }, [])).toEqual(['off:60@0']);
+    expect(io({ sustain: false }, [])).toEqual([]);
+  });
+  it('latch: press to start, press again to stop, key-up does nothing', () => {
+    const r = k({ latch: true }, [on(60, 0), off(60, 10), on(64, 20), on(60, 30), off(60, 40)]);
+    expect(summary(r)).toEqual(['on:60@0', 'on:64@20', 'off:60@30']);
+  });
+  it('key strength scales velocity; is playable; mapped to the Keyboard params', () => {
+    expect(getDef('midi-keyboard').playable).toBe(true);
+    for (const id of ['synth', 'pluck', 'drum']) expect(getDef(id).playable).toBeFalsy();
+    expect(getDef('midi-keyboard').params.baseOctave).toMatchObject({ default: 5, min: 1, max: 9 });
   });
   it('ignores releases of notes that are not down; clamps to 0..127', () => {
     expect(k({}, [off(61, 0)])).toEqual([]);
-    expect(summary(k({ octave: 4 }, [on(100, 0)]))).toEqual(['on:127@0']);
+    expect(summary(k({ transpose: 24 }, [on(120, 0)]))).toEqual(['on:127@0']);
   });
 });
 
@@ -33,7 +58,10 @@ describe('midi-device', () => {
     ];
     expect(summary(d({}, evs))).toEqual(['on:60@0', 'on:62@1', 'off:60@5']);
     expect(summary(d({ channel: 2 }, evs))).toEqual(['on:62@1']);
-    expect(summary(d({ device: 'pad' }, evs))).toEqual(['on:62@1']);
+    expect(summary(d({ device: 'pad' }, evs))).toEqual(['on:62@1']); // legacy: part of the name
+    const byId: MidiEvent[] = [{ ...on(60, 0), device: 'id-1', deviceName: 'Piano' }, { ...on(62, 1), device: 'id-2', deviceName: 'Pads' }];
+    expect(summary(d({ device: 'id-2' }, byId))).toEqual(['on:62@1']);
+    expect(summary(d({ device: '' }, byId))).toEqual(['on:60@0', 'on:62@1']);
   });
   it('transpose keeps releases matched', () => {
     expect(summary(d({ transpose: 12 }, [{ ...on(60, 0), device: 'x' }, { ...off(60, 9), device: 'x' }]))).toEqual(['on:72@0', 'off:72@9']);
