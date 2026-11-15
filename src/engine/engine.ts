@@ -262,10 +262,18 @@ export class Engine {
       const inputs: Record<string, Value | Value[] | null> = {};
       const sigs: string[] = [];
       const wiredParams: Record<string, Value> = {};
+      const lazyWired = new Set<string>();
       for (const [name, idef] of Object.entries(def.inputs as Record<string, { type: string; multi?: boolean }>)) {
         inputs[name] = idef.multi ? [] : null;
       }
       for (const edge of edges) {
+        const lazyDef = def.inputs[edge.to.port] as { lazy?: boolean } | undefined;
+        if (lazyDef?.lazy) {
+          // Not evaluated here. Identity = structure of everything upstream, so edits invalidate but frames do not.
+          sigs.push(`${edge.to.port}=lazy:${this.structSig(edge.from.node, scope, new Set())}:${edge.from.port}:${scope.item}:${scope.proxy}`);
+          lazyWired.add(edge.to.port);
+          continue;
+        }
         const up = await this.evalNode(edge.from.node, scope);
         const value = up?.outputs[edge.from.port] ?? null;
         const upDef = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '');
@@ -300,6 +308,7 @@ export class Engine {
       // 3. Required inputs missing → the node produces nothing.
       for (const [name, idef] of Object.entries(def.inputs as Record<string, { required?: boolean; multi?: boolean }>)) {
         const v = inputs[name];
+        if (lazyWired.has(name)) continue;
         if (idef.required && (v === null || (Array.isArray(v) && v.length === 0))) return { key: `empty:${id}`, outputs: {} };
       }
 
@@ -374,11 +383,11 @@ export class Engine {
         proxy: scope.proxy,
         unitFor: (w: number, h: number) => this.unitFor(scope.graph, w, h, scope.proxy),
         px: (unitPixels: number, r?: { unit: number }) => unitPixels * (r ?? ref).unit,
-        pull: async (input: string, at: { seconds: number }) => {
-          used.time = true;
+        pull: async (input: string, at?: { seconds: number }) => {
           const edge = edges.find((e) => e.to.port === input);
           if (!edge) return null;
-          const frame = Math.max(0, Math.round(at.seconds * project.fps));
+          // No `at` = current frame, which makes the node time-dependent (through the clock getter).
+          const frame = Math.max(0, Math.round((at ? at.seconds : time.seconds) * project.fps));
           const sub: Scope = { ...scope, frame, seconds: frame / project.fps };
           const up = await this.evalNode(edge.from.node, sub);
           const v = up?.outputs[edge.from.port] ?? null;
@@ -424,6 +433,20 @@ export class Engine {
     } finally {
       scope.stack.delete(stackKey);
     }
+  }
+
+  /** Hash of a node and everything upstream of it (types, stored params, wiring): changes only when the graph is edited. */
+  private structSig(id: string, scope: Scope, seen: Set<string>): string {
+    if (seen.has(id)) return 'cycle';
+    seen.add(id);
+    const node = scope.nodes.get(id);
+    if (!node) return 'missing';
+    const ins = (scope.inbound.get(id) ?? [])
+      .map((e) => `${e.to.port}<${e.from.port}:${this.structSig(e.from.node, scope, seen)}`)
+      .sort()
+      .join(',');
+    const p = scope.graph.project;
+    return hash(`${node.type}|${JSON.stringify(node.params)}|${node.bypass ? 1 : 0}|${ins}|${p.width}x${p.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
   }
 
   /** Fusion-style effect mask + mix, applied by the kernel for `maskable` nodes. */

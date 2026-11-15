@@ -118,6 +118,13 @@ export interface InputDef {
   required?: boolean;
   /** Accept several wires; the value is an array in wire order. */
   multi?: boolean;
+  /**
+   * Do not evaluate this input automatically: `ctx.in` holds null and the node fetches it with `ctx.pull`.
+   * Use it for analysis that should run ONCE on a fixed frame (e.g. extracting a palette from the first frame of a
+   * video): the node is then not re-rendered when the input changes from frame to frame, only when the upstream
+   * nodes are edited. `required` on a lazy input means "must be wired".
+   */
+  lazy?: boolean;
 }
 
 export interface OutputDef {
@@ -402,10 +409,11 @@ export interface RenderCtx<P extends ParamSchema, I extends InputSchema> {
   /** Convert a length in unit pixels to texels of `ref` (rarely needed: 'px' params are already converted). */
   px(unitPixels: number, ref?: { unit: number }): number;
   /**
-   * Re-evaluate an input at another time (seconds). For temporal nodes: echo, retime, loop cross-fade.
+   * Re-evaluate an input at another time (seconds), or fetch a `lazy` input (omit `at` for the current frame).
+   * For temporal nodes (echo, retime, loop cross-fade) and run-once analysis on a fixed frame.
    * The result is only valid during this render call.
    */
-  pull<K extends keyof I>(input: K, at: { seconds: number }): Promise<SocketValueMap[I[K]['type']] | null>;
+  pull<K extends keyof I>(input: K, at?: { seconds: number }): Promise<SocketValueMap[I[K]['type']] | null>;
 }
 
 export interface NodeDef<
