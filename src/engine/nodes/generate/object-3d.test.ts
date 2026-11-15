@@ -4,7 +4,7 @@ import { harness } from '../../testing';
 let shared: ReturnType<typeof harness> | null = null;
 const H = () => (shared ??= harness());
 const proj = { width: 64, height: 64 };
-const base = { rotX: 0, rotY: 0, rotZ: 0, spinX: 0, spinY: 0, spinZ: 0, camera: 'orthographic', scale: 0.5, baseColor: [1, 1, 1, 1] };
+const base = { rotX: 0, rotY: 0, rotZ: 0, spinX: 0, spinY: 0, spinZ: 0, cameraType: 'orthographic', scale: 0.5, baseColor: [1, 1, 1, 1] };
 
 async function draw(params: Record<string, unknown>) {
   const t = await H();
@@ -25,14 +25,14 @@ it('every shape is drawn in the middle, with a transparent background', async ()
 });
 
 it('sphere has the expected radius and an antialiased edge (orthographic and perspective)', async () => {
-  for (const camera of ['orthographic', 'perspective']) {
-    const px = await draw({ shape: 'sphere', scale: 0.5, camera });
+  for (const cameraType of ['orthographic', 'perspective']) {
+    const px = await draw({ shape: 'sphere', scale: 0.5, cameraType });
     // radius = 0.95 * 16 = 15.2 texels
-    expect(alphaAt(px, 32 + 14, 32), camera).toBe(255);
-    expect(alphaAt(px, 32 + 17, 32), camera).toBe(0);
+    expect(alphaAt(px, 32 + 14, 32), cameraType).toBe(255);
+    expect(alphaAt(px, 32 + 17, 32), cameraType).toBe(0);
     const edge = alphaAt(px, 32 + 15, 32);
-    expect(edge, camera).toBeGreaterThan(40);
-    expect(edge, camera).toBeLessThan(250);
+    expect(edge, cameraType).toBeGreaterThan(40);
+    expect(edge, cameraType).toBeLessThan(250);
   }
 });
 
@@ -79,7 +79,7 @@ it('spinning loops exactly (whole turns) and moves', async () => {
   const t = await H();
   const size = { size: t.solid(64, 64, [0, 0, 0, 255], 1) };
   for (const shape of ['cube', 'torus', 'pyramid']) {
-    const r = await t.loopCheck('object-3d', { shape, spinY: 1, spinX: 2, camera: 'perspective' }, size);
+    const r = await t.loopCheck('object-3d', { shape, spinY: 1, spinX: 2, cameraType: 'perspective' }, size);
     expect(r.seam, shape).toBeLessThan(0.05);
     expect(r.motion, shape).toBeGreaterThan(1);
   }

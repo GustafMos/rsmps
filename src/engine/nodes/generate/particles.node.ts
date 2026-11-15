@@ -45,14 +45,14 @@ interface Recipe {
 }
 
 const RECIPES = {
-  dust: { shape: 'dot', angle: -25, drift: 0.12, trav: 0.6, wander: 0.5, sizeMul: 0.7, sizeVar: 0.5, streak: 0, fadeIn: 0.3, fadeOut: 0.3, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.6, a: [1, 0.95, 0.8, 1], b: [0.8, 0.86, 1, 1] },
-  snow: { shape: 'dot', angle: 90, drift: 1, trav: 0.3, wander: 0.7, sizeMul: 1.2, sizeVar: 0.5, streak: 0, fadeIn: 0.1, fadeOut: 0.1, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.95, a: [1, 1, 1, 1], b: [0.82, 0.9, 1, 1] },
-  rain: { shape: 'streak', angle: 100, drift: 3, trav: 0, wander: 0, sizeMul: 0.6, sizeVar: 0.3, streak: 7, fadeIn: 0.05, fadeOut: 0.05, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.65, a: [0.7, 0.8, 1, 1], b: [0.86, 0.92, 1, 1] },
-  sparks: { shape: 'streak', angle: -90, drift: 0.8, trav: 0.9, wander: 0.6, sizeMul: 0.8, sizeVar: 0.5, streak: 2.5, fadeIn: 0.05, fadeOut: 0.5, twinkle: 0, respawn: true, colorMode: 2, alpha: 1, a: [1, 0.95, 0.55, 1], b: [1, 0.3, 0.05, 1], forceSoft: true },
-  bubbles: { shape: 'bubble', angle: -90, drift: 0.35, trav: 0.4, wander: 0.7, sizeMul: 3, sizeVar: 0.7, streak: 0, fadeIn: 0.12, fadeOut: 0.2, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.85, a: [0.7, 0.9, 1, 1], b: [1, 1, 1, 1], forceHard: true },
-  fireflies: { shape: 'glow', angle: -10, drift: 0, trav: 1, wander: 1, sizeMul: 1.6, sizeVar: 0.3, streak: 0, fadeIn: 0.2, fadeOut: 0.2, twinkle: 1, respawn: true, colorMode: 0, alpha: 1, a: [1, 0.95, 0.4, 1], b: [0.7, 1, 0.3, 1] },
-  confetti: { shape: 'rect', angle: 90, drift: 0.7, trav: 0.4, wander: 0.6, sizeMul: 1.8, sizeVar: 0.4, streak: 0, fadeIn: 0.08, fadeOut: 0.08, twinkle: 0, respawn: true, colorMode: 1, alpha: 1, a: [1, 0.3, 0.4, 1], b: [0.3, 0.7, 1, 1], forceHard: true },
-  stars: { shape: 'sparkle', angle: 0, drift: 0, trav: 0, wander: 0, sizeMul: 2.2, sizeVar: 0.8, streak: 0, fadeIn: 0, fadeOut: 0, twinkle: 2, respawn: false, colorMode: 0, alpha: 1, a: [1, 1, 0.85, 1], b: [0.8, 0.9, 1, 1] },
+  dust: { shape: 'dot', angle: -25, drift: 0.12, trav: 0.6, wander: 0.5, sizeMul: 1.3, sizeVar: 0.6, streak: 0, fadeIn: 0.3, fadeOut: 0.3, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.85, a: [1, 0.95, 0.8, 1], b: [0.8, 0.86, 1, 1] },
+  snow: { shape: 'dot', angle: 90, drift: 1, trav: 0.3, wander: 0.7, sizeMul: 1.5, sizeVar: 0.6, streak: 0, fadeIn: 0.1, fadeOut: 0.1, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.95, a: [1, 1, 1, 1], b: [0.82, 0.9, 1, 1] },
+  rain: { shape: 'streak', angle: 100, drift: 3, trav: 0, wander: 0, sizeMul: 0.8, sizeVar: 0.3, streak: 8, fadeIn: 0.05, fadeOut: 0.05, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.65, a: [0.7, 0.8, 1, 1], b: [0.86, 0.92, 1, 1] },
+  sparks: { shape: 'streak', angle: -90, drift: 0.8, trav: 0.9, wander: 0.6, sizeMul: 1.4, sizeVar: 0.5, streak: 2.5, fadeIn: 0.05, fadeOut: 0.5, twinkle: 0, respawn: true, colorMode: 2, alpha: 1, a: [1, 0.95, 0.55, 1], b: [1, 0.3, 0.05, 1], forceSoft: true },
+  bubbles: { shape: 'bubble', angle: -90, drift: 0.35, trav: 0.4, wander: 0.7, sizeMul: 3.5, sizeVar: 0.7, streak: 0, fadeIn: 0.12, fadeOut: 0.2, twinkle: 0, respawn: true, colorMode: 0, alpha: 0.85, a: [0.7, 0.9, 1, 1], b: [1, 1, 1, 1], forceHard: true },
+  fireflies: { shape: 'glow', angle: -10, drift: 0, trav: 1, wander: 1, sizeMul: 3, sizeVar: 0.3, streak: 0, fadeIn: 0.2, fadeOut: 0.2, twinkle: 1, respawn: true, colorMode: 0, alpha: 1, a: [1, 0.95, 0.4, 1], b: [0.7, 1, 0.3, 1] },
+  confetti: { shape: 'rect', angle: 90, drift: 0.7, trav: 0.4, wander: 0.6, sizeMul: 2.3, sizeVar: 0.4, streak: 0, fadeIn: 0.08, fadeOut: 0.08, twinkle: 0, respawn: true, colorMode: 1, alpha: 1, a: [1, 0.3, 0.4, 1], b: [0.3, 0.7, 1, 1], forceHard: true },
+  stars: { shape: 'sparkle', angle: 0, drift: 0, trav: 0, wander: 0, sizeMul: 3.2, sizeVar: 0.8, streak: 0, fadeIn: 0, fadeOut: 0, twinkle: 2, respawn: false, colorMode: 0, alpha: 1, a: [1, 1, 0.85, 1], b: [0.8, 0.9, 1, 1] },
 } satisfies Record<string, Recipe>;
 type Preset = keyof typeof RECIPES;
 
@@ -85,7 +85,7 @@ export default defineNode({
       ],
     },
     count: { type: 'number', default: 300, min: 1, max: 20000, step: 1, integer: true, label: 'Amount', hint: 'Roughly how many particles are on screen. Very large particles limit this.' },
-    particleSize: { type: 'number', default: 6, min: 0.5, max: 300, unit: 'px', label: 'Size' },
+    particleSize: { type: 'number', default: 10, min: 0.5, max: 300, unit: 'px', label: 'Size' },
     cycles: { type: 'number', default: 1, min: 1, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Speed (cycles per loop)', hint: 'How many times each particle lives its life per loop. Higher = faster.' },
     direction: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Turn direction', hint: '0 keeps the type’s natural direction (snow falls, sparks rise). Positive turns clockwise.' },
     spread: { type: 'number', default: 25, min: 0, max: 360, step: 1, unit: 'deg', label: 'Spread', hint: 'Random variation of each particle’s direction.' },

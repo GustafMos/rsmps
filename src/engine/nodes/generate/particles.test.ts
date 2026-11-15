@@ -22,7 +22,7 @@ function stats(data: Uint8ClampedArray) {
 it('every preset draws particles on a transparent background', async () => {
   const t = await H();
   for (const preset of PRESETS) {
-    const out = await t.run('particles', { preset, count: 60, particleSize: 6 }, {}, { project: proj, seconds: 1 });
+    const out = await t.run('particles', { preset, count: 40, particleSize: 3 }, {}, { project: proj, seconds: 1 });
     const s = stats((await t.pixels(out.image as never)).data);
     expect(s.nonEmpty, preset).toBeGreaterThan(30);
     expect(s.covered, preset).toBeLessThan(0.6);

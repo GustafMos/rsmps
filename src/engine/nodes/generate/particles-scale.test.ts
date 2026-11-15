@@ -20,8 +20,8 @@ function stats(data: Uint8ClampedArray) {
 
 it('more particles cover more of the image; handles thousands', async () => {
   const t = await H();
-  const few = stats((await t.pixels((await t.run('particles', { count: 40 }, {}, { project: proj, seconds: 1 })).image as never)).data);
-  const lots = stats((await t.pixels((await t.run('particles', { count: 4000, particleSize: 3 }, {}, { project: proj, seconds: 1 })).image as never)).data);
+  const few = stats((await t.pixels((await t.run('particles', { count: 40, particleSize: 3 }, {}, { project: proj, seconds: 1 })).image as never)).data);
+  const lots = stats((await t.pixels((await t.run('particles', { count: 4000, particleSize: 2 }, {}, { project: proj, seconds: 1 })).image as never)).data);
   expect(lots.mean).toBeGreaterThan(few.mean * 3);
   const huge = await t.run('particles', { count: 20000, particleSize: 2 }, {}, { project: { width: 512, height: 512 }, seconds: 1 });
   expect((huge.image as { width: number }).width).toBe(512);

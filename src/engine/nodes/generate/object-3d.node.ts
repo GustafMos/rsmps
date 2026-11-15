@@ -1,5 +1,7 @@
 import { defineNode } from '../../define';
+import { cameraBasis, PROJECTION_ID } from '../../lib/gen-camera';
 import { rgba, rotationZYX } from '../../lib/gen-common';
+import type { CameraValue } from '../../types';
 
 const SHAPES = { cube: 0, sphere: 1, cylinder: 2, cone: 3, torus: 4, pyramid: 5, capsule: 6, octahedron: 7 } as const;
 
@@ -9,7 +11,7 @@ export default defineNode({
   category: 'generate',
   description: 'A lit 3D primitive (cube, sphere, cylinder, cone, torus, pyramid, capsule, octahedron) that can spin in a perfect loop. Transparent background.',
   keywords: ['cube', 'sphere', 'cylinder', 'cone', 'torus', 'donut', 'pyramid', 'capsule', 'octahedron', '3d', 'model', 'spin', 'rotate', 'raymarch', 'cel', 'toon'],
-  inputs: { size: { type: 'image', label: 'Size from' } },
+  inputs: { size: { type: 'image', label: 'Size from' }, camera: { type: 'camera', label: 'Camera' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     shape: {
@@ -28,20 +30,24 @@ export default defineNode({
       ],
     },
     baseColor: { type: 'color', default: [0.35, 0.6, 0.95, 1], label: 'Colour' },
-    x: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Position X', group: 'Placement' },
-    y: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Position Y', group: 'Placement' },
-    scale: { type: 'number', default: 0.6, min: 0.02, max: 3, step: 0.005, unit: 'norm', label: 'Size', group: 'Placement', hint: 'Fraction of the frame’s shorter side.' },
-    camera: {
+    posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
+    posY: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Y (up)', group: 'Object' },
+    posZ: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Z (away)', group: 'Object' },
+    objectScale: { type: 'number', default: 1, min: 0.01, max: 20, step: 0.01, label: 'Object scale', group: 'Object' },
+    x: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Frame position X (built-in camera)', group: 'Built-in camera', hint: 'Ignored when a Camera is wired in.' },
+    y: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Frame position Y (built-in camera)', group: 'Built-in camera' },
+    scale: { type: 'number', default: 0.6, min: 0.02, max: 3, step: 0.005, unit: 'norm', label: 'Size in frame (built-in camera)', group: 'Built-in camera', hint: 'Fraction of the frame’s shorter side. Ignored when a Camera is wired in.' },
+    cameraType: {
       type: 'enum',
       default: 'perspective',
-      label: 'Camera',
-      group: 'Placement',
+      label: 'Built-in camera',
+      group: 'Built-in camera',
       options: [
         { value: 'perspective', label: 'Perspective' },
         { value: 'orthographic', label: 'Orthographic (flat)' },
       ],
     },
-    fov: { type: 'number', default: 30, min: 5, max: 90, step: 1, unit: 'deg', label: 'Perspective strength', group: 'Placement', hint: 'Higher = camera closer, stronger perspective.', visibleIf: (p) => p.camera === 'perspective' },
+    fov: { type: 'number', default: 30, min: 5, max: 90, step: 1, unit: 'deg', label: 'Perspective strength', group: 'Built-in camera', hint: 'Higher = camera closer, stronger perspective.', visibleIf: (p) => p.cameraType === 'perspective' },
     rotX: { type: 'number', default: 25, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate X (tilt)', group: 'Rotation' },
     rotY: { type: 'number', default: 35, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Y (turn)', group: 'Rotation' },
     rotZ: { type: 'number', default: 0, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Z (roll)', group: 'Rotation' },
@@ -50,13 +56,13 @@ export default defineNode({
     spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     lightAzimuth: { type: 'number', default: -35, min: -180, max: 180, step: 1, unit: 'deg', label: 'Light from (left/right)', group: 'Lighting' },
     lightElevation: { type: 'number', default: 40, min: -90, max: 90, step: 1, unit: 'deg', label: 'Light height', group: 'Lighting' },
-    ambient: { type: 'number', default: 0.25, min: 0, max: 1, step: 0.01, label: 'Ambient light', group: 'Lighting' },
+    ambient: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Ambient light', group: 'Lighting' },
     specular: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Shininess', group: 'Lighting' },
     gloss: { type: 'number', default: 32, min: 2, max: 256, step: 1, label: 'Highlight tightness', group: 'Lighting' },
     cel: { type: 'bool', default: false, label: 'Flat (cel) shading', group: 'Lighting', hint: 'Posterises the light into a few flat bands. Great for pixel art.' },
     celSteps: { type: 'number', default: 3, min: 2, max: 8, step: 1, integer: true, label: 'Shading bands', group: 'Lighting', visibleIf: (p) => p.cel === true },
   },
-  summary: (p) => `${p.shape} · ${p.camera}${p.cel ? ` · ${p.celSteps}-band cel` : ''}${p.spinX || p.spinY || p.spinZ ? ' · spinning' : ''}`,
+  summary: (p) => `${p.shape} · ${p.cameraType}${p.cel ? ` · ${p.celSteps}-band cel` : ''}${p.spinX || p.spinY || p.spinZ ? ' · spinning' : ''}`,
   render(ctx) {
     const p = ctx.params;
     const size = ctx.in.size ?? ctx.canvas;
@@ -66,17 +72,44 @@ export default defineNode({
     const az = (p.lightAzimuth * Math.PI) / 180;
     const el = (p.lightElevation * Math.PI) / 180;
     const light = [Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)];
-    const ortho = p.camera === 'orthographic';
-    const camDist = 1 / Math.sin((Math.min(90, Math.max(5, p.fov)) * Math.PI) / 360);
+
+    // The wired camera wins; otherwise build the equivalent of the simple built-in camera.
+    let cam: CameraValue | null = ctx.in.camera;
+    if (!cam) {
+      const scale = Math.max(0.001, p.scale);
+      const short = Math.min(size.width, size.height);
+      const ortho = p.cameraType === 'orthographic';
+      const D = 1 / Math.sin((Math.min(90, Math.max(5, p.fov)) * Math.PI) / 360);
+      const tanH = 1 / Math.sqrt(D * D - 1);
+      cam = {
+        kind: 'camera',
+        projection: ortho ? 'orthographic' : 'perspective',
+        fov: (2 * Math.atan(tanH / scale) * 180) / Math.PI,
+        orthoSize: 2 / scale,
+        position: [0, 0, ortho ? -6 : -D],
+        target: [0, 0, 0],
+        roll: 0,
+        // place the object at (x, y) of the frame
+        shift: [((p.x - 0.5) * size.width) / short, (-(p.y - 0.5) * size.height) / short],
+      };
+    }
+    const basis = cameraBasis(cam);
     const image = ctx.gpu.pass({
       label: 'object-3d',
       size,
       uniforms: {
         shape: SHAPES[p.shape as keyof typeof SHAPES] ?? 0,
-        ortho,
-        camDist,
-        pos: [p.x, p.y],
-        scale: Math.max(0.001, p.scale),
+        proj: PROJECTION_ID[cam.projection] ?? 1,
+        camPos: basis.position,
+        camRight: basis.right,
+        camUp: basis.up,
+        camFwd: basis.forward,
+        fovTan: Math.tan((Math.min(cam.projection === 'fisheye' ? 359 : 179, Math.max(1, cam.fov)) * Math.PI) / 360),
+        fovRad: (Math.min(360, Math.max(1, cam.fov)) * Math.PI) / 180,
+        orthoHalf: Math.max(0.001, cam.orthoSize) / 2,
+        shift: cam.shift,
+        objPos: [p.posX, p.posY, p.posZ],
+        objScale: Math.max(0.001, p.objectScale),
         t0: [R[0], R[3], R[6]],
         t1: [R[1], R[4], R[7]],
         t2: [R[2], R[5], R[8]],
@@ -103,20 +136,10 @@ fn sdCone(p: vec3f, c: vec2f, h: f32) -> f32 {
   let s = max(k * (w.x * q.y - w.y * q.x), k * (w.y - q.y));
   return sqrt(d) * sign(s);
 }
-fn sdPyramid(pin: vec3f, h: f32) -> f32 {
-  let m2 = h * h + 0.25;
-  var p = pin;
-  p = vec3f(abs(p.x), p.y, abs(p.z));
-  if (p.z > p.x) { p = vec3f(p.z, p.y, p.x); }
-  p = vec3f(p.x - 0.5, p.y, p.z - 0.5);
-  let q = vec3f(p.z, h * p.y - 0.5 * p.x, h * p.x + 0.5 * p.y);
-  let s = max(-q.x, 0.0);
-  let t = clamp((q.y - 0.5 * p.z) / (m2 + 0.25), 0.0, 1.0);
-  let a = m2 * (q.x + s) * (q.x + s) + q.y * q.y;
-  let b = m2 * (q.x + 0.5 * t) * (q.x + 0.5 * t) + (q.y - m2 * t) * (q.y - m2 * t);
-  var d2 = min(a, b);
-  if (min(q.y, -q.x * m2 - q.y * 0.5) > 0.0) { d2 = 0.0; }
-  return sqrt((d2 + q.z * q.z) / m2) * sign(max(q.z, -p.y));
+// square pyramid as an intersection of 5 planes (base at y=-0.55, apex at y=0.65): exact inside, a safe lower bound outside
+fn sdPyramid(p: vec3f) -> f32 {
+  let side = vec2f(0.8944272, 0.4472136);
+  return max(-p.y - 0.55, max(side.x * abs(p.x) + side.y * p.y - 0.2906841, side.x * abs(p.z) + side.y * p.y - 0.2906841));
 }
 fn sdOcta(pin: vec3f, s: f32) -> f32 {
   let p = abs(pin);
@@ -130,8 +153,7 @@ fn sdOcta(pin: vec3f, s: f32) -> f32 {
   return length(vec3f(q.x, q.y - s + k, q.z - k));
 }
 
-fn map(pw: vec3f) -> f32 {
-  let p = vec3f(dot(u.t0, pw), dot(u.t1, pw), dot(u.t2, pw));
+fn mapObj(p: vec3f) -> f32 {
   let k = i32(u.shape);
   if (k == 0) { return sdBox(p, vec3f(0.55), 0.04); }
   if (k == 1) { return length(p) - 0.95; }
@@ -141,44 +163,77 @@ fn map(pw: vec3f) -> f32 {
   }
   if (k == 3) { return sdCone(p - vec3f(0.0, 0.8, 0.0), vec2f(0.4472136, 0.8944272), 1.6); }
   if (k == 4) { return length(vec2f(length(p.xz) - 0.68, p.y)) - 0.28; }
-  if (k == 5) { return sdPyramid((p + vec3f(0.0, 0.55, 0.0)) / 1.2, 1.0) * 1.2; }
+  if (k == 5) { return sdPyramid(p); }
   if (k == 6) { return length(vec3f(p.x, p.y - clamp(p.y, -0.45, 0.45), p.z)) - 0.5; }
   return sdOcta(p, 1.0);
+}
+fn map(pw: vec3f) -> f32 {
+  let q = pw - u.objPos;
+  return mapObj(vec3f(dot(u.t0, q), dot(u.t1, q), dot(u.t2, q)) / u.objScale) * u.objScale;
 }
 fn calcNormal(p: vec3f) -> vec3f {
   let e = vec2f(1.0, -1.0) * 0.0008;
   return normalize(e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx) + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx));
 }
 
-fn shade(xn: f32, yn: f32) -> vec4f {
-  var ro = vec3f(xn, yn, -4.0);
-  var rd = vec3f(0.0, 0.0, 1.0);
-  var tmax = 8.0;
-  var t = 0.0;
-  if (u.ortho < 0.5) {
-    let tanH = 1.0 / sqrt(u.camDist * u.camDist - 1.0);
-    ro = vec3f(0.0, 0.0, -u.camDist);
-    rd = normalize(vec3f(xn * tanH, yn * tanH, 1.0));
-    t = max(0.0, u.camDist - 1.4);
-    tmax = u.camDist + 1.4;
+// Ray for frame coordinates (uf: short-side units, y up; ff: full-frame -1..1, y up). Returns false for no ray.
+fn makeRay(uf: vec2f, ff: vec2f, ro: ptr<function, vec3f>, rd: ptr<function, vec3f>) -> bool {
+  let proj = i32(u.proj);
+  *ro = u.camPos;
+  if (proj == 0) {
+    *ro = u.camPos + u.camRight * (uf.x * u.orthoHalf) + u.camUp * (uf.y * u.orthoHalf);
+    *rd = u.camFwd;
+  } else if (proj == 1) {
+    *rd = normalize(u.camFwd + u.camRight * (uf.x * u.fovTan) + u.camUp * (uf.y * u.fovTan));
+  } else if (proj == 2) {
+    let r = length(uf);
+    if (r > 1.0) { return false; }
+    let th = r * u.fovRad * 0.5;
+    let dir2 = select(vec2f(0.0), uf / r, r > 1e-6);
+    *rd = u.camFwd * cos(th) + (u.camRight * dir2.x + u.camUp * dir2.y) * sin(th);
+  } else if (proj == 3) {
+    let lon = ff.x * PI;
+    let lat = ff.y * PI * 0.5;
+    *rd = u.camFwd * (cos(lat) * cos(lon)) + u.camRight * (cos(lat) * sin(lon)) + u.camUp * sin(lat);
   } else {
-    t = 2.6;
-    tmax = 5.4;
+    let lon = ff.x * PI;
+    *rd = normalize(u.camFwd * cos(lon) + u.camRight * sin(lon) + u.camUp * (ff.y * tan(clamp(u.fovRad * 0.5, 0.01, 1.5))));
   }
+  return true;
+}
+
+fn shade(uf: vec2f, ff: vec2f) -> vec4f {
+  var ro = vec3f(0.0);
+  var rd = vec3f(0.0, 0.0, 1.0);
+  if (!makeRay(uf, ff, &ro, &rd)) { return vec4f(0.0); }
+  // bounding sphere around the object: cheap reject, and a tight start/end for the march
+  let bc = u.objPos - ro;
+  let br = 1.2 * u.objScale;
+  let tca = dot(bc, rd);
+  let d2 = dot(bc, bc) - tca * tca;
+  if (d2 > br * br) { return vec4f(0.0); }
+  let thc = sqrt(br * br - d2);
+  var t = max(0.0, tca - thc);
+  let tmax = tca + thc;
+  if (tmax < 0.0) { return vec4f(0.0); }
   var hit = false;
-  for (var i = 0; i < 96; i++) {
-    let h = map(ro + rd * t);
-    if (h < 0.0007) { hit = true; break; }
-    t += h * 0.9;
+  var h = 1.0;
+  var iters = 0;
+  for (var i = 0; i < 128; i++) {
+    iters = i;
+    h = map(ro + rd * t);
+    if (h < 0.0007 * u.objScale) { hit = true; break; }
+    t += h * 0.8;
     if (t > tmax) { break; }
   }
+  // grazing rays along a flat face can run out of steps while skimming the surface: count them as hits
+  if (!hit && iters == 127 && h < 0.01 * u.objScale) { hit = true; }
   if (!hit) { return vec4f(0.0); }
   let pos = ro + rd * t;
   let n = calcNormal(pos);
-  let L = normalize(u.light);
+  let L = normalize(u.light); // world space: the light does not follow the camera
   let diff = max(dot(n, L), 0.0);
-  let V = -rd;
-  let H = normalize(L + V);
+  let H = normalize(L - rd);
   var s = pow(max(dot(n, H), 0.0), u.gloss) * select(1.0, 0.0, diff <= 0.0);
   var lit = diff;
   if (u.cel > 0.5) {
@@ -190,18 +245,24 @@ fn shade(xn: f32, yn: f32) -> vec4f {
   return vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), 1.0);
 }
 
-fn fx(uv: vec2f, px: vec2f) -> vec4f {
+fn sampleAt(px: vec2f) -> vec4f {
   let short = min(u.size.x, u.size.y);
-  let R = max(u.scale * short * 0.5, 0.5);
-  let c = u.pos * u.size;
+  let c = u.size * 0.5;
+  let p = vec2f(px.x - c.x, -(px.y - c.y));
+  let uf = p / (short * 0.5) - u.shift * 2.0;
+  let ff = vec2f(p.x / c.x, p.y / c.y) - vec2f(u.shift.x * 2.0 * short / u.size.x, u.shift.y * 2.0 * short / u.size.y);
+  return shade(uf, ff);
+}
+
+fn fx(uv: vec2f, px: vec2f) -> vec4f {
   // 4 rotated-grid samples per pixel: antialiased silhouette
-  let s0 = shade((px.x - 0.375 - c.x) / R, -(px.y - 0.125 - c.y) / R);
-  let s1 = shade((px.x + 0.125 - c.x) / R, -(px.y - 0.375 - c.y) / R);
-  let s2 = shade((px.x + 0.375 - c.x) / R, -(px.y + 0.125 - c.y) / R);
-  let s3 = shade((px.x - 0.125 - c.x) / R, -(px.y + 0.375 - c.y) / R);
+  let s0 = sampleAt(px + vec2f(-0.375, -0.125));
+  let s1 = sampleAt(px + vec2f(0.125, -0.375));
+  let s2 = sampleAt(px + vec2f(0.375, 0.125));
+  let s3 = sampleAt(px + vec2f(-0.125, 0.375));
   let sum = s0 + s1 + s2 + s3;
-  let cov = sum.a * 0.25;
   if (sum.a < 0.5) { return vec4f(0.0); }
+  let cov = sum.a * 0.25;
   var col = sum.rgb / sum.a;
   if (u.cel > 0.5) {
     // keep the shading bands crisp: one sample's colour, only the silhouette is blended
