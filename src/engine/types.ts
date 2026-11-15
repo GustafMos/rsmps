@@ -159,6 +159,12 @@ export interface NumberParam extends ParamBase {
   unit?: ParamUnit;
   /** Round to an integer. */
   integer?: boolean;
+  /**
+   * Largest value that is safe and sensible in normal use (sliders stop here). Typing a larger value is allowed
+   * up to `max`, but the UI first asks "did you mean that?" because it may be very slow or exhaust memory.
+   * Set it on every param whose cost grows with its value (resolutions, counts, iterations, radii).
+   */
+  softMax?: number;
 }
 export interface BoolParam extends ParamBase {
   type: 'bool';
