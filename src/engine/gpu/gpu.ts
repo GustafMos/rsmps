@@ -389,7 +389,10 @@ export async function createHeadlessDevice(): Promise<GPUDevice> {
   const name = 'webgpu';
   const mod = (await import(/* @vite-ignore */ name)) as { create: (flags: string[]) => GPU; globals: Record<string, unknown> };
   Object.assign(globalThis, mod.globals);
-  const adapter = await mod.create([]).requestAdapter({ powerPreference: 'high-performance' });
+  // Keep the Dawn instance alive: if it is garbage-collected the next GPU readback crashes the process.
+  const instance = mod.create([]);
+  (globalThis as Record<string, unknown>).__rsmpsGpuInstance = instance;
+  const adapter = await instance.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('No WebGPU adapter found.');
   return adapter.requestDevice();
 }
