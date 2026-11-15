@@ -190,3 +190,23 @@ export function upstream(graph: GraphDoc, nodeId: string): Set<string> {
   }
   return seen;
 }
+
+/** Wires into one input socket, in evaluation order (for `multi` inputs this is the layer order, first = bottom). */
+export function wiresInto(graph: GraphDoc, nodeId: string, port: string): Edge[] {
+  return graph.edges.filter((e) => e.to.node === nodeId && e.to.port === port);
+}
+
+/** Move a wire up or down among the wires of the same `multi` input (delta +1 = later = further on top). */
+export function moveWire(graph: GraphDoc, edgeId: string, delta: number): GraphDoc {
+  const edge = graph.edges.find((e) => e.id === edgeId);
+  if (!edge) return graph;
+  const group = wiresInto(graph, edge.to.node, edge.to.port);
+  const from = group.indexOf(edge);
+  const to = Math.min(group.length - 1, Math.max(0, from + delta));
+  if (to === from) return graph;
+  const reordered = [...group];
+  reordered.splice(from, 1);
+  reordered.splice(to, 0, edge);
+  let i = 0;
+  return { ...graph, edges: graph.edges.map((e) => (e.to.node === edge.to.node && e.to.port === edge.to.port ? reordered[i++] : e)) };
+}
