@@ -29,7 +29,7 @@ export default defineNode({
       wgsl: /* wgsl */ `
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let a = textureSampleLevel(ta, smpNearest, uv, 0.0);
-  let b = textureSampleLevel(tb, ${same ? 'smpNearest' : 'smp'}, uv, 0.0);
+  let b = ${same ? 'textureSampleLevel(tb, smpNearest, uv, 0.0)' : 'sampleCrisp(tb, uv, vec2f(textureDimensions(tb)) / u.size)'};
   return mix(a, b, u.k);
 }`,
     });

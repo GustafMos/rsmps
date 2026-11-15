@@ -93,7 +93,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let b = textureSampleLevel(bg, smpNearest, uv, 0.0);
   let fuv = (uv - u.center) / u.fsize + 0.5;
   if (fuv.x < 0.0 || fuv.y < 0.0 || fuv.x > 1.0 || fuv.y > 1.0) { return b; }
-  var f = textureSampleLevel(fg, smp, fuv, 0.0) * u.opacity;
+  var f = sampleCrisp(fg, fuv, vec2f(textureDimensions(fg)) / (u.fsize * u.size)) * u.opacity;
   ${mask ? 'f *= textureSampleLevel(m, smp, uv, 0.0).r;' : ''}
   let bs = unpremul(b); let fs = unpremul(f);
   // Blend where both exist, plain foreground where the background is empty.

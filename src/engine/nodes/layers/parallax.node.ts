@@ -113,7 +113,7 @@ export default defineNode({
   {
     let q = tf(uv, u.t${i});
     if (q.x >= 0.0 && q.y >= 0.0 && q.x <= 1.0 && q.y <= 1.0) {
-      let c = textureSampleLevel(l${i}, smp, q, 0.0);
+      let c = sampleCrisp(l${i}, q, vec2f(textureDimensions(l${i})) / u.size);
       col = c + col * (1.0 - c.a);
     }
   }`,
@@ -135,7 +135,7 @@ fn tf(uv: vec2f, t: vec4f) -> vec2f {
   return p / u.size + 0.5;
 }
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
-  var col = textureSampleLevel(bg, smp, tf(uv, u.tb), 0.0);
+  var col = sampleCrisp(bg, tf(uv, u.tb), vec2f(1.0));
   ${layerCode}
   return col;
 }`,
