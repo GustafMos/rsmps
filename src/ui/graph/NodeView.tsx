@@ -69,11 +69,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
     try {
       const params: Record<string, unknown> = {};
       for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.default;
-      return def.summary(params);
+      return def.summary(params, wired);
     } catch {
       return '';
     }
-  }, [def, node.params]);
+  }, [def, node.params, wired]);
 
   const frameTxt = useEd((s) => (hasFrameParams(def) ? (() => { const z = frameSize(s.graph.project, node); return `${z.width}×${z.height}`; })() : ''));
   const title = node.label || def?.title || node.type;

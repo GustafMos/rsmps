@@ -186,7 +186,7 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
   return createPortal(
     <div className="rs-tl" tabIndex={-1} role="dialog" aria-label="Timeline">
       <div className="rs-tl__head">
-        <span className="rs-caps">Timeline · {node.label || 'Timeline'}</span>
+        <span className="rs-caps">Timeline{node.label ? ` · ${node.label}` : ''}</span>
         <RecordButton nodeId={nodeId} />
         <span className="rs-tl__sp" />
         <button className="rs-btn" onClick={() => write(addTrack(tl, 'audio').timeline)}><Icon name="plus" /> Audio track</button>

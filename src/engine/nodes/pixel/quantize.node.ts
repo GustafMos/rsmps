@@ -21,7 +21,7 @@ export default defineNode({
     colorSpace: { type: 'enum', default: 'oklab', options: SPACE_OPTIONS, label: 'Match in' },
     strength: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Strength', hint: '0 keeps the original colours, 1 snaps fully to the palette.' },
   },
-  summary: (p) => `${p.colorSpace === 'oklab' ? 'OKLab' : p.colorSpace === 'linear' ? 'Linear' : 'RGB'} · ${Math.round(p.strength * 100)}% · ${paletteSummary(false, p.fallback)}`,
+  summary: (p, wired) => `${p.colorSpace === 'oklab' ? 'OKLab' : p.colorSpace === 'linear' ? 'Linear' : 'RGB'} · ${Math.round(p.strength * 100)}% · ${paletteSummary(!!wired?.has('palette'), p.fallback)}`,
   render(ctx) {
     const src = ctx.in.image;
     const colors = clampPalette(resolvePalette(ctx.in.palette, ctx.params.fallback));

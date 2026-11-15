@@ -489,7 +489,7 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
   return createPortal(
     <div ref={box} className="rs-ce" tabIndex={-1} role="dialog" aria-label={`Curve editor: ${title}`}>
       <div className="rs-ce__head" onPointerDown={move}>
-        <span className="rs-caps">Curve · {title}</span>
+        <span className="rs-caps">Curve{title && title.toLowerCase() !== 'curve' ? ` · ${title}` : ''}</span>
         <span className="rs-ce__hint">click add · drag move · Shift snaps frames · Ctrl snaps value · Alt breaks handles · Del removes · I inserts at playhead</span>
         <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onClose} onPointerDown={(e) => e.stopPropagation()} aria-label="Close"><Icon name="close" /></button>
       </div>

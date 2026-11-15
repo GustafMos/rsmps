@@ -482,7 +482,8 @@ export interface NodeDef<
   /** Stream-domain implementation (audio, MIDI). See src/engine/audio/types.ts. */
   audio?: AudioKernel;
   /** One line shown on the node body, e.g. "Bayer 8×8 · 16 colours". */
-  summary?: (params: ParamsOf<P>) => string;
+  /** `wired` = names of this node's inputs and param sockets that currently have a wire (when the caller knows). */
+  summary?: (params: ParamsOf<P>, wired?: ReadonlySet<string>) => string;
   /**
    * The node accepts notes played by the user. While it is selected, the UI maps the computer keyboard
    * (and an on-screen piano) to MIDI notes and sends them to it.

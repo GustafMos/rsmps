@@ -195,7 +195,7 @@ export default defineNode({
     },
     seed: { type: 'number', default: 0, min: 0, max: 9999, step: 1, integer: true, label: 'Seed', visibleIf: (p) => p.algorithm === 'white-noise' },
   },
-  summary: (p) => `${DITHER_ALGORITHMS.find((a) => a.id === p.algorithm)?.label ?? p.algorithm} · ${paletteSummary(false, p.fallback)}`,
+  summary: (p, wired) => `${DITHER_ALGORITHMS.find((a) => a.id === p.algorithm)?.label ?? p.algorithm} · ${paletteSummary(!!wired?.has('palette'), p.fallback)}`,
   async render(ctx) {
     const src = ctx.in.image;
     const p = ctx.params;
