@@ -1,5 +1,5 @@
 import type { AnalyzeSignalsOffline, RenderAudioOffline, SignalTracks } from './api';
-import { AudioGraphRunner, audioAssetIds, hasAudioOutput } from './runner';
+import { AudioGraphRunner, audioAssetIds, hasExportAudio } from './runner';
 import { BLOCK_SIZE } from './types';
 
 /**
@@ -7,9 +7,9 @@ import { BLOCK_SIZE } from './types';
  * Live-only sources (microphone, MIDI devices) are silent. Returns null when there is no audio output.
  */
 export const renderAudioOffline: RenderAudioOffline = async (graph, registry, assets, options) => {
-  if (!hasAudioOutput(graph, registry)) return null;
+  if (!hasExportAudio(graph, registry)) return null; // nothing enabled to export: the video gets no audio track
   const sampleRate = options.sampleRate ?? 48000;
-  const runner = new AudioGraphRunner(registry, { sampleRate, fadeOnRebuild: false });
+  const runner = new AudioGraphRunner(registry, { sampleRate, fadeOnRebuild: false, exportOnly: true });
   runner.setGraph(graph);
   for (const id of audioAssetIds(graph, registry)) {
     const pcm = await assets(id);

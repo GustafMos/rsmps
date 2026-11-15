@@ -4,6 +4,7 @@
 import type { Registry } from '../define';
 import type { AnyNodeDef, GraphDoc, InputSchema, OutputSchema } from '../types';
 import { registerAudioNodes } from './nodes';
+import { nsdf, pickPeriod } from './pitch';
 import { resolveParams } from './params';
 import { AudioGraphRunner } from './runner';
 import type { AudioAsset, AudioIO, MidiEvent, StereoBlock } from './types';
@@ -249,11 +250,12 @@ export function makeGraph(spec: GraphSpec, project: Partial<GraphDoc['project']>
 export function renderGraph(
   doc: GraphDoc,
   seconds: number,
-  opts: { sampleRate?: number; mic?: Float32Array; fade?: boolean; playing?: boolean } = {},
+  opts: { sampleRate?: number; mic?: Float32Array; fade?: boolean; playing?: boolean; assets?: Record<string, { sampleRate: number; channels: Float32Array[] }> } = {},
 ): { left: Float32Array; right: Float32Array; runner: AudioGraphRunner } {
   const sr = opts.sampleRate ?? SR;
   const runner = new AudioGraphRunner(audioRegistry(), { sampleRate: sr, fadeOnRebuild: opts.fade ?? false });
   runner.setGraph(doc);
+  for (const [id, pcm] of Object.entries(opts.assets ?? {})) runner.setAsset(id, pcm);
   runner.setTransport({ playing: opts.playing ?? true, seconds: 0, duration: doc.project.duration, loop: doc.project.loop });
   const total = Math.round(seconds * sr);
   const left = new Float32Array(total);
@@ -272,3 +274,18 @@ export function renderGraph(
 
 export const on = (note: number, offset: number, velocity = 1, channel = 0): MidiEvent => ({ type: 'on', note, velocity, value: 0, offset, channel });
 export const off = (note: number, offset: number, channel = 0): MidiEvent => ({ type: 'off', note, velocity: 0, value: 0, offset, channel });
+
+/** Fundamental frequency of a pitched signal by McLeod autocorrelation over a 4096-sample window starting at `from` (0 if none). */
+export function pitchHz(x: Float32Array, sr = SR, from = 0, minHz = 40, maxHz = 2000): number {
+  const w = 4096;
+  const win = Float32Array.from(x.subarray(from, from + w)); // copy; remove DC so asymmetric waves work
+  let mean = 0;
+  for (let i = 0; i < win.length; i++) mean += win[i];
+  mean /= win.length;
+  for (let i = 0; i < win.length; i++) win[i] -= mean;
+  const maxLag = Math.min(w / 2 - 2, Math.floor(sr / minHz));
+  const out = new Float32Array(maxLag + 2);
+  nsdf(win, win.length, maxLag, out);
+  const r = pickPeriod(out, Math.max(2, Math.floor(sr / maxHz)), maxLag, 0.9, { lag: 0, clarity: 0 });
+  return r.lag > 0 ? sr / r.lag : 0;
+}

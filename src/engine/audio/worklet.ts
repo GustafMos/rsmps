@@ -21,6 +21,7 @@ class RsmpsProcessor extends AudioWorkletProcessor {
   private runner: AudioGraphRunner;
   private sinceMeters = 0;
   private sinceSignals = 0;
+  private sinceRec = 0;
   private reportedError = false;
   private scratch = new Float32Array(BLOCK_SIZE * 4);
   private slotBlocks: ([Float32Array, Float32Array] | null)[] = Array.from({ length: MAX_MICS }, () => null);
@@ -56,6 +57,19 @@ class RsmpsProcessor extends AudioWorkletProcessor {
       case 'midi':
         for (const ev of m.events) r.sendMidi(null, ev);
         break;
+      case 'arm':
+        r.armRecording(m.nodeId, m.target);
+        break;
+      case 'recStart':
+        r.startRecording(m.latency);
+        break;
+      case 'recStop': {
+        const take = r.stopRecording();
+        const transfer: ArrayBuffer[] = [];
+        if (take?.pcm) for (const ch of take.pcm.channels) if (!transfer.includes(ch.buffer as ArrayBuffer)) transfer.push(ch.buffer as ArrayBuffer);
+        this.port.postMessage({ type: 'take', take } satisfies FromWorklet, transfer);
+        break;
+      }
       case 'micSlots':
         r.setMicSlots(m.slots);
         break;
@@ -104,6 +118,12 @@ class RsmpsProcessor extends AudioWorkletProcessor {
     if (this.sinceMeters >= sampleRate / 30) {
       this.sinceMeters = 0;
       this.post({ type: 'meters', meters: this.runner.takeMeters() });
+    }
+    this.sinceRec += total;
+    if (this.sinceRec >= sampleRate / 30) {
+      this.sinceRec = 0;
+      const state = this.runner.recordingState();
+      if (state.armed) this.post({ type: 'recState', state });
     }
     this.sinceSignals += total;
     if (this.sinceSignals >= sampleRate / 60) {

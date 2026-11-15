@@ -4,6 +4,7 @@
  */
 import type { Registry } from '../define';
 import type { GraphDoc } from '../types';
+import type { TimelineNote } from './timeline';
 
 export interface PcmAudio {
   sampleRate: number;
@@ -26,6 +27,58 @@ export interface AudioDevice {
   id: string;
   /** Name to show in the dropdown. */
   label: string;
+}
+
+/** One loop pass (or the single pass) of a recording. `pcm` here is a VIEW into the take's buffer: copy before keeping. */
+export interface RecordedPass {
+  /** Project seconds where this pass starts on the timeline. */
+  start: number;
+  length: number;
+  pcm?: PcmAudio;
+  /** Seconds relative to `start`. */
+  notes?: TimelineNote[];
+}
+
+/** What `stopRecording()` hands back. Turn it into clips with `applyTake` (timeline.ts) after storing the PCM as assets. */
+export interface RecordedTake {
+  nodeId: string;
+  /** Timeline track id the take was armed for. */
+  track: string;
+  kind: 'audio' | 'midi';
+  /** Project seconds where the take starts on the timeline (input latency already compensated). */
+  start: number;
+  /** Seconds. */
+  length: number;
+  /** Audio takes: the whole recording as lossless float32 stereo at the context rate. */
+  pcm?: PcmAudio;
+  /** MIDI takes: notes in seconds from `start` (every loop pass merged, times modulo the loop, only when loopPasses <= 1). */
+  notes?: TimelineNote[];
+  /** Number of loop passes recorded (1 = no loop wrap happened). */
+  loopPasses?: number;
+  /** One entry per pass (only when the transport looped while recording). Pass 0 starts at `start`; later passes at the loop start. */
+  passes?: RecordedPass[];
+  /** Input latency that was compensated, seconds (device latency + the node's latency offset). */
+  latency: number;
+  /** Set when recording ended early (for example the maximum length was reached). */
+  error?: string;
+}
+
+export interface RecordingState {
+  /** A node is armed for recording. */
+  armed: boolean;
+  /** Capturing right now. */
+  recording: boolean;
+  /** idle: nothing armed; armed: waiting for startRecording; count-in: clicks before capture; recording: capturing. */
+  phase: 'idle' | 'armed' | 'count-in' | 'recording';
+  /** Seconds captured so far. */
+  seconds: number;
+  /** Seconds of count-in left (0 when not counting in). Start the transport when this reaches 0. */
+  countIn: number;
+  /** Peak level 0..1 per channel of the audio being recorded (0 for MIDI-only). */
+  level: [number, number];
+  nodeId: string | null;
+  /** Message to show the user (maximum length reached ...), or null. */
+  error: string | null;
 }
 
 export interface AudioEngine {
@@ -58,6 +111,24 @@ export interface AudioEngine {
   listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]>;
   /** Call `listener` when devices are plugged or unplugged (or labels become available). Returns an unsubscribe function. */
   onDevicesChanged(listener: () => void): () => void;
+  /**
+   * Choose what the Timeline node `nodeId` records, or pass null to disarm. One node can be armed at a time (arming
+   * another disarms the first). What is wired into the node's `recordAudio` / `recordMidi` input is what gets captured.
+   */
+  armRecording(nodeId: string, target: { track: string; kind: 'audio' | 'midi' } | null): void;
+  /**
+   * Begin capturing on the armed node. If the node has a count-in, `recordingState().phase` is 'count-in' (with clicks)
+   * first: start the transport when it reaches 'recording'. Capture only advances while the transport is playing.
+   */
+  startRecording(): void;
+  /**
+   * Stop and resolve with the take (null if nothing was armed or nothing was captured). The capture runs inside the
+   * worklet, sample accurate and lossless; the whole take arrives here when you stop. Input latency
+   * (`audioContext.baseLatency + outputLatency`, plus the node's latencyOffsetMs) is already compensated.
+   */
+  stopRecording(): Promise<RecordedTake | null>;
+  /** Poll (or after each message) for record meters and the count-in. Updated ~30 Hz while armed. */
+  recordingState(): RecordingState;
   /** Peak level 0..1 per channel at a node's first audio output, or null when unknown. */
   meter(nodeId: string): [number, number] | null;
   /** Send a note from the UI (on-screen keyboard) into a MIDI-producing node. */
@@ -103,3 +174,10 @@ export type AnalyzeSignalsOffline = (
   assets: AudioAssetProvider,
   options: { duration: number; fps: number; sampleRate?: number; loop: boolean },
 ) => Promise<SignalTracks>;
+
+/**
+ * True if exporting would produce audio: some audio-out that is included in export (its "Include in export" switch is on and
+ * it is not bypassed) has something wired in. Use this, not `AudioEngine.hasAudio` (which means "there is something to hear
+ * live"), to decide whether an export gets an audio track. `renderAudioOffline` returns null in exactly the other case.
+ */
+export type HasExportAudio = (graph: GraphDoc, registry: Registry) => boolean;

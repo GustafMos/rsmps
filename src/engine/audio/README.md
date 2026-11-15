@@ -148,7 +148,7 @@ Goal: sing into the microphone and let the loudness (or pitch, or notes) move an
   `round((f+1)*sampleRate/fps)`). Kernels smooth their own measurements, so this is the smoothed value at that moment,
   not an average over the frame. `SignalTracks.value(nodeId, name, frameIndex)` looks it up. The host's `Host.signal` during
   export should return `tracks.value(nodeId, name, Math.round(seconds * fps))`.
-* **Export limitation: live sources are silent offline.** A graph driven by the *microphone* or a *MIDI device*
+* **Export limitation: live sources are silent offline** (record a take into a Timeline to export it, see below). A graph driven by the *microphone* or a *MIDI device*
   exports as the quiet values (zeros, or `From`), because there is no live input to analyse. To export an animation
   driven by singing: record the singing, import it as an audio file, and use `audio-file` instead of `microphone`
   (and `audio-to-midi` on the file for note-driven animation). The offline analysis of an `audio-file` is exact and
@@ -190,6 +190,75 @@ For notes: Microphone.tap, Audio to MIDI, then `MIDI to Numbers` (`Note` for hei
   (`velocity` param, "key strength"). `sustain` (e.g. UI maps Shift to it) holds released notes; `latch` makes each key a
   toggle. The kernel only applies strength, `transpose`, sustain and latch: the UI sends absolute notes.
   `synth`, `pluck` and `drum` are deliberately NOT playable: they take MIDI from a Keyboard node (one clean path).
+
+## Recording and the Timeline
+
+The **Timeline** node (`audio-timeline`, "Timeline") is an Ableton-style arranger in one node: several audio and MIDI
+tracks, clips you can offset, loop, fade and layer, and recording of new takes straight into it.
+
+**Data.** The node's `clips` param is a `TimelineData` (exact JSON shape and every editing helper are in
+`src/engine/audio/timeline.ts`: `addTrack`, `addAudioClip`, `addMidiClip`, `moveClip`, `trimClipStart/End`, `splitClip`,
+`duplicateClip`, `mergeClips`, `quantizeClip`, `transposeClip`, `makeClipLoopCleanly`, `applyTake`, `audioClipToMidi`,
+`normalizeTimeline` ...). The UI must edit it only through those helpers.
+
+**Playback.** Clip starts are sample accurate. Overlapping clips sum (audio) or merge (MIDI). `loop` repeats the source
+region and stays phase-locked to the clip start, hence to the project loop. Seek, pause and loop wrap send note-offs for
+hanging notes. `wrap` lets a clip that passes the loop end continue from the loop start. Outputs: `audio` (all audio
+tracks), `midi` (all MIDI tracks), `soloAudio` / `soloMidi` (only the track named in `outputTrack`; for separate
+instruments the simplest route is several Timeline nodes, or one Timeline plus `outputTrack`). Track `gain`/`pan` apply to
+audio tracks; `mute`/`solo` to both kinds. Export plays clips identically (same runner), so a recorded take exports.
+
+**Wiring recipe**
+
+```
+Microphone.tap      ─► Timeline.recordAudio          (audio take)
+MIDI Keyboard       ─► Timeline.recordMidi           (MIDI take; MIDI Device and Audio to MIDI work too)
+Timeline.midi       ─► Synth (or any instrument)  ─► Mixer ─┐
+Timeline.audio      ─────────────────────────────────► Mixer ─► Audio Out
+```
+
+**Recording API** (`AudioEngine`): `armRecording(nodeId, { track, kind })`, `startRecording()`, `stopRecording(): Promise<RecordedTake | null>`,
+`recordingState()` (`phase`: idle / armed / count-in / recording, `seconds`, `countIn` seconds left, `level`, `error`).
+Capture runs inside the worklet (sample accurate, lossless float32) and the whole take is posted when you stop
+(not streamed in chunks: simpler and equally lossless; the worklet holds it in memory, bounded by the node's `maxLength`,
+default 10 minutes, ending with a clear `error` message). Input latency (`baseLatency + outputLatency` plus the node's
+`latencyOffsetMs`) is removed so overdubs line up with what was heard. Capture only advances while the transport plays.
+**Count-in**: set `countIn` bars; `phase` is 'count-in' (clicks, if `metronome` is on) and the host should start the
+transport when it becomes 'recording'. The metronome click is added to the Timeline's `audio` output only while counting in
+or recording, so it is never in an export. `monitor` passes the record inputs through while armed.
+**Loop recording**: when the transport loops while recording, the take has `passes` split exactly at the loop point.
+`applyTake(timeline, take, { mode, assetIds })` puts it on the timeline: `overdub` (MIDI: all passes merged into one
+looping clip as long as the loop; audio: each pass its own clip, stacked), `takes` (each pass a clip, all muted but the
+last) or `replace` (like takes, and clips already there over that time range are removed). The caller stores each
+`pcm` (`take.pcm`, or `passes[k].pcm`, which are views: copy them) as assets and passes the ids in order.
+
+**Export and the microphone.** A live microphone or MIDI device is silent in an export. Record the take into a Timeline
+and export that: the recorded clips play back exactly, including the sound-to-picture bridge (`audio-level` fed by the Timeline).
+
+## Instruments (MIDI in, audio out)
+
+All take MIDI from a Keyboard, MIDI Device, Arpeggiator, Audio to MIDI or a Timeline's `midi` output. A `preset` enum picks
+a patch (a bundle of parameters); choose "Custom" to use the individual settings instead. Not playable from the computer
+keyboard themselves: put a Keyboard node in front.
+
+| Node id | Title | Presets | Notes |
+| --- | --- | --- | --- |
+| `synth` | Synth | (settings only) | Two-oscillator subtractive poly synth, polyBLEP, unison, filter envelope |
+| `pluck` | Plucked String | | Karplus-Strong |
+| `drum` | Drum Kit | | Simple kick, snare, hats on GM notes |
+| `chip-synth` | Chiptune | NES lead, Game Boy pulse, C64-ish arpeggio, Triangle bass, Noise hi-hat, Noise snare | Pulse 12.5/25/50/75 %, stepped triangle, LFSR noise (long/short), 16-step volume, arpeggio, pulse-width sweep, vibrato, pitch slide, bit crush |
+| `fm-synth` | FM Synth | Electric piano, Bell, FM bass, Brass, Glass pad | 4 operators, 6 algorithms, feedback, per-operator ratio/level/ADSR |
+| `organ` | Organ | Jazz, Rock, Church, Ballad | 9 drawbars, key percussion, key click, rotary speaker |
+| `strings-pad` | Strings & Pad | Warm pad, String machine, Choir-ish | Up to 7 detuned band-limited saws per note, filter, ensemble chorus, vowel formants |
+| `bass` | Bass | Acid, Sub, Reese | Mono, saw/square/sub, 24 dB filter envelope, slide on overlapping notes, accent, drive |
+| `sampler` | Sampler | | Plays an `assets` sound (a file or a recorded take) pitched by note, trim, loop, ADSR, one-shot, **slice mode** across keys |
+| `drum-machine` | Drum Machine | | Kick, snare, clap, closed/open hat, tom, rim, cowbell with Tune/Decay/Level each, GM note map, **built-in step sequencer** |
+
+**Drum machine sequencer.** `pattern` (json) is edited only through `src/engine/audio/drum-pattern.ts` (`emptyPattern`,
+`defaultPattern`, `toggleStep`, `setStep`, `setSteps` 16/32, `setSwing`, `rotateVoice`, `fillEvery`, `euclidean`,
+`randomizeVoice`, `clearVoice`, `normalizePattern` ...). Sixteenth-note steps; "Timing: tempo" uses the node's BPM,
+"fit the pattern to the project length" stretches it over the project duration so it loops exactly. The sequencer runs
+while the transport plays. A piano model is not included: the Sampler plays recorded or imported piano sounds.
 
 ## Not in v1
 

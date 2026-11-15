@@ -4,5 +4,8 @@
  */
 export { createAudioEngine } from './engine';
 export { renderAudioOffline, analyzeSignalsOffline } from './offline';
+export { hasExportAudio } from './runner';
 export * from './keyboard-map';
-export type { AudioDevice, AudioEngine, AudioAssetProvider, PcmAudio, TransportState, CreateAudioEngine, RenderAudioOffline, AnalyzeSignalsOffline, SignalTracks } from './api';
+export * from './timeline';
+export * from './drum-pattern';
+export type { AudioDevice, AudioEngine, RecordedTake, RecordedPass, RecordingState, AudioAssetProvider, PcmAudio, TransportState, CreateAudioEngine, RenderAudioOffline, AnalyzeSignalsOffline, SignalTracks, HasExportAudio } from './api';

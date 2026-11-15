@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { defineNode } from '../../define';
 import { Registry } from '../../define';
-import { renderAudioOffline } from '../offline';
+import { analyzeSignalsOffline, renderAudioOffline } from '../offline';
 import { registerAudioNodes } from '../nodes';
-import { AudioGraphRunner, audioAssetIds, hasAudioOutput } from '../runner';
+import { AudioGraphRunner, audioAssetIds, hasAudioOutput, hasExportAudio } from '../runner';
 import { SR, allFinite, audioRegistry, db, makeGraph, noise, off, on, peak, renderGraph, rms, sine, toneAmp, zeroCrossFreq } from '../testing';
 import { defineAudio } from '../types';
 
@@ -394,6 +394,53 @@ describe('transport', () => {
     const m = runner.takeMeters();
     expect(m.o[0]).toBeCloseTo(0.5, 1);
     expect(runner.takeMeters().o[0]).toBe(0);
+  });
+});
+
+describe('export switch on audio-out', () => {
+  const two = (a: Record<string, unknown>, b: Record<string, unknown>, bypassB = false) =>
+    makeGraph({
+      nodes: [
+        { id: 'o1', type: 'oscillator', params: { frequency: 300, level: -12 } },
+        { id: 'o2', type: 'oscillator', params: { frequency: 900, level: -12 } },
+        { id: 'out1', type: 'audio-out', params: { limiter: false, ...a } },
+        { id: 'out2', type: 'audio-out', params: { limiter: false, ...b }, bypass: bypassB },
+      ],
+      edges: ['o1.audio -> out1.audio', 'o2.audio -> out2.audio'],
+    });
+  const render = (g: ReturnType<typeof two>) => renderAudioOffline(g, audioRegistry(), async () => null, { duration: 0.5, loop: false });
+
+  it('a disabled audio-out is left out of the export but still heard live', async () => {
+    const g = two({}, { enabled: false });
+    expect(hasExportAudio(g, audioRegistry())).toBe(true);
+    const pcm = (await render(g))!;
+    expect(toneAmp(pcm.channels[0], 300, SR, 4800, 20000)).toBeGreaterThan(0.2);
+    expect(toneAmp(pcm.channels[0], 900, SR, 4800, 20000)).toBeLessThan(0.01);
+    // live playback (the normal runner) plays both
+    const live = renderGraph(g, 0.5).left;
+    expect(toneAmp(live, 300, SR, 4800, 20000)).toBeGreaterThan(0.2);
+    expect(toneAmp(live, 900, SR, 4800, 20000)).toBeGreaterThan(0.2);
+    expect(hasAudioOutput(g, audioRegistry())).toBe(true);
+  });
+  it('a bypassed audio-out is not exported either', async () => {
+    const pcm = (await render(two({}, {}, true)))!;
+    expect(toneAmp(pcm.channels[0], 900, SR, 4800, 20000)).toBeLessThan(0.01);
+    expect(toneAmp(pcm.channels[0], 300, SR, 4800, 20000)).toBeGreaterThan(0.2);
+  });
+  it('everything disabled: nothing to export (null, no audio track) although there is still something to hear', async () => {
+    const g = two({ enabled: false }, { enabled: false });
+    expect(hasExportAudio(g, audioRegistry())).toBe(false);
+    expect(hasAudioOutput(g, audioRegistry())).toBe(true);
+    expect(await render(g)).toBeNull();
+    expect(audioRegistry().get('audio-out')!.params.enabled).toMatchObject({ type: 'bool', default: true, label: 'Include in export' });
+  });
+  it('analysis taps are unaffected by the export switch', async () => {
+    const g = makeGraph({
+      nodes: [{ id: 'o', type: 'oscillator', params: { level: -12 } }, { id: 'lv', type: 'audio-level', params: { floor: -60, ceiling: 0 } }, { id: 'out', type: 'audio-out', params: { enabled: false } }],
+      edges: ['o.audio -> lv.audio', 'o.audio -> out.audio'],
+    });
+    const t = await analyzeSignalsOffline(g, audioRegistry(), async () => null, { duration: 0.5, fps: 24, loop: false });
+    expect(t.value('lv', 'level', 10)).toBeGreaterThan(0.5);
   });
 });
 

@@ -5,7 +5,7 @@
  */
 import type { Registry } from '../define';
 import type { GraphDoc } from '../types';
-import type { AudioAssetProvider, AudioDevice, AudioEngine, CreateAudioEngine, TransportState } from './api';
+import type { AudioAssetProvider, AudioDevice, AudioEngine, CreateAudioEngine, RecordedTake, RecordingState, TransportState } from './api';
 import { toAudioAsset } from './pcm';
 import type { FromWorklet, ToWorklet } from './protocol';
 import { MAX_MICS, WORKLET_NAME } from './protocol';
@@ -46,6 +46,8 @@ class WebAudioEngine implements AudioEngine {
   private volume = 1;
   private meters = new Map<string, [number, number]>();
   private signals = new Map<string, number>();
+  private recState: RecordingState = { armed: false, recording: false, phase: 'idle', seconds: 0, countIn: 0, level: [0, 0], nodeId: null, error: null };
+  private pendingTake: ((take: RecordedTake | null) => void) | null = null;
   private disposed = false;
 
   hasAudio(graph: GraphDoc, registry: Registry): boolean {
@@ -91,6 +93,11 @@ class WebAudioEngine implements AudioEngine {
         for (const [id, v] of Object.entries(m.meters)) this.meters.set(id, v);
       } else if (m.type === 'signals') {
         for (const [id, values] of Object.entries(m.signals)) for (const [name, v] of Object.entries(values)) this.signals.set(id + '\u0000' + name, v);
+      } else if (m.type === 'recState') {
+        this.recState = m.state;
+      } else if (m.type === 'take') {
+        this.pendingTake?.(m.take);
+        this.pendingTake = null;
       } else if (m.type === 'error') {
         console.warn('Audio worklet error:', m.message);
       }
@@ -120,6 +127,39 @@ class WebAudioEngine implements AudioEngine {
   setVolume(volume: number): void {
     this.volume = Math.max(0, volume);
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.01);
+  }
+
+  armRecording(nodeId: string, target: { track: string; kind: 'audio' | 'midi' } | null): void {
+    this.post({ type: 'arm', nodeId, target });
+    this.recState = target
+      ? { ...this.recState, armed: true, phase: 'armed', nodeId, error: null }
+      : { armed: false, recording: false, phase: 'idle', seconds: 0, countIn: 0, level: [0, 0], nodeId: null, error: null };
+  }
+
+  startRecording(): void {
+    const latency = this.ctx ? this.ctx.baseLatency + ((this.ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0) : 0;
+    this.post({ type: 'recStart', latency: Number.isFinite(latency) ? latency : 0 });
+    this.recState = { ...this.recState, recording: true, phase: 'recording', seconds: 0 };
+  }
+
+  stopRecording(): Promise<RecordedTake | null> {
+    if (!this.node) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingTake = null;
+        resolve(null);
+      }, 10000);
+      this.pendingTake = (take) => {
+        clearTimeout(timer);
+        resolve(take);
+      };
+      this.post({ type: 'recStop' });
+      this.recState = { ...this.recState, recording: false, phase: this.recState.armed ? 'armed' : 'idle' };
+    });
+  }
+
+  recordingState(): RecordingState {
+    return this.recState;
   }
 
   hasSignals(graph: GraphDoc, registry: Registry): boolean {

@@ -5,6 +5,7 @@
  */
 import type { Registry } from '../define';
 import type { AnyNodeDef, GraphDoc, InputSchema, OutputSchema, ParamSchema } from '../types';
+import type { RecordedTake, RecordingState } from './api';
 import { resolveParams } from './params';
 import { toAudioAsset } from './pcm';
 import {
@@ -22,6 +23,8 @@ export interface RunnerOptions {
   blockSize?: number;
   /** Fade the master in over ~10 ms after a topology change (default true). Offline renders turn it off. */
   fadeOnRebuild?: boolean;
+  /** Export mode: audio-out nodes that are switched off (`enabled` false) or bypassed are not rendered. */
+  exportOnly?: boolean;
 }
 
 export interface TransportUpdate {
@@ -64,6 +67,17 @@ interface PlanNode {
 
 const isAudioNode = (def: AnyNodeDef | undefined): def is AnyNodeDef => !!def && !!def.audio;
 
+const isExported = (n: { params: Record<string, unknown>; bypass?: boolean }): boolean => n.params.enabled !== false && !n.bypass;
+
+/** True if an audio-out that is included in exports (not switched off, not bypassed) has something wired into it. */
+export function hasExportAudio(graph: GraphDoc, registry: Registry): boolean {
+  for (const n of graph.nodes) {
+    const def = registry.get(n.type);
+    if (isAudioNode(def) && def.category === 'output' && isExported(n) && graph.edges.some((e) => e.to.node === n.id)) return true;
+  }
+  return false;
+}
+
 /** True if the graph has an audio sink with something wired into it. */
 export function hasAudioOutput(graph: GraphDoc, registry: Registry): boolean {
   for (const n of graph.nodes) {
@@ -79,7 +93,7 @@ export function hasSignalTap(graph: GraphDoc, registry: Registry): boolean {
     const def = registry.get(n.type);
     if (!isAudioNode(def) || def.category === 'output') continue;
     const outs = Object.values(def.outputs as OutputSchema);
-    if (outs.some((o) => o.type === 'audio' || o.type === 'midi')) continue;
+    if (outs.some((o) => o.type === 'audio' || o.type === 'midi') && !def.audio?.runWhenFed) continue;
     const ins = def.inputs as InputSchema;
     if (graph.edges.some((e) => e.to.node === n.id && ins[e.to.port] && (ins[e.to.port].type === 'audio' || ins[e.to.port].type === 'midi'))) return true;
   }
@@ -92,6 +106,8 @@ export function audioAssetIds(graph: GraphDoc, registry: Registry): string[] {
   for (const n of graph.nodes) {
     const def = registry.get(n.type);
     if (!isAudioNode(def)) continue;
+    const extra = def.audio!.assets?.(resolveParams(def, n.params));
+    if (extra) for (const id of extra) ids.add(id);
     for (const [key, p] of Object.entries(def.params as ParamSchema)) {
       if (p.type === 'assets') {
         const v = n.params[key];
@@ -109,6 +125,7 @@ export class AudioGraphRunner {
 
   private registry: Registry;
   private fadeOnRebuild: boolean;
+  private exportOnly: boolean;
   private nodes = new Map<string, PlanNode>();
   private order: PlanNode[] = [];
   private sinks: PlanNode[] = [];
@@ -121,12 +138,14 @@ export class AudioGraphRunner {
   private fadeTotal: number;
   private faults = 0;
   private micSlots = new Map<string, number>();
+  private recNode: string | null = null;
 
   constructor(registry: Registry, options: RunnerOptions) {
     this.registry = registry;
     this.sampleRate = options.sampleRate;
     this.blockSize = options.blockSize ?? BLOCK_SIZE;
     this.fadeOnRebuild = options.fadeOnRebuild ?? true;
+    this.exportOnly = options.exportOnly ?? false;
     this.fadeTotal = Math.max(1, Math.round(this.sampleRate * 0.01));
   }
 
@@ -175,6 +194,37 @@ export class AudioGraphRunner {
     for (const k of Object.keys(slots)) this.micSlots.set(k, slots[k]);
   }
 
+  /** Send a host command to a node's kernel (see `AudioKernel.control`). Returns its result, or undefined if the node is not running. */
+  control(nodeId: string, message: unknown): unknown {
+    const pn = this.nodes.get(nodeId);
+    return pn?.kernel.control ? pn.kernel.control(pn.state, message, pn.params) : undefined;
+  }
+
+  /**
+   * Arm one recording node (Timeline) for a track, or pass null to disarm. Arming another node disarms the previous one.
+   * What is wired to the node's recordAudio / recordMidi input is what gets captured.
+   */
+  armRecording(nodeId: string, target: { track: string; kind: 'audio' | 'midi' } | null): void {
+    if (this.recNode && this.recNode !== nodeId) this.control(this.recNode, { type: 'arm', target: null });
+    this.control(nodeId, { type: 'arm', target });
+    this.recNode = target ? nodeId : null;
+  }
+
+  /** Begin capturing on the armed node. `latency` = seconds of device latency to compensate (baseLatency + outputLatency). */
+  startRecording(latency = 0): void {
+    if (this.recNode) this.control(this.recNode, { type: 'start', latency });
+  }
+
+  /** Stop and return the take (null if nothing was captured). The node stays armed. */
+  stopRecording(): RecordedTake | null {
+    return this.recNode ? ((this.control(this.recNode, { type: 'stop' }) as RecordedTake | null) ?? null) : null;
+  }
+
+  recordingState(): RecordingState {
+    const s = this.recNode ? (this.control(this.recNode, { type: 'state' }) as RecordingState | undefined) : undefined;
+    return s ?? { armed: false, recording: false, phase: 'idle', seconds: 0, countIn: 0, level: [0, 0], nodeId: null, error: null };
+  }
+
   /** Queue a MIDI event for the next block. `nodeId` null = hardware device input (all device nodes see it). */
   sendMidi(nodeId: string | null, ev: MidiEvent): void {
     if (nodeId === null) this.deviceMidi.push(ev);
@@ -191,7 +241,7 @@ export class AudioGraphRunner {
     const byId = new Map(doc.nodes.map((n) => [n.id, n]));
     const sinkIds = doc.nodes.filter((n) => {
       const d = registry.get(n.type);
-      return isAudioNode(d) && d.category === 'output';
+      return isAudioNode(d) && d.category === 'output' && (!this.exportOnly || isExported(n));
     });
     // Edges that carry stream data between audio nodes.
     const edges = doc.edges.filter((e) => {
@@ -210,7 +260,7 @@ export class AudioGraphRunner {
     const hasStreamOut = (d: AnyNodeDef) => Object.values(d.outputs as OutputSchema).some((o) => o.type === 'audio' || o.type === 'midi');
     const tapIds = doc.nodes.filter((n) => {
       const d = registry.get(n.type);
-      return isAudioNode(d) && d.category !== 'output' && !hasStreamOut(d) && edges.some((e) => e.to.node === n.id);
+      return isAudioNode(d) && d.category !== 'output' && (!hasStreamOut(d) || !!d.audio?.runWhenFed) && edges.some((e) => e.to.node === n.id);
     });
     // Upstream closure of the roots.
     const needed = new Set<string>();

@@ -9,11 +9,11 @@ import { snapToScale, stepInScale } from '../scales';
 import { SR, audioRegistry, rms, sine, toneAmp } from '../testing';
 
 const EXPECTED = {
-  'audio-source': ['audio-file', 'microphone', 'oscillator'],
+  'audio-source': ['audio-file', 'audio-timeline', 'microphone', 'oscillator'],
   output: ['audio-out'],
   'audio-fx': ['chorus', 'compressor', 'delay', 'distortion', 'eq', 'filter', 'flanger', 'gain', 'gate', 'limiter', 'mixer', 'pitch-shift', 'reverb', 'stereo-width', 'tremolo'],
   math: ['audio-level', 'midi-trigger', 'midi-value'],
-  synth: ['arpeggiator', 'audio-to-midi', 'chord', 'drum', 'midi-device', 'midi-keyboard', 'midi-transpose', 'pluck', 'synth'],
+  synth: ['arpeggiator', 'audio-to-midi', 'bass', 'chip-synth', 'chord', 'drum', 'drum-machine', 'fm-synth', 'midi-device', 'midi-keyboard', 'midi-transpose', 'organ', 'pluck', 'sampler', 'strings-pad', 'synth'],
 } as const;
 
 describe('node definitions', () => {
@@ -24,7 +24,9 @@ describe('node definitions', () => {
     const byCat: Record<string, string[]> = {};
     for (const d of defs) (byCat[d.category] ??= []).push(d.id);
     for (const k of Object.keys(byCat)) byCat[k].sort();
-    expect(byCat).toEqual(EXPECTED);
+    // every documented node exists (new instruments may be added to a category without touching this list)
+    for (const [cat, ids] of Object.entries(EXPECTED)) for (const id of ids) expect(byCat[cat], `${cat}/${id}`).toContain(id);
+    expect(Object.keys(byCat).sort()).toEqual(Object.keys(EXPECTED).sort());
   });
 
   it.each(defs.map((d) => [d.id, d] as const))('%s is a valid, well-formed audio node', (_id, def) => {

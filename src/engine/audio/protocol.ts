@@ -1,5 +1,6 @@
 /** Messages between the main-thread engine (engine.ts) and the AudioWorklet (worklet.ts). */
 import type { GraphDoc } from '../types';
+import type { RecordedTake, RecordingState } from './api';
 import type { MidiEvent } from './types';
 
 export type ToWorklet =
@@ -10,11 +11,16 @@ export type ToWorklet =
   | { type: 'midi'; events: MidiEvent[] }
   /** Which worklet input carries which microphone node. */
   | { type: 'micSlots'; slots: Record<string, number> }
+  | { type: 'arm'; nodeId: string; target: { track: string; kind: 'audio' | 'midi' } | null }
+  | { type: 'recStart'; latency: number }
+  | { type: 'recStop' }
   | { type: 'note'; nodeId: string; note: number; velocity: number; on: boolean };
 
 export type FromWorklet =
   | { type: 'meters'; meters: Record<string, [number, number]> }
   | { type: 'signals'; signals: Record<string, Record<string, number>> }
+  | { type: 'recState'; state: RecordingState }
+  | { type: 'take'; take: RecordedTake | null }
   | { type: 'error'; message: string };
 
 export const WORKLET_NAME = 'rsmps-audio';

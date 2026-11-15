@@ -120,6 +120,18 @@ export interface AudioKernel<S = any> { // eslint-disable-line @typescript-eslin
   create(ctx: AudioCtx): S;
   /** Process one block. Handle null inputs. Keep every piece of state inside `state`. */
   process(state: S, io: AudioIO): void;
+  /**
+   * Run this node (and everything upstream) whenever any of its stream inputs is wired, even if nothing downstream
+   * consumes its outputs. For nodes with a side effect on the host (the Timeline records what is wired to it).
+   */
+  runWhenFed?: boolean;
+  /**
+   * Host command channel (arm / start / stop recording ...). Called between blocks, never from process().
+   * The return value goes back to the caller of `AudioGraphRunner.control`.
+   */
+  control?(state: S, message: any, params: AudioParams): any;
+  /** Asset ids this node plays, for hosts that must load them first (beyond 'assets'-type params). */
+  assets?(params: AudioParams): string[]; // eslint-disable-line @typescript-eslint/no-explicit-any
   /** Clear tails and held notes (called on transport seek / stop where meaningful). Optional. */
   reset?(state: S): void;
 }

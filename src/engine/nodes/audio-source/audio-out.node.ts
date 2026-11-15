@@ -17,6 +17,7 @@ export default defineNode({
   inputs: { audio: { type: 'audio', multi: true, label: 'Audio' } },
   outputs: {},
   params: {
+    enabled: { type: 'bool', default: true, label: 'Include in export', hint: 'Untick to leave this sound out of exported files. You still hear it while working.' },
     gain: { type: 'number', default: 0, min: -60, max: 12, step: 0.1, unit: 'db', label: 'Master volume' },
     limiter: { type: 'bool', default: true, label: 'Protect against clipping' },
     ceiling: { type: 'number', default: -1, min: -12, max: 0, step: 0.1, unit: 'db', label: 'Ceiling', visibleIf: (p) => p.limiter !== false },
