@@ -380,12 +380,16 @@ export class PlayerImpl implements Player {
 
   /** See needsInvalidate(): live bridge values must not be served from a cache. */
   private signalEvent(ev: FrameEvent): void {
-    if (needsInvalidate(this.liveSignals(), ev)) this.clearPending = true;
+    if (needsInvalidate(this.liveSignals(), ev)) {
+      this.clearPending = true;
+      this.deps.router.flushHistory(); // a new pass: history is write-once per frame within a pass
+    }
   }
 
   private updateAudioInfo(graph: GraphDoc): void {
     const { audio, registry } = this.deps;
     this.hasSig = audio.hasSignals(graph, registry);
+    this.deps.router.fps = graph.project.fps;
     this.audioNeeded = this.hasSig || audio.hasAudio(graph, registry);
     this.micNodes = graph.nodes.filter((n) => n.type === 'microphone' && !n.bypass).length;
   }
@@ -429,6 +433,7 @@ export class PlayerImpl implements Player {
         this.markChanged();
         return;
       }
+      if (this.liveSignals()) this.deps.router.recordFrame(r.frame);
       if (r.frame !== this.frame) {
         this.frame = r.frame;
         this.kick();

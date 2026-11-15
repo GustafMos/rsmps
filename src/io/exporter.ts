@@ -109,7 +109,8 @@ export class ExporterImpl implements Exporter {
     const ids = req.outputs.length ? req.outputs : enabledOutputs(graph, registry).map((n) => n.id);
     const outs = ids
       .map((id) => graph.nodes.find((n) => n.id === id))
-      .filter((n): n is NodeInstance => !!n && registry.get(n.type)?.category === 'output');
+      // Picture outputs only: the audio output renders sound, which is muxed into the videos, not exported on its own.
+      .filter((n): n is NodeInstance => !!n && registry.get(n.type)?.category === 'output' && Object.values(registry.get(n.type)!.inputs).some((i) => (i as { type: string }).type === 'image'));
     if (outs.length === 0) throw new Error('This graph has no Output node to export. Add an Output node and connect an image to it.');
 
     const itemCount = batchCount(graph, registry);
@@ -702,7 +703,8 @@ export class ExporterImpl implements Exporter {
     try {
       if (audio.hasAudio(graph, registry)) {
         const rendered = await audio.renderOffline(graph, registry, (id) => library.assetAudio(id), { duration, loop: graph.project.loop });
-        if (rendered && rendered.channels.length && rendered.channels[0].length) return rendered;
+        // The offline renderer works in whole blocks: cut/pad to exactly the video's duration.
+        if (rendered && rendered.channels.length && rendered.channels[0].length) return fitAudio(rendered, 0, duration, false);
       }
       for (const n of this.mediaNodes(graph, job.out.id)) {
         const id = this.assetIdFor(n, job.item);

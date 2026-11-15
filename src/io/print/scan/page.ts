@@ -11,7 +11,7 @@ import {
   type PaperId,
   type SheetHeader,
 } from '../format';
-import { applyH, bilerp, dist, fitHomography, invert3, type Pt } from '../geometry';
+import { applyH, bilerp, dist, fitHomography, invert3, type Mat3, type Pt } from '../geometry';
 import { framesOnHeaderPage, geometryFromHeader, markCenterMm, pageHeader, planSheet, type SheetGeometry } from '../layout';
 import { createRaster, resizeRaster, sampleGray, toGray8, type RasterImage } from '../raster';
 import { estimateWhiteField, whiteAt, type WhiteField } from './clean';
@@ -137,6 +137,75 @@ function decodeAny(gray: Uint8Array, w: number, h: number, corners: Pt[]): Sheet
       return sampleGray(gray, w, h, p.x, p.y);
     }, t.s.width);
     if (header) return header;
+  }
+  return null;
+}
+
+interface Aligned {
+  W: number;
+  HH: number;
+  H1: Mat3;
+  Hinv: Mat3;
+  fidPhoto: Pt[];
+  fidFound: number;
+  rect: RasterImage;
+  grayR: Float32Array;
+  ppm: number;
+  warnings: string[];
+}
+
+/** Homography from the four finder centres, refined by template matching on the rectified page, plus the rectified page. */
+export function alignToPage(photo: RasterImage, corners: Pt[], W: number, HH: number): Aligned | null {
+  const fidMm = finderCentersMm(W, HH);
+  const H0 = fitHomography(fidMm, corners);
+  if (!H0) return null;
+  const ppm = clamp(photoPixelsPerMm(H0, W / 2, HH / 2), 4, 9);
+  const rect0 = rectify(photo, H0, W, HH, ppm);
+  const gray0 = toGrayF(rect0);
+  const fidPhoto: Pt[] = [];
+  const warnings: string[] = [];
+  let fidFound = 0;
+  for (let i = 0; i < 4; i++) {
+    const tpl = finderTemplate(ppm, i === 0);
+    const m = matchTemplate(gray0, rect0.width, rect0.height, tpl, fidMm[i].x * ppm, fidMm[i].y * ppm, 4 * ppm);
+    if (m && m.score >= 0.5) {
+      fidPhoto.push(applyH(H0, m.x / ppm, m.y / ppm));
+      fidFound++;
+    } else {
+      fidPhoto.push(corners[i]);
+      warnings.push(`Corner marker ${['top-left', 'top-right', 'bottom-right', 'bottom-left'][i]} could not be refined (${m ? `match ${m.score.toFixed(2)}` : 'outside the image'}); using the coarse position.`);
+    }
+  }
+  const H1 = fitHomography(fidMm, fidPhoto) ?? H0;
+  const Hinv = invert3(H1);
+  if (!Hinv) return null;
+  const rect = fidFound > 0 ? rectify(photo, H1, W, HH, ppm) : rect0;
+  const grayR = fidFound > 0 ? toGrayF(rect) : gray0;
+  return { W, HH, H1, Hinv, fidPhoto, fidFound, rect, grayR, ppm, warnings };
+}
+
+/**
+ * Second chance for small photos: align precisely for the most plausible paper sizes first (finder centres refined
+ * to sub-pixel), then read the strip through the refined homography.
+ */
+function decodeRefined(gray: Uint8Array, photo: RasterImage, corners: Pt[]): { header: SheetHeader; aligned: Aligned } | null {
+  const aspectQuad = dist(corners[0], corners[1]) / Math.max(1e-6, dist(corners[0], corners[3]));
+  const tries = PAPER_TRIES.map((t) => {
+    const s = pageSizeMm(t.paper, t.landscape);
+    const f = finderCentersMm(s.width, s.height);
+    return { s, d: Math.abs(Math.log(aspectQuad / ((f[1].x - f[0].x) / (f[3].y - f[0].y)))) };
+  })
+    .filter((t) => t.d < 0.25)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 3);
+  for (const t of tries) {
+    const al = alignToPage(photo, corners, t.s.width, t.s.height);
+    if (!al) continue;
+    const header = decodeStrip((x, y) => {
+      const p = applyH(al.H1, x, y);
+      return sampleGray(gray, photo.width, photo.height, p.x, p.y);
+    }, t.s.width);
+    if (header) return { header, aligned: al };
   }
   return null;
 }
@@ -339,6 +408,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   let corners: Pt[] = hyps[0];
   let header: SheetHeader | null = null;
   let manualLayout = false;
+  let aligned: Aligned | null = null;
   if (manual?.layout) {
     try {
       header = manualHeader(manual, index);
@@ -354,6 +424,17 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
       if (header) {
         corners = c;
         break;
+      }
+    }
+    if (!header) {
+      for (const c of hyps) {
+        const r = decodeRefined(gray, photo, c);
+        if (r) {
+          header = r.header;
+          aligned = r.aligned;
+          corners = c;
+          break;
+        }
       }
     }
     if (!header) {
@@ -380,30 +461,11 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   /* ---- 3. homography from the four finders, refined on the rectified page ---- */
   const W = geo.pageWidthMm;
   const HH = geo.pageHeightMm;
+  const al = aligned && Math.abs(aligned.W - W) < 1e-6 && Math.abs(aligned.HH - HH) < 1e-6 ? aligned : alignToPage(photo, corners, W, HH);
+  if (!al) return fail(report, 'The corner markers do not form a usable quadrilateral.');
+  report.warnings.push(...al.warnings);
+  const { H1, Hinv, fidPhoto, fidFound, rect, grayR, ppm } = al;
   const fidMm = finderCentersMm(W, HH);
-  const H0 = fitHomography(fidMm, corners);
-  if (!H0) return fail(report, 'The corner markers do not form a usable quadrilateral.');
-  const ppm = clamp(photoPixelsPerMm(H0, W / 2, HH / 2), 4, 9);
-  const rect0 = rectify(photo, H0, W, HH, ppm);
-  const gray0 = toGrayF(rect0);
-  const fidPhoto: Pt[] = [];
-  let fidFound = 0;
-  for (let i = 0; i < 4; i++) {
-    const tpl = finderTemplate(ppm, i === 0);
-    const m = matchTemplate(gray0, rect0.width, rect0.height, tpl, fidMm[i].x * ppm, fidMm[i].y * ppm, 4 * ppm);
-    if (m && m.score >= 0.5) {
-      fidPhoto.push(applyH(H0, m.x / ppm, m.y / ppm));
-      fidFound++;
-    } else {
-      fidPhoto.push(corners[i]);
-      report.warnings.push(`Corner marker ${['top-left', 'top-right', 'bottom-right', 'bottom-left'][i]} could not be refined (${m ? `match ${m.score.toFixed(2)}` : 'outside the image'}); using the coarse position.`);
-    }
-  }
-  const H1 = fitHomography(fidMm, fidPhoto) ?? H0;
-  const Hinv = invert3(H1);
-  if (!Hinv) return fail(report, 'The corner markers do not form a usable quadrilateral.');
-  const rect = fidFound > 0 ? rectify(photo, H1, W, HH, ppm) : rect0;
-  const grayR = fidFound > 0 ? toGrayF(rect) : gray0;
 
   /* ---- 4. refine every "+" mark ---- */
   const cols = geo.columns;

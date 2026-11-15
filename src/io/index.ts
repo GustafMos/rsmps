@@ -105,5 +105,6 @@ export const createIo: CreateIo = async () => {
       return res.value;
     },
   };
+  if (import.meta.env.DEV) (window as unknown as { __rsmpsIo?: Io }).__rsmpsIo = io; // dev-only handle for browser tests
   return io;
 };
