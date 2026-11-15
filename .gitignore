@@ -21,3 +21,8 @@ dist-cli/
 !.vscode/extensions.json
 .idea/
 src/cli/generated-nodes.ts
+
+# desktop packaging
+release/
+.desktop-stage/
+desktop/build/

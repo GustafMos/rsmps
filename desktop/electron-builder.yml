@@ -1,0 +1,79 @@
+# electron-builder configuration for the RSMPS desktop app. Run through desktop/scripts/pack.mjs (npm run desktop:build).
+# Run with --projectDir .desktop-stage (the staged bundle: web build + main process + minimal package.json), so none of
+# the repo's node_modules (sharp, the optional ffmpeg installer) can be collected into the app. Paths here are therefore
+# relative to .desktop-stage/, hence the ../ prefixes for repo files.
+appId: rip.scorpy.rsmps
+productName: RSMPS
+copyright: MIT licence. RipScorpy Media Processing Suite contributors.
+artifactName: RSMPS-${version}-${os}-${arch}.${ext}
+asar: true
+compression: normal
+npmRebuild: false
+nodeGypRebuild: false
+publish: null
+
+directories:
+  output: ../release
+  buildResources: ../desktop/build
+
+files:
+  - "**/*"
+  - "!**/*.map"
+  - "!**/*.md"
+  - "!**/test/**"
+  - "!**/*.test.*"
+
+extraResources:
+  - from: THIRD_PARTY_LICENSES.txt
+    to: THIRD_PARTY_LICENSES.txt
+  - from: LICENSE
+    to: LICENSE.rsmps.txt
+
+# Code signing: nothing is configured, so builds are unsigned. electron-builder signs automatically when CSC_LINK /
+# CSC_KEY_PASSWORD (Windows and macOS) or WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD are present. See docs/RELEASING.md.
+
+win:
+  icon: ../desktop/build/icon.ico
+  target:
+    - { target: nsis, arch: [x64] }
+    - { target: zip, arch: [x64] } # portable: unzip and run RSMPS.exe
+
+nsis:
+  artifactName: RSMPS-Setup-${version}-${os}-${arch}.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: RSMPS
+  installerIcon: ../desktop/build/icon.ico
+  uninstallerIcon: ../desktop/build/icon.ico
+  installerHeaderIcon: ../desktop/build/icon.ico
+  installerSidebar: ../desktop/build/installerSidebar.bmp
+  uninstallerSidebar: ../desktop/build/installerSidebar.bmp
+
+mac:
+  icon: ../desktop/build/icon-mac.png # rounded dark tile; electron-builder derives icon.icns from this 1024 px PNG
+  category: public.app-category.graphics-design
+  target:
+    - { target: dmg, arch: [universal] }
+    - { target: zip, arch: [universal] }
+  # Hardened runtime is OFF while builds are unsigned (an unsigned app with it on is rejected by the loader on some
+  # setups). When signing/notarizing, build with -c.mac.hardenedRuntime=true; desktop/entitlements.mac.plist is ready.
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  entitlements: ../desktop/entitlements.mac.plist
+  entitlementsInherit: ../desktop/entitlements.mac.plist
+  extendInfo:
+    NSCameraUsageDescription: RSMPS uses the camera for live input nodes.
+    NSMicrophoneUsageDescription: RSMPS uses the microphone for audio input nodes.
+
+dmg:
+  artifactName: RSMPS-${version}-${os}-${arch}.${ext}
+
+linux:
+  icon: ../desktop/build/icon.png
+  category: Graphics
+  executableName: rsmps
+  synopsis: GPU node graph for batch image, video and audio processing
+  target:
+    - { target: AppImage, arch: [x64] }
+    - { target: tar.gz, arch: [x64] }
