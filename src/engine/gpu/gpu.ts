@@ -58,6 +58,16 @@ export class Gpu {
   private linear: GPUSampler;
   private nearest: GPUSampler;
   private blitPipelines = new Map<string, GPURenderPipeline>();
+  private pendingErrors: Promise<string | null>[] = [];
+
+  /** Resolve shader compilation results gathered since the last call; throws the first error. Cheap when nothing was compiled. */
+  async checkErrors(): Promise<void> {
+    if (this.pendingErrors.length === 0) return;
+    const results = await Promise.all(this.pendingErrors.splice(0));
+    const first = results.find((r) => r);
+    if (first) throw new Error(first);
+  }
+
   /** Bytes currently allocated in pooled textures (in use + idle). */
   allocatedBytes = 0;
 
@@ -178,6 +188,8 @@ ${VERTEX}`;
           })),
         ],
       });
+      // Shader mistakes (including WGSL reserved words used as names) otherwise fail silently with a blank image.
+      this.device.pushErrorScope('validation');
       const module = this.device.createShaderModule({ label: options.label, code });
       const pipeline = this.device.createRenderPipeline({
         label: options.label,
@@ -186,6 +198,10 @@ ${VERTEX}`;
         fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
         primitive: { topology: 'triangle-list' },
       });
+      const label = options.label ?? 'pass';
+      this.pendingErrors.push(
+        this.device.popErrorScope().then((err) => (err ? `Shader "${label}" failed to compile: ${err.message.split(/\r?\n/).slice(0, 6).join(' ')}` : null)),
+      );
       entry = { pipeline, layout: bgl };
       this.pipelines.set(cacheKey, entry);
     }

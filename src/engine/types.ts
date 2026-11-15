@@ -407,7 +407,9 @@ export interface Host {
 /** A live picture source for `Host.liveFrame`. */
 export type LiveSource =
   | { kind: 'camera'; deviceId: string; width?: number; height?: number; facing?: 'user' | 'environment' }
-  | { kind: 'url'; url: string };
+  | { kind: 'url'; url: string; mode?: 'auto' | 'image' | 'mjpeg' | 'video'; refresh?: number }
+  /** A phone streaming its camera through the LAN phone link (QR code). `session` is the pairing token. */
+  | { kind: 'phone'; session: string };
 
 export interface AssetInfo {
   id: string;

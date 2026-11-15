@@ -414,6 +414,7 @@ export class Engine {
         outputs = ((await def.render(ctx as never)) ?? {}) as Record<string, Value | null>;
         this.checkOutputs(def, outputs);
         if (def.maskable) this.applyMask(def, inputs, outputs, params.mix as number);
+        await this.gpu.checkErrors();
         for (const v of Object.values(outputs)) {
           if (isTextured(v) && !retained.has(v.texture)) {
             retained.add(v.texture);

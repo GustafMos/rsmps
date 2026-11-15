@@ -48,8 +48,7 @@ export default defineNode({
     const url = ctx.params.url.trim();
     if (!url) throw new Error('Enter an address (URL).');
     if (!host.liveFrame) throw new Error('Network pictures are not available here (exports and headless runs). Record it first.');
-    // The host reads `mode` / `refresh` as optional extras of the url source.
-    const source = { kind: 'url', url, mode: ctx.params.kind, refresh: ctx.params.refresh } as LiveSource;
+    const source: LiveSource = { kind: 'url', url, mode: ctx.params.kind, refresh: ctx.params.refresh };
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
     const frame = await host.liveFrame(source, maxSide);
     if (!frame) throw new Error('Waiting for the first picture…');

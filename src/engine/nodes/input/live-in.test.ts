@@ -54,3 +54,26 @@ it('url-in passes address, type and refresh to the host and keeps the stream siz
   expect((out.image as { width: number }).width).toBe(8);
   expect(seen[0]).toMatchObject({ kind: 'url', url: 'http://cam/shot.jpg', mode: 'image', refresh: 5 });
 });
+
+it('phone-camera rotates on the GPU and asks the host for the phone session', async () => {
+  const seen: LiveSource[] = [];
+  const base = await harness();
+  const host: Host = {
+    ...nullHost,
+    async liveFrame(source) {
+      seen.push(source);
+      const img = base.fromFn(4, 2, (x) => (x === 0 ? [255, 0, 0, 255] : [0, 0, 0, 255]));
+      return { texture: img.texture, width: 4, height: 2 };
+    },
+  };
+  const t = await harness([], host);
+  await expect(t.run('phone-camera', {})).rejects.toThrow(/Not linked/);
+  const out = await t.run('phone-camera', { session: 'tok', rotate: '90' });
+  const im = out.image as { width: number; height: number };
+  expect([im.width, im.height]).toEqual([2, 4]); // 90 degrees swaps the sides
+  const px = await t.pixels(out.image as never);
+  expect(px.at(1, 0)).toEqual([255, 0, 0, 255]); // the red left column ends up on the top row, right side
+  expect(seen[0]).toMatchObject({ kind: 'phone', session: 'tok' });
+  const plain = await t.run('phone-camera', { session: 'tok', rotate: 'auto' });
+  expect((plain.image as { width: number }).width).toBe(4);
+});
