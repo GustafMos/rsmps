@@ -36,6 +36,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cli": "tsx src/cli/index.ts",
+    "cli2": "node scripts/build-cli.mjs && node dist-cli/rsmps.mjs",
+    "build:cli2": "node scripts/build-cli.mjs",
     "check": "tsc --noEmit && vitest run"
   },
   "dependencies": {

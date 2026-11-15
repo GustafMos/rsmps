@@ -20,3 +20,4 @@ dist-cli/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+src/cli2/generated-nodes.ts
