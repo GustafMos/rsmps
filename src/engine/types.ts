@@ -295,6 +295,8 @@ export interface Host {
   assetInfo(assetId: string): AssetInfo | null;
   /** Decoded frame of an image/video asset at `seconds`, at most `maxSide` texels on the long side (0 = full). */
   assetFrame(assetId: string, seconds: number, maxSide: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
+  /** Decoded PCM of an audio asset or a video's sound track (used by the audio engine, not by render nodes). */
+  assetAudio?(assetId: string): Promise<{ sampleRate: number; channels: Float32Array[] } | null>;
   /** Rasterise text to straight RGBA (browser canvas). Optional: missing in headless runs. */
   rasterizeText?(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null;
 }
