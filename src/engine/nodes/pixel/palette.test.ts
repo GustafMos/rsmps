@@ -39,7 +39,7 @@ describe('palette', () => {
     const img = t.fromFn(60, 20, (x) => (x < 20 ? [220, 30, 30, 255] : x < 40 ? [30, 200, 40, 255] : [30, 40, 210, 255]));
     for (const method of ['median-cut', 'kmeans']) {
       const a = (await t.run('palette', { source: 'extract', count: 3, method }, { image: img })).palette as PaletteValue;
-      const b = (await t.run('palette', { source: 'extract', count: 3, method, lockFirstFrame: false }, { image: img })).palette as PaletteValue;
+      const b = (await t.run('palette', { source: 'extract', count: 3, method, follow: true }, { image: img })).palette as PaletteValue;
       expect(a.colors.length).toBe(3);
       expect(b.colors).toEqual(a.colors);
       const rgb = a.colors.map((c) => c.map((v) => Math.round(v * 255)));
@@ -55,34 +55,39 @@ describe('palette', () => {
     expect(p.colors.length).toBe(2);
   });
 
-  it('"lock to first frame" keeps the palette of second 0 while the video changes', async () => {
+  it('extracts once from the chosen frame and stays cached across frames; "follow" re-extracts per frame', async () => {
     const t = await harness();
     const red = t.solid(16, 16, [250, 20, 20, 255]);
     const blue = t.solid(16, 16, [20, 20, 250, 255]);
+    let renders = 0;
     t.registry.register(
       defineNode({
         id: 'test-timed-source',
         title: 'timed',
         category: 'input',
-        description: 'red at t=0, blue later',
+        description: 'red before 0.5s, blue later',
         inputs: {},
         outputs: { image: { type: 'image' } },
         params: {},
-        render: (ctx) => ({ image: ctx.time.seconds < 0.5 ? red : blue }),
+        render: (ctx) => {
+          renders++;
+          return { image: ctx.time.seconds < 0.5 ? red : blue };
+        },
       }),
     );
-    const build = (lock: boolean) => {
-      let g = createGraph('lock');
-      const src = addNode(g, t.registry, 'test-timed-source');
-      const pal = addNode(src.graph, t.registry, 'palette', { x: 0, y: 0 }, { source: 'extract', count: 2, lockFirstFrame: lock });
-      g = connect(pal.graph, t.registry, { node: src.node.id, port: 'image' }, { node: pal.node.id, port: 'image' });
-      return { g, id: pal.node.id };
+    const build = (params: Record<string, unknown>) => {
+      const src = addNode(createGraph('x'), t.registry, 'test-timed-source');
+      const pal = addNode(src.graph, t.registry, 'palette', { x: 0, y: 0 }, { source: 'extract', count: 2, ...params });
+      return { g: connect(pal.graph, t.registry, { node: src.node.id, port: 'image' }, { node: pal.node.id, port: 'image' }), id: pal.node.id };
     };
-    const locked = build(true);
-    const late = (await t.evalGraph(locked.g, locked.id, { seconds: 2, port: 'palette' })) as PaletteValue;
-    expect(late.colors[0][0]).toBeGreaterThan(0.9); // red, from second 0
-    const free = build(false);
-    const lateFree = (await t.evalGraph(free.g, free.id, { seconds: 2, port: 'palette' })) as PaletteValue;
-    expect(lateFree.colors[0][2]).toBeGreaterThan(0.9); // blue, from the current frame
+    const fixed = build({ frame: 0 });
+    const seen: number[] = [];
+    for (const s of [0, 0.25, 1, 2, 3]) seen.push(((await t.evalGraph(fixed.g, fixed.id, { seconds: s, port: 'palette' })) as PaletteValue).colors[0][0]);
+    expect(seen.every((v) => v > 0.9)).toBe(true); // always the red of second 0
+    expect(renders).toBe(1); // upstream and extraction ran once for 5 frames
+    const later = build({ frame: 2 });
+    expect(((await t.evalGraph(later.g, later.id, { seconds: 0, port: 'palette' })) as PaletteValue).colors[0][2]).toBeGreaterThan(0.9);
+    const follow = build({ follow: true });
+    expect(((await t.evalGraph(follow.g, follow.id, { seconds: 2, port: 'palette' })) as PaletteValue).colors[0][2]).toBeGreaterThan(0.9);
   });
 });

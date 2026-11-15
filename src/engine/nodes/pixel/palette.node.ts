@@ -37,7 +37,7 @@ export default defineNode({
   description: 'Provides a colour palette: a built-in one, your own, or colours extracted from an image.',
   keywords: ['colors', 'swatch', 'extract', 'median cut', 'kmeans', 'pico-8', 'gameboy'],
   cpu: true,
-  inputs: { image: { type: 'image', label: 'Image (for extract)' } },
+  inputs: { image: { type: 'image', label: 'Image (for extract)', lazy: true } },
   outputs: { palette: { type: 'palette', label: 'Palette' } },
   params: {
     source: {
@@ -79,11 +79,22 @@ export default defineNode({
       ],
       visibleIf: (p) => p.source === 'extract',
     },
-    lockFirstFrame: {
+    frame: {
+      type: 'number',
+      default: 0,
+      min: 0,
+      max: 3600,
+      step: 0.01,
+      unit: 's',
+      label: 'Sample at',
+      hint: 'The palette is extracted once from the input at this time and stays fixed for the whole clip.',
+      visibleIf: (p) => p.source === 'extract' && p.follow !== true,
+    },
+    follow: {
       type: 'bool',
-      default: true,
-      label: 'Lock to first frame',
-      hint: 'Extract from the input at second 0 so a video keeps one stable palette instead of flickering.',
+      default: false,
+      label: 'Re-extract every frame',
+      hint: 'Uses the CPU on every frame and the palette may flicker. Leave off for a stable, cached palette.',
       visibleIf: (p) => p.source === 'extract',
     },
     sort: {
@@ -106,8 +117,7 @@ export default defineNode({
     } else if (p.source === 'custom') {
       colors = p.custom.map((c) => [c[0], c[1], c[2]] as Rgb);
     } else {
-      let image: ImageValue | null = ctx.in.image;
-      if (image && p.lockFirstFrame) image = (await ctx.pull('image', { seconds: 0 })) ?? image;
+      const image: ImageValue | null = p.follow ? await ctx.pull('image', { seconds: ctx.time.seconds }) : await ctx.pull('image', { seconds: p.frame });
       if (!image) colors = [[0, 0, 0], [1, 1, 1]];
       else {
         const k = EXTRACT_SIDE / Math.max(image.width, image.height);

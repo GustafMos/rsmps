@@ -3,6 +3,7 @@ import type { DitherSpace } from '../../lib/pixel-color';
 import { diffuseGpu } from '../../lib/pixel-diffuse-gpu';
 import { DITHER_ALGORITHMS, algorithmFamily, thresholdMatrix } from '../../lib/pixel-dither-data';
 import { PALETTE_WGSL, SPACE_INDEX, SPACE_OPTIONS, clampPalette, matrixTexture, paletteTexture } from '../../lib/pixel-gpu';
+import { FALLBACK_PARAM, paletteSummary, resolvePalette } from '../../lib/pixel-palettes';
 
 /**
  * Dither: image + palette in, image out that uses ONLY palette colours.
@@ -157,11 +158,12 @@ export default defineNode({
   keywords: ['bayer', 'floyd', 'steinberg', 'atkinson', 'halftone', 'blue noise', 'ordered', 'diffusion', 'retro', 'palette'],
   inputs: {
     image: { type: 'image', required: true, label: 'Image' },
-    palette: { type: 'palette', required: true, label: 'Palette' },
+    palette: { type: 'palette', label: 'Palette' },
   },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
   params: {
+    fallback: FALLBACK_PARAM,
     algorithm: {
       type: 'enum',
       default: 'bayer-4',
@@ -189,11 +191,11 @@ export default defineNode({
     },
     seed: { type: 'number', default: 0, min: 0, max: 9999, step: 1, integer: true, label: 'Seed', visibleIf: (p) => p.algorithm === 'white-noise' },
   },
-  summary: (p) => DITHER_ALGORITHMS.find((a) => a.id === p.algorithm)?.label ?? p.algorithm,
+  summary: (p) => `${DITHER_ALGORITHMS.find((a) => a.id === p.algorithm)?.label ?? p.algorithm} · ${paletteSummary(false, p.fallback)}`,
   async render(ctx) {
     const src = ctx.in.image;
     const p = ctx.params;
-    const colors = clampPalette(ctx.in.palette.colors);
+    const colors = clampPalette(resolvePalette(ctx.in.palette, ctx.params.fallback));
     if (colors.length === 0) return { image: src };
     const space = p.colorSpace as DitherSpace;
     const family = algorithmFamily(p.algorithm);

@@ -40,10 +40,11 @@ describe('quantize', () => {
     expect(Math.abs(none.at(1, 1)[0] - 100)).toBeLessThan(3);
   });
 
-  it('the palette socket is required: without it the node produces nothing', async () => {
+  it('without a palette wire it uses the fallback palette (never produces nothing)', async () => {
     const t = await harness();
-    const out = await t.run('quantize', {}, { image: t.solid(2, 2, [1, 2, 3, 255]) });
-    expect(out.image ?? null).toBeNull();
+    const out = await t.run('quantize', { fallback: 'one-bit' }, { image: t.solid(2, 2, [250, 250, 240, 255]) });
+    const px = await t.pixels(out.image as never);
+    expect(px.at(0, 0).slice(0, 3)).toEqual([245, 240, 230]);
   });
 
   it('works the same at 2x resolution (no lengths involved)', async () => {

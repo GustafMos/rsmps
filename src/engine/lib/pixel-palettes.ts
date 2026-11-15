@@ -1,3 +1,4 @@
+import { hexToRgb } from './pixel-color';
 /** Built-in palettes (ported from the old engine, plus a few classics). Colours are hex. */
 export interface BuiltinPalette {
   id: string;
@@ -79,4 +80,24 @@ export const BUILTIN_PALETTES: BuiltinPalette[] = [
 
 export function builtinPalette(id: string): BuiltinPalette | undefined {
   return BUILTIN_PALETTES.find((p) => p.id === id);
+}
+
+export const FALLBACK_PARAM = {
+  type: 'enum' as const,
+  default: 'sweetie-16',
+  label: 'Palette',
+  group: 'Fallback palette (when none is connected)',
+  hint: 'Used only when no palette is wired in. Wire a Palette node to use your own or an extracted one.',
+  options: BUILTIN_PALETTES.map((p) => ({ value: p.id, label: `${p.name} (${p.colors.length})` })),
+};
+
+/** Colours to use: the wired palette, else the chosen built-in. */
+export function resolvePalette(wired: { colors: [number, number, number][] } | null, fallbackId: string): [number, number, number][] {
+  if (wired && wired.colors.length) return wired.colors;
+  return (builtinPalette(fallbackId) ?? BUILTIN_PALETTES[0]).colors.map(hexToRgb);
+}
+
+export function paletteSummary(wired: boolean, fallbackId: string): string {
+  // The summary cannot see wires, so it names the fallback that applies when nothing is connected.
+  return wired ? 'palette wired' : `no palette wired → ${builtinPalette(fallbackId)?.name ?? fallbackId}`;
 }
