@@ -104,7 +104,12 @@ export class PlayerImpl implements Player {
   private settledKey = '';
   private settledFrame = -1;
   private settledProxy = 1;
+  /** Size the image has at proxy 1 (what the user sees reported). */
   private size: { width: number; height: number } | null = null;
+  /** Actual texture size on screen. */
+  private rendered: { width: number; height: number } | null = null;
+  /** Last size measured in a proxy-1 render of the viewed node. Proxy-independent nodes (Pixelate, Resize) make `rendered / proxy` wrong. */
+  private fullReal: { width: number; height: number } | null = null;
   private errors: ReadonlyMap<string, string> = EMPTY_ERRORS;
   private timings: ReadonlyMap<string, number> = EMPTY_ERRORS as unknown as ReadonlyMap<string, number>;
   private lostMessage: string | null = null;
@@ -164,6 +169,7 @@ export class PlayerImpl implements Player {
     const prev = this.view;
     const changed =
       !prev || prev.graph !== view.graph || prev.node !== view.node || prev.port !== view.port || prev.item !== view.item || prev.itemCount !== view.itemCount;
+    if (!prev || prev.node !== view.node || prev.port !== view.port) this.fullReal = null;
     this.view = { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount };
     if (!changed) return;
     this.keyDirty = true;
@@ -195,7 +201,7 @@ export class PlayerImpl implements Player {
     this.signalEvent('play');
     if (this.audioNeeded && !this.deps.audio.running) this.deps.audio.start().then(() => this.markChanged(), () => undefined);
     this.playing = true;
-    this.ctl.reset();
+    this.ctl.warmup();
     this.anchorClock();
     this.syncTransport();
     this.raf = requestAnimationFrame(this.tick);
@@ -421,6 +427,7 @@ export class PlayerImpl implements Player {
       this.keyDirty = false;
       if (key !== this.key) {
         this.key = key;
+        this.ctl.warmup();
         this.cache.clear();
         this.dirty = true;
       }
@@ -488,7 +495,7 @@ export class PlayerImpl implements Player {
         // Wait for the GPU so the measurement is real and the queue cannot run away.
         await this.gpu.device.queue.onSubmittedWorkDone().catch(() => undefined);
         const budget = 1000 / job.graph.project.fps;
-        this.ctl.report(performance.now() - started, budget);
+        this.ctl.report(performance.now() - started, budget, performance.now());
       }
     } else if (!stale) {
       this.clearOutput();
@@ -498,12 +505,15 @@ export class PlayerImpl implements Player {
 
   /** Put `image` on screen and remember what is showing. */
   private show(image: Shown, job: Job, proxy: number): void {
+    this.rendered = { width: image.width, height: image.height };
+    if (proxy >= 0.999) this.fullReal = this.rendered;
+    const full = this.fullReal ?? { width: Math.max(1, Math.round(image.width / proxy)), height: Math.max(1, Math.round(image.height / proxy)) };
+    if (!this.size || this.size.width !== full.width || this.size.height !== full.height) this.size = full;
     if (!this.present(image)) return;
     this.setShown(image);
     this.shownKey = job.key;
     this.shownFrame = job.frame;
     this.shownProxy = proxy;
-    this.size = { width: image.width, height: image.height };
     this.fpsRing[this.fpsHead] = performance.now();
     this.fpsHead = (this.fpsHead + 1) % FPS_RING;
     this.fpsCount = Math.min(FPS_RING, this.fpsCount + 1);
@@ -526,6 +536,11 @@ export class PlayerImpl implements Player {
         canvas.width = img.width;
         canvas.height = img.height;
       }
+      // The backing store is the rendered size; CSS shows it at the full-resolution size so the proxy is invisible.
+      if (this.size) {
+        canvas.style.width = `${this.size.width}px`;
+        canvas.style.height = `${this.size.height}px`;
+      }
       this.gpu.blit(img, ctx.getCurrentTexture(), true);
       return true;
     } catch (err) {
@@ -537,6 +552,7 @@ export class PlayerImpl implements Player {
   private clearOutput(): void {
     this.setShown(null);
     this.size = null;
+    this.rendered = null;
     this.shownFrame = -1;
     const ctx = this.ctx;
     if (!ctx) return;
@@ -595,6 +611,7 @@ export class PlayerImpl implements Player {
       errors: this.errors,
       timings: this.timings,
       imageSize: this.size,
+      renderedSize: this.rendered,
       audio: { needed: this.audioNeeded, running: this.deps.audio.running, micNodes: this.micNodes },
     };
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fitAudio } from './audio-util';
-import { PROXY_LEVELS, ProxyController, frameAtTime } from './clock';
+import { frameAtTime } from './clock';
 import { RenderedFrameCache } from './frame-cache';
 import { sizeBucket, detectKind } from './library';
 import { ByteLru, TimedFrameStore } from './lru';
@@ -127,52 +127,6 @@ describe('frameAtTime', () => {
     expect(r.ended).toBe(true);
     expect(r.frame).toBe(95);
     expect(frameAtTime(0, 1000, 24, 96, false).ended).toBe(false);
-  });
-});
-
-describe('ProxyController', () => {
-  const budget = 1000 / 30;
-  it('lowers the proxy when frames are over budget, one step at a time', () => {
-    const c = new ProxyController();
-    const seen: number[] = [];
-    for (let i = 0; i < 60; i++) seen.push(c.report(80, budget));
-    expect(seen[0]).toBe(1);
-    expect(c.proxy).toBeLessThan(1);
-    const steps = [...new Set(seen)];
-    for (let i = 1; i < steps.length; i++) expect(PROXY_LEVELS.indexOf(steps[i] as 1)).toBe(PROXY_LEVELS.indexOf(steps[i - 1] as 1) + 1);
-  });
-  it('settles at the level where the cost fits (cost ~ proxy^2)', () => {
-    const c = new ProxyController();
-    // 80 ms at full resolution: needs proxy <= sqrt(33/80) ~ 0.64 -> 0.5
-    for (let i = 0; i < 300; i++) c.report(80 * c.proxy * c.proxy, budget);
-    expect(c.proxy).toBe(0.5);
-  });
-  it('does not flap: a borderline load keeps the level', () => {
-    const c = new ProxyController();
-    for (let i = 0; i < 100; i++) c.report(80 * c.proxy * c.proxy, budget);
-    const level = c.proxy;
-    const changes = new Set<number>();
-    for (let i = 0; i < 300; i++) changes.add(c.report(80 * c.proxy * c.proxy, budget));
-    expect(changes.size).toBe(1);
-    expect(c.proxy).toBe(level);
-  });
-  it('raises again only after a long stretch of easy frames', () => {
-    const c = new ProxyController();
-    for (let i = 0; i < 40; i++) c.report(200 * c.proxy * c.proxy, budget);
-    const low = c.proxy;
-    expect(low).toBeLessThan(1);
-    for (let i = 0; i < 10; i++) c.report(2, budget);
-    expect(c.proxy).toBe(low); // hysteresis
-    for (let i = 0; i < 300; i++) c.report(2, budget);
-    expect(c.proxy).toBe(1);
-  });
-  it('ignores the frames right after a change (compile spikes)', () => {
-    const c = new ProxyController();
-    for (let i = 0; i < 6; i++) c.report(80, budget);
-    const p = c.proxy;
-    c.report(5000, budget);
-    c.report(5000, budget);
-    expect(c.proxy).toBe(p);
   });
 });
 

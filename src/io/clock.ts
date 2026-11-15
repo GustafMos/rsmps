@@ -21,70 +21,124 @@ export function frameAtTime(startFrame: number, elapsedMs: number, fps: number, 
 
 export const PROXY_LEVELS = [1, 0.75, 0.5, 0.35, 0.25] as const;
 
+export interface ProxyTuning {
+  /** Frames ignored after warmup() (shader compiles, cold caches). */
+  warmupFrames: number;
+  /** Size of the median window. */
+  window: number;
+  /** Consecutive over-budget medians before stepping down (levels above the floor). */
+  lowerAfter: number;
+  /** Median above budget * this counts as over. */
+  overFactor: number;
+  /** Median below budget * this counts as comfortable. */
+  underFactor: number;
+  /** Comfortable for this long before stepping up (ms). */
+  raiseAfterMs: number;
+  /** A level abandoned for being too slow is not retried for this long (ms). */
+  retryAfterMs: number;
+  /** Index of the lowest level used without sustained proof (0.5). */
+  floorIndex: number;
+  /** Over budget at the floor for this long before going below it (ms). */
+  belowFloorAfterMs: number;
+}
+
+export const DEFAULT_TUNING: ProxyTuning = {
+  warmupFrames: 8,
+  window: 5,
+  lowerAfter: 6,
+  overFactor: 1.0,
+  underFactor: 0.55,
+  raiseAfterMs: 1500,
+  retryAfterMs: 10_000,
+  floorIndex: 2,
+  belowFloorAfterMs: 2000,
+};
+
 /**
- * Chooses the playback proxy scale. Cost is assumed to scale with proxy^2, so measured render times are
- * normalised to full resolution. Lowers one step after a few consecutive over-budget frames; raises one step
- * only after a long run of frames that would still fit comfortably at the higher level (hysteresis).
+ * Chooses the playback proxy scale, calmly. It looks at the median of the last few render times (one
+ * spike never matters), changes one level at a time, ignores frames right after play / graph / proxy
+ * changes, will not go below 0.5 unless 0.5 is itself too slow for a sustained time, climbs only after a
+ * sustained comfortable period, and does not retry a level it abandoned for ~10 s. The level survives pause/play and loop
+ * wraps (only `reset()` returns to 1).
  */
 export class ProxyController {
   private idx = 0;
-  /** Smoothed render time normalised to proxy 1, ms. */
-  private norm = 0;
+  private times: number[] = [];
+  private warm = 0;
   private over = 0;
-  private under = 0;
-  private cooldown = 0;
+  private overSince = -1;
+  private underSince = -1;
+  private abandonedUntil: number[] = PROXY_LEVELS.map(() => 0);
 
-  constructor(private opts = { lowerAfter: 3, raiseAfter: 40, lowerAbove: 1.0, raiseBelow: 0.65, cooldown: 4 }) {}
+  constructor(private t: ProxyTuning = DEFAULT_TUNING) {
+    this.warm = t.warmupFrames;
+  }
 
   get proxy(): number {
     return PROXY_LEVELS[this.idx];
   }
 
+  /** Back to full resolution (the user changed the proxy mode). */
   reset(): void {
     this.idx = 0;
-    this.norm = 0;
-    this.over = 0;
-    this.under = 0;
-    this.cooldown = 0;
+    this.abandonedUntil = PROXY_LEVELS.map(() => 0);
+    this.warmup();
   }
 
-  /** Feed the time one rendered frame took. Returns the proxy to use for the next frame. */
-  report(renderMs: number, budgetMs: number): number {
-    if (this.cooldown > 0) {
-      // The first frames after a change include shader compiles and cache misses: ignore them.
-      this.cooldown--;
+  /** Playback started, or the graph changed: keep the level, but ignore the next frames and restart timers. */
+  warmup(): void {
+    this.warm = this.t.warmupFrames;
+    this.times = [];
+    this.over = 0;
+    this.overSince = -1;
+    this.underSince = -1;
+  }
+
+  /** Feed the time one rendered frame took (ms) at wall-clock `now` (ms). Returns the proxy for the next frame. */
+  report(renderMs: number, budgetMs: number, now: number = performance.now()): number {
+    if (this.warm > 0) {
+      this.warm--;
       return this.proxy;
     }
-    const p = this.proxy;
-    const sample = renderMs / (p * p);
-    this.norm = this.norm === 0 ? sample : this.norm * 0.7 + sample * 0.3;
-    const atCurrent = this.norm * p * p;
-    if (atCurrent > budgetMs * this.opts.lowerAbove) {
+    this.times.push(renderMs);
+    if (this.times.length > this.t.window) this.times.shift();
+    if (this.times.length < this.t.window) return this.proxy;
+    const median = [...this.times].sort((a, b) => a - b)[this.times.length >> 1];
+
+    if (median > budgetMs * this.t.overFactor) {
+      this.underSince = -1;
       this.over++;
-      this.under = 0;
-      if (this.over >= this.opts.lowerAfter && this.idx < PROXY_LEVELS.length - 1) {
+      if (this.overSince < 0) this.overSince = now;
+      const atFloor = this.idx >= this.t.floorIndex;
+      const ready = atFloor ? now - this.overSince >= this.t.belowFloorAfterMs : this.over >= this.t.lowerAfter;
+      if (ready && this.idx < PROXY_LEVELS.length - 1) {
+        this.abandonedUntil[this.idx] = now + this.t.retryAfterMs;
         this.idx++;
-        this.change();
+        this.settle();
       }
-    } else {
-      this.over = 0;
-      if (this.idx > 0) {
-        const up = PROXY_LEVELS[this.idx - 1];
-        if (this.norm * up * up < budgetMs * this.opts.raiseBelow) {
-          this.under++;
-          if (this.under >= this.opts.raiseAfter) {
-            this.idx--;
-            this.change();
-          }
-        } else this.under = 0;
-      }
+      return this.proxy;
     }
+
+    this.over = 0;
+    this.overSince = -1;
+    if (this.idx > 0 && median < budgetMs * this.t.underFactor) {
+      if (this.underSince < 0) this.underSince = now;
+      const up = PROXY_LEVELS[this.idx - 1];
+      const p = this.proxy;
+      const predicted = median * ((up * up) / (p * p));
+      if (now - this.underSince >= this.t.raiseAfterMs && now >= this.abandonedUntil[this.idx - 1] && predicted < budgetMs * 0.9) {
+        this.idx--;
+        this.settle();
+      }
+    } else this.underSince = -1;
     return this.proxy;
   }
 
-  private change(): void {
+  private settle(): void {
+    this.warm = this.t.warmupFrames;
+    this.times = [];
     this.over = 0;
-    this.under = 0;
-    this.cooldown = this.opts.cooldown;
+    this.overSince = -1;
+    this.underSince = -1;
   }
 }

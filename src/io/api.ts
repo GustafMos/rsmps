@@ -44,7 +44,15 @@ export interface PlayerState {
   /** Node id → milliseconds in the last evaluation. */
   timings: ReadonlyMap<string, number>;
   /** Size of the image currently shown, or null. */
+  /**
+   * Size of the image at FULL resolution (proxy 1), independent of the playback proxy. Show this to the user and
+   * lay the canvas out at exactly this size (the player also sets the canvas CSS width/height to it); the browser
+   * scales the lower-resolution backing store, so the picture never changes size on screen when the proxy changes.
+   * Taken from the last proxy-1 render of the viewed node; until one exists it is rendered size / proxy.
+   */
   imageSize: { width: number; height: number } | null;
+  /** Actual size of the texture currently drawn (smaller than imageSize at a lowered proxy), or null. For diagnostics only. */
+  renderedSize: { width: number; height: number } | null;
   /**
    * Audio status. `needed`: the graph has an audio output or sound-to-picture analysis taps, so the audio engine
    * must run. `running`: it has been started (needs a user gesture via enableAudio()). `micNodes`: microphone nodes
