@@ -46,6 +46,48 @@ export function sourceChain(
   return { graph: g, node: n.node.id };
 }
 
+/** A number source that is a function of the frame index. `spy.n` counts how often it actually renders. */
+export function numberSource(id: string, f: (frame: number) => number, spy?: { n: number }): AnyNodeDef {
+  return defineNode({
+    id,
+    title: id,
+    category: 'math',
+    description: 'test stepped number source',
+    inputs: {},
+    outputs: { value: { type: 'number' } },
+    params: {},
+    render(ctx) {
+      if (spy) spy.n++;
+      return { value: f(ctx.time.frame) };
+    },
+  });
+}
+
+/** numberSource → node(type, params) on `value` (and optionally a second source on `trigger`). 10 fps, 100 s, no loop. */
+export function numberChain(
+  t: Harness,
+  sourceId: string,
+  type: string,
+  params: Record<string, unknown> = {},
+  opts: { trigger?: string; project?: Partial<GraphDoc['project']> } = {},
+): { graph: GraphDoc; node: string; source: string } {
+  let g = createGraph('number-test');
+  g.project = { ...g.project, fps: 10, duration: 100, loop: false, width: 4, height: 4, ...opts.project };
+  const s = addNode(g, t.registry, sourceId);
+  const n = addNode(s.graph, t.registry, type, { x: 0, y: 0 }, params);
+  g = connect(n.graph, t.registry, { node: s.node.id, port: 'value' }, { node: n.node.id, port: 'value' });
+  if (opts.trigger) {
+    const tr = addNode(g, t.registry, opts.trigger);
+    g = connect(tr.graph, t.registry, { node: tr.node.id, port: 'value' }, { node: n.node.id, port: 'trigger' });
+  }
+  return { graph: g, node: n.node.id, source: s.node.id };
+}
+
+/** Number output of a node at a given frame of the project. */
+export async function numberAt(t: Harness, graph: GraphDoc, node: string, frame: number): Promise<number> {
+  return (await t.evalGraph(graph, node, { seconds: frame / graph.project.fps })) as number;
+}
+
 /** Red channel (0..255) of the centre pixel of a node's output at `seconds`. */
 export async function sampleAt(t: Harness, graph: GraphDoc, node: string, seconds: number): Promise<number> {
   const img = (await t.evalGraph(graph, node, { seconds })) as ImageValue | null;
