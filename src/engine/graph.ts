@@ -163,6 +163,11 @@ export function outputNodes(graph: GraphDoc, registry: Registry): NodeInstance[]
   return graph.nodes.filter((n) => registry.get(n.type)?.category === 'output');
 }
 
+/** Output nodes that "export everything" should render: not bypassed and not switched off with their `enabled` param. */
+export function enabledOutputs(graph: GraphDoc, registry: Registry): NodeInstance[] {
+  return outputNodes(graph, registry).filter((n) => !n.bypass && n.params.enabled !== false);
+}
+
 /** Batch size: the largest asset list on any node with an `assets` param (minimum 1). */
 export function batchCount(graph: GraphDoc, registry: Registry): number {
   let count = 1;

@@ -13,6 +13,7 @@ export default defineNode({
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: {},
   params: {
+    enabled: { type: 'bool', default: true, label: 'Include in export', hint: 'Untick to skip this output when exporting everything. You can still export it on its own.' },
     name: { type: 'string', default: '{name}', label: 'File name', hint: 'Tokens: {name} {index} {width} {height} {frame}' },
     kind: {
       type: 'enum',

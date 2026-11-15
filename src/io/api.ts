@@ -121,7 +121,7 @@ export interface ExportedFile {
 
 export interface ExportRequest {
   graph: GraphDoc;
-  /** Output node ids to render; empty = every output node in the graph. */
+  /** Output node ids to render; empty = every output that is not switched off (`enabled` param) or bypassed. */
   outputs: string[];
   /** 'current' = only `item`; 'all' = the whole batch. */
   items: 'current' | 'all';

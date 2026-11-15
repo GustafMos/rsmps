@@ -131,6 +131,7 @@ export function selectOutputs(graph: GraphDoc, registry: Registry, filter: strin
   for (const n of all) {
     if (wanted.length && !wanted.includes(n.id.toLowerCase()) && !wanted.includes((n.label ?? '').toLowerCase())) continue;
     if (n.type !== 'image-out') continue; // audio-out and plugin sinks are not image exports
+    if (!wanted.length && (n.bypass || n.params.enabled === false)) continue; // switched off; name it with --outputs to render it anyway
     nodes.push(n);
   }
   for (const f of wanted) {

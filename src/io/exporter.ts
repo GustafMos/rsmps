@@ -26,7 +26,7 @@ import type { PcmAudio } from '../engine/audio/api';
 import type { Registry } from '../engine/define';
 import { defaultParams } from '../engine/engine';
 import type { Gpu } from '../engine/gpu/gpu';
-import { batchCount, outputNodes, upstream } from '../engine/graph';
+import { batchCount, enabledOutputs, outputNodes, upstream } from '../engine/graph';
 import type { GraphDoc, ImageValue, MaskValue, NodeInstance } from '../engine/types';
 import type { ExportRequest, ExportedFile, Exporter } from './api';
 import type { AudioBridge } from './audio-bridge';
@@ -106,7 +106,7 @@ export class ExporterImpl implements Exporter {
   async run(req: ExportRequest): Promise<ExportedFile[]> {
     const { registry } = this.d;
     const graph = req.graph;
-    const ids = req.outputs.length ? req.outputs : outputNodes(graph, registry).map((n) => n.id);
+    const ids = req.outputs.length ? req.outputs : enabledOutputs(graph, registry).map((n) => n.id);
     const outs = ids
       .map((id) => graph.nodes.find((n) => n.id === id))
       .filter((n): n is NodeInstance => !!n && registry.get(n.type)?.category === 'output');
