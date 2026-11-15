@@ -118,6 +118,10 @@ The tool is MIT licensed and does not claim anything you make with it. Check the
 **Where do I report bugs?**
 On the GitHub issue tracker (TODO: add the link) or in the comments here.
 
+## Not affiliated (include on the page)
+
+RSMPS is an independent project. It is not affiliated with, sponsored by or endorsed by Blackmagic Design, the Blender Foundation, Adobe, Ableton, Apple, or any other company, product or creator mentioned here. DaVinci Resolve, Fusion, Blender, Adobe Color, Ableton Live and ProRes are trademarks of their respective owners. They are named only to describe what inspired this tool or what it works with.
+
 ## Price (owner's decision)
 
 - **Minimum:** TODO. Suggested: **$0 minimum**, because the same builds are free on GitHub, so a minimum above zero would only

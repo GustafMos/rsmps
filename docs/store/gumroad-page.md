@@ -84,6 +84,10 @@ System Settings, Privacy & Security, Open Anyway. Or `xattr -dr com.apple.quaran
 **Does it upload my files?** No. The app makes no network requests of its own.
 ```
 
+## Not affiliated (include on the page)
+
+RSMPS is an independent project. It is not affiliated with, sponsored by or endorsed by Blackmagic Design, the Blender Foundation, Adobe, Ableton, Apple, or any other company, product or creator mentioned here. DaVinci Resolve, Fusion, Blender, Adobe Color, Ableton Live and ProRes are trademarks of their respective owners. They are named only to describe what inspired this tool or what it works with.
+
 ## Price (owner's decision)
 
 - **Minimum:** TODO. Suggested: **$1**, so a purchase is a deliberate choice and not a free-download with extra steps (Gumroad
