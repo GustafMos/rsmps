@@ -64,6 +64,9 @@ function bytesOf(t: { texture: GPUTexture }): number {
   return t.texture.width * t.texture.height * (t.texture.format === 'rgba8unorm' ? 4 : 8);
 }
 
+/** True when the page was opened with ?safe (see Player.setView). */
+export const SAFE_MODE = typeof location !== 'undefined' && /[?&]safe/.test(location.search);
+
 export class PlayerImpl implements Player {
   private gpu: Gpu;
   private canvas: HTMLCanvasElement | null = null;
@@ -155,6 +158,9 @@ export class PlayerImpl implements Player {
   }
 
   setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number }): void {
+    // Safe mode: open the app with ?safe in the address to load the project WITHOUT rendering anything,
+    // so a setting that makes rendering hang can be fixed. Remove ?safe and reload to render again.
+    if (SAFE_MODE) view = { ...view, node: null };
     const prev = this.view;
     const changed =
       !prev || prev.graph !== view.graph || prev.node !== view.node || prev.port !== view.port || prev.item !== view.item || prev.itemCount !== view.itemCount;
