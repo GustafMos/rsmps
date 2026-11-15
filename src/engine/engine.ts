@@ -133,6 +133,8 @@ function coerceParam(p: ParamDef, raw: unknown): unknown {
     case 'palette':
     case 'assets':
       return Array.isArray(raw) ? raw : p.default;
+    case 'curve':
+      return raw && typeof raw === 'object' && Array.isArray((raw as { keys?: unknown }).keys) ? raw : p.default;
     default:
       return raw === undefined ? p.default : raw;
   }

@@ -207,7 +207,30 @@ export interface AssetsParam extends ParamBase {
 export interface DeviceParam extends ParamBase {
   type: 'device';
   default: string;
-  device: 'audio-input' | 'midi-input';
+  device: 'audio-input' | 'midi-input' | 'video-input';
+}
+/** One key of an animation curve. */
+export interface CurveKey {
+  /** Position in the loop, 0..1 (phase), so curves scale with the project duration. */
+  t: number;
+  /** Value at the key. */
+  v: number;
+  /** How the segment AFTER this key is interpolated. */
+  interp: 'linear' | 'hold' | 'smooth' | 'bezier';
+  /** Bezier handles as offsets [dt, dv] from the key (used when interp = 'bezier'; incoming handle belongs to this key's left side). */
+  in?: [number, number];
+  out?: [number, number];
+}
+/** A keyframed curve edited with the curve editor. */
+export interface CurveValue {
+  keys: CurveKey[];
+}
+export interface CurveParam extends ParamBase {
+  type: 'curve';
+  default: CurveValue;
+  /** Suggested vertical range of the editor. */
+  min?: number;
+  max?: number;
 }
 /** Free-form JSON for nodes with a custom inspector (strokes, curves…). Avoid when a typed param works. */
 export interface JsonParam extends ParamBase {
@@ -225,6 +248,7 @@ export type ParamDef =
   | PaletteParam
   | AssetsParam
   | DeviceParam
+  | CurveParam
   | JsonParam;
 
 export type ParamValue<P extends ParamDef> = P extends NumberParam
@@ -245,7 +269,9 @@ export type ParamValue<P extends ParamDef> = P extends NumberParam
                 ? string[]
                 : P extends DeviceParam
                   ? string
-                  : unknown;
+                  : P extends CurveParam
+                    ? CurveValue
+                    : unknown;
 
 export type ParamSchema = Record<string, ParamDef>;
 export type InputSchema = Record<string, InputDef>;
@@ -361,6 +387,11 @@ export interface Host {
   /** Decoded PCM of an audio asset or a video's sound track (used by the audio engine, not by render nodes). */
   assetAudio?(assetId: string): Promise<{ sampleRate: number; channels: Float32Array[] } | null>;
   /**
+   * Latest frame of a live picture source (webcam, network stream). Live-only: returns null when the source is
+   * not running or in headless/export runs unless the host recorded it. `maxSide` as in assetFrame.
+   */
+  liveFrame?(source: LiveSource, maxSide: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
+  /**
    * Value of a named signal that a stream-domain (audio/MIDI) node publishes, at `seconds`:
    * loudness, pitch, note, gate… This is the bridge that lets sound drive picture parameters.
    * Live it returns the latest measured value; during export, the value analysed from the rendered audio.
@@ -370,6 +401,11 @@ export interface Host {
   /** Rasterise text to straight RGBA (browser canvas). Optional: missing in headless runs. */
   rasterizeText?(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null;
 }
+
+/** A live picture source for `Host.liveFrame`. */
+export type LiveSource =
+  | { kind: 'camera'; deviceId: string; width?: number; height?: number; facing?: 'user' | 'environment' }
+  | { kind: 'url'; url: string };
 
 export interface AssetInfo {
   id: string;
