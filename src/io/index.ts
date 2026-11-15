@@ -10,6 +10,7 @@ import { registerBuiltins } from '../engine/nodes';
 import type { Io, CreateIo } from './api';
 import { createAudioBridge } from './audio-bridge';
 import { ExporterImpl } from './exporter';
+import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
 import { Library } from './library';
 import { listVideoInputs, onVideoDevicesChanged } from './live';
@@ -37,9 +38,8 @@ export function assetIdsOf(graph: import('../engine/types').GraphDoc, registry: 
 
 export const createIo: CreateIo = async () => {
   const device = await createBrowserDevice();
-  device.addEventListener?.('uncapturederror', (e) => {
-    console.error('WebGPU error:', (e as GPUUncapturedErrorEvent).error?.message ?? e);
-  });
+  const watch = new GpuWatch();
+  watch.attach(device);
   const gpu = new Gpu(device);
   const registry = new Registry();
   registerBuiltins(registry);
@@ -57,7 +57,8 @@ export const createIo: CreateIo = async () => {
   router.onExportEnd = () => player.invalidate();
   library.subscribe(() => player.invalidate());
 
-  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router });
+  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router, player, watch });
+  watch.onError((m) => player.reportGpuError(m));
   const phone = new PhoneLink();
   await phone.init();
   library.live.phone = phone;

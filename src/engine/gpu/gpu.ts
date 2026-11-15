@@ -47,6 +47,9 @@ function layoutUniforms(uniforms: Record<string, UniformValue>): UniformLayout {
   return { wgsl: `struct U {\n${lines.join('\n')}\n};`, size: Math.ceil(offset / 16) * 16, fields };
 }
 
+/** Root-scope size at which a leak warning is printed (dev only). */
+const ROOT_SCOPE_WARN = 48;
+
 export class Gpu {
   readonly device: GPUDevice;
   private pool = new Map<string, GPUTexture[]>();
@@ -98,13 +101,21 @@ export class Gpu {
       this.pooled.add(tex);
       this.allocatedBytes += w * h * (format === 'rgba8unorm' ? 4 : 8);
     }
-    this.fresh[this.fresh.length - 1].add(tex);
+    const scope = this.fresh[this.fresh.length - 1];
+    scope.add(tex);
+    if (this.fresh.length === 1 && scope.size === ROOT_SCOPE_WARN && !this.warnedRoot && import.meta.env?.DEV) {
+      this.warnedRoot = true;
+      console.warn('GPU textures are being acquired outside gpu.scoped()/a node render and never retained: they will never be recycled (leak). See Gpu.scoped.');
+    }
     return tex;
   }
+
+  private warnedRoot = false;
 
   retain(tex: GPUTexture): void {
     if (!this.pooled.has(tex)) return;
     this.refs.set(tex, (this.refs.get(tex) ?? 0) + 1);
+    this.fresh[0].delete(tex); // an owner exists now: the root scope no longer needs to track it
   }
 
   release(tex: GPUTexture): void {
@@ -123,6 +134,44 @@ export class Gpu {
     this.fresh.push(new Set());
   }
 
+  /**
+   * Run `fn` in its own temp-texture scope. Every texture acquired inside (`pass`, `alloc`, `upload`, ...) that is not
+   * RETAINED when `fn` returns goes back to the pool. Use it around any GPU work done outside a node render (export, display,
+   * snapshots): retain what must outlive the scope INSIDE `fn`, and release it later. Without a scope such textures land in the
+   * root scope, which is never collected.
+   */
+  scoped<T>(fn: () => T): T {
+    this.begin();
+    try {
+      return fn();
+    } finally {
+      this.end();
+    }
+  }
+
+  /** Like `scoped` for async work. Only use it when nothing else acquires textures while `fn` awaits (scopes are a stack). */
+  async scopedAsync<T>(fn: () => Promise<T>): Promise<T> {
+    this.begin();
+    try {
+      return await fn();
+    } finally {
+      this.end();
+    }
+  }
+
+  /** Memory and ownership counters for diagnostics and tests. `rootScope` should stay near 0. */
+  stats(): { allocatedBytes: number; idleBytes: number; idleTextures: number; retainedTextures: number; rootScope: number } {
+    let idleBytes = 0;
+    let idleTextures = 0;
+    for (const list of this.pool.values()) {
+      for (const t of list) {
+        idleBytes += t.width * t.height * (t.format === 'rgba8unorm' ? 4 : 8);
+        idleTextures++;
+      }
+    }
+    return { allocatedBytes: this.allocatedBytes, idleBytes, idleTextures, retainedTextures: this.refs.size, rootScope: this.fresh[0].size };
+  }
+
   /** Close the scope: every texture acquired inside it that nobody retained goes back to the pool. */
   end(): void {
     const set = this.fresh.length > 1 ? this.fresh.pop()! : this.fresh[0];
@@ -133,6 +182,10 @@ export class Gpu {
   }
 
   private recycle(tex: GPUTexture): void {
+    this.fresh[0].delete(tex);
+    // A texture that trim() already destroyed can still be named by an open scope: never put it back into the pool
+    // (it would be handed out again and every pass using it would be silently dropped).
+    if (!this.pooled.has(tex)) return;
     const key = `${tex.width}x${tex.height}:${tex.format}`;
     const list = this.pool.get(key) ?? [];
     if (!list.includes(tex)) list.push(tex);
@@ -145,6 +198,7 @@ export class Gpu {
       for (const tex of list) {
         this.allocatedBytes -= tex.width * tex.height * (tex.format === 'rgba8unorm' ? 4 : 8);
         this.pooled.delete(tex);
+        this.fresh[0].delete(tex);
         tex.destroy();
       }
     }
@@ -296,6 +350,11 @@ ${VERTEX}`;
     const encoder = this.device.createCommandEncoder();
     encoder.copyTextureToBuffer({ texture }, { buffer, bytesPerRow, rowsPerImage: height }, [width, height]);
     this.device.queue.submit([encoder.finish()]);
+    if (texture !== image.texture) {
+      // The conversion copy is queued: later passes are ordered after it, so the temporary can be reused right away.
+      this.retain(texture);
+      this.release(texture);
+    }
     await buffer.mapAsync(GPUMapMode.READ);
     const mapped = new Uint8Array(buffer.getMappedRange());
     const out = new Uint8ClampedArray(width * height * 4);

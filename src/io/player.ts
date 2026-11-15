@@ -407,6 +407,33 @@ export class PlayerImpl implements Player {
     }
   }
 
+  private holds = 0;
+
+  /**
+   * Stop rendering (and free the RAM frame cache) until the returned function is called. Exports use it so the player does not
+   * evaluate, evict and recycle textures between export frames, and so its memory is free for the export.
+   */
+  hold(): () => void {
+    this.holds++;
+    this.cache.clear();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.holds--;
+      if (this.holds === 0) {
+        this.dirty = true;
+        this.kick();
+      }
+    };
+  }
+
+  /** Show a GPU error (out of memory, invalid texture) in the state: a silently failed pass would otherwise look like a wrong picture. */
+  reportGpuError(message: string): void {
+    this.errors = new Map([...this.errors, ['gpu', message]]);
+    this.markChanged();
+  }
+
   private liveSignals(): boolean {
     return this.hasSig && this.deps.audio.running;
   }
@@ -514,7 +541,7 @@ export class PlayerImpl implements Player {
   private nextJob(): Job | null {
     const view = this.view;
     if (!view || this.disposed || this.lostMessage || !this.ctx) return null;
-    if (this.deps.router.exporting) return null; // an export owns Host.signal right now
+    if (this.deps.router.exporting || this.holds > 0) return null; // an export owns Host.signal / the GPU right now
     if (this.keyDirty) {
       const key = renderHash(view.graph, view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}/${view.activeOutput ?? ''}`);
       this.keyDirty = false;
@@ -553,7 +580,7 @@ export class PlayerImpl implements Player {
     const started = performance.now();
     let res: EvalResult;
     try {
-      res = await this.deps.gate.evaluate({
+      res = await this.deps.gate.evaluateHeld({
         graph: this.hasLive ? stampLive(job.graph, this.liveIds, ++this.liveTick) : job.graph,
         node: job.node,
         port: job.port,
@@ -571,6 +598,7 @@ export class PlayerImpl implements Player {
     }
     this.errors = res.errors;
     this.timings = res.timings;
+    try {
     const stale = this.keyDirty || job.key !== this.key;
     const v = res.value;
     if (isTextured(v)) {
@@ -578,12 +606,16 @@ export class PlayerImpl implements Player {
         this.markChanged();
         return;
       }
-      let shownValue: ImageValue | MaskValue = v;
-      const cf = job.frameSpec.conform;
-      if (cf) shownValue = conformImage(this.gpu, v, scaleSize(cf.size, job.proxy), cf.mode, cf.anchor);
-      if (job.frameSpec.pixelSize) shownValue = enlargeNearest(this.gpu, shownValue, job.frameSpec.pixelSize);
-      const image: Shown = { texture: shownValue.texture, width: shownValue.width, height: shownValue.height };
-      this.gpu.retain(image.texture); // held for the cache / the shown slot
+      // Conform / enlarge passes allocate temporaries: run them in a scope and retain only the final texture (the slot reference
+      // for the cache / the shown image). The evaluation result itself is held by the gate until `drop` below.
+      const image: Shown = this.gpu.scoped(() => {
+        let shownValue: ImageValue | MaskValue = v;
+        const cf = job.frameSpec.conform;
+        if (cf) shownValue = conformImage(this.gpu, v, scaleSize(cf.size, job.proxy), cf.mode, cf.anchor);
+        if (job.frameSpec.pixelSize) shownValue = enlargeNearest(this.gpu, shownValue, job.frameSpec.pixelSize);
+        this.gpu.retain(shownValue.texture);
+        return { texture: shownValue.texture, width: shownValue.width, height: shownValue.height };
+      });
       let kept = false;
       try {
         if (!live && this.cache.put(job.frame, image, job.proxy, bytesOf(image))) kept = true;
@@ -601,6 +633,9 @@ export class PlayerImpl implements Player {
       this.clearOutput();
     }
     this.markChanged();
+    } finally {
+      this.deps.gate.drop(res);
+    }
   }
 
   /** Put `image` on screen and remember what is showing. */

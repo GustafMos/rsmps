@@ -283,6 +283,7 @@ export class Library implements MediaLibrary {
   private poolSweeper: ReturnType<typeof setInterval> | null = null;
   /** True while an export runs: video frames must be frame-exact (seek path only, never real-time playback). */
   exact = false;
+  private frameBudget = FRAME_BUDGET_BYTES;
   private pending = new Map<string, Promise<Frame | null>>();
   private audio = new Map<string, Promise<PcmAudio | null>>();
   private audioBytes = new Map<string, number>();
@@ -298,7 +299,7 @@ export class Library implements MediaLibrary {
 
   constructor(private gpu: Gpu) {
     this.live = new LiveSources(gpu);
-    this.frames = new TimedFrameStore<Frame>(FRAME_BUDGET_BYTES, (f) => this.gpu.release(f.texture));
+    this.frames = new TimedFrameStore<Frame>(this.frameBudget, (f) => this.gpu.release(f.texture));
   }
 
   /* --------------------------------- listing -------------------------------- */
@@ -928,6 +929,14 @@ export class Library implements MediaLibrary {
     let pcm = 0;
     for (const n of this.audioBytes.values()) pcm += n;
     return this.frames.bytes + pcm;
+  }
+
+  /** Set the byte budget of the decoded-frame store (evicts down to it); returns the previous one. */
+  setFrameBudget(bytes: number): number {
+    const prev = this.frameBudget;
+    this.frameBudget = bytes;
+    this.frames.maxBytes = bytes;
+    return prev;
   }
 
   /** Release decoders and textures (page teardown). */

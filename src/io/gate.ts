@@ -16,6 +16,34 @@ export class EvalGate {
     return run;
   }
 
+  /**
+   * Like evaluate, but a texture result is RETAINED inside the gated step, before any other evaluation can start (a later
+   * evaluation evicts and recycles cached results). The caller owns that reference: pass the result to `drop` when done.
+   */
+  evaluateHeld(req: EvalRequest): Promise<EvalResult> {
+    const run = this.tail.then(async () => {
+      const res = await this.engine.evaluate(req);
+      const v = res.value;
+      if (v && typeof v === 'object' && 'texture' in v) this.engine.gpu.retain(v.texture);
+      return res;
+    });
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Give back the reference taken by evaluateHeld. */
+  drop(res: EvalResult): void {
+    const v = res.value;
+    if (v && typeof v === 'object' && 'texture' in v) this.engine.gpu.release(v.texture);
+  }
+
+  /** Set the engine's result-cache budget (bytes of texture memory); returns the previous one. */
+  setCacheBudget(bytes: number): number {
+    const prev = this.engine.cacheBudget;
+    this.engine.cacheBudget = bytes;
+    return prev;
+  }
+
   /** Run `fn` after every queued evaluation has finished and before any later one starts. */
   exclusive<T>(fn: () => T | Promise<T>): Promise<T> {
     const run = this.tail.then(fn);

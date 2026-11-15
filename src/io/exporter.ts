@@ -35,6 +35,8 @@ import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
 import { encodeWav } from './wav';
 import { OffscreenPresenter, frameFromCanvas, presentToBlob } from './encode';
+import { GpuWatch, scopeMessage } from './gpu-watch';
+import type { EvalResult } from '../engine/engine';
 import { SILENT_TRACKS, type SignalRouter } from './signals';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
@@ -50,6 +52,9 @@ export interface ExporterDeps {
   library: Library;
   audio: AudioBridge;
   router?: SignalRouter;
+  /** Pausing the player for the duration of an export keeps it from evaluating (and recycling textures) between frames. */
+  player?: { hold(): () => void };
+  watch?: GpuWatch;
 }
 
 type Img = ImageValue | MaskValue;
@@ -95,6 +100,10 @@ interface Composed {
   release(): void;
 }
 
+/** Cache budgets while an export runs (bytes of GPU texture memory). */
+const EXPORT_ENGINE_CACHE = 192 * 1024 * 1024;
+const EXPORT_MEDIA_CACHE = 128 * 1024 * 1024;
+
 const MIME: Record<OutParams['imageFormat'], string> = { png: 'image/png', webp: 'image/webp', jpeg: 'image/jpeg' };
 
 export class ExporterImpl implements Exporter {
@@ -107,10 +116,22 @@ export class ExporterImpl implements Exporter {
   async run(req: ExportRequest): Promise<ExportedFile[]> {
     // Video frames must be frame-exact while exporting (the browser-player fallback may not use real-time playback).
     this.d.library.exact = true;
+    const unhold = this.d.player?.hold(); // no player evaluations between export frames
+    this.d.watch?.take();
+    // An export touches every frame once: the engine / frame caches are not worth hundreds of MB then, and the memory is what keeps
+    // large frames (1080x1920 with 20+ intermediate textures) from running the GPU out of memory.
+    const engineBudget = this.d.gate.setCacheBudget(EXPORT_ENGINE_CACHE);
+    const mediaBudget = this.d.library.setFrameBudget(EXPORT_MEDIA_CACHE);
+    await this.d.gate.exclusive(() => this.d.gpu.trim()); // never while an evaluation is mid-render
     try {
       return await this.runExact(req);
     } finally {
+      this.d.gate.setCacheBudget(engineBudget);
+      this.d.library.setFrameBudget(mediaBudget);
+      await this.d.gate.exclusive(() => this.d.gpu.trim());
       this.d.library.exact = false;
+      this.releaseConformed();
+      unhold?.();
     }
   }
 
@@ -391,11 +412,13 @@ export class ExporterImpl implements Exporter {
 
   private async signature(img: Img): Promise<string> {
     const { gpu } = this.d;
-    const small = gpu.pass({
-      label: 'export-signature',
-      size: { width: 16, height: 16 },
-      textures: { src: img },
-      wgsl: `fn fx(uv: vec2f, px: vec2f) -> vec4f {
+    // The pass and the readback copy are submitted inside the scope (queue order keeps the temporary valid), then it is recycled.
+    const pending = gpu.scoped(() => {
+      const small = gpu.pass({
+        label: 'export-signature',
+        size: { width: 16, height: 16 },
+        textures: { src: img },
+        wgsl: `fn fx(uv: vec2f, px: vec2f) -> vec4f {
   var acc = vec4f(0.0);
   let cell = 1.0 / 16.0;
   for (var j = 0; j < 4; j++) {
@@ -406,14 +429,10 @@ export class ExporterImpl implements Exporter {
   }
   return acc / 16.0;
 }`,
+      });
+      return gpu.read(small, false);
     });
-    gpu.retain(small.texture);
-    try {
-      const bytes = await gpu.read(small, false);
-      return hashString(Array.from(bytes).join(','));
-    } finally {
-      gpu.release(small.texture);
-    }
+    return hashString(Array.from(await pending).join(','));
   }
 
   /** Evaluate the output node at `frame`. The result texture is only valid until the next evaluation: retain it. */
@@ -429,32 +448,61 @@ export class ExporterImpl implements Exporter {
     this.releaseConformed();
     const fp = readFrameParams(job.out.params);
     const target = resolveFrame(graph.project, fp);
-    const res = await this.d.gate.evaluate({
-      canvas: isCustomFrame(graph.project, target) ? target : undefined,
-      graph,
-      node: job.out.id,
-      seconds: frame / graph.project.fps,
-      item: job.item,
-      itemCount: job.itemCount,
-      proxy: 1 / fp.pixelSize,
-      quality: 'final',
-    });
-    const v = res.value;
-    if (v && typeof v === 'object' && 'texture' in v) {
-      const img = v as Img;
-      // Conform to the art grid, then enlarge with hard pixels to the full frame (unless art-size export).
-      const art = pixelPlan(target, fp.pixelSize).art;
-      const conformed = conformImage(this.d.gpu, img, fp.pixelSize > 1 ? art : target, effectiveConform(fp), fp.conformAnchor);
-      const out = job.artMode ? conformed : enlargeNearest(this.d.gpu, conformed, fp.pixelSize);
-      if (out !== img) {
-        // Held until the next renderFrame (or the end of the run): callers retain it themselves while encoding.
-        this.d.gpu.retain(out.texture);
-        this.conformed = out.texture;
+    const { gpu, gate } = this.d;
+    const device = gpu.device;
+    // Any GPU error while rendering this frame makes the picture WRONG (a failed pass leaves old texture content behind): catch it.
+    device.pushErrorScope('validation');
+    device.pushErrorScope('out-of-memory');
+    let gpuError: string | null = null;
+    let res: EvalResult | null = null;
+    let result: Img | null = null;
+    let failure: unknown = null;
+    try {
+      res = await gate.evaluateHeld({
+        canvas: isCustomFrame(graph.project, target) ? target : undefined,
+        graph,
+        node: job.out.id,
+        seconds: frame / graph.project.fps,
+        item: job.item,
+        itemCount: job.itemCount,
+        proxy: 1 / fp.pixelSize,
+        quality: 'final',
+      });
+      await gpu.checkErrors(); // shader compile errors of this frame
+      const v = res.value;
+      if (!(v && typeof v === 'object' && 'texture' in v)) {
+        const firstError = [...res.errors.values()][0];
+        throw new Error(firstError ?? 'Nothing is connected to this output.');
       }
-      return out;
+      const img = v as Img;
+      // Conform to the art grid, then enlarge with hard pixels to the full frame (unless art-size export). The temporaries of
+      // these passes are recycled when the scope closes; only the final texture is retained.
+      const art = pixelPlan(target, fp.pixelSize).art;
+      const out = gpu.scoped(() => {
+        const conformed = conformImage(gpu, img, fp.pixelSize > 1 ? art : target, effectiveConform(fp), fp.conformAnchor);
+        const final = job.artMode ? conformed : enlargeNearest(gpu, conformed, fp.pixelSize);
+        if (final !== img) gpu.retain(final.texture);
+        return final;
+      });
+      // One reference is held until the next renderFrame (or the end of the run); callers retain it again while encoding.
+      if (out !== img) {
+        gate.drop(res);
+        this.conformed = out.texture;
+      } else this.conformed = img.texture; // the gate's reference becomes the hold
+      result = out;
+    } catch (err) {
+      failure = err;
+      if (res && !result) gate.drop(res);
     }
-    const firstError = [...res.errors.values()][0];
-    throw new Error(firstError ?? 'Nothing is connected to this output.');
+    const oom = await device.popErrorScope();
+    const validation = await device.popErrorScope();
+    gpuError = scopeMessage('out-of-memory', oom) ?? scopeMessage('validation', validation) ?? this.d.watch?.take() ?? null;
+    if (gpuError) {
+      this.releaseConformed();
+      throw new Error(`${gpuError}. Frame ${frame + 1} would be wrong, so the export was stopped. Close other tabs or lower the output size.`);
+    }
+    if (failure) throw failure;
+    return result!;
   }
 
   /**
@@ -470,18 +518,21 @@ export class ExporterImpl implements Exporter {
     if (W === img.width && H === img.height) return { drawable: img, release: () => undefined };
     const maxDim = gpu.device.limits.maxTextureDimension2D;
     if (W > maxDim || H > maxDim) throw new Error(`The output would be ${W}x${H}, larger than this GPU supports (${maxDim}). Lower the pixel upscale.`);
-    const out = gpu.pass({
-      label: 'export-compose',
-      size: { width: W, height: H },
-      textures: { src: img },
-      uniforms: { scale, srcSize: [img.width, img.height] },
-      wgsl: `fn fx(uv: vec2f, px: vec2f) -> vec4f {
+    const out = gpu.scoped(() => {
+      const o = gpu.pass({
+        label: 'export-compose',
+        size: { width: W, height: H },
+        textures: { src: img },
+        uniforms: { scale, srcSize: [img.width, img.height] },
+        wgsl: `fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let p = vec2i(floor(px / u.scale));
   if (p.x >= i32(u.srcSize.x) || p.y >= i32(u.srcSize.y)) { return vec4f(0.0); }
   return textureLoad(src, p, 0);
 }`,
+      });
+      gpu.retain(o.texture); // owned by the Composed below
+      return o;
     });
-    gpu.retain(out.texture);
     return { drawable: { texture: out.texture, width: W, height: H }, release: () => gpu.release(out.texture) };
   }
 
