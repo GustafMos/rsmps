@@ -122,6 +122,7 @@ function coerceParam(p: ParamDef, raw: unknown): unknown {
     case 'vec2':
       return Array.isArray(raw) && raw.length === 2 ? raw : p.default;
     case 'string':
+    case 'device':
       return typeof raw === 'string' ? raw : p.default;
     case 'palette':
     case 'assets':

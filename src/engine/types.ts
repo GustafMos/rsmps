@@ -190,6 +190,12 @@ export interface AssetsParam extends ParamBase {
   default: string[];
   accept: 'image-video' | 'audio' | 'midi' | 'any';
 }
+/** A hardware device chosen from a live list (system microphones, MIDI inputs). Value = device id; '' = system default / all. */
+export interface DeviceParam extends ParamBase {
+  type: 'device';
+  default: string;
+  device: 'audio-input' | 'midi-input';
+}
 /** Free-form JSON for nodes with a custom inspector (strokes, curves…). Avoid when a typed param works. */
 export interface JsonParam extends ParamBase {
   type: 'json';
@@ -205,6 +211,7 @@ export type ParamDef =
   | Vec2Param
   | PaletteParam
   | AssetsParam
+  | DeviceParam
   | JsonParam;
 
 export type ParamValue<P extends ParamDef> = P extends NumberParam
@@ -223,7 +230,9 @@ export type ParamValue<P extends ParamDef> = P extends NumberParam
               ? [number, number, number][]
               : P extends AssetsParam
                 ? string[]
-                : unknown;
+                : P extends DeviceParam
+                  ? string
+                  : unknown;
 
 export type ParamSchema = Record<string, ParamDef>;
 export type InputSchema = Record<string, InputDef>;
@@ -420,6 +429,11 @@ export interface NodeDef<
   audio?: AudioKernel;
   /** One line shown on the node body, e.g. "Bayer 8×8 · 16 colours". */
   summary?: (params: ParamsOf<P>) => string;
+  /**
+   * The node accepts notes played by the user. While it is selected, the UI maps the computer keyboard
+   * (and an on-screen piano) to MIDI notes and sends them to it.
+   */
+  playable?: boolean;
   /** Set when `render` does heavy CPU work, so the UI can warn. */
   cpu?: boolean;
   /**
