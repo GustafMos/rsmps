@@ -10,10 +10,10 @@ import type { AssetInfo, GraphDoc, Host, Value } from '../engine/types';
 
 /** The user's media. Implements the engine `Host`, persists files in IndexedDB so a reload keeps them. */
 export interface MediaLibrary extends Host {
-  /** Import files (images, videos, audio, MIDI). Returns the new assets in order. */
+  /** Assets for the media panel. Working assets owned by a scan project are hidden unless `includeHidden`. */
   add(files: File[]): Promise<AssetInfo[]>;
   remove(assetId: string): Promise<void>;
-  list(): AssetInfo[];
+  list(opts?: { includeHidden?: boolean }): AssetInfo[];
   /** Small preview as an object URL (cached). */
   thumbnail(assetId: string): Promise<string | null>;
   /** Load previously imported assets after a page reload. */
@@ -25,6 +25,13 @@ export interface MediaLibrary extends Host {
    * Persisted like other assets, so scanned frames can feed a Media In node as an animation.
    */
   addSequence(name: string, frames: Blob[] | ImageBitmap[], fps: number): Promise<AssetInfo>;
+  /**
+   * The hidden working sequence owned by `owner` (a scan project id): created on first call, then REPLACED in place under
+   * the same asset id. Hidden from `list()`; removed by `removeOwned`.
+   */
+  attachSequence(owner: string, name: string, frames: Blob[], fps: number): Promise<AssetInfo>;
+  /** Delete every asset owned by `owner`. */
+  removeOwned(owner: string): Promise<void>;
 }
 
 export interface PlayerState {
@@ -159,8 +166,34 @@ export interface PluginManager {
 }
 
 /** Project persistence: the graph document itself (assets are referenced by id). */
+/** A library entry as stored: `AssetInfo` plus ownership. Hidden working assets belong to a scan project (`owner` = its id). */
+export type LibraryAsset = AssetInfo & { owner?: string; hidden?: boolean };
+
+/**
+ * Everything a scan tab needs to come back after a reload. Results (recovered frames) are NOT stored: `io.scan.restore`
+ * recomputes them from the photos and manual corrections.
+ */
+export interface ScanSession {
+  /** The original photo files. */
+  photos: { name: string; blob: Blob }[];
+  /** Manual corrections per photo index, exactly what `ScanApi.reanalyzePage` takes. */
+  manual: Record<number, ScanManualInput>;
+  /** What the UI collects: `analyze` (ScanAnalyzeOptions), `commit` (name, fps, drawingOnly, clean-up, last export settings...). Free-form. */
+  options: { analyze?: ScanAnalyzeOptions; commit?: Partial<Omit<ScanCommitOptions, 'originals'>> } & Record<string, unknown>;
+  /** Id of the hidden working sequence asset created by `ScanApi.attach`. */
+  committedAssetId?: string;
+  /** The scan project's own node graph (processes the recovered frames, e.g. upscale and clean up). */
+  graph?: GraphDoc;
+}
+
 /** One open project (tab). Metadata only: the graph body is loaded on demand with `loadProject`. */
 export interface OpenProject {
+  /**
+   * 'graph': an ordinary node-graph project. 'scan': a print-and-scan session that ALSO owns a node graph
+   * (`loadProject(id)` returns it, or null before it has one; `saveProject(id, graph)` saves it). Stored projects
+   * without a kind are graphs.
+   */
+  kind: 'graph' | 'scan';
   id: string;
   name: string;
   /** ms since epoch of the last edit. */
@@ -186,6 +219,12 @@ export interface ProjectStore {
   saveProject(id: string, graph: GraphDoc, thumbnail?: Blob): void;
   /** Clear the dirty flag (after a successful file save). */
   markSaved(id: string): Promise<void>;
+  /** Add a scan project as a new last tab and make it active. Its thumbnail becomes the first photo. */
+  createScanProject(name?: string): Promise<OpenProject>;
+  /** Debounced like `saveProject`. Photo blobs are only rewritten when the photo list changed. Ignored for graph projects. */
+  saveScanSession(id: string, session: ScanSession): void;
+  /** The stored session of a scan project (an empty one if nothing was saved yet), or null for a graph project. */
+  loadScanSession(id: string): Promise<ScanSession | null>;
   /** Add a project as a new last tab and make it active. */
   createProject(graph: GraphDoc, name?: string): Promise<OpenProject>;
   /** Remove from the tabs. Keeps the graph in the last 10 closed projects. Returns the id that should become active. */
@@ -224,6 +263,12 @@ export interface AudioApi {
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
 }
 
+export interface DeviceApi {
+  list(kind: 'audio-input' | 'midi-input' | 'video-input'): Promise<AudioDevice[]>;
+  /** Returns an unsubscribe function. */
+  onChanged(listener: () => void): () => void;
+}
+
 export interface MemoryInfo {
   /** Engine node-result cache (read from a private counter: best effort). */
   engineCacheBytes: number;
@@ -246,6 +291,8 @@ export interface Io {
   /** Print-and-scan-back: photos of printed sheets to an animation asset. */
   scan: ScanApi;
   audio: AudioApi;
+  /** Hardware lists. Camera names appear after the user granted camera permission (before that: "Camera 1"…). */
+  devices: DeviceApi;
   /**
    * Switch the live project to tab `id` and release the old one's memory: flushes its pending save, pauses the
    * player and stops audio, clears the engine cache, the player's frame cache and pooled GPU textures, and drops decoded
@@ -359,8 +406,8 @@ export interface ScanPageReport {
   /** Remaining tilt in degrees after removing the quarter-turn rotation (-45..45). */
   skewDeg: number;
   layout: ScanLayoutInfo | null;
-  /** 'strip' = decoded from the printed data strip; 'manual' = supplied via `reanalyzePage`. */
-  layoutSource: 'strip' | 'manual' | null;
+  /** 'strip' = decoded from the printed data strip; 'manual' = supplied via `reanalyzePage`; 'lattice' = strip unreadable, layout detected from the + marks (confirm page number, frame count and fps). */
+  layoutSource: 'strip' | 'manual' | 'lattice' | null;
   /** 0-based page number (from the layout), or null when unknown. */
   pageIndex: number | null;
   /** Inclusive range of frame indices on this page, or null. */
@@ -495,4 +542,12 @@ export interface ScanApi {
   reanalyzePage(result: ScanResult, pageIndex: number, manual: ScanManualInput): Promise<ScanResult>;
   /** Create an image-sequence asset in the library from the recovered frames. */
   commit(result: ScanResult, options: ScanCommitOptions): Promise<AssetInfo>;
+  /**
+   * Create or REPLACE the one hidden working sequence owned by scan project `projectId` (same asset id every time, so the
+   * project's Media In keeps pointing at it; the player re-renders). Hidden from `library.list()`, survives reloads, deleted
+   * when the project is dropped for good. `options.name` is the asset's name.
+   */
+  attach(projectId: string, result: ScanResult, options: ScanCommitOptions): Promise<AssetInfo>;
+  /** Rebuild a stored session: analyse the photos, then re-apply the manual corrections in photo order. */
+  restore(session: ScanSession): Promise<ScanResult>;
 }

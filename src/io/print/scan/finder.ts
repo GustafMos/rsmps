@@ -183,6 +183,9 @@ export function findFinders(bin: Uint8Array, w: number, h: number): Finder[] {
   return cands.filter((f) => f.hits >= 2);
 }
 
+/** Long/short side ratios of the finder rectangle for the supported papers (centres 11.9 mm from the edges). */
+const PAPER_ASPECTS = [[210, 297], [297, 420], [215.9, 279.4], [148, 210], [215.9, 355.6]].map(([w, h]) => (h - 23.8) / (w - 23.8));
+
 function cross(o: Pt, a: Pt, b: Pt): number {
   return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
 }
@@ -203,12 +206,11 @@ function polygonArea(p: Pt[]): number {
   return Math.abs(a) / 2;
 }
 
-/** Choose the four candidates forming the largest convex quadrilateral with consistent module sizes. */
-export function selectQuad(cands: Finder[]): Finder[] | null {
+/** Best-scoring plausible quadrilaterals (convex, paper-like aspect, consistent module sizes), best first. */
+export function rankQuads(cands: Finder[], limit = 4): Finder[][] {
   const list = [...cands].sort((a, b) => b.hits - a.hits).slice(0, 14);
-  if (list.length < 4) return null;
-  let best: Finder[] | null = null;
-  let bestScore = 0;
+  if (list.length < 4) return [];
+  const found: { q: Finder[]; score: number }[] = [];
   for (let a = 0; a < list.length; a++)
     for (let b = a + 1; b < list.length; b++)
       for (let c = b + 1; c < list.length; c++)
@@ -223,11 +225,19 @@ export function selectQuad(cands: Finder[]): Finder[] | null {
           let minSide = Infinity;
           for (let i = 0; i < 4; i++) minSide = Math.min(minSide, Math.hypot(q[i].x - q[(i + 1) % 4].x, q[i].y - q[(i + 1) % 4].y));
           if (minSide < avg * 12) continue;
-          const score = polygonArea(q);
-          if (score > bestScore) {
-            bestScore = score;
-            best = q;
-          }
+          // Plausible paper: the quad's aspect (long/short side) must be near a real paper format.
+          const sideA = (Math.hypot(q[0].x - q[1].x, q[0].y - q[1].y) + Math.hypot(q[2].x - q[3].x, q[2].y - q[3].y)) / 2;
+          const sideB = (Math.hypot(q[1].x - q[2].x, q[1].y - q[2].y) + Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y)) / 2;
+          const asp = Math.max(sideA, sideB) / Math.min(sideA, sideB);
+          const aspErr = Math.min(...PAPER_ASPECTS.map((p) => Math.abs(Math.log(asp / p))));
+          if (aspErr > 0.14) continue;
+          const score = polygonArea(q) * Math.exp(-4 * aspErr) * (0.5 + Math.min(...q.map((f) => f.hits)) / (2 + Math.min(...q.map((f) => f.hits))));
+          found.push({ q, score });
         }
-  return best;
+  return found.sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.q);
+}
+
+/** Largest plausible quadrilateral, or null. */
+export function selectQuad(cands: Finder[]): Finder[] | null {
+  return rankQuads(cands, 1)[0] ?? null;
 }

@@ -7,6 +7,7 @@ import type { Registry } from '../engine/define';
 import { validateGraph } from '../engine/graph';
 import { DEFAULT_PROJECT, type GraphDoc } from '../engine/types';
 import type { ProjectStore } from './api';
+import type { ScanSession } from './api';
 import { ProjectSession, type OpenProject } from './session';
 import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import { errorMessage, uniqueId } from './util';
@@ -53,6 +54,11 @@ export class ProjectStoreImpl implements ProjectStore {
   private thumbUrls = new Map<string, string>();
   /** Problems found in the last opened file (unknown node types, bad wires). The nodes are kept. */
   lastOpenProblems: { nodeId?: string; message: string }[] = [];
+
+  /** Called when a project is dropped for good (see ProjectSession.onPurge). */
+  set onPurge(fn: ((id: string, kind: "graph" | "scan") => void) | null) {
+    this.session.onPurge = fn;
+  }
 
   constructor(private registry: Registry) {
     if (typeof window !== 'undefined') {
@@ -111,6 +117,21 @@ export class ProjectStoreImpl implements ProjectStore {
     return this.session.duplicateProject(id);
   }
 
+  async createScanProject(name?: string): Promise<OpenProject> {
+    await this.flush();
+    return this.session.createScanProject(name);
+  }
+  loadScanSession(id: string): Promise<ScanSession | null> {
+    return this.session.loadScanSession(id) as Promise<ScanSession | null>;
+  }
+  /** Debounced like saveProject. The thumbnail is the first photo, downscaled (made once per first photo). */
+  saveScanSession(id: string, session: ScanSession): void {
+    this.pendingScan.set(id, session);
+    this.schedule();
+  }
+  private pendingScan = new Map<string, ScanSession>();
+  private thumbOf = new Map<string, Blob>();
+
   /** Debounced (~400 ms). Updates the project's body, name, time and thumbnail only. */
   saveProject(id: string, graph: GraphDoc, thumbnail?: Blob): void {
     const prev = this.pending.get(id);
@@ -129,11 +150,22 @@ export class ProjectStoreImpl implements ProjectStore {
     this.timer = null;
     const jobs = [...this.pending];
     this.pending.clear();
+    const scans = [...this.pendingScan];
+    this.pendingScan.clear();
     const legacy = this.pendingActive;
     this.pendingActive = null;
     this.writing = this.writing.then(async () => {
       try {
         for (const [id, p] of jobs) await this.session.saveProject(id, p.graph, p.thumbnail);
+        for (const [id, s] of scans) {
+          const first = s.photos[0]?.blob;
+          let thumb: Blob | undefined;
+          if (first && this.thumbOf.get(id) !== first) {
+            thumb = (await photoThumbnail(first)) ?? undefined;
+            this.thumbOf.set(id, first);
+          }
+          await this.session.saveScanSession(id, s, thumb);
+        }
         if (legacy) {
           const id = await this.session.activeId();
           if (id) await this.session.saveProject(id, legacy);
@@ -300,6 +332,22 @@ export class ProjectStoreImpl implements ProjectStore {
       }
     }
     return copy;
+  }
+}
+
+/** First photo, shrunk to a small WebP for the tab. */
+async function photoThumbnail(blob: Blob): Promise<Blob | null> {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const k = Math.min(1, 160 / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * k));
+    const h = Math.max(1, Math.round(bmp.height * k));
+    const canvas = new OffscreenCanvas(w, h);
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    return await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+  } catch {
+    return null;
   }
 }
 

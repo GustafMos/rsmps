@@ -4,7 +4,7 @@
  */
 import type { ScanReport } from '../../api';
 import { formatProjectId } from '../format';
-import type { RasterImage } from '../raster';
+import { resizeRaster, type RasterImage } from '../raster';
 import { scanPage, type PageScan, type PageScanOptions } from './page';
 
 export interface AssembledScan {
@@ -15,13 +15,15 @@ export interface AssembledScan {
 }
 
 /** Combine page scans. Mutates `used` and `warnings` in the page reports. */
-export function assembleScan(pages: PageScan[]): AssembledScan {
+export function assembleScan(input: PageScan[]): AssembledScan {
   const warnings: string[] = [];
+  const pages: PageScan[] = input.map((p) => ({ ...p, header: p.header && { ...p.header }, frames: p.frames.map((f) => ({ ...f })) }));
   // Work on copies so assembling the same page scans again (after a manual fix) never double-counts warnings.
   const reports = new Map(pages.map((p) => [p, { ...p.report, warnings: [...p.report.warnings] }]));
   const R = (p: PageScan) => reports.get(p)!;
   const usable = pages.filter((p) => p.header && p.frames.length > 0);
   for (const p of pages) R(p).used = false;
+  inheritFromStrips(pages, R);
 
   // Dominant project (pages typed in by hand have id 0 and join any project).
   const votes = new Map<number, number>();
@@ -110,4 +112,50 @@ export function assembleScan(pages: PageScan[]): AssembledScan {
 export function scanSheets(photos: { image: RasterImage; name?: string; options?: PageScanOptions }[], shared: PageScanOptions = {}): AssembledScan {
   const pages = photos.map((p, i) => scanPage(p.image, p.name ?? `photo-${i + 1}`, i, { ...shared, ...p.options }));
   return assembleScan(pages);
+}
+
+/**
+ * Pages whose strip was unreadable (layout from the + lattice) take project id, page count, frame total, fps and
+ * frame size from decoded pages of the same grid; the page number is assigned when exactly one is missing.
+ */
+function inheritFromStrips(pages: PageScan[], R: (p: PageScan) => PageScan['report']): void {
+  const decoded = pages.filter((p) => p.header && p.frames.length > 0 && !p.latticeLayout && !p.manualLayout);
+  const lattice = pages.filter((p) => p.header && p.latticeLayout && p.frames.length > 0);
+  if (decoded.length === 0 || lattice.length === 0) return;
+  const have = new Set(decoded.map((p) => p.header!.pageIndex));
+  for (const p of lattice) {
+    const h = p.header!;
+    const q = decoded.find((d) => d.header!.paper === h.paper && d.header!.landscape === h.landscape && d.header!.columns === h.columns && d.header!.rows === h.rows);
+    if (!q) continue;
+    const t = q.header!;
+    const missing: number[] = [];
+    for (let i = 0; i < t.pageCount; i++) if (!have.has(i)) missing.push(i);
+    const r = R(p);
+    const notes: string[] = [`fps ${t.fpsX100 / 100}, ${t.totalFrames} frames in ${t.pageCount} pages and the project id were taken from the pages that could be read`];
+    let pageIndex = h.pageIndex;
+    if (missing.length === lattice.length) {
+      pageIndex = missing[lattice.indexOf(p)];
+      notes.push(lattice.length === 1 ? `this is the only page missing, so it is page ${pageIndex + 1}` : `pages were assigned to the missing numbers in the order given: this one is page ${pageIndex + 1} (check)`);
+    } else notes.push(`page number could not be determined, assuming ${pageIndex + 1}`);
+    const shift = pageIndex * t.columns * t.rows - h.firstFrame;
+    h.pageIndex = pageIndex;
+    h.pageCount = t.pageCount;
+    h.totalFrames = t.totalFrames;
+    h.fpsX100 = t.fpsX100;
+    h.frameW = t.frameW;
+    h.frameH = t.frameH;
+    h.guide = t.guide;
+    h.guideOpacity = t.guideOpacity;
+    h.projectId = t.projectId;
+    h.firstFrame += shift;
+    p.frames = p.frames.map((f) => ({ ...f, index: f.index + shift })).filter((f) => f.index < t.totalFrames);
+    if (t.frameW && t.frameH) p.frames = p.frames.map((f) => (f.image.width === t.frameW && f.image.height === t.frameH ? f : { ...f, image: resizeRaster(f.image, t.frameW, t.frameH, 'auto') }));
+    if (r.layout) {
+      Object.assign(r.layout, { pageIndex, pageCount: t.pageCount, firstFrame: h.firstFrame, totalFrames: t.totalFrames, framesOnPage: p.frames.length, fps: t.fpsX100 / 100, frameWidthPx: t.frameW, frameHeightPx: t.frameH, guide: t.guide, guideOpacity: t.guideOpacity, projectId: formatProjectId(t.projectId) });
+    }
+    r.pageIndex = pageIndex;
+    r.frameRange = p.frames.length ? [p.frames[0].index, p.frames[p.frames.length - 1].index] : null;
+    r.cells = r.cells.map((c) => ({ ...c, frame: c.frame + shift })).filter((c) => c.frame < t.totalFrames);
+    r.warnings.push(`Layout inferred from the + marks (strip unreadable): ${notes.join('; ')}.`);
+  }
 }

@@ -10,6 +10,7 @@ import type {
   ScanFrame,
   ScanManualInput,
   ScanResult,
+  ScanSession,
 } from './api';
 import type { AssetInfo } from '../engine/types';
 import { encodePng } from './print/png';
@@ -23,7 +24,8 @@ const MAX_PHOTO_SIDE = 5000;
 const PHOTO_PREVIEW_SIDE = 1024;
 
 async function decodeToRaster(blob: Blob, maxSide = 0): Promise<RasterImage> {
-  let bmp = await createImageBitmap(blob);
+  // EXIF orientation is applied ('from-image' is the default; stated so the pipeline never sees a sideways photo).
+  let bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
   try {
     const long = Math.max(bmp.width, bmp.height);
     if (maxSide > 0 && long > maxSide) {
@@ -156,7 +158,30 @@ export class ScanImpl implements ScanApi {
     };
   }
 
+  async restore(session: ScanSession): Promise<ScanResult> {
+    const files = session.photos.map((p) => new File([p.blob], p.name, { type: p.blob.type }));
+    let result = await this.analyze(files, session.options.analyze ?? {});
+    const indices = Object.keys(session.manual).map(Number).sort((a, b) => a - b);
+    for (const i of indices) {
+      if (i < 0 || i >= files.length) continue;
+      const next = await result.reanalyzePage(i, session.manual[i]);
+      result.dispose();
+      result = next;
+    }
+    return result;
+  }
+
+  async attach(projectId: string, result: ScanResult, o: ScanCommitOptions): Promise<AssetInfo> {
+    const { blobs, fps } = await this.buildSequence(result, o);
+    return this.library.attachSequence(projectId, o.name.trim() || 'Scan frames', blobs, fps);
+  }
+
   async commit(result: ScanResult, o: ScanCommitOptions): Promise<AssetInfo> {
+    const { blobs, fps } = await this.buildSequence(result, o);
+    return this.library.addSequence(o.name.trim() || 'Scanned animation', blobs, fps);
+  }
+
+  private async buildSequence(result: ScanResult, o: ScanCommitOptions): Promise<{ blobs: Blob[]; fps: number }> {
     const missing = o.missing ?? 'repeat';
     const layout = result.report.pages.find((p) => p.used && p.layout)?.layout;
     const fps = o.fps ?? (result.report.fps > 0 ? result.report.fps : 12);
@@ -187,7 +212,6 @@ export class ScanImpl implements ScanApi {
       }
       await yieldToEventLoop();
     }
-    const blobs = out.map((r) => pngBlob(r, !o.drawingOnly));
-    return this.library.addSequence(o.name.trim() || 'Scanned animation', blobs, fps);
+    return { blobs: out.map((r) => pngBlob(r, !o.drawingOnly)), fps };
   }
 }

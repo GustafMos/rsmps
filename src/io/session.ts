@@ -11,7 +11,20 @@
  */
 import type { GraphDoc } from '../engine/types';
 
+export type ProjectKind = 'graph' | 'scan';
+
+/** Stored form of a scan session (photos live under their own keys). */
+export interface ScanSessionLike {
+  photos: { name: string; blob: Blob }[];
+  manual: Record<number, unknown>;
+  options: Record<string, unknown>;
+  committedAssetId?: string;
+  graph?: GraphDoc;
+}
+
 export interface OpenProject {
+  /** 'graph' (a node graph) or 'scan' (a print-and-scan session). Old stored projects are graphs. */
+  kind: ProjectKind;
   id: string;
   name: string;
   /** ms since epoch of the last edit. */
@@ -29,6 +42,7 @@ export interface KV {
 }
 
 interface Meta {
+  kind?: ProjectKind;
   id: string;
   name: string;
   updatedAt: number;
@@ -45,11 +59,23 @@ interface SessionRecord {
 export const MAX_CLOSED = 10;
 const GRAPH = (id: string) => `graph:${id}`;
 const THUMB = (id: string) => `thumb:${id}`;
+const SCAN = (id: string) => `scan:${id}`;
+const SCAN_PHOTO = (id: string, i: number) => `scanphoto:${id}:${i}`;
+
+interface ScanRecord {
+  version: 1;
+  photos: { name: string }[];
+  manual: Record<number, unknown>;
+  options: Record<string, unknown>;
+  committedAssetId?: string;
+}
 
 export class ProjectSession {
   private rec: SessionRecord | null = null;
   private loading: Promise<SessionRecord> | null = null;
   private urls = new Map<string, { blob: Blob; url: string }>();
+  /** Photo blobs last written/read per scan project, so unchanged photos are not rewritten. */
+  private photoBlobs = new Map<string, Blob[]>();
 
   constructor(
     private kv: KV,
@@ -105,7 +131,7 @@ export class ProjectSession {
   }
 
   private async toOpen(m: Meta): Promise<OpenProject> {
-    return { id: m.id, name: m.name, updatedAt: m.updatedAt, thumbnail: await this.thumbUrl(m.id), dirty: m.dirty || undefined };
+    return { kind: m.kind ?? 'graph', id: m.id, name: m.name, updatedAt: m.updatedAt, thumbnail: await this.thumbUrl(m.id), dirty: m.dirty || undefined };
   }
 
   /* --------------------------------- queries ------------------------------- */
@@ -136,6 +162,7 @@ export class ProjectSession {
   async loadProject(id: string): Promise<GraphDoc | null> {
     const rec = await this.load();
     if (!rec.open.some((m) => m.id === id)) return null;
+    // A scan project's graph is the one that processes its recovered frames (null until it has one).
     return (await this.kv.get<GraphDoc>(GRAPH(id))) ?? null;
   }
 
@@ -150,7 +177,7 @@ export class ProjectSession {
     if (thumbnail) {
       await this.kv.put(THUMB(id), thumbnail);
     }
-    meta.name = graph.name || meta.name;
+    if ((meta.kind ?? 'graph') === 'graph') meta.name = graph.name || meta.name; // a scan tab keeps its own name
     meta.updatedAt = this.now();
     meta.dirty = true;
     await this.persist();
@@ -176,6 +203,77 @@ export class ProjectSession {
     return this.toOpen(meta);
   }
 
+  /* ------------------------------------ scan projects --------------------------------- */
+
+  async createScanProject(name?: string): Promise<OpenProject> {
+    const rec = await this.load();
+    const id = this.newId();
+    const meta: Meta = { kind: 'scan', id, name: name?.trim() || 'Scan', updatedAt: this.now() };
+    rec.open.push(meta);
+    rec.activeId = id;
+    await this.persist();
+    return this.toOpen(meta);
+  }
+
+  /** Write a scan session. Photo blobs are only rewritten when the list of photos changed. */
+  async saveScanSession(id: string, session: ScanSessionLike, thumbnail?: Blob): Promise<void> {
+    const rec = await this.load();
+    const meta = rec.open.find((m) => m.id === id);
+    if (!meta || meta.kind !== 'scan') return;
+    const written = this.photoBlobs.get(id) ?? [];
+    for (let i = 0; i < session.photos.length; i++) {
+      if (written[i] !== session.photos[i].blob) await this.kv.put(SCAN_PHOTO(id, i), session.photos[i].blob);
+    }
+    for (let i = session.photos.length; i < written.length; i++) await this.kv.delete(SCAN_PHOTO(id, i));
+    this.photoBlobs.set(id, session.photos.map((p) => p.blob));
+    const record: ScanRecord = {
+      version: 1,
+      photos: session.photos.map((p) => ({ name: p.name })),
+      manual: session.manual,
+      options: session.options,
+      committedAssetId: session.committedAssetId,
+    };
+    await this.kv.put(SCAN(id), record);
+    if (session.graph) await this.kv.put(GRAPH(id), session.graph);
+    if (thumbnail) await this.kv.put(THUMB(id), thumbnail);
+    meta.updatedAt = this.now();
+    meta.dirty = true;
+    await this.persist();
+  }
+
+  /** The stored session of a scan project (empty when nothing was saved yet), or null for other projects. */
+  async loadScanSession(id: string): Promise<ScanSessionLike | null> {
+    const rec = await this.load();
+    const meta = rec.open.find((m) => m.id === id);
+    if (!meta || meta.kind !== 'scan') return null;
+    const stored = await this.kv.get<ScanRecord>(SCAN(id));
+    if (!stored) return { photos: [], manual: {}, options: {}, graph: (await this.kv.get<GraphDoc>(GRAPH(id))) ?? undefined };
+    const photos: ScanSessionLike['photos'] = [];
+    for (let i = 0; i < stored.photos.length; i++) {
+      const blob = await this.kv.get<Blob>(SCAN_PHOTO(id, i));
+      if (blob) photos.push({ name: stored.photos[i].name, blob });
+    }
+    this.photoBlobs.set(id, photos.map((p) => p.blob));
+    const graph = (await this.kv.get<GraphDoc>(GRAPH(id))) ?? undefined;
+    return { photos, manual: stored.manual ?? {}, options: stored.options ?? {}, committedAssetId: stored.committedAssetId, graph };
+  }
+
+  /** Called when a project is dropped for good (falls off the recently-closed list). */
+  onPurge: ((id: string, kind: ProjectKind) => void) | null = null;
+
+  private async deleteBodies(meta: Meta): Promise<void> {
+    this.onPurge?.(meta.id, meta.kind ?? 'graph');
+    await this.kv.delete(GRAPH(meta.id));
+    await this.kv.delete(THUMB(meta.id));
+    if (meta.kind === 'scan') {
+      const stored = await this.kv.get<ScanRecord>(SCAN(meta.id));
+      for (let i = 0; i < (stored?.photos.length ?? 0); i++) await this.kv.delete(SCAN_PHOTO(meta.id, i));
+      await this.kv.delete(SCAN(meta.id));
+      this.photoBlobs.delete(meta.id);
+    }
+    this.dropThumbUrl(meta.id);
+  }
+
   async renameProject(id: string, name: string): Promise<void> {
     const rec = await this.load();
     const meta = rec.open.find((m) => m.id === id);
@@ -183,8 +281,10 @@ export class ProjectSession {
     if (!meta || !clean) return;
     meta.name = clean;
     meta.updatedAt = this.now();
-    const body = await this.kv.get<GraphDoc>(GRAPH(id));
-    if (body) await this.kv.put(GRAPH(id), { ...body, name: clean });
+    if ((meta.kind ?? 'graph') === 'graph') {
+      const body = await this.kv.get<GraphDoc>(GRAPH(id));
+      if (body) await this.kv.put(GRAPH(id), { ...body, name: clean });
+    }
     await this.persist();
   }
 
@@ -207,6 +307,7 @@ export class ProjectSession {
   async duplicateProject(id: string): Promise<OpenProject | null> {
     const rec = await this.load();
     const src = rec.open.find((m) => m.id === id);
+    if (src?.kind === 'scan') return this.duplicateScan(rec, src);
     const body = src ? await this.kv.get<GraphDoc>(GRAPH(id)) : undefined;
     if (!src || !body) return null;
     const copyId = this.newId();
@@ -215,6 +316,27 @@ export class ProjectSession {
     const thumb = await this.kv.get<Blob>(THUMB(id));
     if (thumb) await this.kv.put(THUMB(copyId), thumb);
     const meta: Meta = { id: copyId, name, updatedAt: this.now() };
+    rec.open.splice(rec.open.indexOf(src) + 1, 0, meta);
+    await this.persist();
+    return this.toOpen(meta);
+  }
+
+  private async duplicateScan(rec: SessionRecord, src: Meta): Promise<OpenProject> {
+    const copyId = this.newId();
+    const name = `${src.name} copy`;
+    const stored = await this.kv.get<ScanRecord>(SCAN(src.id));
+    if (stored) {
+      for (let i = 0; i < stored.photos.length; i++) {
+        const blob = await this.kv.get<Blob>(SCAN_PHOTO(src.id, i));
+        if (blob) await this.kv.put(SCAN_PHOTO(copyId, i), blob);
+      }
+      await this.kv.put(SCAN(copyId), structuredClone({ ...stored, committedAssetId: undefined }));
+    }
+    const graph = await this.kv.get<GraphDoc>(GRAPH(src.id));
+    if (graph) await this.kv.put(GRAPH(copyId), { ...structuredClone(graph), name });
+    const thumb = await this.kv.get<Blob>(THUMB(src.id));
+    if (thumb) await this.kv.put(THUMB(copyId), thumb);
+    const meta: Meta = { kind: 'scan', id: copyId, name, updatedAt: this.now() };
     rec.open.splice(rec.open.indexOf(src) + 1, 0, meta);
     await this.persist();
     return this.toOpen(meta);
@@ -232,9 +354,7 @@ export class ProjectSession {
     rec.closed.unshift(meta);
     while (rec.closed.length > MAX_CLOSED) {
       const old = rec.closed.pop()!;
-      await this.kv.delete(GRAPH(old.id));
-      await this.kv.delete(THUMB(old.id));
-      this.dropThumbUrl(old.id);
+      await this.deleteBodies(old);
     }
     if (rec.activeId === id) rec.activeId = (rec.open[at] ?? rec.open[at - 1])?.id ?? null;
     await this.persist();

@@ -12,6 +12,7 @@ import { createAudioBridge } from './audio-bridge';
 import { ExporterImpl } from './exporter';
 import { EvalGate } from './gate';
 import { Library } from './library';
+import { listVideoInputs, onVideoDevicesChanged } from './live';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { ProjectStoreImpl } from './projects';
@@ -56,7 +57,11 @@ export const createIo: CreateIo = async () => {
 
   const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router });
   const plugins = new PluginManagerImpl(registry);
+  const purgeOwned = (id: string, kind: 'graph' | 'scan') => {
+    if (kind === 'scan') void library.removeOwned(id);
+  };
   const projects = new ProjectStoreImpl(registry);
+  projects.onPurge = purgeOwned;
 
   const io: Io = {
     engine,
@@ -75,7 +80,7 @@ export const createIo: CreateIo = async () => {
       await gate.clearEngine(); // (c) engine cache (waits for an in-flight evaluation)
       library.releaseDecodedExcept(graph ? assetIdsOf(graph, registry) : new Set()); // (d)
       gpu.trim(); // (c) idle pooled textures of the old project
-      if (graph) await projects.setActive(id); // (e)
+      await projects.setActive(id); // (e) works for graph and scan projects (a scan project without a graph yet returns null)
       return graph;
     },
     memory() {
@@ -85,6 +90,13 @@ export const createIo: CreateIo = async () => {
         frameCacheBytes: player.cacheBytes,
         decodedMediaBytes: library.decodedBytes(),
       };
+    },
+    devices: {
+      list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),
+      onChanged: (l) => {
+        const offs = [audio.onDevicesChanged(l), onVideoDevicesChanged(l)];
+        return () => offs.forEach((off) => off());
+      },
     },
     audio: {
       listDevices: (kind) => audio.listDevices(kind),

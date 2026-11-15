@@ -158,3 +158,89 @@ describe('ProjectSession', () => {
     expect(kv.reads.some((k) => k.startsWith('graph:'))).toBe(false);
   });
 });
+
+describe('scan projects', () => {
+  const fakeBlob = (tag: string) => ({ tag }) as unknown as Blob;
+  const sessionOf = (n: number) => ({
+    photos: Array.from({ length: n }, (_, i) => ({ name: `p${i}.jpg`, blob: fakeBlob('b' + i) })),
+    manual: { 1: { fps: 12 } },
+    options: { commit: { name: 'x' } },
+    committedAssetId: 'a1',
+    graph: g('scan graph'),
+  });
+
+  it('migrates old metadata: no kind means graph', async () => {
+    const kv = new FakeKV();
+    kv.data.set('session', { version: 1, open: [{ id: 'old', name: 'Old', updatedAt: 1 }], activeId: 'old', closed: [] });
+    const { s } = make(kv);
+    expect((await s.listOpen())[0].kind).toBe('graph');
+  });
+
+  it('creates a scan project, saves and loads a session round trip with its graph', async () => {
+    const { s, kv } = make();
+    const p = await s.createScanProject();
+    expect(p).toMatchObject({ kind: 'scan', name: 'Scan' });
+    expect(await s.loadScanSession(p.id)).toEqual({ photos: [], manual: {}, options: {}, graph: undefined });
+    const a = sessionOf(2);
+    await s.saveScanSession(p.id, a, new Blob(['t']));
+    const back = await s.loadScanSession(p.id);
+    expect(back!.photos.map((x) => x.name)).toEqual(['p0.jpg', 'p1.jpg']);
+    expect(back!.photos[1].blob).toEqual(a.photos[1].blob);
+    expect(back!.manual).toEqual({ 1: { fps: 12 } });
+    expect(back!.committedAssetId).toBe('a1');
+    expect(back!.graph?.name).toBe('scan graph');
+    // The scan project's graph is also what loadProject returns; a graph project has no scan session.
+    expect((await s.loadProject(p.id))?.name).toBe('scan graph');
+    const gp = await s.createProject(g('G'));
+    expect(await s.loadScanSession(gp.id)).toBeNull();
+    expect(kv.data.has('scanphoto:' + p.id + ':1')).toBe(true);
+  });
+
+  it('only rewrites photos that changed and drops removed ones', async () => {
+    const { s, kv } = make();
+    const p = await s.createScanProject('S');
+    const a = sessionOf(3);
+    await s.saveScanSession(p.id, a);
+    const puts: string[] = [];
+    const orig = kv.put.bind(kv);
+    kv.put = async (k, v) => (puts.push(k), orig(k, v));
+    await s.saveScanSession(p.id, { ...a, manual: { 0: { fps: 9 } } });
+    expect(puts.filter((k) => k.startsWith('scanphoto:'))).toEqual([]);
+    await s.saveScanSession(p.id, { ...a, photos: a.photos.slice(0, 1) });
+    expect(kv.data.has('scanphoto:' + p.id + ':2')).toBe(false);
+    expect(kv.data.has('scanphoto:' + p.id + ':0')).toBe(true);
+  });
+
+  it('saveProject / rename / duplicate / reorder work for scan projects', async () => {
+    const { s } = make();
+    const a = await s.createProject(g('A'));
+    const sc = await s.createScanProject('Sc');
+    await s.saveProject(sc.id, g('edited'));
+    expect((await s.loadProject(sc.id))?.name).toBe('edited');
+    await s.saveScanSession(sc.id, sessionOf(1));
+    const copy = await s.duplicateProject(sc.id);
+    expect(copy).toMatchObject({ kind: 'scan', name: 'Sc copy' });
+    expect((await s.loadScanSession(copy!.id))!.photos).toHaveLength(1);
+    await s.renameProject(sc.id, 'Renamed');
+    expect((await s.listOpen()).find((p) => p.id === sc.id)!.name).toBe('Renamed');
+    await s.reorderOpen([sc.id, a.id]);
+    expect((await s.listOpen()).map((p) => p.id).slice(0, 2)).toEqual([sc.id, a.id]);
+  });
+
+  it('close/reopen keeps the session; falling off the closed list purges photos and calls onPurge', async () => {
+    const { s, kv } = make();
+    const purged: string[] = [];
+    s.onPurge = (id, kind) => purged.push(`${kind}:${id}`);
+    const sc = await s.createScanProject();
+    await s.saveScanSession(sc.id, sessionOf(2));
+    await s.closeProject(sc.id);
+    expect((await s.listClosed())[0]).toMatchObject({ id: sc.id, kind: 'scan' });
+    expect(await s.reopen(sc.id)).toMatchObject({ kind: 'scan' });
+    expect((await s.loadScanSession(sc.id))!.photos).toHaveLength(2);
+    await s.closeProject(sc.id);
+    for (let i = 0; i < MAX_CLOSED; i++) await s.closeProject((await s.createProject(g('x' + i))).id);
+    expect(purged).toEqual([`scan:${sc.id}`]);
+    expect(kv.data.has('scanphoto:' + sc.id + ':0')).toBe(false);
+    expect(kv.data.has('scan:' + sc.id)).toBe(false);
+  });
+});

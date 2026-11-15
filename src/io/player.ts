@@ -19,6 +19,7 @@ import { OffscreenPresenter } from './encode';
 import { RenderedFrameCache } from './frame-cache';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
+import { feedsFromLive, liveNodeIds, stampLive } from './live-stamp';
 import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
 import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, readFrameParams, resolveFrame, scaleSize, type ConformAnchor, type Size } from './frame';
@@ -114,6 +115,12 @@ export class PlayerImpl implements Player {
   private hasSig = false;
   private micNodes = 0;
   private clearPending = false;
+  private liveIds = new Set<string>();
+  private liveGraph: GraphDoc | null = null;
+  private hasLive = false;
+  private liveTick = 0;
+  private liveTimer: ReturnType<typeof setInterval> | null = null;
+  private liveFps = 0;
   private curPixel = 1;
   private settledKey = '';
   private settledFrame = -1;
@@ -187,6 +194,7 @@ export class PlayerImpl implements Player {
     this.view = { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, activeOutput: view.activeOutput ?? null };
     if (!changed) return;
     this.keyDirty = true;
+    this.updateLive(view);
     const p = view.graph.project;
     const total = totalFramesOf(p);
     const timeChanged = !prev || prev.graph.project.fps !== p.fps || prev.graph.project.duration !== p.duration || prev.graph.project.loop !== p.loop;
@@ -316,6 +324,7 @@ export class PlayerImpl implements Player {
 
   dispose(): void {
     this.disposed = true;
+    if (this.liveTimer) clearInterval(this.liveTimer);
     this.playing = false;
     cancelAnimationFrame(this.raf);
     this.cache.clear();
@@ -372,6 +381,31 @@ export class PlayerImpl implements Player {
     this.frame = 0;
     this.audioGraph = null;
     this.markChanged();
+  }
+
+  /**
+   * Live pictures change without the graph changing: while a live node feeds the viewed node, keep rendering
+   * while paused (at the project fps) and let stampLive() defeat the evaluation cache.
+   */
+  private updateLive(view: View): void {
+    if (this.liveGraph !== view.graph) {
+      this.liveGraph = view.graph;
+      this.liveIds = liveNodeIds(view.graph, this.deps.registry);
+    }
+    this.hasLive = feedsFromLive(view.graph, view.node, this.liveIds);
+    const fps = view.graph.project.fps;
+    if (this.liveTimer && (!this.hasLive || this.liveFps !== fps)) {
+      clearInterval(this.liveTimer);
+      this.liveTimer = null;
+    }
+    if (this.hasLive && !this.liveTimer) {
+      this.liveFps = fps;
+      this.liveTimer = setInterval(() => {
+        if (this.playing || this.disposed) return;
+        this.dirty = true;
+        this.kick();
+      }, Math.max(16, 1000 / fps));
+    }
   }
 
   private liveSignals(): boolean {
@@ -511,7 +545,7 @@ export class PlayerImpl implements Player {
     this.settledKey = job.key;
     this.settledFrame = job.frame;
     this.settledProxy = job.proxy;
-    const live = this.liveSignals();
+    const live = this.liveSignals() || this.hasLive;
     const cached = live ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
       this.show(cached.image, job, cached.proxy, job.frameSpec.pixelSize ? 1 : cached.proxy);
@@ -521,7 +555,7 @@ export class PlayerImpl implements Player {
     let res: EvalResult;
     try {
       res = await this.deps.gate.evaluate({
-        graph: job.graph,
+        graph: this.hasLive ? stampLive(job.graph, this.liveIds, ++this.liveTick) : job.graph,
         node: job.node,
         port: job.port,
         seconds: job.frame / job.graph.project.fps,

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { planSheet, type SheetLayout } from './layout';
 import { renderPage } from './render';
@@ -15,7 +17,7 @@ let pages: RasterImage[] = [];
 
 const stats: string[] = [];
 
-function evaluate(label: string, out: ReturnType<typeof assembleScan>, expectFrames: number[]) {
+function evaluate(label: string, out: ReturnType<typeof assembleScan>, expectFrames: number[], maxShift = 1.0, maxErr = 14) {
   let worstShift = 0;
   let sumErr = 0;
   let worstErr = 0;
@@ -33,8 +35,8 @@ function evaluate(label: string, out: ReturnType<typeof assembleScan>, expectFra
     n++;
   }
   stats.push(`${label}: frames=${n} meanErr=${(sumErr / n).toFixed(2)} worstErr=${worstErr.toFixed(2)} worstShift=${worstShift.toFixed(2)}px`);
-  expect(worstShift).toBeLessThan(1.0);
-  expect(sumErr / n).toBeLessThan(14);
+  expect(worstShift).toBeLessThan(maxShift);
+  expect(sumErr / n).toBeLessThan(maxErr);
   return { worstShift, meanErr: sumErr / n };
 }
 
@@ -134,7 +136,7 @@ describe('scan end to end', () => {
     expect(out.report.complete).toBe(false);
   }, 180000);
 
-  it('falls back to a manual layout when the data strip is destroyed, using the page-corner order', async () => {
+  it('uses a manual layout and corners (as the Scan tab sends them) when the strip is destroyed', async () => {
     const wipe = (page: RasterImage) => {
       const mm = 300 / 25.4;
       for (let y = Math.round(6 * mm); y < Math.round(17 * mm); y++)
@@ -142,7 +144,9 @@ describe('scan end to end', () => {
     };
     const photo = await shoot(0, { rotateDeg: 3, seed: 16, mutate: wipe });
     const auto = scanPage(photo, 'nostrip.jpg', 0);
-    expect(auto.report.status).toBe('failed');
+    // without the strip the layout is recovered from the + lattice, with a warning asking to confirm the rest
+    expect(auto.report.status).toBe('warning');
+    expect(auto.report.layoutSource).toBe('lattice');
     expect(auto.report.warnings.join(' ')).toMatch(/data strip could not be read/);
     expect(auto.report.corners).not.toBeNull();
     const manual = scanPage(photo, 'nostrip.jpg', 0, {
@@ -176,6 +180,68 @@ describe('scan end to end', () => {
     for (let i = 3; i < drawing.data.length; i += 4) if (drawing.data[i] > 40) ink++;
     stats.push(`guide removal: residual ink ${(ink / (FW * FH) * 100).toFixed(1)}% of frame`);
     expect(ink / (FW * FH)).toBeLessThan(0.08);
+  }, 180000);
+
+  const hostile: PhotoOptions = { width: 2200, height: 4000, outWidth: 1100, outHeight: 2000, jpegQuality: 75, clutter: true, shadow: true, blur: 1.2, noise: 5 };
+
+  it('reads a low-resolution (1100x2000, JPEG 75) photo with a cluttered dark desk, decoy squares and a hard shadow', async () => {
+    const photo = await shoot(0, { ...hostile, rotateDeg: 2, seed: 41 });
+    expect(photo.width).toBe(1100);
+    const scan = scanPage(photo, 'lowres-hostile.jpg', 0);
+    expect(scan.report.status, scan.report.warnings.join(' | ')).not.toBe('failed');
+    expect(scan.report.layoutSource).toBe('strip');
+    const out = assembleScan([scan]);
+    evaluate('hostile 1100x2000', out, [...Array(12).keys()], 1.2, 22);
+  }, 180000);
+
+  it('reads a page that occupies only half of the picture', async () => {
+    const photo = await shoot(1, { ...hostile, fill: 0.5, rotateDeg: -7, seed: 43, perspective: 0.05 });
+    const scan = scanPage(photo, 'half.jpg', 0);
+    expect(scan.report.status, scan.report.warnings.join(' | ')).not.toBe('failed');
+    const out = assembleScan([scan]);
+    expect(out.report.pages[0].pageIndex).toBe(1);
+    evaluate('half-size sheet', { ...out, frames: out.frames.map((f, i) => (i >= 12 ? f : null)) } as typeof out, [...Array(12).keys()].map((i) => i + 12), 1.5, 24);
+  }, 180000);
+
+  it('recovers the layout from the + lattice when the data strip is unreadable, and inherits the rest from other pages', async () => {
+    const wipe = (page: RasterImage) => {
+      const mm = 300 / 25.4;
+      for (let y = Math.round(5 * mm); y < Math.round(19 * mm); y++)
+        for (let x = Math.round(page.width / 2 - 25 * mm); x < Math.round(page.width / 2 + 25 * mm); x++) page.data.set([255, 255, 255, 255], (y * page.width + x) * 4);
+    };
+    const p0 = await shoot(0, { rotateDeg: 3, seed: 51, mutate: wipe });
+    const p1 = await shoot(1, { rotateDeg: -4, seed: 52 });
+    const scan0 = scanPage(p0, 'nostrip.jpg', 0);
+    expect(scan0.report.status).not.toBe('failed');
+    expect(scan0.report.layoutSource).toBe('lattice');
+    expect(scan0.report.layout!.columns).toBe(3);
+    expect(scan0.report.layout!.rows).toBe(4);
+    expect(scan0.report.warnings.join(' ')).toMatch(/data strip could not be read; the layout was detected from the + marks/);
+    const out = assembleScan([scan0, scanPage(p1, 'p1.jpg', 1)]);
+    expect(out.report.complete).toBe(true);
+    expect(out.report.fps).toBe(12);
+    expect(out.report.pages[0].pageIndex).toBe(0);
+    expect(out.report.pages[0].layout!.projectId).toBe(out.report.pages[1].layout!.projectId);
+    evaluate('lattice+inherit', out, [...Array(N).keys()]);
+  }, 180000);
+
+  const samples = 'tmp/scan-samples';
+  it.skipIf(!fs.existsSync(samples) || fs.readdirSync(samples).filter((n) => /^photo-.*.jpe?g$/i.test(n)).length === 0)('recovers 12 plausible frames from the real photos in tmp/scan-samples', async () => {
+    for (const name of fs.readdirSync(samples).filter((n) => /^photo-.*.jpe?g$/i.test(n))) {
+      const raw = await sharp(`${samples}/${name}`).rotate().ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const img = { width: raw.info.width, height: raw.info.height, data: new Uint8ClampedArray(raw.data.buffer, raw.data.byteOffset, raw.data.length) };
+      const scan = scanPage(img, name, 0);
+      expect(scan.report.status, name + ': ' + scan.report.warnings.join(' | ')).not.toBe('failed');
+      expect(scan.frames).toHaveLength(12);
+      for (const fr of scan.frames) {
+        const im = fr.image;
+        let sum = 0;
+        for (let i = 0; i < im.width * im.height * 4; i += 4) sum += (im.data[i] + im.data[i + 1] + im.data[i + 2]) / 3;
+        expect(sum / (im.width * im.height), name + ' frame ' + fr.index + ' is mostly dark').toBeLessThan(110);
+        expect(Math.abs(im.width / im.height - 1080 / 1920)).toBeLessThan(0.02);
+      }
+      expect(scan.frames.map((f) => f.index)).toEqual([...Array(12).keys()]);
+    }
   }, 180000);
 
   it('prints stats', () => {

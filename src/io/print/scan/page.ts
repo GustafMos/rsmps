@@ -11,14 +11,15 @@ import {
   type PaperId,
   type SheetHeader,
 } from '../format';
-import { applyH, bilerp, dist, fitHomography, invert3, type Mat3, type Pt } from '../geometry';
-import { framesOnHeaderPage, geometryFromHeader, markCenterMm, pageHeader, planSheet, type SheetGeometry } from '../layout';
+import { applyH, bilerp, dist, fitHomography, invert3, mul3, type Mat3, type Pt } from '../geometry';
+import { framesOnHeaderPage, geometryFromHeader, markCenterMm, markHalfFor, pageHeader, planSheet, type SheetGeometry } from '../layout';
 import { createRaster, resizeRaster, sampleGray, toGray8, type RasterImage } from '../raster';
 import { estimateWhiteField, whiteAt, type WhiteField } from './clean';
-import { adaptiveBinarize, downscaleGray, findFinders, selectQuad } from './finder';
+import { adaptiveBinarize, downscaleGray, findFinders, rankQuads } from './finder';
 import { finderTemplate, markTemplate, matchTemplate } from './refine';
 import { photoPixelsPerMm, rectify } from './rectify';
-import { decodeStrip } from './strip';
+import { decodeStrip, decodeStripGrid, placeStrip } from './strip';
+import { findPlusPeaks, inferLattice, trackLattice, type Peak } from './lattice';
 
 export interface PageScanOptions {
   manual?: ScanManualInput;
@@ -34,6 +35,8 @@ export interface PageScan {
   header: SheetHeader | null;
   /** True when the layout did not come from a strip (totals may need to be derived across pages). */
   manualLayout: boolean;
+  /** True when the layout was inferred from the + lattice because the strip was unreadable. */
+  latticeLayout: boolean;
   frames: { index: number; image: RasterImage }[];
   /** The rectified page (analysis resolution), or null. */
   rectified: RasterImage | null;
@@ -152,6 +155,8 @@ interface Aligned {
   grayR: Float32Array;
   ppm: number;
   warnings: string[];
+  /** Candidate "+" centres on the rectified page (rect px), computed on demand. */
+  peaks: Peak[] | null;
 }
 
 /** Homography from the four finder centres, refined by template matching on the rectified page, plus the rectified page. */
@@ -181,33 +186,165 @@ export function alignToPage(photo: RasterImage, corners: Pt[], W: number, HH: nu
   if (!Hinv) return null;
   const rect = fidFound > 0 ? rectify(photo, H1, W, HH, ppm) : rect0;
   const grayR = fidFound > 0 ? toGrayF(rect) : gray0;
-  return { W, HH, H1, Hinv, fidPhoto, fidFound, rect, grayR, ppm, warnings };
+  return { W, HH, H1, Hinv, fidPhoto, fidFound, rect, grayR, ppm, warnings, peaks: null };
 }
 
 /**
- * Second chance for small photos: align precisely for the most plausible paper sizes first (finder centres refined
- * to sub-pixel), then read the strip through the refined homography.
+ * Read the strip from a crop rectified at 12 px/mm around where it should be: find its ink blob (the sheet may be
+ * curled so the strip sits a few mm away from where the corner homography puts it), then sample its module grid.
  */
-function decodeRefined(gray: Uint8Array, photo: RasterImage, corners: Pt[]): { header: SheetHeader; aligned: Aligned } | null {
+export function decodeStripLocated(photo: RasterImage, H1: Mat3, W: number): SheetHeader | null {
+  const ppmS = 12;
+  const cw = 64;
+  const ch = 19;
+  const x0 = W / 2 - cw / 2;
+  const y0 = 2.5;
+  const Hs = mul3(H1, [1, 0, x0, 0, 1, y0, 0, 0, 1]);
+  const crop = rectify(photo, Hs, cw, ch, ppmS);
+  const g = toGrayF(crop);
+  const pl = placeStrip(g, crop.width, crop.height, ppmS);
+  if (!pl) return null;
+  const mx0 = pl.m / ppmS;
+  if (mx0 < 0.6 || mx0 > 1.3) return null;
+  // The sampler receives ideal axis-aligned coordinates (mm in the crop) and applies the measured shear.
+  const ox = pl.ox / ppmS;
+  const oy = pl.oy / ppmS;
+  const sample = (x: number, y: number) => sampleGray(g, crop.width, crop.height, (x + pl.slopeX * (y - oy)) * ppmS, (y + pl.slopeY * (x - ox)) * ppmS);
+  for (const k of [1, 0.985, 1.015]) {
+    const header = decodeStripGrid(sample, ox, oy, mx0 * k, mx0 * k);
+    if (header) return header;
+  }
+  return null;
+}
+
+/** Finder module size (px) per corner set, so the paper size can be judged from the markers' known 1.4 mm modules. */
+const moduleHint = new WeakMap<object, number>();
+
+function paperCandidates(corners: Pt[], limit: number): { paper: PaperId; landscape: boolean; s: { width: number; height: number }; d: number }[] {
   const aspectQuad = dist(corners[0], corners[1]) / Math.max(1e-6, dist(corners[0], corners[3]));
-  const tries = PAPER_TRIES.map((t) => {
+  const module = moduleHint.get(corners);
+  // Distance between the two top finder centres in mm, from the known marker size (perspective-averaged module).
+  const estSpan = module ? (dist(corners[0], corners[1]) / module) * 1.4 : null;
+  const estSpanV = module ? (dist(corners[0], corners[3]) / module) * 1.4 : null;
+  return PAPER_TRIES.map((t) => {
     const s = pageSizeMm(t.paper, t.landscape);
     const f = finderCentersMm(s.width, s.height);
-    return { s, d: Math.abs(Math.log(aspectQuad / ((f[1].x - f[0].x) / (f[3].y - f[0].y)))) };
+    const aspErr = Math.abs(Math.log(aspectQuad / ((f[1].x - f[0].x) / (f[3].y - f[0].y))));
+    const sizeErr = estSpan && estSpanV ? (Math.abs(Math.log(estSpan / (f[1].x - f[0].x))) + Math.abs(Math.log(estSpanV / (f[3].y - f[0].y)))) / 2 : 0;
+    // A-series sizes are far more common; Letter vs A4 differ by only ~10% in aspect.
+    return { ...t, s, aspErr, sizeErr, d: aspErr + sizeErr - (t.paper === 'letter' || t.paper === 'legal' ? 0 : 0.04) };
   })
-    .filter((t) => t.d < 0.25)
+    .filter((t) => t.aspErr < 0.25 && t.sizeErr < 0.45)
     .sort((a, b) => a.d - b.d)
-    .slice(0, 3);
-  for (const t of tries) {
+    .slice(0, limit);
+}
+
+/**
+ * Second chance for small or curled photos: align precisely for the most plausible paper sizes (finder centres
+ * refined to sub-pixel), then find the strip near its expected place and read it.
+ */
+function decodeRefined(gray: Uint8Array, photo: RasterImage, corners: Pt[]): { header: SheetHeader; aligned: Aligned } | null {
+  for (const t of paperCandidates(corners, 3)) {
     const al = alignToPage(photo, corners, t.s.width, t.s.height);
     if (!al) continue;
-    const header = decodeStrip((x, y) => {
-      const p = applyH(al.H1, x, y);
-      return sampleGray(gray, photo.width, photo.height, p.x, p.y);
-    }, t.s.width);
+    const header =
+      decodeStripLocated(photo, al.H1, t.s.width) ??
+      decodeStrip((x, y) => {
+        const p = applyH(al.H1, x, y);
+        return sampleGray(gray, photo.width, photo.height, p.x, p.y);
+      }, t.s.width);
     if (header) return { header, aligned: al };
   }
   return null;
+}
+
+function pagePeaks(al: Aligned, halfMm: number, thickMm: number): Peak[] {
+  if (!al.peaks) {
+    al.peaks = findPlusPeaks(al.grayR, al.rect.width, al.rect.height, al.ppm, halfMm, thickMm, {
+      x0: 4 * al.ppm,
+      y0: 15 * al.ppm,
+      x1: (al.W - 4) * al.ppm,
+      y1: (al.HH - 15) * al.ppm,
+    });
+  }
+  return al.peaks;
+}
+
+/** White gap (mm) between frames, measured across the gutter next to the mark lattice; null when it cannot be measured. */
+function measureGutter(gray: Float32Array, w: number, h: number, ppm: number, xMm: number, yMm: number, spanMm: number): number | null {
+  const prof: number[] = [];
+  const y0 = Math.max(0, Math.round((yMm - spanMm) * ppm));
+  const y1 = Math.min(h - 1, Math.round((yMm + spanMm) * ppm));
+  const cx = Math.round(xMm * ppm);
+  for (let y = y0; y <= y1; y++) {
+    let v = 0;
+    for (let dx = -3; dx <= 3; dx++) v += gray[y * w + Math.min(w - 1, Math.max(0, cx + dx))];
+    prof.push(v / 7);
+  }
+  const sorted = [...prof].sort((a, b) => a - b);
+  const dark = sorted[Math.floor(sorted.length * 0.1)];
+  const paper = sorted[Math.floor(sorted.length * 0.92)];
+  if (paper - dark < 45) return null;
+  const thr = (dark + paper) / 2;
+  const mid = Math.round(yMm * ppm) - y0;
+  if (mid < 0 || mid >= prof.length || prof[mid] < thr) return null;
+  let a = mid;
+  let b = mid;
+  while (a > 0 && prof[a - 1] >= thr) a--;
+  while (b < prof.length - 1 && prof[b + 1] <= 1e9 && prof[b + 1] >= thr) b++;
+  if (a === 0 || b === prof.length - 1) return null;
+  const gap = (b - a + 1) / ppm;
+  return gap >= 3 && gap <= 20 ? gap : null;
+}
+
+/**
+ * No readable strip: infer the layout (columns, rows, pitch, gutter) from the "+" lattice of the aligned page.
+ * Paper size comes from the finder aspect; page number, frame count and fps are unknown.
+ */
+export function inferHeaderFromLattice(al: Aligned, paper: PaperId, landscape: boolean, pageIndex: number): { header: SheetHeader; gutterMeasured: boolean } | null {
+  const half = markHalfFor(5);
+  const peaks = pagePeaks(al, half, 0.4);
+  const mm = peaks.filter((p) => p.score >= 0.75).map((p) => ({ x: p.x / al.ppm, y: p.y / al.ppm })).filter((p) => p.x > 4 && p.x < al.W - 4 && p.y > 16 && p.y < al.HH - 16)
+    // the strip's own blobs can look like crosses
+    .filter((p) => !(Math.abs(p.x - al.W / 2) < 26 && p.y < 20.5));
+  const lat = inferLattice(mm, 5);
+  if (!lat) return null;
+  const cols = lat.x.count - 1;
+  const rows = lat.y.count - 1;
+  if (cols < 1 || rows < 1 || cols > 63 || rows > 63) return null;
+  const rowMid = lat.y.origin + (rows >= 2 ? lat.y.pitch : 0);
+  const measured = measureGutter(al.grayR, al.rect.width, al.rect.height, al.ppm, lat.x.origin + lat.x.pitch / 2, rowMid, 9);
+  const gutter = Math.min(Math.max(measured ?? 5, 3), Math.min(20, Math.min(lat.x.pitch, lat.y.pitch) - 8));
+  const t10 = (v: number) => Math.round(v * 10);
+  const cellW = t10(lat.x.pitch - gutter);
+  const cellH = t10(lat.y.pitch - gutter);
+  const perPage = cols * rows;
+  return {
+    gutterMeasured: measured !== null,
+    header: {
+      version: 1,
+      paper,
+      landscape,
+      pageIndex,
+      pageCount: pageIndex + 1,
+      columns: cols,
+      rows,
+      cellW,
+      cellH,
+      pitchX: cellW + t10(gutter),
+      pitchY: cellH + t10(gutter),
+      gridX0: t10(lat.x.origin + gutter / 2),
+      gridY0: t10(lat.y.origin + gutter / 2),
+      firstFrame: pageIndex * perPage,
+      totalFrames: (pageIndex + 1) * perPage,
+      fpsX100: 0,
+      frameW: 0,
+      frameH: 0,
+      guide: 'full',
+      guideOpacity: 100,
+      projectId: 0,
+    },
+  };
 }
 
 function layoutInfo(header: SheetHeader, g: SheetGeometry): ScanLayoutInfo {
@@ -364,7 +501,7 @@ function fail(report: ScanPageReport, message: string, extra: Partial<ScanPageRe
   Object.assign(report, extra);
   report.status = 'failed';
   report.warnings.push(message);
-  return { report, header: null, manualLayout: false, frames: [], rectified: null, quality: Infinity };
+  return { report, header: null, manualLayout: false, latticeLayout: false, frames: [], rectified: null, quality: Infinity };
 }
 
 /** Scan one photo. `index` is its position in the caller's list (kept in the report). Never throws on bad photos. */
@@ -379,6 +516,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   /* ---- 1. corner hypotheses ---- */
   let hyps: Pt[][];
   let ambiguous = false;
+  const hypList: { corners: Pt[]; quad: number; rank: number }[] = [];
   if (manual?.corners) {
     const c = manual.corners;
     hyps = [[c.tl, c.tr, c.br, c.bl]];
@@ -390,17 +528,22 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
     const bin = adaptiveBinarize(small.data, small.width, small.height, radius);
     const finders = findFinders(bin, small.width, small.height).sort((a, b) => b.hits - a.hits);
     report.foundCorners = finders.slice(0, 8).map((c): ScanPoint => ({ x: c.x * f, y: c.y * f }));
-    const quad = selectQuad(finders);
-    if (!quad) {
+    const quads = rankQuads(finders, 4);
+    if (quads.length === 0) {
       return fail(
         report,
-        `Not all four corner markers were found (${finders.length} candidate${finders.length === 1 ? '' : 's'} detected): one is probably covered, cut off or too blurred. Photograph the whole sheet flat, in good light, with all four corner markers visible, or mark the corners by hand.`,
+        `Not all four corner markers were found (${finders.length} candidate${finders.length === 1 ? '' : 's'} detected, none forming a paper-shaped quadrilateral): one is probably covered, cut off or too blurred. Photograph the whole sheet flat, in good light, with all four corner markers visible, or mark the corners by hand.`,
       );
     }
-    const q = quad.map((c) => ({ x: c.x * f, y: c.y * f, module: c.module * f }));
-    const ranked = rankRotations(q, gray, w, h);
-    ambiguous = ranked[0].ambiguous;
-    hyps = ranked.map((r) => r.corners);
+    quads.forEach((quad, qi) => {
+      const q = quad.map((c) => ({ x: c.x * f, y: c.y * f, module: c.module * f }));
+      const ranked = rankRotations(q, gray, w, h);
+      if (qi === 0) ambiguous = ranked[0].ambiguous;
+      const avgModule = q.reduce((sum, p) => sum + p.module, 0) / 4;
+      ranked.forEach((r) => moduleHint.set(r.corners, avgModule));
+      ranked.forEach((r, ri) => hypList.push({ corners: r.corners, quad: qi, rank: ri }));
+    });
+    hyps = hypList.map((h2) => h2.corners);
     report.cornersSource = 'auto';
   }
 
@@ -408,6 +551,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   let corners: Pt[] = hyps[0];
   let header: SheetHeader | null = null;
   let manualLayout = false;
+  let latticeLayout = false;
   let aligned: Aligned | null = null;
   if (manual?.layout) {
     try {
@@ -427,7 +571,8 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
       }
     }
     if (!header) {
-      for (const c of hyps) {
+      const refinedTries = hypList.length ? hypList.filter((h2) => h2.rank < 2).map((h2) => h2.corners) : hyps;
+      for (const c of refinedTries) {
         const r = decodeRefined(gray, photo, c);
         if (r) {
           header = r.header;
@@ -437,15 +582,30 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
         }
       }
     }
+    if (header) report.layoutSource = 'strip';
     if (!header) {
-      report.corners = cornersObject(hyps[0]);
-      return fail(
-        report,
-        'The corner markers were found but the printed data strip could not be read (blurred, too small or damaged). Enter the page layout by hand (paper, columns, rows).',
-        { corners: report.corners },
+      // No strip: recover the layout from the "+" lattice so frames can still be cut.
+      const cand = paperCandidates(hyps[0], 1)[0];
+      const al = cand ? alignToPage(photo, hyps[0], cand.s.width, cand.s.height) : null;
+      const inferred = al && cand ? inferHeaderFromLattice(al, cand.paper, cand.landscape, manual?.pageIndex ?? index) : null;
+      if (!inferred || !al || !cand) {
+        report.corners = cornersObject(hyps[0]);
+        return fail(
+          report,
+          'The four corner markers were found but the data strip could not be read and no regular grid of + marks could be recognised. Enter the page layout by hand (paper, columns, rows).',
+          { corners: report.corners },
+        );
+      }
+      header = inferred.header;
+      aligned = al;
+      corners = hyps[0];
+      manualLayout = true;
+      latticeLayout = true;
+      report.layoutSource = 'lattice';
+      report.warnings.push(
+        `The data strip could not be read; the layout was detected from the + marks instead: ${header.columns} x ${header.rows} frames on ${cand.paper.toUpperCase()}${cand.landscape ? ' landscape' : ''}${inferred.gutterMeasured ? '' : ' (gutter assumed 5 mm)'}. Please confirm the page number, total frame count and fps${ambiguous ? ', and check the page orientation (the top-left marker was not clearly identified)' : ''}.`,
       );
     }
-    report.layoutSource = 'strip';
   }
   report.corners = cornersObject(corners);
   const geo = geometryFromHeader(header);
@@ -467,32 +627,31 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   const { H1, Hinv, fidPhoto, fidFound, rect, grayR, ppm } = al;
   const fidMm = finderCentersMm(W, HH);
 
-  /* ---- 4. refine every "+" mark ---- */
+  /* ---- 4. find every "+" mark: matched filter, then a smooth warp tracks the lattice ---- */
   const cols = geo.columns;
   const rows = geo.rows;
-  const tpl = markTemplate(ppm, geo.markHalfMm, geo.markThickMm);
+  const peaks = pagePeaks(al, geo.markHalfMm, geo.markThickMm);
+  const expected: { x: number; y: number }[] = [];
+  for (let r = 0; r <= rows; r++) {
+    for (let c = 0; c <= cols; c++) {
+      const mm = markCenterMm(geo, c, r);
+      expected.push({ x: mm.x * ppm, y: mm.y * ppm });
+    }
+  }
+  const maxRadius = 0.4 * Math.min(geo.pitchXMm, geo.pitchYMm) * ppm;
+  const tracked = trackLattice(expected, peaks, Math.min(5 * ppm, maxRadius), 1.5 * ppm);
   const grid: MarkInfo[][] = [];
-  const radii = [1.3 * ppm, Math.min(2.4, geo.gutterMm / 2 - 0.2) * ppm];
   for (let r = 0; r <= rows; r++) {
     const rowInfo: MarkInfo[] = [];
     for (let c = 0; c <= cols; c++) {
+      const node = tracked.nodes[r * (cols + 1) + c];
       const mm = markCenterMm(geo, c, r);
       const predicted = applyH(H1, mm.x, mm.y);
-      let info: MarkInfo = { photo: predicted, found: false, score: 0, residual: 0 };
-      for (const radius of radii) {
-        const m = matchTemplate(grayR, rect.width, rect.height, tpl, mm.x * ppm, mm.y * ppm, radius);
-        if (m && m.score >= 0.5) {
-          const p = applyH(H1, m.x / ppm, m.y / ppm);
-          info = { photo: p, found: true, score: m.score, residual: dist(p, predicted) };
-          break;
-        }
-        if (m) info.score = Math.max(info.score, m.score);
-      }
-      rowInfo.push(info);
+      const p = applyH(H1, node.x / ppm, node.y / ppm);
+      rowInfo.push({ photo: p, found: !!node.peak, score: node.peak?.score ?? 0, residual: dist(p, predicted) });
     }
     grid.push(rowInfo);
   }
-  // Marks that were not found follow the displacement of their nearest found neighbours.
   const foundList: { r: number; c: number }[] = [];
   grid.forEach((row, r) => row.forEach((m, c) => m.found && foundList.push({ r, c })));
   if (foundList.length < Math.max(4, Math.ceil(0.25 * (rows + 1) * (cols + 1)))) {
@@ -500,30 +659,6 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
       marksFound: foundList.length,
       marksExpected: (rows + 1) * (cols + 1),
     });
-  }
-  for (let r = 0; r <= rows; r++) {
-    for (let c = 0; c <= cols; c++) {
-      if (grid[r][c].found) continue;
-      const mm = markCenterMm(geo, c, r);
-      const predicted = applyH(H1, mm.x, mm.y);
-      const near = foundList
-        .map((f) => ({ f, d: Math.hypot(f.r - r, f.c - c) }))
-        .sort((a, b) => a.d - b.d)
-        .slice(0, 4);
-      let sx = 0;
-      let sy = 0;
-      let sw = 0;
-      for (const { f, d } of near) {
-        const fm = markCenterMm(geo, f.c, f.r);
-        const fp = applyH(H1, fm.x, fm.y);
-        const wgt = 1 / (d * d + 0.25);
-        sx += (grid[f.r][f.c].photo.x - fp.x) * wgt;
-        sy += (grid[f.r][f.c].photo.y - fp.y) * wgt;
-        sw += wgt;
-      }
-      grid[r][c].photo = { x: predicted.x + sx / sw, y: predicted.y + sy / sw };
-      grid[r][c].residual = Math.hypot(sx / sw, sy / sw);
-    }
   }
   const P = grid.map((row) => row.map((m) => m.photo));
   const R = P.map((row) => row.map((p) => {
@@ -566,8 +701,9 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   /* ---- 5. cut frames ---- */
   const field = opts.flatten === false ? null : estimateWhiteField(rect, geo, ppm);
   if (opts.flatten !== false && !field) report.warnings.push('There was not enough blank paper to correct the lighting; frames were not flattened.');
-  let outW = opts.outputWidth ?? (header.frameW || Math.round((geo.cellWMm * 300) / 25.4));
-  let outH = opts.outputHeight ?? (header.frameH || Math.round((geo.cellHMm * 300) / 25.4));
+  const dpiPx = Math.min(300 / 25.4, photoPixelsPerMm(H1, W / 2, HH / 2) * 1.5);
+  let outW = opts.outputWidth ?? (header.frameW || Math.round(geo.cellWMm * dpiPx));
+  let outH = opts.outputHeight ?? (header.frameH || Math.round(geo.cellHMm * dpiPx));
   if (opts.outputWidth && !opts.outputHeight) outH = Math.max(1, Math.round((outW * geo.cellHMm) / geo.cellWMm));
   if (opts.outputHeight && !opts.outputWidth) outW = Math.max(1, Math.round((outH * geo.cellWMm) / geo.cellHMm));
   outW = clamp(Math.round(outW), 1, 4096);
@@ -591,7 +727,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   report.status = report.warnings.length > 0 ? 'warning' : 'ok';
   report.thumbnailKind = 'rectified';
   const missingPenalty = (report.marksExpected - report.marksFound) * 5;
-  return { report, header, manualLayout, frames, rectified: small, quality: (reproj ?? 99) + missingPenalty + (fidFound < 4 ? 20 : 0) };
+  return { report, header, manualLayout, latticeLayout, frames, rectified: small, quality: (reproj ?? 99) + missingPenalty + (fidFound < 4 ? 20 : 0) };
 }
 
 function cornersObject(c: Pt[]): ScanCorners {
