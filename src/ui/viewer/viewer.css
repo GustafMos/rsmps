@@ -60,3 +60,19 @@
 .rs-pts { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 .rs-pts__svg { position: absolute; pointer-events: auto; overflow: visible; }
 .rs-pts__hint { left: 50%; bottom: var(--s-3); transform: translateX(-50%); color: var(--yellow); border-color: var(--yellow); background: #2a2208; }
+
+/* narrow viewer: lower-priority chip content gives way instead of overlapping */
+.rs-viewer { container-type: inline-size; }
+@container (max-width: 640px) {
+  .rs-viewer__info > .rs-num { display: none; }
+  .rs-viewer__name { max-width: 110px; }
+  .rs-viewer__zoom { display: none; }
+  .rs-viewer__batch { left: var(--s-2); top: auto; bottom: var(--s-2); transform: none; }
+  .rs-viewer__fname { max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rs-viewer__preset { max-width: 110px; }
+}
+@container (max-width: 480px) {
+  .rs-viewer__frame { top: auto; bottom: 44px; max-width: calc(100% - 16px); }
+  .rs-viewer__pix { top: auto; bottom: var(--s-2); max-width: calc(100% - 16px); overflow: hidden; }
+  .rs-viewer__batch { bottom: 80px; }
+}

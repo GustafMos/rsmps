@@ -123,3 +123,5 @@
 .rs-nodekind { display: flex; align-items: center; gap: var(--s-2); width: 100%; padding: 0 var(--s-1); color: var(--accent-hi); }
 .rs-nodekind .rs-select { height: 24px; font-weight: 600; }
 .rs-node__errtext { position: absolute; left: 0; right: 0; top: 100%; margin-top: 3px; padding: 3px var(--s-2); background: var(--danger-bg); border: 1px solid var(--danger); color: var(--text); font-size: var(--fs-xs); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; pointer-events: none; z-index: 3; }
+/* inputs: filled = a wire is connected, hollow = free */
+.rs-sock--in:not(.is-wired) { background: var(--bg-2); }

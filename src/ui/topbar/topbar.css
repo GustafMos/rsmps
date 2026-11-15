@@ -4,6 +4,8 @@
 .rs-top__link { gap: var(--s-1); color: var(--text-dim); }
 .rs-top__link:hover { color: var(--text); }
 .rs-top__link .rs-top__label { font-size: var(--fs-sm); }
+.rs-top__link { color: var(--text-dim); }
+.rs-top .rs-btn:focus-visible, .rs-top a.rs-btn:focus-visible { box-shadow: var(--focus); }
 @media (max-width: 1100px) { .rs-top__link .rs-top__label { display: none; } }
 .rs-top__word { font-family: var(--font-pixel); font-size: var(--fs-lg); letter-spacing: 0.1em; color: var(--text); }
 .rs-top__sep { width: 1px; height: 20px; background: var(--line-strong); margin: 0 var(--s-1); }

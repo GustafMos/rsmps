@@ -24,8 +24,8 @@ import '../layers.css';
 
 const catColor = (def: AnyNodeDef | undefined) => (def ? (CATEGORIES[def.category]?.color ?? '#7f8c9b') : '#ff5c6c');
 
-function Socket({ node, port, type, dir }: { node: string; port: string; type: SocketType; dir: 'in' | 'out' }) {
-  return <span className={`rs-sock rs-sock--${type} rs-sock--${dir}`} data-sock data-node={node} data-port={port} data-dir={dir} data-type={type} />;
+function Socket({ node, port, type, dir, wired }: { node: string; port: string; type: SocketType; dir: 'in' | 'out'; wired?: boolean }) {
+  return <span className={`rs-sock rs-sock--${type} rs-sock--${dir}${wired ? ' is-wired' : ''}`} data-sock data-node={node} data-port={port} data-dir={dir} data-type={type} />;
 }
 
 export const NodeView = memo(function NodeView({ node }: { node: NodeInstance }) {
@@ -228,7 +228,7 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
       <div className="rs-row rs-row--io" style={{ top: row.y, height: ROW_H }}>
         {row.input && (
           <>
-            {!row.input.multi && <Socket node={node.id} port={row.input.port} type={row.input.type} dir="in" />}
+            {!row.input.multi && <Socket node={node.id} port={row.input.port} type={row.input.type} dir="in" wired={wired.has(row.input.port)} />}
             <span className="rs-row__label">{row.input.label}</span>
           </>
         )}
@@ -362,7 +362,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
   }
   return (
     <div className="rs-row rs-row--param" data-param-key={row.key} style={{ top: row.y, height: ROW_H }}>
-      {row.socket && <Socket node={node.id} port={row.key} type={row.socket} dir="in" />}
+      {row.socket && <Socket node={node.id} port={row.key} type={row.socket} dir="in" wired={isWired} />}
       {control}
     </div>
   );

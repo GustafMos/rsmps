@@ -67,13 +67,13 @@ export function TopBar() {
   return (
     <header className="rs-top">
       <div className="rs-top__brand">
-        <img src="/ripscorpy-logo.png" alt="" width={34} height={34} />
+        <img src="/ripscorpy-mark.png" alt="" width={32} height={32} />
         <span className="rs-top__word">RSMPS</span>
       </div>
       <MenuButton items={fileItems} className="rs-btn rs-btn--ghost">File <Icon name="chevronDown" size={12} /></MenuButton>
       <div className="rs-top__sep" />
-      <button className="rs-btn rs-btn--icon rs-btn--ghost" disabled={!canUndo} onClick={() => ed.undo()} title="Undo (Ctrl+Z)"><Icon name="undo" /></button>
-      <button className="rs-btn rs-btn--icon rs-btn--ghost" disabled={!canRedo} onClick={() => ed.redo()} title="Redo (Ctrl+Y)"><Icon name="redo" /></button>
+      <button className="rs-btn rs-btn--icon rs-btn--ghost" disabled={!canUndo} onClick={() => ed.undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Icon name="undo" /></button>
+      <button className="rs-btn rs-btn--icon rs-btn--ghost" disabled={!canRedo} onClick={() => ed.redo()} title="Redo (Ctrl+Y)" aria-label="Redo"><Icon name="redo" /></button>
       <div className="rs-top__sep" />
       <input
         className="rs-top__name"
@@ -85,13 +85,18 @@ export function TopBar() {
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }}
       />
       <div className="rs-top__spacer" />
-      <button className={`rs-btn rs-btn--icon rs-btn--ghost${leftOpen ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ leftOpen: !leftOpen })} title="Toggle media panel"><Icon name="folder" /></button>
-      <button className={`rs-btn rs-btn--icon rs-btn--ghost${rightOpen ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ rightOpen: !rightOpen })} title="Toggle inspector"><Icon name="menu" /></button>
-      <button className="rs-btn rs-btn--ghost" onClick={() => { ed.studioTarget = null; ed.openDialog('palette'); }} title="Palette Studio: build palettes from colour harmonies or images">Palettes</button>
-      <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.openDialog('plugins')} title="Plugins"><Icon name="plug" /></button>
-      <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.openDialog('shortcuts')} title="Keyboard shortcuts (?)"><Icon name="help" /></button>
-      <a className="rs-btn rs-btn--ghost rs-top__link" href="https://ko-fi.com/ripscorpy" target="_blank" rel="noopener noreferrer" title="Buy me a coffee: it feeds two cats"><Icon name="coffee" /><span className="rs-top__label">Support</span></a>
-      <a className="rs-btn rs-btn--ghost rs-top__link" href={bugUrl} target="_blank" rel="noopener noreferrer" title="Report a bug on GitHub (only app version, browser and GPU are pre-filled)"><Icon name="bug" /><span className="rs-top__label">Report a bug</span></a>
+      <button className={`rs-btn rs-btn--icon rs-btn--ghost${leftOpen ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ leftOpen: !leftOpen })} title="Toggle media panel" aria-label="Toggle media panel"><Icon name="folder" /></button>
+      <button className={`rs-btn rs-btn--icon rs-btn--ghost${rightOpen ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ rightOpen: !rightOpen })} title="Toggle inspector" aria-label="Toggle inspector"><Icon name="menu" /></button>
+      <div className="rs-top__sep" />
+      <button className="rs-btn rs-btn--ghost rs-top__link" onClick={open} title="Open file in a new tab (Ctrl+O)" aria-label="Open"><Icon name="open" /><span className="rs-top__label">Open</span></button>
+      <button className="rs-btn rs-btn--ghost rs-top__link" onClick={save} title="Save (Ctrl+S)" aria-label="Save"><Icon name="save" /><span className="rs-top__label">Save</span></button>
+      <button className="rs-btn rs-btn--ghost rs-top__link" onClick={() => { ed.studioTarget = null; ed.openDialog('palette'); }} title="Palette Studio: build palettes from colour harmonies or images" aria-label="Palettes"><Icon name="palette" /><span className="rs-top__label">Palettes</span></button>
+      <button className="rs-btn rs-btn--ghost rs-top__link" onClick={() => ed.openDialog('plugins')} title="Plugins" aria-label="Plugins"><Icon name="puzzle" /><span className="rs-top__label">Plugins</span></button>
+      <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.openDialog('shortcuts')} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><Icon name="help" /></button>
+      <div className="rs-top__sep" />
+      <a className="rs-btn rs-btn--ghost rs-top__link" href="https://ko-fi.com/ripscorpy" target="_blank" rel="noopener noreferrer" title="Buy me a coffee: it feeds two cats" aria-label="Support"><Icon name="coffee" /><span className="rs-top__label">Support</span></a>
+      <a className="rs-btn rs-btn--ghost rs-top__link" href={bugUrl} target="_blank" rel="noopener noreferrer" title="Report a bug on GitHub (only app version, browser and GPU are pre-filled)" aria-label="Report a bug"><Icon name="bug" /><span className="rs-top__label">Report a bug</span></a>
+      <div className="rs-top__sep" />
       <div className="rs-top__split">
         <button className="rs-btn rs-btn--primary" onClick={() => void ed.runExport([], ed.exportPrefs(ed.state.activeProject).items)} disabled={enabledCount === 0} title="Export the outputs that are ticked (Outputs panel)"><Icon name="export" /> Export ({enabledCount})</button>
         <MenuButton className="rs-btn rs-btn--primary rs-top__caret" title="More export options" items={[
