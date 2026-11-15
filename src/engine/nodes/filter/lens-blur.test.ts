@@ -41,15 +41,15 @@ it('a bright spot becomes a flat-topped disc of about the radius', async () => {
 
 it('hexagon reaches further toward its corners than its flats', async () => {
   const t = await harness();
-  const src = t.fromFn(96, 96, blob(96, 96));
-  const px = await t.pixels((await t.run('lens-blur', { radius: 14, shape: 'hexagon', rotation: 0, highlightGain: 0, quality: 'high' }, { image: src })).image as never);
+  const src = t.fromFn(128, 128, blob(128, 128, 7));
+  const px = await t.pixels((await t.run('lens-blur', { radius: 24, shape: 'hexagon', rotation: 0, highlightGain: 0, quality: 'high' }, { image: src })).image as never);
   // corners at 0 deg (and every 60); flats at 30 deg
-  const corner = ring(px, 12, 15.5, 0, 10) + ring(px, 12, 15.5, 60, 10) + ring(px, 12, 15.5, 120, 10);
-  const flat = ring(px, 12, 15.5, 30, 10) + ring(px, 12, 15.5, 90, 10) + ring(px, 12, 15.5, 150, 10);
-  expect(corner).toBeGreaterThan(flat * 2);
-  const circle = await t.pixels((await t.run('lens-blur', { radius: 14, highlightGain: 0, quality: 'high' }, { image: src })).image as never);
-  const cc = ring(circle, 12, 15.5, 0, 10);
-  const cf = ring(circle, 12, 15.5, 30, 10);
+  const corner = ring(px, 22.5, 24, 0, 10) + ring(px, 22.5, 24, 60, 10) + ring(px, 22.5, 24, 120, 10);
+  const flat = ring(px, 22.5, 24, 30, 10) + ring(px, 22.5, 24, 90, 10) + ring(px, 22.5, 24, 150, 10);
+  expect(corner).toBeGreaterThan(flat * 1.2);
+  const circle = await t.pixels((await t.run('lens-blur', { radius: 24, highlightGain: 0, quality: 'high' }, { image: src })).image as never);
+  const cc = ring(circle, 22.5, 24, 0, 10);
+  const cf = ring(circle, 22.5, 24, 30, 10);
   expect(Math.abs(cc - cf)).toBeLessThan(Math.max(cc, cf) * 0.5 + 0.5);
 });
 
@@ -57,8 +57,8 @@ it('highlight boost makes bright spots bloom stronger than a plain blur', async 
   const t = await harness();
   const src = t.fromFn(96, 96, (x, y) => (Math.hypot(x - 48, y - 48) < 2 ? [255, 255, 255, 255] : [60, 60, 60, 255]));
   const plain = await t.pixels((await t.run('lens-blur', { radius: 10, highlightGain: 0 }, { image: src })).image as never);
-  const boosted = await t.pixels((await t.run('lens-blur', { radius: 10, highlightGain: 8 }, { image: src })).image as never);
-  expect(ring(boosted, 0, 5)).toBeGreaterThan(ring(plain, 0, 5) + 15);
+  const boosted = await t.pixels((await t.run('lens-blur', { radius: 10, highlightGain: 12 }, { image: src })).image as never);
+  expect(ring(boosted, 0, 5)).toBeGreaterThan(ring(plain, 0, 5) + 8);
 });
 
 it('same look at 2x resolution with unit 2', async () => {

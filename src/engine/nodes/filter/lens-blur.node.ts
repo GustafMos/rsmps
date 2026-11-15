@@ -3,7 +3,7 @@ import { defineNode } from '../../define';
 const SIDES: Record<string, number> = { circle: 0, hexagon: 6, octagon: 8 };
 const QUALITY: Record<string, number> = { draft: 64, normal: 160, high: 288 };
 /** Largest radius (in texels) the gather pass ever works at; bigger blurs are done on a smaller copy and upsampled. */
-const WORK_RADIUS = 6;
+const WORK_RADIUS = 4;
 
 export default defineNode({
   id: 'lens-blur',
@@ -33,7 +33,7 @@ export default defineNode({
     },
     rotation: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Blade rotation', group: 'Aperture', visibleIf: (p) => p.shape !== 'circle' },
     highlightThreshold: { type: 'number', default: 0.75, min: 0, max: 1, step: 0.01, label: 'Highlight threshold', group: 'Highlights', hint: 'Areas brighter than this bloom into bokeh discs.' },
-    highlightGain: { type: 'number', default: 3, min: 0, max: 12, softMax: 8, step: 0.1, label: 'Highlight boost', group: 'Highlights', hint: '0 = plain even blur.' },
+    highlightGain: { type: 'number', default: 4, min: 0, max: 12, softMax: 8, step: 0.1, label: 'Highlight boost', group: 'Highlights', hint: '0 = plain even blur.' },
     quality: {
       type: 'enum',
       default: 'normal',
@@ -63,26 +63,32 @@ export default defineNode({
     const taps = Math.round(QUALITY[p.quality] * (ctx.quality === 'preview' ? 0.5 : 1));
     const depthUniforms = { focus: p.focus, range: p.range, denom: Math.max(Math.max(p.focus, 1 - p.focus) - p.range, 0.05) };
 
-    // 1. linear-light premultiplied copy at working resolution (box filtered)
-    const lin = gpu.pass({
-      label: 'lens-prep',
-      size: low,
-      format: 'rgba16float',
-      textures: { src },
-      uniforms: { step: down / 3 },
-      wgsl: /* wgsl */ `
+    // 1. linear-light premultiplied copies at working resolution (box filtered): boost-weighted colour+alpha, and the weights.
+    //    Weighting is done per full-resolution texel, so small bright lights keep their punch after downsampling.
+    const prepWgsl = (out: string) => /* wgsl */ `
+fn boost(c: vec4f) -> f32 {
+  if (u.gain <= 0.0 || c.a <= 0.0001) { return 1.0; }
+  let l = luma(c.rgb / c.a);
+  return 1.0 + u.gain * smoothstep(u.thr, u.thr + 0.12 * (1.0 - u.thr) + 0.02, l);
+}
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let texel = 1.0 / vec2f(textureDimensions(src));
   var acc = vec4f(0.0);
+  var wacc = 0.0;
   for (var j = -1; j <= 1; j++) {
     for (var i = -1; i <= 1; i++) {
       let s = unpremul(textureSampleLevel(src, smp, uv + vec2f(f32(i), f32(j)) * u.step * texel, 0.0));
-      acc += vec4f(srgbToLinear(s.rgb) * s.a, s.a);
+      let c = vec4f(srgbToLinear(s.rgb) * s.a, s.a);
+      let w = boost(c);
+      acc += c * w;
+      wacc += w;
     }
   }
-  return acc / 9.0;
-}`,
-    });
+  ${out}
+}`;
+    const prepOpts = { size: low, format: 'rgba16float' as const, textures: { src }, uniforms: { step: down / 3, gain: p.highlightGain, thr: Math.pow(p.highlightThreshold, 2.2) } };
+    const lin = gpu.pass({ ...prepOpts, label: 'lens-prep', wgsl: prepWgsl('return acc / 9.0;') });
+    const wts = gpu.pass({ ...prepOpts, label: 'lens-weights', wgsl: prepWgsl('return vec4f(wacc / 9.0);') });
 
     // 2. bounded gather: golden-angle spiral over a disc/polygon, weights boost highlights (and respect depth)
     const hasDepth = !!depth;
@@ -90,22 +96,15 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
       label: 'lens-gather',
       size: low,
       format: 'rgba16float',
-      textures: { lin, depth: depth ?? null },
+      textures: { lin, wts, depth: depth ?? null },
       uniforms: {
         radius: p.radius / down,
         taps,
         sides: SIDES[p.shape],
         rot: (p.rotation * Math.PI) / 180,
-        thr: Math.pow(p.highlightThreshold, 2.2),
-        gain: p.highlightGain,
         ...depthUniforms,
       },
       wgsl: /* wgsl */ `
-fn tapWeight(c: vec4f) -> f32 {
-  if (u.gain <= 0.0 || c.a <= 0.0001) { return 1.0; }
-  let l = luma(c.rgb / c.a);
-  return 1.0 + u.gain * smoothstep(u.thr, u.thr + 0.12 * (1.0 - u.thr) + 0.02, l);
-}
 fn polyScale(theta: f32) -> f32 {
   if (u.sides < 1.0) { return 1.0; }
   let seg = TAU / u.sides;
@@ -121,11 +120,9 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let texel = 1.0 / vec2f(textureDimensions(lin));
   let centre = textureSampleLevel(lin, smp, uv, 0.0);
   ${hasDepth ? 'let rad = u.radius * cocAt(uv);' : 'let rad = u.radius;'}
-  if (rad < 0.35) { return centre; }
-  var acc = vec4f(0.0);
-  var wsum = 0.0;
-  let wc = tapWeight(centre);
-  acc += centre * wc; wsum += wc;
+  if (rad < 0.35) { return centre / max(textureSampleLevel(wts, smp, uv, 0.0).r, 0.0001); }
+  var acc = centre;
+  var wsum = textureSampleLevel(wts, smp, uv, 0.0).r;
   let n = i32(clamp(u.taps, 8.0, 320.0));
   for (var i = 0; i < n; i++) {
     let t = (f32(i) + 0.5) / f32(n);
@@ -135,9 +132,9 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     let off = vec2f(cos(theta), sin(theta)) * r * rad;
     let tuv = uv + off * texel;
     let c = textureSampleLevel(lin, smp, tuv, 0.0);
-    var wt = tapWeight(c) * ps * ps;
+    var wt = ps * ps;
     ${hasDepth ? 'wt = wt * clamp(u.radius * cocAt(tuv) - length(off) + 1.0, 0.0, 1.0);' : ''}
-    acc += c * wt; wsum += wt;
+    acc += c * wt; wsum += textureSampleLevel(wts, smp, tuv, 0.0).r * wt;
   }
   return acc / wsum;
 }`,
