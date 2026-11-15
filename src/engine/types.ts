@@ -289,6 +289,9 @@ type InValue<I extends InputDef> = I extends { multi: true }
 export type InputsOf<I extends InputSchema> = { [K in keyof I]: InValue<I[K]> };
 export type OutputsOf<O extends OutputSchema> = { [K in keyof O]?: SocketValueMap[O[K]['type']] | null };
 
+/** Host capabilities a node may depend on. See `NodeDef.requires`. */
+export type Capability = 'local-server';
+
 /** Node families, as in Blender's Add menu. The UI groups and colours nodes by category. */
 export const CATEGORIES = {
   input: { title: 'Input', color: '#5b8def' },
@@ -489,6 +492,12 @@ export interface NodeDef<
    * (and an on-screen piano) to MIDI notes and sends them to it.
    */
   playable?: boolean;
+  /**
+   * Things the node needs from where the app is running. If the host lacks one, the node still appears but the UI
+   * marks it with a clear "only works in a local build" warning (e.g. on the hosted web version).
+   *  - 'local-server': needs the app started locally with its own server (`npm run dev:lan`), e.g. the phone link.
+   */
+  requires?: readonly Capability[];
   /** Set when `render` does heavy CPU work, so the UI can warn. */
   cpu?: boolean;
   /**

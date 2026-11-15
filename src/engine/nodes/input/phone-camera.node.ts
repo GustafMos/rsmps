@@ -10,6 +10,7 @@ export default defineNode({
   id: 'phone-camera',
   title: 'Phone Camera',
   category: 'input',
+  requires: ['local-server'],
   description: 'Live picture from a phone camera, linked by scanning a QR code. Needs the app started with "npm run dev:lan" and both devices on the same Wi-Fi. Live preview only.',
   keywords: ['phone', 'mobile', 'camera', 'qr', 'live', 'webcam', 'stream'],
   inputs: {},

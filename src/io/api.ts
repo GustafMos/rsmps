@@ -356,6 +356,12 @@ export interface Io {
   /** Phone as a camera through a QR code (LAN mode only). */
   phone: PhoneApi;
   /**
+   * What this running copy of the app can do, for `NodeDef.requires`. The hosted web version and the packaged
+   * desktop app have no local server, so 'local-server' is absent there; it is present under `npm run dev:lan`.
+   * The UI warns on nodes whose requirements are not met.
+   */
+  capabilities(): ReadonlySet<import('../engine/types').Capability>;
+  /**
    * Switch the live project to tab `id` and release the old one's memory: flushes its pending save, pauses the
    * player and stops audio, clears the engine cache, the player's frame cache and pooled GPU textures, and drops decoded
    * media (frames, PCM, decoder cursors) that the new project does not use. Assets stay in IndexedDB and the asset

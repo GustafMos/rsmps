@@ -98,6 +98,7 @@ export const createIo: CreateIo = async () => {
       };
     },
     phone,
+    capabilities: () => new Set(phone.available ? (["local-server"] as const) : []),
     devices: {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),
       onChanged: (l) => {
