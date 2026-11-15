@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { Icon } from '../components/Icon';
+import { SUPPORT } from '../supportCopy';
 import { useApp, useEd } from '../store/context';
 import { ExportDialog } from './ExportDialog';
 import { PluginsDialog } from './PluginsDialog';
@@ -27,6 +29,30 @@ export function DialogHost() {
     default:
       return null;
   }
+}
+
+export function SupportCard() {
+  const { ed } = useApp();
+  const kind = useEd((s) => s.supportPrompt);
+  useEffect(() => {
+    if (!kind) return;
+    const t = setTimeout(() => ed.dismissSupport(), 20000);
+    return () => clearTimeout(t);
+  }, [kind, ed]);
+  if (!kind) return null;
+  return (
+    <aside className="rs-support" role="complementary" aria-label="Support RSMPS">
+      <img src="/ripscorpy-logo.png" alt="" width={36} height={36} />
+      <div className="rs-support__body">
+        <p>{SUPPORT[kind]}</p>
+        <div className="rs-support__btns">
+          <a className="rs-btn rs-btn--primary" href={SUPPORT.url} target="_blank" rel="noopener noreferrer" onClick={() => ed.dismissSupport()}>{SUPPORT.button}</a>
+          <button className="rs-btn rs-btn--ghost" onClick={() => ed.dismissSupport()}>{SUPPORT.dismiss}</button>
+        </div>
+      </div>
+      <button className="rs-btn rs-btn--icon rs-btn--ghost rs-support__x" onClick={() => ed.dismissSupport()} aria-label="Dismiss"><Icon name="close" size={12} /></button>
+    </aside>
+  );
 }
 
 export function ExportBar() {

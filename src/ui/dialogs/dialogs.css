@@ -57,3 +57,10 @@
 .rs-km__warn { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2); background: #2a2208; border: 1px solid var(--yellow); font-size: var(--fs-sm); }
 .rs-km__warn span { flex: 1; }
 .rs-km__warn svg { color: var(--yellow); }
+
+.rs-support { position: fixed; right: var(--s-4); bottom: 150px; z-index: 1250; width: 340px; display: flex; gap: var(--s-3); align-items: flex-start; padding: var(--s-3); background: var(--bg-2); border: 1px solid var(--accent-hi); box-shadow: var(--shadow-hard); }
+.rs-support img { image-rendering: pixelated; flex: none; }
+.rs-support__body { flex: 1; min-width: 0; }
+.rs-support__body p { margin: 0 0 var(--s-2); font-size: var(--fs-sm); line-height: 1.5; }
+.rs-support__btns { display: flex; gap: var(--s-2); }
+.rs-support__x { flex: none; width: 24px; min-width: 24px; height: 24px; }

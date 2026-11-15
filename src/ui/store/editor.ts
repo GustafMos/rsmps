@@ -83,6 +83,8 @@ export interface EditorState {
   activeProject: string | null;
   /** Name of the project being loaded (editing is blocked meanwhile). */
   switching: string | null;
+  /** One-time support prompt currently visible. */
+  supportPrompt: 'export' | 'close' | null;
   /** Running export (progress shown in a floating bar). */
   exportJob: { label: string; fraction: number } | null;
   /** Top-level tab: the node editor or the print-scan-back tool. */
@@ -157,6 +159,7 @@ export class Editor {
       activeProject: null,
       switching: null,
       exportJob: null,
+      supportPrompt: null,
     });
   }
 
@@ -910,6 +913,7 @@ export class Editor {
         }
       } else await this.refreshProjects();
       this.toast(`Closed "${closing?.name ?? 'project'}"`, 'info', [{ label: 'Reopen', run: () => void this.reopenProject(id) }]);
+      setTimeout(() => this.maybeSupport('close'), 600);
     } catch (err) {
       this.toast(`Could not close the tab: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
@@ -979,6 +983,24 @@ export class Editor {
   /* -------------------------------- export --------------------------------- */
 
   private exportAbort: AbortController | null = null;
+  private supportShown = new Set<string>();
+
+  /** Each trigger shows its prompt at most once EVER (flag set when shown), never in safe mode or over another prompt. */
+  maybeSupport(kind: 'export' | 'close'): void {
+    if (/[?&]safe/.test(location.search) || this.state.supportPrompt || this.supportShown.has(kind)) return;
+    const key = 'rsmps.ui.support.' + kind;
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, '1');
+    } catch {
+      /* storage unavailable: the per-session guard above still limits it to once */
+    }
+    this.supportShown.add(kind);
+    this.patch({ supportPrompt: kind });
+  }
+  dismissSupport(): void {
+    if (this.state.supportPrompt) this.patch({ supportPrompt: null });
+  }
 
   exportPrefs(projectId: string | null): { items: 'current' | 'all'; zip: boolean } {
     try {
@@ -1019,6 +1041,7 @@ export class Editor {
       if (ac.signal.aborted) throw new DOMException('Aborted', 'AbortError');
       this.io.exporter.download(files);
       this.toast(`Exported ${files.length} file${files.length === 1 ? '' : 's'}`, 'ok');
+      setTimeout(() => this.maybeSupport('export'), 1200);
     } catch (err) {
       if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) this.toast('Export cancelled', 'info');
       else this.toast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');

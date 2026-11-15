@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Icon } from './components/Icon';
-import { DialogHost, ExportBar, Toasts } from './dialogs/Overlays';
+import { DialogHost, ExportBar, SupportCard, Toasts } from './dialogs/Overlays';
 import { GraphView } from './graph/GraphView';
 import { Inspector } from './inspector/Inspector';
 import { AddMenu } from './menus/AddMenu';
@@ -122,6 +122,7 @@ export function App() {
       <NodeContextMenu />
       <DialogHost />
       <ExportBar />
+      <SupportCard />
       <Toasts />
     </div>
   );
