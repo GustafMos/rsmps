@@ -67,7 +67,7 @@ export function TopBar() {
   return (
     <header className="rs-top">
       <div className="rs-top__brand">
-        <img src="/ripscorpy-mark.png" alt="" width={32} height={32} />
+        <img src={`${import.meta.env.BASE_URL}ripscorpy-mark.png`} alt="" width={32} height={32} />
         <span className="rs-top__word">RSMPS</span>
       </div>
       <MenuButton items={fileItems} className="rs-btn rs-btn--ghost">File <Icon name="chevronDown" size={12} /></MenuButton>

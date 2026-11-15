@@ -42,7 +42,7 @@ export function SupportCard() {
   if (!kind) return null;
   return (
     <aside className="rs-support" role="complementary" aria-label="Support RSMPS">
-      <img src="/ripscorpy-logo.png" alt="" width={36} height={36} />
+      <img src={`${import.meta.env.BASE_URL}ripscorpy-logo.png`} alt="" width={36} height={36} />
       <div className="rs-support__body">
         <p>{SUPPORT[kind]}</p>
         <div className="rs-support__btns">

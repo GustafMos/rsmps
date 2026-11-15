@@ -104,7 +104,7 @@ export function Root() {
   if (boot.status === 'loading') {
     return (
       <div className="rs-boot">
-        <img src="/ripscorpy-logo.png" alt="" width={96} height={96} />
+        <img src={`${import.meta.env.BASE_URL}ripscorpy-logo.png`} alt="" width={96} height={96} />
         <div className="rs-boot__word">RSMPS</div>
         <div className="rs-boot__msg">Starting the GPU engine…</div>
       </div>
@@ -113,7 +113,7 @@ export function Root() {
   if (boot.status === 'error') {
     return (
       <div className="rs-boot rs-boot--error" role="alert">
-        <img src="/ripscorpy-logo.png" alt="" width={96} height={96} />
+        <img src={`${import.meta.env.BASE_URL}ripscorpy-logo.png`} alt="" width={96} height={96} />
         <div className="rs-boot__word">Cannot start</div>
         <p className="rs-boot__big">{/webgpu|adapter|gpu/i.test(boot.message) ? 'RSMPS needs WebGPU, and this browser could not provide it.' : 'RSMPS could not start.'}</p>
         <p className="rs-boot__msg">{boot.message}</p>
