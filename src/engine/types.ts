@@ -7,12 +7,13 @@
  *
  * Read docs/ENGINE.md before adding a node.
  */
+import type { AudioKernel } from './audio/types';
 
 /* ----------------------------------------------------------------------- */
 /* Sockets and values                                                       */
 /* ----------------------------------------------------------------------- */
 
-export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'audio' | 'midi';
+export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'regions' | 'audio' | 'midi';
 
 /**
  * A GPU image. RGBA8, sRGB-encoded, PREMULTIPLIED alpha, row 0 = top.
@@ -43,6 +44,24 @@ export interface PaletteValue {
   colors: [number, number, number][];
 }
 
+/** One detected / tracked area of the frame. */
+export interface Region {
+  /** Stable across frames when a tracker assigned it; otherwise the index within the frame. */
+  id: number;
+  /** Class or tag, e.g. "blob", "red", "person". */
+  label: string;
+  /** Confidence 0..1. */
+  score: number;
+  /** Bounding box in normalised frame coordinates: [x0, y0, x1, y1], (0,0) = top-left. */
+  box: [number, number, number, number];
+}
+
+/** Detected regions of the current frame. Turn them into a mask to drive any maskable effect. */
+export interface RegionsValue {
+  kind: 'regions';
+  items: Region[];
+}
+
 /** Straight (non-premultiplied) sRGB colour, 0..1. */
 export type ColorValue = [number, number, number, number];
 
@@ -63,6 +82,7 @@ export interface SocketValueMap {
   number: number;
   color: ColorValue;
   audio: AudioValue;
+  regions: RegionsValue;
   midi: MidiValue;
 }
 export type Value = SocketValueMap[SocketType];
@@ -211,6 +231,7 @@ export const CATEGORIES = {
   transform: { title: 'Transform', color: '#58c4dd' },
   composite: { title: 'Composite', color: '#8fd14f' },
   mask: { title: 'Mask', color: '#9aa7b1' },
+  track: { title: 'Detect & Track', color: '#e85d75' },
   time: { title: 'Time', color: '#b08968' },
   math: { title: 'Math & Utility', color: '#7f8c9b' },
   'audio-source': { title: 'Audio Source', color: '#2ec4b6' },
@@ -369,7 +390,7 @@ export interface NodeDef<
   /** Frame-domain implementation (images, masks, palettes, numbers). */
   render?: (ctx: RenderCtx<P, I>) => OutputsOf<O> | Promise<OutputsOf<O>>;
   /** Stream-domain implementation (audio, MIDI). See src/engine/audio/types.ts. */
-  audio?: unknown;
+  audio?: AudioKernel;
   /** One line shown on the node body, e.g. "Bayer 8×8 · 16 colours". */
   summary?: (params: ParamsOf<P>) => string;
   /** Set when `render` does heavy CPU work, so the UI can warn. */
