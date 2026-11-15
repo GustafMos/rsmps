@@ -34,7 +34,10 @@ interface AssetRecord {
   id: string;
   added: number;
   info: AssetInfo;
+  /** The file, or the first frame for image sequences. */
   blob: Blob;
+  /** Image sequences: one still per frame. */
+  frames?: Blob[];
 }
 
 type Kind = AssetInfo['kind'];
@@ -258,6 +261,8 @@ class VideoReader {
 export class Library implements MediaLibrary {
   private infos = new Map<string, AssetInfo>();
   private blobs = new Map<string, Blob>();
+  /** Image-sequence assets: the stills, in frame order. */
+  private sequences = new Map<string, Blob[]>();
   private listeners = new Set<() => void>();
   private frames: TimedFrameStore<Frame>;
   private readers = new Map<string, VideoReader>();
@@ -327,6 +332,38 @@ export class Library implements MediaLibrary {
     return added;
   }
 
+  async addSequence(name: string, frames: Blob[] | ImageBitmap[], fps: number): Promise<AssetInfo> {
+    if (frames.length === 0) throw new Error('An image sequence needs at least one frame.');
+    const rate = Number.isFinite(fps) && fps > 0 ? fps : 12;
+    const blobs: Blob[] = [];
+    for (const f of frames as (Blob | ImageBitmap)[]) {
+      if (f instanceof Blob) blobs.push(f);
+      else {
+        const canvas = new OffscreenCanvas(f.width, f.height);
+        canvas.getContext('2d')!.drawImage(f, 0, 0);
+        blobs.push(await canvas.convertToBlob({ type: 'image/png' }));
+      }
+    }
+    let width = 0;
+    let height = 0;
+    try {
+      const probe = await createImageBitmap(blobs[0]);
+      width = probe.width;
+      height = probe.height;
+      probe.close();
+    } catch {
+      throw new Error('The first frame of the sequence could not be decoded.');
+    }
+    const info: AssetInfo = { id: uniqueId('a'), name, kind: 'video', width, height, duration: blobs.length / rate, fps: rate, hasAudio: false };
+    this.infos.set(info.id, info);
+    this.sequences.set(info.id, blobs);
+    this.blobs.set(info.id, blobs[0]);
+    const record: AssetRecord = { id: info.id, added: Date.now(), info, blob: blobs[0], frames: blobs };
+    idbPut('assets', info.id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
+    this.notify();
+    return info;
+  }
+
   async restore(): Promise<void> {
     let records: AssetRecord[] = [];
     try {
@@ -340,6 +377,7 @@ export class Library implements MediaLibrary {
       if (!r?.info || !r.blob) continue;
       this.infos.set(r.id, r.info);
       this.blobs.set(r.id, r.blob);
+      if (r.frames?.length) this.sequences.set(r.id, r.frames);
     }
     if (records.length) this.notify();
   }
@@ -347,6 +385,7 @@ export class Library implements MediaLibrary {
   async remove(assetId: string): Promise<void> {
     if (!this.infos.delete(assetId)) return;
     this.blobs.delete(assetId);
+    this.sequences.delete(assetId);
     this.frames.dropGroups(`${assetId}|`);
     this.readers.get(assetId)?.dispose();
     this.readers.delete(assetId);
@@ -440,6 +479,8 @@ export class Library implements MediaLibrary {
     const t = info.kind === 'image' ? 0 : Math.max(0, seconds);
     const hit = this.frames.find(group, t);
     if (hit) return Promise.resolve(hit);
+    const sequence = this.sequences.get(assetId);
+    if (sequence) return this.decodeSequenceFrame(info, sequence, size, group, t);
     if (info.kind === 'image') {
       let p = this.pending.get(group);
       if (!p) {
@@ -481,6 +522,38 @@ export class Library implements MediaLibrary {
     const frame: Frame = { texture, width: bmp.width, height: bmp.height };
     this.frames.put(group, 0, Infinity, this.bytesOf(frame), frame);
     return frame;
+  }
+
+  /** Image-sequence asset: frame = floor(seconds x fps), clamped to the last frame. */
+  private decodeSequenceFrame(info: AssetInfo, stills: Blob[], size: { bucket: number; width: number; height: number }, group: string, t: number): Promise<Frame | null> {
+    const idx = Math.min(stills.length - 1, Math.max(0, Math.floor(t * info.fps + 1e-6)));
+    const key = `${group}#${idx}`;
+    let p = this.pending.get(key);
+    if (!p) {
+      p = (async () => {
+        const blob = stills[idx];
+        const bmp =
+          size.bucket === 0
+            ? await createImageBitmap(blob)
+            : await createImageBitmap(blob, { resizeWidth: size.width, resizeHeight: size.height, resizeQuality: 'high' });
+        if (!this.infos.has(info.id)) {
+          bmp.close();
+          return null;
+        }
+        const texture = this.takeTexture(bmp.width, bmp.height);
+        try {
+          this.gpu.device.queue.copyExternalImageToTexture({ source: bmp }, { texture, premultipliedAlpha: true }, [bmp.width, bmp.height]);
+        } finally {
+          bmp.close();
+        }
+        const frame: Frame = { texture, width: bmp.width, height: bmp.height };
+        const end = idx === stills.length - 1 ? Infinity : (idx + 1) / info.fps;
+        this.frames.put(group, idx / info.fps, end, this.bytesOf(frame), frame);
+        return frame;
+      })().finally(() => this.pending.delete(key));
+      this.pending.set(key, p);
+    }
+    return p;
   }
 
   private decodeVideoFrame(info: AssetInfo, size: { bucket: number; width: number; height: number }, group: string, t: number): Promise<Frame | null> {
@@ -559,7 +632,7 @@ export class Library implements MediaLibrary {
   private async makeThumbnail(info: AssetInfo): Promise<string | null> {
     const blob = this.blobs.get(info.id);
     if (!blob) return null;
-    if (info.kind === 'image') {
+    if (info.kind === 'image' || this.sequences.has(info.id)) {
       const long = Math.max(info.width, info.height);
       const scale = Math.min(1, THUMB_SIDE / Math.max(1, long));
       const w = Math.max(1, Math.round(info.width * scale));

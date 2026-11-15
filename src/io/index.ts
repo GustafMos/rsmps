@@ -15,6 +15,7 @@ import { Library } from './library';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { ProjectStoreImpl } from './projects';
+import { ScanImpl } from './scan';
 
 export const createIo: CreateIo = async () => {
   const device = await createBrowserDevice();
@@ -46,6 +47,7 @@ export const createIo: CreateIo = async () => {
     exporter,
     plugins,
     projects,
+    scan: new ScanImpl(library),
     async evaluate(graph, node, opts = {}) {
       const res = await gate.evaluate({
         graph,

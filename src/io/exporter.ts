@@ -35,6 +35,7 @@ import { OffscreenPresenter } from './encode';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { imageExtension, resolvePattern, sanitizeFileName, sequencePattern, uniqueName, type NameTokens } from './naming';
+import { exportPrint, readPrintParams, type PrintParams } from './print/export';
 import { layoutSheet, sheetMetadata } from './spritesheet';
 import { errorMessage, hashString, isAbort, throwIfAborted, totalFramesOf, yieldToEventLoop } from './util';
 
@@ -47,7 +48,7 @@ export interface ExporterDeps {
 }
 
 type Img = ImageValue | MaskValue;
-type Kind = 'image' | 'sequence' | 'video' | 'spritesheet';
+type Kind = 'image' | 'sequence' | 'video' | 'spritesheet' | 'print';
 
 interface OutParams {
   name: string;
@@ -59,6 +60,7 @@ interface OutParams {
   scale: number;
   columns: number;
   padding: number;
+  print: PrintParams;
 }
 
 interface Job {
@@ -114,6 +116,7 @@ export class ExporterImpl implements Exporter {
         const upstreamVideo = this.firstAssetOfKind(graph, out.id, item, 'video') !== null;
         let weight = 1;
         if (params.kind === 'sequence' || params.kind === 'video' || params.kind === 'spritesheet') weight = frames;
+        else if (params.kind === 'print') weight = Math.max(1, Math.ceil(frames / params.print.step));
         else if (params.kind === 'auto') weight = upstreamVideo ? frames : 1;
         jobs.push({ out, params, item, itemCount, sourceName, weight, label: `${out.label || sanitizeFileName(sourceName)}${itemCount > 1 ? ` #${item + 1}` : ''}` });
       }
@@ -185,7 +188,7 @@ export class ExporterImpl implements Exporter {
     const oneOf = <T extends string>(v: unknown, list: readonly T[], d: T): T => (list.includes(v as T) ? (v as T) : d);
     return {
       name: typeof p.name === 'string' && p.name.trim() ? p.name : '{name}',
-      kind: oneOf(p.kind, ['auto', 'image', 'sequence', 'video', 'spritesheet'] as const, 'auto'),
+      kind: oneOf(p.kind, ['auto', 'image', 'sequence', 'video', 'spritesheet', 'print'] as const, 'auto'),
       imageFormat: oneOf(p.imageFormat, ['png', 'webp', 'jpeg'] as const, 'png'),
       quality: Math.min(1, Math.max(0.1, num(p.quality, 0.92))),
       codec: typeof p.codec === 'string' ? p.codec : 'avc',
@@ -193,6 +196,7 @@ export class ExporterImpl implements Exporter {
       scale: Math.max(1, Math.round(num(p.scale, 1))),
       columns: Math.max(0, Math.round(num(p.columns, 0))),
       padding: Math.max(0, Math.round(num(p.padding, 0))),
+      print: readPrintParams(p),
     };
   }
 
@@ -246,6 +250,8 @@ export class ExporterImpl implements Exporter {
         return this.exportSheet(job, run);
       case 'video':
         return this.exportVideo(job, run);
+      case 'print':
+        return this.exportPrintSheets(job, run);
     }
   }
 
@@ -478,6 +484,33 @@ export class ExporterImpl implements Exporter {
 
   private presenterBlob(img: { texture: GPUTexture; width: number; height: number }, mime: string): Promise<Blob> {
     return this.presenter(false).present(img).convertToBlob({ type: mime });
+  }
+
+  /* ------------------------------------- print sheets ------------------------------------------- */
+
+  private async exportPrintSheets(job: Job, run: Run): Promise<ExportedFile[]> {
+    const graph = run.req.graph;
+    const baseName = resolvePattern(job.params.name, this.tokens(job, 0, 0));
+    return exportPrint({
+      params: job.params.print,
+      title: sanitizeFileName(baseName),
+      frames: totalFramesOf(graph.project),
+      fps: graph.project.fps,
+      signal: run.req.signal,
+      renderFrame: async (f) => {
+        const { gpu } = this.d;
+        const img = await this.renderFrame(job, run, f);
+        gpu.retain(img.texture);
+        try {
+          return { width: img.width, height: img.height, data: await gpu.read(img, true) };
+        } finally {
+          gpu.release(img.texture);
+        }
+      },
+      progress: (fraction, label) => run.progress(fraction, label),
+      claim: (name) => this.claim(run, name),
+      yieldNow: yieldToEventLoop,
+    });
   }
 
   /* ------------------------------------- video -------------------------------------------------- */

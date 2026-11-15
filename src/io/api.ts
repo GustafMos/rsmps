@@ -19,6 +19,11 @@ export interface MediaLibrary extends Host {
   restore(): Promise<void>;
   /** Called whenever the asset list changes. Returns an unsubscribe function. */
   subscribe(listener: () => void): () => void;
+  /**
+   * Create an image-sequence asset: a 'video' asset whose frames are stills (frame = floor(seconds x fps)).
+   * Persisted like other assets, so scanned frames can feed a Media In node as an animation.
+   */
+  addSequence(name: string, frames: Blob[] | ImageBitmap[], fps: number): Promise<AssetInfo>;
 }
 
 export interface PlayerState {
@@ -148,9 +153,246 @@ export interface Io {
   exporter: Exporter;
   plugins: PluginManager;
   projects: ProjectStore;
+  /** Print-and-scan-back: photos of printed sheets to an animation asset. */
+  scan: ScanApi;
   /** Evaluate once, outside the player (thumbnails, node previews). */
   evaluate(graph: GraphDoc, node: string, opts?: { port?: string; seconds?: number; item?: number; proxy?: number }): Promise<Value | null>;
 }
 
 /** Implemented in src/io/index.ts. Throws a readable error when WebGPU is unavailable. */
 export type CreateIo = () => Promise<Io>;
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Print and scan back                                                                              */
+/* ---------------------------------------------------------------------------------------------- */
+
+/** A point in photo pixels (origin top-left of the decoded photo, x right, y down). */
+export interface ScanPoint {
+  x: number;
+  y: number;
+}
+
+/** The four page corner finder patterns, named after the PRINTED page (not the photo): `tl` is the distinctive top-left one. */
+export interface ScanCorners {
+  tl: ScanPoint;
+  tr: ScanPoint;
+  br: ScanPoint;
+  bl: ScanPoint;
+}
+
+/** Layout of one printed page, as decoded from its data strip or supplied manually. */
+export interface ScanLayoutInfo {
+  paper: 'a4' | 'a3' | 'letter' | 'a5' | 'legal';
+  landscape: boolean;
+  pageWidthMm: number;
+  pageHeightMm: number;
+  /** 0-based page number within the printed set. */
+  pageIndex: number;
+  pageCount: number;
+  columns: number;
+  rows: number;
+  cellWidthMm: number;
+  cellHeightMm: number;
+  gutterMm: number;
+  /** Index of the first frame on this page (0-based, counting printed frames). */
+  firstFrame: number;
+  /** Frames on this page (the last page may be partly empty). */
+  framesOnPage: number;
+  /** Frames in the whole printed set. */
+  totalFrames: number;
+  /** Playback rate recorded at print time. */
+  fps: number;
+  /** Size in pixels of the original frames (0 when unknown, e.g. manual layout). */
+  frameWidthPx: number;
+  frameHeightPx: number;
+  /** How the frames were printed. 'faded' uses `guideOpacity` (percent ink kept). */
+  guide: 'full' | 'faded' | 'outline' | 'blank';
+  guideOpacity: number;
+  /** 8 hex digits identifying the printed project; pages of one set share it. */
+  projectId: string;
+}
+
+/** Result for one "+" registration mark of a page (marks form a (columns+1) x (rows+1) grid). */
+export interface ScanMarkResult {
+  column: number;
+  row: number;
+  /** True when the mark was located by template matching; false when its position was interpolated from neighbours. */
+  found: boolean;
+  /** Match quality 0..1 (normalised cross-correlation). */
+  score: number;
+  /** Distance in photo pixels between the refined mark and where the page perspective alone predicted it. Large = paper curl or lens distortion. */
+  residualPx: number;
+}
+
+/** Result for one frame cell of a page. */
+export interface ScanCellResult {
+  /** Absolute frame index. */
+  frame: number;
+  column: number;
+  row: number;
+  /** How many of the four surrounding marks were found (0..4). */
+  marksFound: number;
+  /** Largest residual among the four surrounding marks (photo pixels). */
+  maxResidualPx: number;
+}
+
+/** Everything the Scan tab needs to know about one photo / scan. */
+export interface ScanPageReport {
+  /** Position of this page in the list given to `analyze` (use it with `reanalyzePage`). */
+  index: number;
+  fileName: string;
+  /** Pixel size of the decoded photo. */
+  photoWidth: number;
+  photoHeight: number;
+  /**
+   * 'ok': fully registered. 'warning': usable but something was off (see `warnings`: missing marks, high distortion,
+   * ambiguous orientation). 'failed': no frames were produced from this photo.
+   */
+  status: 'ok' | 'warning' | 'failed';
+  /** Corner finders in photo pixels (null when fewer than four were found). */
+  corners: ScanCorners | null;
+  /** Finder candidates that WERE found even when the set is incomplete (for drawing hints). */
+  foundCorners: ScanPoint[];
+  cornersSource: 'auto' | 'manual' | null;
+  /** Clockwise rotation of the printed page inside the photo, snapped to a quarter turn. */
+  rotation: 0 | 90 | 180 | 270;
+  /** Remaining tilt in degrees after removing the quarter-turn rotation (-45..45). */
+  skewDeg: number;
+  layout: ScanLayoutInfo | null;
+  /** 'strip' = decoded from the printed data strip; 'manual' = supplied via `reanalyzePage`. */
+  layoutSource: 'strip' | 'manual' | null;
+  /** 0-based page number (from the layout), or null when unknown. */
+  pageIndex: number | null;
+  /** Inclusive range of frame indices on this page, or null. */
+  frameRange: [number, number] | null;
+  /** RMS distance (photo pixels) between the refined marks and one best-fit perspective: how far from a flat sheet the photo is. */
+  reprojectionErrorPx: number | null;
+  marksFound: number;
+  marksExpected: number;
+  marks: ScanMarkResult[];
+  cells: ScanCellResult[];
+  /** True when this page's frames are in the result. False for the worse of two photos of the same page, or pages of another project. */
+  used: boolean;
+  /** Object URL of a small image of the page: the rectified page when detection worked, else the photo. Null when unavailable. */
+  thumbnailUrl: string | null;
+  thumbnailKind: 'rectified' | 'photo';
+  /** Object URL of the photo downsized to `photoScale` x its size, for drawing `corners` on top. Multiply photo coordinates by `photoScale`. */
+  photoUrl: string | null;
+  photoScale: number;
+  warnings: string[];
+}
+
+/** Summary of a whole scan session. */
+export interface ScanReport {
+  pages: ScanPageReport[];
+  /** Project id of the set the frames belong to (8 hex digits), or null when no page decoded. */
+  projectId: string | null;
+  /** Frames in the printed set (from the strips). */
+  totalFrames: number;
+  pageCount: number;
+  fps: number;
+  /** Pixel size of the recovered frames. */
+  frameWidthPx: number;
+  frameHeightPx: number;
+  recoveredFrames: number;
+  /** 0-based page numbers that were never supplied (or failed). */
+  missingPages: number[];
+  /** Frame indices without an image. */
+  missingFrames: number[];
+  /** True when every frame of the set was recovered and no page failed. */
+  complete: boolean;
+  warnings: string[];
+}
+
+/** One recovered frame. */
+export interface ScanFrame {
+  /** Absolute frame index within the printed set. */
+  index: number;
+  width: number;
+  height: number;
+  /** Straight-alpha RGBA. */
+  data: Uint8ClampedArray;
+}
+
+/** A page layout to use when the data strip cannot be read: the same settings that were used for printing. */
+export interface ScanManualLayout {
+  paper: 'a4' | 'a3' | 'letter' | 'a5' | 'legal';
+  landscape?: boolean;
+  columns: number;
+  rows: number;
+  /** Gutter in mm (default 5). */
+  gutterMm?: number;
+  /** Margin in mm (default 10). */
+  marginMm?: number;
+  /** Width / height of one frame (default 1). */
+  frameAspect?: number;
+}
+
+/** Manual help for one page: any combination of corner points and layout. */
+export interface ScanManualInput {
+  /** Corner finders in photo pixels. Order them as they are on the PRINTED page (tl = the page's top-left finder). */
+  corners?: ScanCorners;
+  layout?: ScanManualLayout;
+  /** 0-based page number (default: position in the supplied list). */
+  pageIndex?: number;
+  /** Index of the first frame on the page (default: pageIndex x columns x rows). */
+  firstFrame?: number;
+  /** Frames in the whole set (default: columns x rows x pages supplied). */
+  totalFrames?: number;
+  fps?: number;
+  /** Frame pixel size to cut to (default: cell size at 300 dpi). */
+  frameWidthPx?: number;
+  frameHeightPx?: number;
+}
+
+export interface ScanAnalyzeOptions {
+  /** Cut frames to this size instead of the original frame size recorded in the strip. */
+  outputWidth?: number;
+  outputHeight?: number;
+  /** Divide out uneven lighting using the blank paper (default true). */
+  flatten?: boolean;
+}
+
+/** Outcome of `Io.scan.analyze`. Holds object URLs: call `dispose()` when the Scan tab closes. */
+export interface ScanResult {
+  report: ScanReport;
+  /** Recovered frames, indexed by frame number; null where a frame is missing. */
+  frames: (ScanFrame | null)[];
+  /** Object URL (PNG) of each frame, same indexing. */
+  frameUrls: (string | null)[];
+  /**
+   * Re-run one page with manual corners and/or layout, keeping the other pages. `pageIndex` is
+   * `ScanPageReport.index`. Returns a new result (the old one stays valid until disposed).
+   */
+  reanalyzePage(pageIndex: number, manual: ScanManualInput): Promise<ScanResult>;
+  /** Revoke all object URLs. */
+  dispose(): void;
+}
+
+export interface ScanCommitOptions {
+  /** Name of the new asset. */
+  name: string;
+  /** Playback rate (default: the printed fps, else 12). */
+  fps?: number;
+  /** Output the ink only, on transparent (default false). */
+  drawingOnly?: boolean;
+  /** Drawing extraction: darkness (0..1) treated as paper. Default 0.12. */
+  threshold?: number;
+  /** Drawing extraction: softness of the edge. Default 0.1. */
+  softness?: number;
+  /** Original frames in print order; with `removeGuide` the printed guide is divided out of the scans. */
+  originals?: Blob[];
+  removeGuide?: boolean;
+  /** What to do with frames that could not be recovered (default 'repeat' the previous one). */
+  missing?: 'repeat' | 'blank' | 'skip';
+}
+
+/** Scan-back: turn photos of printed sheets into an animation asset. */
+export interface ScanApi {
+  /** Decode photos / scans, find the page markers, align, and cut the frames. Pages may be given in any order. */
+  analyze(files: File[], options?: ScanAnalyzeOptions): Promise<ScanResult>;
+  /** Same as `result.reanalyzePage`. */
+  reanalyzePage(result: ScanResult, pageIndex: number, manual: ScanManualInput): Promise<ScanResult>;
+  /** Create an image-sequence asset in the library from the recovered frames. */
+  commit(result: ScanResult, options: ScanCommitOptions): Promise<AssetInfo>;
+}

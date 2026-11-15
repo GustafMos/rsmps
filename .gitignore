@@ -8,8 +8,8 @@ dist-ssr/
 .DS_Store
 Thumbs.db
 coverage/
-output/
-tmp/
+/output/
+/tmp/
 test-output/
 test-output-*/
 test-video/
