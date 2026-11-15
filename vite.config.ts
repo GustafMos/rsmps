@@ -33,6 +33,8 @@ export default defineConfig(async () => {
     server: {
       port: 5173,
       open: false,
+      // Build outputs must not be watched: a locked file in release/ (the packaged app) crashed the dev server.
+      watch: { ignored: ['**/release/**', '**/.desktop-stage/**', '**/dist/**', '**/dist-cli/**', '**/tmp/**', '**/test-output*/**'] },
       ...(lan ? { host: true } : {}),
     },
   };

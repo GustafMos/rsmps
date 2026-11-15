@@ -1,6 +1,6 @@
 import { useEd, useApp } from '../store/context';
 import { NumberField } from '../components/NumberField';
-import { SelectField } from '../components/fields';
+import { CheckField, SelectField } from '../components/fields';
 import './scan.css';
 
 /** "1 Photos / 2 Clean up & export" switch shown under the tab strip of a scan tab. */
@@ -30,6 +30,7 @@ export function ScanQuickSettings() {
   const find = (label: string) => graph.nodes.find((n) => n.label === label);
   const up = find('Upscale');
   const lv = find('Contrast');
+  const clean = find('Clean paper');
   const out = find('Export');
   const asset = ed.scanAsset();
   const baseH = asset?.height ?? 0;
@@ -44,6 +45,9 @@ export function ScanQuickSettings() {
             {[1, 2, 3, 4].map((m) => <button key={m} className={baseH && h === baseH * m ? 'is-on' : ''} onClick={() => baseH && ed.setParam(up.id, 'height', baseH * m)} title={baseH ? `${baseH * m}px tall` : ''}>×{m}</button>)}
           </div>
         </>
+      )}
+      {clean && (
+        <CheckField value={clean.params.output === 'ink'} onChange={(on) => ed.setParam(clean.id, 'output', on ? 'ink' : 'paper')} label="Drawing only (transparent)" />
       )}
       {lv && (
         <>

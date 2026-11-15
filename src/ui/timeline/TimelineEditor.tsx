@@ -26,6 +26,8 @@ import { NumberField } from '../components/NumberField';
 import { ASSET_MIME } from '../graph/gestures';
 import { useApp, useEd } from '../store/context';
 import { RecordButton } from './RecordButton';
+import { ClipHandles, ClipWave } from './ClipParts';
+import { PianoRoll } from './PianoRoll';
 import './timeline.css';
 
 const TRACK_H = 52;
@@ -47,6 +49,8 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
   const armed = useEd((s) => s.armed);
   const [pps, setPps] = useState(60); // pixels per second
   const [sel, setSel] = useState<string | null>(null);
+  const [roll, setRoll] = useState<string | null>(null);
+  const [pop, setPop] = useState<string | null>(null);
   const head = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const tl = normalizeTimeline(node?.params.clips);
@@ -120,6 +124,33 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
     const up = () => {
       window.removeEventListener('pointermove', mv);
       window.removeEventListener('pointerup', up);
+      ed.endHold();
+    };
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+  };
+
+  /** Fade corners and the loop handle: one undo step per gesture. A click on the loop handle toggles looping. */
+  const dragPart = (e: React.PointerEvent, clip: TimelineClip, part: 'fadeIn' | 'fadeOut' | 'loop') => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSel(clip.id);
+    const x0 = e.clientX;
+    let moved = false;
+    const base = tlRef.current;
+    ed.beginHold();
+    const mv = (ev: PointerEvent) => {
+      const dt = (ev.clientX - x0) / pps;
+      if (Math.abs(ev.clientX - x0) > 3) moved = true;
+      if (!moved) return;
+      if (part === 'fadeIn') write(updateClip(base, clip.id, { fadeIn: Math.max(0, Math.min(clip.length - clip.fadeOut, clip.fadeIn + dt)) }));
+      else if (part === 'fadeOut') write(updateClip(base, clip.id, { fadeOut: Math.max(0, Math.min(clip.length - clip.fadeIn, clip.fadeOut - dt)) }));
+      else write(updateClip(base, clip.id, { loop: true, srcLength: clip.srcLength ?? clip.length, length: Math.max(0.05, snap(clipEnd(clip) + dt, ev.altKey) - clip.start) }));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', mv);
+      window.removeEventListener('pointerup', up);
+      if (!moved && part === 'loop') write(updateClip(base, clip.id, clip.loop ? { loop: false } : { loop: true, srcLength: clip.srcLength ?? clip.length }));
       ed.endHold();
     };
     window.addEventListener('pointermove', mv);
@@ -216,13 +247,16 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
                     className={`rs-tl__clip${c.id === sel ? ' is-sel' : ''}${isMidiClip(c) ? ' is-midi' : ''}${c.muted ? ' is-muted' : ''}`}
                     style={{ left: c.start * pps, width: Math.max(4, c.length * pps) }}
                     onPointerDown={(e) => dragClip(e, c, 'move')}
-                    title={`${c.name ?? (isMidiClip(c) ? 'MIDI clip' : 'Audio clip')} · drag to move (Alt: no snap) · edges trim · Del · Ctrl+D · S splits at the playhead`}
+                    onDoubleClick={() => (isMidiClip(c) ? setRoll(c.id) : setPop(c.id))}
+                    title={`${c.name ?? (isMidiClip(c) ? 'MIDI clip' : 'Audio clip')} · drag to move (Alt: no snap) · edges trim · Del · Ctrl+D · S splits at the playhead · double-click: ${isMidiClip(c) ? 'piano roll' : 'gain, fades, loop'}`}
                   >
+                    {!isMidiClip(c) && c.asset && <ClipWave clip={c} pps={pps} />}
                     <span className="rs-tl__edge rs-tl__edge--l" onPointerDown={(e) => dragClip(e, c, 'l')} />
                     <span className="rs-tl__cname">{c.name ?? (isMidiClip(c) ? 'MIDI' : 'Audio')}</span>
                     {isMidiClip(c) && (c.notes ?? []).slice(0, 400).map((n, i) => (
                       <i key={i} className="rs-tl__note" style={{ left: `${(n.t / Math.max(0.001, c.srcLength ?? c.length)) * 100}%`, width: `${Math.max(0.5, (n.d / Math.max(0.001, c.srcLength ?? c.length)) * 100)}%`, bottom: `${(n.note / 127) * 70 + 4}%`, opacity: 0.4 + n.vel * 0.6 }} />
                     ))}
+                    <ClipHandles clip={c} pps={pps} onGrab={(ev, part) => dragPart(ev, c, part)} />
                     <span className="rs-tl__edge rs-tl__edge--r" onPointerDown={(e) => dragClip(e, c, 'r')} />
                   </div>
                 ))}
@@ -233,6 +267,22 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
           </div>
         </div>
       </div>
+      {pop && tl.clips.find((c) => c.id === pop) && (() => {
+        const c = tl.clips.find((x) => x.id === pop)!;
+        return (
+          <div className="rs-tl__pop" style={{ right: 12, top: 36 }} onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <div className="rs-caps"><span>{c.name ?? 'Audio clip'}</span><button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => setPop(null)} aria-label="Close"><Icon name="close" size={12} /></button></div>
+            <NumberField label="Gain" step={0.5} min={-60} max={24} unit="db" value={c.gain} defaultValue={0} onChange={(v) => write(updateClip(tl, c.id, { gain: v }))} />
+            <NumberField label="Fade in" step={0.01} min={0} unit="s" value={Number(c.fadeIn.toFixed(3))} defaultValue={0} onChange={(v) => write(updateClip(tl, c.id, { fadeIn: Math.max(0, Math.min(c.length - c.fadeOut, v)) }))} />
+            <NumberField label="Fade out" step={0.01} min={0} unit="s" value={Number(c.fadeOut.toFixed(3))} defaultValue={0} onChange={(v) => write(updateClip(tl, c.id, { fadeOut: Math.max(0, Math.min(c.length - c.fadeIn, v)) }))} />
+            <div className="rs-insp__actions">
+              <button className={`rs-btn${c.loop ? ' is-on' : ''}`} onClick={() => write(updateClip(tl, c.id, c.loop ? { loop: false } : { loop: true, srcLength: c.srcLength ?? c.length }))}>Loop</button>
+              <button className={`rs-btn${c.muted ? ' is-on' : ''}`} onClick={() => write(updateClip(tl, c.id, { muted: !c.muted }))}>Mute clip</button>
+            </div>
+          </div>
+        );
+      })()}
+      {roll && <PianoRoll clipId={roll} tl={tl} bpm={bpm} grid={grid} write={write} onClose={() => setRoll(null)} />}
       <div className="rs-tl__foot rs-insp__hint">Grid {gridSeconds(bpm, grid) > 0 ? `1/${String(grid).split('/')[1]} note` : 'off'} · {bpm} BPM · shaded area = project loop · click the ruler to seek</div>
     </div>,
     document.body,

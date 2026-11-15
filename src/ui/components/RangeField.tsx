@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp, useEd } from '../store/context';
 import { NumberField } from './NumberField';
 import './range.css';
@@ -35,6 +35,16 @@ export function RangeField({ nodeId, keyName, value, defaultValue, compact }: { 
   });
   const duration = asset?.duration ?? 0;
   const fps = asset?.fps || 24;
+  const assetId = asset?.id;
+  const [strip, setStrip] = useState<string | null>(null);
+  // The library keeps its blobs private, so the strip is the asset's one cached thumbnail stretched behind the bar.
+  useEffect(() => {
+    setStrip(null);
+    if (!assetId) return;
+    let live = true;
+    io.library.thumbnail(assetId).then((u) => live && setStrip(u)).catch(() => undefined);
+    return () => { live = false; };
+  }, [io, assetId]);
   const write = (next: [number, number]) => ed.setParam(nodeId, keyName, [clamp01(next[0]), clamp01(next[1])]);
 
   const drag = (e: React.PointerEvent, part: 'a' | 'b' | 'mid') => {
@@ -46,8 +56,12 @@ export function RangeField({ nodeId, keyName, value, defaultValue, compact }: { 
     const x0 = e.clientX;
     el.setPointerCapture(e.pointerId);
     ed.beginHold();
+    const st0 = io.player.getState();
+    const resume = { seconds: st0.seconds, playing: st0.playing };
+    if (duration && st0.playing) io.player.pause();
     const mv = (ev: PointerEvent) => {
       const d = (ev.clientX - x0) / r.width;
+      if (duration) io.player.seek(clamp01(part === 'b' ? start[1] + d : start[0] + d) * duration);
       if (part === 'a') write([Math.min(start[0] + d, start[1]), start[1]]);
       else if (part === 'b') write([start[0], Math.max(start[1] + d, start[0])]);
       else {
@@ -59,10 +73,16 @@ export function RangeField({ nodeId, keyName, value, defaultValue, compact }: { 
     const up = () => {
       el.removeEventListener('pointermove', mv);
       el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
       ed.endHold();
+      if (duration) {
+        io.player.seek(resume.seconds);
+        if (resume.playing) io.player.play();
+      }
     };
     el.addEventListener('pointermove', mv);
     el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
   };
 
   // playhead inside the bar, imperatively
@@ -96,6 +116,7 @@ export function RangeField({ nodeId, keyName, value, defaultValue, compact }: { 
   return (
     <div className={`rs-range${compact ? ' rs-range--compact' : ''}`} data-nodrag onDoubleClick={() => write(defaultValue)} title="Drag the ends or the middle. Double-click resets.">
       <div ref={bar} className="rs-range__bar">
+        {strip && <div className="rs-range__strip" style={{ backgroundImage: `url(${strip})` }} />}
         <div className="rs-range__span" style={{ left: `${v[0] * 100}%`, width: `${(v[1] - v[0]) * 100}%` }} onPointerDown={(e) => drag(e, 'mid')} />
         <div className="rs-range__handle" style={{ left: `${v[0] * 100}%` }} onPointerDown={(e) => drag(e, 'a')} />
         <div className="rs-range__handle" style={{ left: `${v[1] * 100}%` }} onPointerDown={(e) => drag(e, 'b')} />

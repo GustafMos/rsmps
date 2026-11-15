@@ -12,6 +12,7 @@ import { DeviceField } from '../components/DeviceField';
 import { CurveField } from '../components/CurveField';
 import { RangeField } from '../components/RangeField';
 import { LayerList } from './LayerList';
+import { PhoneChip, hasSessionParam } from '../inspector/PhonePanel';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
 import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row } from '../lib/layout';
@@ -160,11 +161,13 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
         )
         : layout.rows.map((row, i) => <RowView key={i} row={row} node={node} wired={wired} />)}
 
-      {!node.collapsed && summary && layout.summaryY !== null && (
+      {!node.collapsed && hasSessionParam(def) && layout.summaryY !== null && <div style={{ position: 'absolute', left: 0, right: 0, top: layout.summaryY, height: SUMMARY_H }}><PhoneChip node={node} /></div>}
+      {!node.collapsed && summary && layout.summaryY !== null && !hasSessionParam(def) && (
         <div className="rs-node__summary" style={{ top: layout.summaryY, height: SUMMARY_H }} title={summary}>
           {frameTxt ? `${frameTxt} · ${summary}` : summary}
         </div>
       )}
+      {error && !node.collapsed && <div className="rs-node__errtext" role="alert" title={error}>{error}</div>}
       {missing && !node.collapsed && (
         <div className="rs-node__missing" style={{ top: HEAD_H + 6 + ROW_H * Math.max(1, layout.rows.length) }}>
           Missing node type

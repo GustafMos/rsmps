@@ -1027,8 +1027,11 @@ export class Editor {
     let g = createGraph(this.state.projects.find((p) => p.id === this.state.activeProject)?.name ?? 'Scan');
     g = { ...g, project: { ...g.project, width: asset.width, height: asset.height, fps: asset.fps || 12, duration: asset.duration || g.project.duration, loop: false } };
     const chain: { id: string; label: string; params: Record<string, unknown> }[] = [{ id: src.def.id, label: 'Scanned frames', params: { [src.key]: [asset.id] } }];
+    // newer chain: paper-clean -> levels -> upscale-smart; older registries fall back to levels -> resize
+    if (this.registry.get('paper-clean')) chain.push({ id: 'paper-clean', label: 'Clean paper', params: {} });
     if (this.registry.get('levels')) chain.push({ id: 'levels', label: 'Contrast', params: {} });
-    if (this.registry.get('resize')) chain.push({ id: 'resize', label: 'Upscale', params: { mode: 'height', height: asset.height, filter: 'area' } });
+    if (this.registry.get('upscale-smart')) chain.push({ id: 'upscale-smart', label: 'Upscale', params: { mode: 'lineart', by: 'height', height: asset.height } });
+    else if (this.registry.get('resize')) chain.push({ id: 'resize', label: 'Upscale', params: { mode: 'height', height: asset.height, filter: 'area' } });
     chain.push({ id: out.id, label: 'Export', params: { kind: 'video', name: 'scan' } });
     let prev: { node: string; port: string } | null = null;
     let x = 0;
