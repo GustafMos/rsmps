@@ -5,6 +5,7 @@ import { createGestures, frameGraph } from './gestures';
 import { NodeView } from './NodeView';
 import { Wires } from './Wires';
 import { Frames } from './Frames';
+import { SelectionToolbar } from './SelectionToolbar';
 import './graph.css';
 
 export function GraphView() {
@@ -91,6 +92,7 @@ export function GraphView() {
         </svg>
       </div>
       <div ref={box} className="rs-graph__box" />
+      <SelectionToolbar />
       <svg className="rs-graph__overlay">
         <line ref={cut} className="rs-wire is-cut" style={{ display: 'none', stroke: 'var(--danger)', strokeWidth: 2 }} />
       </svg>

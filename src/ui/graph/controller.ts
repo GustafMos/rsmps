@@ -24,6 +24,8 @@ export class GraphController {
   /** Binding that started the current hold-to-pan (so its release can be matched). */
   spaceKey: string | null = null;
   private listeners = new Set<() => void>();
+  /** Called whenever pan/zoom changes (the selection toolbar follows it). */
+  readonly viewListeners = new Set<() => void>();
   private zoomPct = 100;
 
   subscribeZoom = (fn: () => void) => {
@@ -34,6 +36,7 @@ export class GraphController {
 
   applyView(): void {
     const { x, y, zoom } = this.view;
+    this.viewListeners.forEach((l) => l());
     if (this.layer) this.layer.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
     if (this.root) {
       const g = 24 * zoom;

@@ -392,6 +392,7 @@ export function createGestures(app: AppCtx) {
         const x = ev.clientX - r0.left;
         const y = ev.clientY - r0.top;
         if (!moved && dist(x, y, x0, y0) < THRESHOLD) return;
+        if (!moved) cls('is-boxing', true);
         moved = true;
         const b = ctl.box;
         if (b) {
@@ -409,6 +410,7 @@ export function createGestures(app: AppCtx) {
         ed.select([...new Set([...base, ...hits])]);
       },
       () => {
+        cls('is-boxing', false);
         if (ctl.box) ctl.box.style.display = 'none';
         if (!moved && !additive) ed.select([]);
       },
@@ -457,16 +459,48 @@ export function createGestures(app: AppCtx) {
     }
     const target = e.target as HTMLElement;
     const nodeEl = target.closest<HTMLElement>('[data-node-id]');
+    const edgeId = target.closest<HTMLElement>('[data-edge]')?.getAttribute('data-edge');
     trackPointer(e, () => undefined, (ev) => {
       if (dist(ev.clientX, ev.clientY, e.clientX, e.clientY) > 4) return;
-      if (nodeEl) {
+      if (!nodeEl && edgeId) {
+        ed.openContextMenu({ clientX: ev.clientX, clientY: ev.clientY, nodeId: null, edgeId });
+      } else if (nodeEl) {
         const id = nodeEl.dataset.nodeId!;
         if (!ed.state.selection.includes(id)) ed.select([id]);
         ed.openContextMenu({ clientX: ev.clientX, clientY: ev.clientY, nodeId: id, paramKey: target.closest<HTMLElement>('[data-param-key]')?.dataset.paramKey });
       } else {
-        ed.openAddMenu({ clientX: ev.clientX, clientY: ev.clientY, world: ctl.toWorld(ev.clientX, ev.clientY) });
+        ed.openAddMenu({ clientX: ev.clientX, clientY: ev.clientY, world: ctl.toWorld(ev.clientX, ev.clientY), context: true });
       }
     });
+  }
+
+  /** Touch / pen: press and hold (~500 ms, without moving) opens the context menu or the add menu. */
+  function armLongPress(e: RPointerEvent) {
+    const nodeEl = (e.target as HTMLElement).closest<HTMLElement>('[data-node-id]');
+    const edgeId = (e.target as HTMLElement).closest<HTMLElement>('[data-edge]')?.getAttribute('data-edge');
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const t = window.setTimeout(() => {
+      off();
+      if (nodeEl) {
+        const id = nodeEl.dataset.nodeId!;
+        if (!ed.state.selection.includes(id)) ed.select([id]);
+        ed.openContextMenu({ clientX: x0, clientY: y0, nodeId: id });
+      } else if (edgeId) ed.openContextMenu({ clientX: x0, clientY: y0, nodeId: null, edgeId });
+      else ed.openAddMenu({ clientX: x0, clientY: y0, world: ctl.toWorld(x0, y0), context: true });
+    }, 500);
+    const mv = (ev: PointerEvent) => {
+      if (dist(ev.clientX, ev.clientY, x0, y0) > 6) off();
+    };
+    function off() {
+      clearTimeout(t);
+      window.removeEventListener('pointermove', mv);
+      window.removeEventListener('pointerup', off);
+      window.removeEventListener('pointercancel', off);
+    }
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', off);
+    window.addEventListener('pointercancel', off);
   }
 
   /* -------------------------------- dispatch ------------------------------- */
@@ -491,6 +525,7 @@ export function createGestures(app: AppCtx) {
         return;
       }
       if (e.button !== 0) return;
+      if (e.pointerType !== 'mouse') armLongPress(e);
       if (e.altKey) {
         startCut(e);
         return;

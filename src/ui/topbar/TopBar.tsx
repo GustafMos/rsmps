@@ -64,6 +64,20 @@ export function TopBar() {
     { label: 'Customise shortcuts…', onClick: () => ed.openDialog('keymap') },
   ];
 
+  const hasSel = useEd((s) => s.selection.length > 0);
+  const editItems: MenuItem[] = [
+    { label: 'Undo', icon: 'undo', onClick: () => ed.undo(), shortcut: 'Ctrl+Z', disabled: !canUndo },
+    { label: 'Redo', icon: 'redo', onClick: () => ed.redo(), shortcut: 'Ctrl+Y', disabled: !canRedo },
+    { sep: true },
+    { label: 'Cut', onClick: () => ed.cut(), disabled: !hasSel },
+    { label: 'Copy', icon: 'copy', onClick: () => ed.copy(), shortcut: 'Ctrl+C', disabled: !hasSel },
+    { label: 'Paste', onClick: () => ed.paste(), shortcut: 'Ctrl+V', disabled: !ed.hasClipboard() },
+    { label: 'Duplicate', icon: 'copy', onClick: () => ed.duplicate(), shortcut: 'Ctrl+D', disabled: !hasSel },
+    { label: 'Delete', icon: 'trash', onClick: () => ed.deleteSelection(), shortcut: 'Del', disabled: !hasSel },
+    { sep: true },
+    { label: 'Select all', icon: 'selectAll', onClick: () => ed.selectAll(), shortcut: 'Ctrl+A' },
+  ];
+
   return (
     <header className="rs-top">
       <div className="rs-top__brand">
@@ -71,6 +85,7 @@ export function TopBar() {
         <span className="rs-top__word">RSMPS</span>
       </div>
       <MenuButton items={fileItems} className="rs-btn rs-btn--ghost">File <Icon name="chevronDown" size={12} /></MenuButton>
+      <MenuButton items={editItems} className="rs-btn rs-btn--ghost">Edit <Icon name="chevronDown" size={12} /></MenuButton>
       <div className="rs-top__sep" />
       <button className="rs-btn rs-btn--icon rs-btn--ghost" disabled={!canUndo} onClick={() => ed.undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Icon name="undo" /></button>
       <button className="rs-btn rs-btn--icon rs-btn--ghost" disabled={!canRedo} onClick={() => ed.redo()} title="Redo (Ctrl+Y)" aria-label="Redo"><Icon name="redo" /></button>

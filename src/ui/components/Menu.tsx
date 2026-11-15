@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { Icon, type IconName } from './Icon';
 import '../menus/menus.css';
 
 export interface MenuItem {
@@ -9,6 +10,7 @@ export interface MenuItem {
   disabled?: boolean;
   sep?: boolean;
   head?: string;
+  icon?: IconName;
 }
 
 export function MenuPopup({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
@@ -51,7 +53,8 @@ export function MenuPopup({ x, y, items, onClose }: { x: number; y: number; item
               it.onClick?.();
             }}
           >
-            <span>{it.label}</span>
+            <span className="rs-menu__ico">{it.icon && <Icon name={it.icon} size={16} />}</span>
+            <span className="rs-menu__lbl">{it.label}</span>
             {it.shortcut && <span className="rs-kbd">{it.shortcut}</span>}
           </button>
         ),

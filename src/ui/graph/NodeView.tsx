@@ -59,6 +59,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   const hasEnabled = !!def && def.category === 'output' && 'enabled' in def.params;
   const exportOff = hasEnabled && node.params.enabled === false;
   const el = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const on = (e: Event) => { if ((e as CustomEvent<string>).detail === node.id) setRenaming(true); };
+    window.addEventListener('rsmps:rename', on);
+    return () => window.removeEventListener('rsmps:rename', on);
+  }, [node.id]);
 
   useEffect(() => {
     const e = el.current;

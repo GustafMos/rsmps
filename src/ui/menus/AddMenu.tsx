@@ -135,7 +135,8 @@ function AddMenuInner() {
   const choose = (def: AnyNodeDef) => {
     const at = link?.side === 'in' ? { x: req.world.x - NODE_W, y: req.world.y - 20 } : { x: req.world.x, y: req.world.y - 14 };
     ed.openAddMenu(null);
-    ed.addNodeAt(def.id, { x: Math.round(at.x), y: Math.round(at.y) }, link);
+    const id = ed.addNodeAt(def.id, { x: Math.round(at.x), y: Math.round(at.y) }, link);
+    if (id && req.insertEdge) ed.insertOnEdge(id, req.insertEdge);
   };
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -266,6 +267,12 @@ function AddMenuInner() {
       {assign && (
         <div className="rs-add__assign-bar" role="status">
           {assign.pending ? `${assign.pending.binding} is used by “${assign.pending.other}”. Press it again to take it over, or another key.` : `Press the key for “${defs.find((d) => d.id === assign.type)?.title ?? assign.type}”. Esc cancels, Backspace clears.`}
+        </div>
+      )}
+      {req.context && (
+        <div className="rs-add__ctx">
+          <button className="rs-btn rs-btn--ghost" disabled={!ed.hasClipboard()} onClick={() => { ed.openAddMenu(null); ed.paste(req.world); }}><Icon name="copy" size={16} /> Paste <span className="rs-kbd">Ctrl+V</span></button>
+          <button className="rs-btn rs-btn--ghost" onClick={() => { ed.openAddMenu(null); ed.selectAll(); }}><Icon name="selectAll" size={16} /> Select all <span className="rs-kbd">Ctrl+A</span></button>
         </div>
       )}
       <div className="rs-add__foot">

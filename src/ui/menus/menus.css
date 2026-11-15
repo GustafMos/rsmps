@@ -60,3 +60,8 @@
 .rs-add__drive:hover { background: #ffffff30; opacity: 1; }
 .rs-add__item-title.is-unavailable { color: var(--text-dim); }
 .rs-add__req { flex: none; padding: 0 var(--s-1); font-size: var(--fs-xs); color: var(--yellow); border: 1px solid #f5c54266; border-radius: var(--r); white-space: nowrap; }
+.rs-menu__ico { width: 16px; height: 16px; display: grid; place-items: center; flex: none; margin-right: var(--s-2); }
+.rs-menu__lbl { flex: 1; }
+.rs-menu__item > span:first-of-type { flex: none; }
+.rs-add__ctx { display: flex; gap: var(--s-1); padding: var(--s-1) var(--s-2); border-top: 1px solid var(--line); }
+.rs-add__ctx .rs-btn { flex: 1; justify-content: center; gap: var(--s-1); }

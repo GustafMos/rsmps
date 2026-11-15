@@ -60,3 +60,12 @@
 .rs-graph__empty > div { padding: var(--s-4) var(--s-6); background: var(--bg-1); border: 1px dashed var(--line-strong); color: var(--text-dim); font-size: var(--fs-md); text-align: center; line-height: 1.7; }
 .rs-graph.is-drop { box-shadow: inset 0 0 0 2px var(--accent-hi); }
 .rs-graph:focus-visible { box-shadow: none; }
+
+/* selection toolbar */
+.rs-seltb { position: absolute; left: 0; top: 0; z-index: 6; display: flex; gap: 2px; padding: 2px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r); box-shadow: var(--shadow-hard-sm); }
+.rs-graph.is-dragging .rs-seltb, .rs-graph.is-panning .rs-seltb, .rs-graph.is-wiring .rs-seltb, .rs-graph.is-boxing .rs-seltb { display: none; }
+.rs-seltb__btn { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; background: transparent; border: 0; border-radius: var(--r); color: var(--text-dim); }
+.rs-seltb__btn:hover { background: var(--bg-5); color: var(--text); }
+.rs-seltb__btn:focus-visible { box-shadow: var(--focus); }
+.rs-seltb__btn.is-on { color: var(--accent-hi); }
+@media (pointer: coarse) { .rs-seltb__btn { width: 36px; height: 36px; } }

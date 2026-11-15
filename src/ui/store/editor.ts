@@ -39,6 +39,10 @@ export interface AddMenuRequest {
   quick?: boolean;
   /** Set when a wire was dropped on empty space. side = which end is fixed. */
   link?: { side: 'out' | 'in'; node: string; port: string; type: SocketType };
+  /** The new node is spliced into this wire. */
+  insertEdge?: string;
+  /** Opened by right-click / long-press on empty graph: adds Paste and Select all. */
+  context?: boolean;
 }
 
 export interface ContextMenuRequest {
@@ -47,6 +51,8 @@ export interface ContextMenuRequest {
   nodeId: string | null;
   /** Right-click on a parameter row of the node. */
   paramKey?: string;
+  /** Right-click on a wire (nodeId is then null). */
+  edgeId?: string;
 }
 
 export interface Toast {
@@ -764,6 +770,16 @@ export class Editor {
     this.edit((g) => ({ ...g, nodes: [...g.nodes, ...nodes], edges: [...g.edges, ...edges] }));
     this.patch({ selection: nodes.map((n) => n.id), selectedFrame: null });
     if (!at) this.clip = { nodes: nodes.map((n) => ({ ...n })), edges };
+  }
+
+  hasClipboard(): boolean {
+    return !!this.clip && this.clip.nodes.length > 0;
+  }
+
+  cut(): void {
+    if (!this.state.selection.length) return;
+    this.copy();
+    this.deleteSelection();
   }
 
   duplicate(): void {
