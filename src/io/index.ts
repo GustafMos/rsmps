@@ -15,6 +15,7 @@ import { Library } from './library';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { ProjectStoreImpl } from './projects';
+import { SignalRouter } from './signals';
 import { ScanImpl } from './scan';
 
 export const createIo: CreateIo = async () => {
@@ -31,11 +32,15 @@ export const createIo: CreateIo = async () => {
   library.onInvalidate = () => engine.clear();
   const gate = new EvalGate(engine);
   const audio = createAudioBridge();
+  const router = new SignalRouter();
+  router.live = (id, name) => audio.signal(id, name);
+  library.signals = router;
 
-  const player = new PlayerImpl({ gpu, gate, registry, audio, library });
+  const player = new PlayerImpl({ gpu, gate, registry, audio, library, router });
+  router.onExportEnd = () => player.invalidate();
   library.subscribe(() => player.invalidate());
 
-  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio });
+  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router });
   const plugins = new PluginManagerImpl(registry);
   const projects = new ProjectStoreImpl(registry);
 
@@ -48,6 +53,11 @@ export const createIo: CreateIo = async () => {
     plugins,
     projects,
     scan: new ScanImpl(library),
+    audio: {
+      listDevices: (kind) => audio.listDevices(kind),
+      onDevicesChanged: (l) => audio.onDevicesChanged(l),
+      sendNote: (id, n, v, on) => audio.sendNote(id, n, v, on),
+    },
     async evaluate(graph, node, opts = {}) {
       const res = await gate.evaluate({
         graph,

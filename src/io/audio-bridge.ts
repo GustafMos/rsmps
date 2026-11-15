@@ -4,12 +4,20 @@
  */
 import type { Registry } from '../engine/define';
 import type { GraphDoc } from '../engine/types';
-import type { AudioAssetProvider, AudioEngine, PcmAudio, RenderAudioOffline, TransportState } from '../engine/audio/api';
+import type { AnalyzeSignalsOffline, AudioAssetProvider, AudioDevice, AudioEngine, PcmAudio, RenderAudioOffline, SignalTracks, TransportState } from '../engine/audio/api';
 import * as audioModule from '../engine/audio';
 
 export interface AudioBridge {
   /** False when the audio engine could not be created. */
   readonly available: boolean;
+  /** True after start() succeeded (until stop()). */
+  readonly running: boolean;
+  hasSignals(graph: GraphDoc, registry: Registry): boolean;
+  signal(nodeId: string, name: string): number;
+  listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]>;
+  onDevicesChanged(listener: () => void): () => void;
+  sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
+  analyzeSignals(graph: GraphDoc, registry: Registry, assets: AudioAssetProvider, options: { duration: number; fps: number; sampleRate?: number; loop: boolean }): Promise<SignalTracks | null>;
   hasAudio(graph: GraphDoc, registry: Registry): boolean;
   setGraph(graph: GraphDoc, registry: Registry): void;
   setAssets(provider: AudioAssetProvider): void;
@@ -30,6 +38,7 @@ export interface AudioBridge {
 type AudioModule = {
   createAudioEngine?: () => AudioEngine;
   renderAudioOffline?: RenderAudioOffline;
+  analyzeSignalsOffline?: AnalyzeSignalsOffline;
 };
 
 export function createAudioBridge(): AudioBridge {
@@ -40,6 +49,7 @@ export function createAudioBridge(): AudioBridge {
   } catch (err) {
     console.warn('Audio engine could not be created:', err);
   }
+  let running = false;
   const guard = <T>(fallback: T, fn: (e: AudioEngine) => T): T => {
     if (!engine) return fallback;
     try {
@@ -51,6 +61,25 @@ export function createAudioBridge(): AudioBridge {
   };
   return {
     available: engine !== null,
+    get running() {
+      return running;
+    },
+    hasSignals: (g, r) => guard(false, (e) => e.hasSignals(g, r)),
+    signal: (id, name) => guard(0, (e) => e.signal(id, name)),
+    async listDevices(kind) {
+      if (!engine) return [];
+      try {
+        return await engine.listDevices(kind);
+      } catch {
+        return [];
+      }
+    },
+    onDevicesChanged: (l) => guard(() => undefined, (e) => e.onDevicesChanged(l)),
+    sendNote: (id, n, v, on) => guard(undefined, (e) => e.sendNote(id, n, v, on)),
+    async analyzeSignals(graph, registry, assets, options) {
+      if (!mod.analyzeSignalsOffline) return null;
+      return mod.analyzeSignalsOffline(graph, registry, assets, options);
+    },
     hasAudio: (g, r) => guard(false, (e) => e.hasAudio(g, r)),
     setGraph: (g, r) => guard(undefined, (e) => e.setGraph(g, r)),
     setAssets: (p) => guard(undefined, (e) => e.setAssets(p)),
@@ -58,12 +87,16 @@ export function createAudioBridge(): AudioBridge {
       if (!engine) return;
       try {
         await engine.start();
+        running = true;
       } catch (err) {
         console.warn('Audio could not start:', err);
         throw err;
       }
     },
-    stop: () => guard(undefined, (e) => e.stop()),
+    stop: () => {
+      running = false;
+      guard(undefined, (e) => e.stop());
+    },
     setTransport: (s) => guard(undefined, (e) => e.setTransport(s)),
     setVolume: (v) => guard(undefined, (e) => e.setVolume(v)),
     meter: (id) => guard(null, (e) => e.meter(id)),

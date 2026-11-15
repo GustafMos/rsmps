@@ -20,6 +20,7 @@ import type { Gpu } from '../engine/gpu/gpu';
 import type { AssetInfo, TextSpec } from '../engine/types';
 import type { MediaLibrary } from './api';
 import { idbAll, idbDelete, idbPut } from './db';
+import type { SignalRouter } from './signals';
 import { TimedFrameStore } from './lru';
 import { cssFont, wrapLines } from './text';
 import { errorMessage, uniqueId } from './util';
@@ -274,6 +275,8 @@ export class Library implements MediaLibrary {
   version = 0;
   /** Set by createIo: called when decoded content for an existing id may have changed. */
   onInvalidate: (() => void) | null = null;
+  /** Source of `Host.signal` (live audio or offline export tracks). Set by createIo. */
+  signals: SignalRouter | null = null;
 
   constructor(private gpu: Gpu) {
     this.frames = new TimedFrameStore<Frame>(FRAME_BUDGET_BYTES, (f) => this.gpu.release(f.texture));
@@ -283,6 +286,10 @@ export class Library implements MediaLibrary {
 
   list(): AssetInfo[] {
     return [...this.infos.values()];
+  }
+
+  signal(nodeId: string, name: string, seconds: number): number {
+    return this.signals?.signal(nodeId, name, seconds) ?? 0;
   }
 
   assetInfo(assetId: string): AssetInfo | null {

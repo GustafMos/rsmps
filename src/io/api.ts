@@ -4,6 +4,7 @@
  * Implementations live in the other files of src/io.
  */
 import type { Engine } from '../engine/engine';
+import type { AudioDevice } from '../engine/audio/api';
 import type { Registry } from '../engine/define';
 import type { AssetInfo, GraphDoc, Host, Value } from '../engine/types';
 
@@ -44,6 +45,12 @@ export interface PlayerState {
   timings: ReadonlyMap<string, number>;
   /** Size of the image currently shown, or null. */
   imageSize: { width: number; height: number } | null;
+  /**
+   * Audio status. `needed`: the graph has an audio output or sound-to-picture analysis taps, so the audio engine
+   * must run. `running`: it has been started (needs a user gesture via enableAudio()). `micNodes`: microphone nodes
+   * in the graph (starting audio asks for microphone permission).
+   */
+  audio: { needed: boolean; running: boolean; micNodes: number };
 }
 
 /**
@@ -145,6 +152,15 @@ export interface ProjectStore {
   deletePreset(id: string): Promise<void>;
 }
 
+/** Hardware devices and the on-screen keyboard; passes straight through to the audio engine. */
+export interface AudioApi {
+  /** Works before audio is started. Never throws; [] when unsupported or denied. */
+  listDevices(kind: "audio-input" | "midi-input"): Promise<AudioDevice[]>;
+  /** Returns an unsubscribe function. */
+  onDevicesChanged(listener: () => void): () => void;
+  sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
+}
+
 export interface Io {
   engine: Engine;
   registry: Registry;
@@ -155,6 +171,7 @@ export interface Io {
   projects: ProjectStore;
   /** Print-and-scan-back: photos of printed sheets to an animation asset. */
   scan: ScanApi;
+  audio: AudioApi;
   /** Evaluate once, outside the player (thumbnails, node previews). */
   evaluate(graph: GraphDoc, node: string, opts?: { port?: string; seconds?: number; item?: number; proxy?: number }): Promise<Value | null>;
 }

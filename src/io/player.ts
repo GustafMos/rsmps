@@ -19,6 +19,7 @@ import { OffscreenPresenter } from './encode';
 import { RenderedFrameCache } from './frame-cache';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
+import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
 import { errorMessage, renderHash, totalFramesOf } from './util';
 
 export interface PlayerDeps {
@@ -27,6 +28,7 @@ export interface PlayerDeps {
   registry: Registry;
   audio: AudioBridge;
   library: Library;
+  router: SignalRouter;
 }
 
 interface View {
@@ -92,6 +94,10 @@ export class PlayerImpl implements Player {
   private shownFrame = -1;
   private shownProxy = 1;
   /** Key/frame of the last job that finished without an image (null result, error, no canvas): do not retry it until something changes. */
+  private audioNeeded = false;
+  private hasSig = false;
+  private micNodes = 0;
+  private clearPending = false;
   private settledKey = '';
   private settledFrame = -1;
   private settledProxy = 1;
@@ -164,6 +170,7 @@ export class PlayerImpl implements Player {
     if (view.graph !== this.audioGraph) {
       this.audioGraph = view.graph;
       this.deps.audio.setGraph(view.graph, this.deps.registry);
+      this.updateAudioInfo(view.graph);
       if (timeChanged) this.syncTransport();
     }
     this.kick();
@@ -179,6 +186,8 @@ export class PlayerImpl implements Player {
   play(): void {
     if (this.playing || !this.view) return;
     if (!this.view.graph.project.loop && this.frame >= this.totalFrames - 1) this.frame = 0;
+    this.signalEvent('play');
+    if (this.audioNeeded && !this.deps.audio.running) this.deps.audio.start().then(() => this.markChanged(), () => undefined);
     this.playing = true;
     this.ctl.reset();
     this.anchorClock();
@@ -207,6 +216,7 @@ export class PlayerImpl implements Player {
   seek(seconds: number): void {
     const fps = this.fps();
     this.frame = Math.min(this.totalFrames - 1, Math.max(0, Math.round(seconds * fps)));
+    this.signalEvent('seek');
     if (this.playing) this.anchorClock();
     this.syncTransport();
     this.dirty = true;
@@ -221,6 +231,7 @@ export class PlayerImpl implements Player {
     if (this.view?.graph.project.loop) f = ((f % total) + total) % total;
     else f = Math.min(total - 1, Math.max(0, f));
     this.frame = f;
+    this.signalEvent('step');
     this.syncTransport();
     this.dirty = true;
     this.kick();
@@ -267,6 +278,10 @@ export class PlayerImpl implements Player {
 
   async enableAudio(): Promise<void> {
     await this.deps.audio.start();
+    this.clearPending = this.liveSignals();
+    this.dirty = true;
+    this.kick();
+    this.markChanged();
   }
 
   meter(nodeId: string): [number, number] | null {
@@ -291,6 +306,22 @@ export class PlayerImpl implements Player {
   }
 
   /* -------------------------------- internals ------------------------------ */
+
+  private liveSignals(): boolean {
+    return this.hasSig && this.deps.audio.running;
+  }
+
+  /** See needsInvalidate(): live bridge values must not be served from a cache. */
+  private signalEvent(ev: FrameEvent): void {
+    if (needsInvalidate(this.liveSignals(), ev)) this.clearPending = true;
+  }
+
+  private updateAudioInfo(graph: GraphDoc): void {
+    const { audio, registry } = this.deps;
+    this.hasSig = audio.hasSignals(graph, registry);
+    this.audioNeeded = this.hasSig || audio.hasAudio(graph, registry);
+    this.micNodes = graph.nodes.filter((n) => n.type === 'microphone' && !n.bypass).length;
+  }
 
   private fps(): number {
     return this.view?.graph.project.fps ?? 24;
@@ -317,6 +348,7 @@ export class PlayerImpl implements Player {
       if (wrapped) {
         this.lastCycle = r.cycle;
         this.frame = r.frame;
+        this.signalEvent('wrap');
         this.syncTransport(); // loop wrap: re-align audio to the start
         this.kick();
         this.markChanged();
@@ -354,6 +386,12 @@ export class PlayerImpl implements Player {
     this.running = true;
     try {
       for (;;) {
+        if (this.clearPending) {
+          this.clearPending = false;
+          await this.deps.gate.clearEngine();
+          this.cache.clear();
+          this.dirty = true;
+        }
         const job = this.nextJob();
         if (!job) break;
         await this.execute(job);
@@ -371,6 +409,7 @@ export class PlayerImpl implements Player {
   private nextJob(): Job | null {
     const view = this.view;
     if (!view || this.disposed || this.lostMessage || !this.ctx) return null;
+    if (this.deps.router.exporting) return null; // an export owns Host.signal right now
     if (this.keyDirty) {
       const key = renderHash(view.graph, view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}`);
       this.keyDirty = false;
@@ -397,7 +436,8 @@ export class PlayerImpl implements Player {
     this.settledKey = job.key;
     this.settledFrame = job.frame;
     this.settledProxy = job.proxy;
-    const cached = this.cache.get(job.frame, this.playing ? 0 : job.proxy);
+    const live = this.liveSignals();
+    const cached = live ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
       this.show(cached.image, job, cached.proxy);
       return;
@@ -433,7 +473,7 @@ export class PlayerImpl implements Player {
       this.gpu.retain(image.texture); // held for the cache / the shown slot
       let kept = false;
       try {
-        if (this.cache.put(job.frame, image, job.proxy, bytesOf(image))) kept = true;
+        if (!live && this.cache.put(job.frame, image, job.proxy, bytesOf(image))) kept = true;
         this.show(image, job, job.proxy);
       } finally {
         if (!kept) this.gpu.release(image.texture);
@@ -549,6 +589,7 @@ export class PlayerImpl implements Player {
       errors: this.errors,
       timings: this.timings,
       imageSize: this.size,
+      audio: { needed: this.audioNeeded, running: this.deps.audio.running, micNodes: this.micNodes },
     };
   }
 }

@@ -15,4 +15,16 @@ export class EvalGate {
     this.tail = run.catch(() => undefined);
     return run;
   }
+
+  /** Run `fn` after every queued evaluation has finished and before any later one starts. */
+  exclusive<T>(fn: () => T | Promise<T>): Promise<T> {
+    const run = this.tail.then(fn);
+    this.tail = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Drop the engine cache at a moment when no evaluation is running. */
+  clearEngine(): Promise<void> {
+    return this.exclusive(() => this.engine.clear());
+  }
 }

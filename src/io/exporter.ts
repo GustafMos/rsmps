@@ -32,6 +32,7 @@ import type { ExportRequest, ExportedFile, Exporter } from './api';
 import type { AudioBridge } from './audio-bridge';
 import { fitAudio } from './audio-util';
 import { OffscreenPresenter } from './encode';
+import { SILENT_TRACKS, type SignalRouter } from './signals';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { imageExtension, resolvePattern, sanitizeFileName, sequencePattern, uniqueName, type NameTokens } from './naming';
@@ -45,6 +46,7 @@ export interface ExporterDeps {
   registry: Registry;
   library: Library;
   audio: AudioBridge;
+  router?: SignalRouter;
 }
 
 type Img = ImageValue | MaskValue;
@@ -138,10 +140,17 @@ export class ExporterImpl implements Exporter {
 
     const files: ExportedFile[] = [];
     const errors: string[] = [];
+    const sigs = this.d.router && this.d.audio.hasSignals(graph, registry) ? this.d.router : null;
+    let sigItem = -1;
+    try {
     for (current = 0; current < jobs.length; current++) {
       const job = jobs[current];
       throwIfAborted(req.signal);
       run.progress(0, job.label);
+      if (sigs && job.item !== sigItem) {
+        sigItem = job.item;
+        await this.prepareSignals(sigs, run, frames);
+      }
       try {
         files.push(...(await this.exportJob(job, run)));
       } catch (err) {
@@ -150,6 +159,12 @@ export class ExporterImpl implements Exporter {
       }
       doneWeight += job.weight;
       await yieldToEventLoop();
+    }
+    } finally {
+      if (sigs) {
+        sigs.endExport();
+        await this.d.gate.clearEngine().catch(() => undefined); // drop frames rendered with export signals
+      }
     }
     req.onProgress?.({ fraction: 1, label: 'Done' });
 
@@ -161,6 +176,25 @@ export class ExporterImpl implements Exporter {
       return [{ name: `${sanitizeFileName(graph.name || 'export')}.zip`, blob: await zipFiles(files) }];
     }
     return files;
+  }
+
+  /**
+   * Deterministic bridge values for one batch item: analyse the audio offline once, route Host.signal to the
+   * per-frame tracks and drop engine results cached with other (live or previous-item) values.
+   */
+  private async prepareSignals(router: SignalRouter, run: Run, frames: number): Promise<void> {
+    const { audio, registry, library } = this.d;
+    const graph = run.req.graph;
+    const fps = graph.project.fps;
+    router.beginExport(SILENT_TRACKS(fps)); // from now on no live value can leak in
+    try {
+      const tracks = await audio.analyzeSignals(graph, registry, (id) => library.assetAudio(id), { duration: frames / fps, fps, loop: graph.project.loop });
+      if (tracks) router.beginExport(tracks);
+      else run.warnings.push('Sound analysis is unavailable; sound-driven values export as 0.');
+    } catch (err) {
+      run.warnings.push(`Sound analysis failed (${errorMessage(err)}); sound-driven values export as 0.`);
+    }
+    await this.d.gate.clearEngine();
   }
 
   download(files: ExportedFile[]): void {
