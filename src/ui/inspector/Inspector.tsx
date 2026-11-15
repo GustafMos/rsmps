@@ -5,6 +5,10 @@ import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
 import { parseHex, toHex } from '../lib/colorMath';
 import { LayerList } from '../graph/LayerList';
+import { paramSocketType } from '../../engine/define';
+import { useSelector } from '../store/createStore';
+import { nodeViewStore, setPin } from '../store/nodeView';
+import { effectivePins } from '../lib/layout';
 import { isLayerType } from '../lib/layout';
 import { Piano } from './Piano';
 import { KindPicker } from '../components/KindPicker';
@@ -97,6 +101,8 @@ function NodePanel({ id }: { id: string }) {
   const palPort = paletteInputPort(def);
   const project = useEd((s) => s.graph.project);
   const wired = new Map(edges.filter((e) => e.to.node === id).map((e) => [e.to.port, e] as const));
+  const pins = useSelector(nodeViewStore, (s) => s.pins[id]);
+  const pinned = pins ?? effectivePins(def, node);
   return (
     <div className="rs-insp__scroll">
       <div className="rs-insp__sec">
@@ -148,6 +154,8 @@ function NodePanel({ id }: { id: string }) {
         node={node}
         def={def}
         wired={wired}
+        pinned={pinned}
+        onSelectSource={(port) => { const e = wired.get(port); if (e) ed.select([e.from.node]); }}
         label={(port) => {
           const e = wired.get(port);
           const src = e && nodes.find((n) => n.id === e.from.node);
@@ -166,12 +174,16 @@ function ParamGroups({
   node,
   def,
   wired,
+  pinned,
+  onSelectSource,
   label,
   onDisconnect,
 }: {
   node: NodeInstance;
   def: AnyNodeDef;
   wired: Map<string, unknown>;
+  pinned: string[];
+  onSelectSource: (port: string) => void;
   label: (port: string) => string;
   onDisconnect: (port: string) => void;
 }) {
@@ -210,7 +222,7 @@ function ParamGroups({
           )}
           {!(collapsed[g.name] ?? (hasKind(def) && node.params.kind === undefined ? AUTO_COLLAPSED.includes(g.name) : hasKind(def) && String(node.params.kind) === 'auto' && AUTO_COLLAPSED.includes(g.name))) &&
             g.items.map(([key, p]) => (
-              <ParamControl key={key} node={node} keyName={key} p={p} isWired={wired.has(key)} wiredFrom={label(key)} onDisconnect={() => onDisconnect(key)} />
+              <ParamControl key={key} node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} wiredFrom={label(key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(key)} onDisconnect={() => onDisconnect(key)} />
             ))}
         </div>
       ))}
@@ -218,7 +230,8 @@ function ParamGroups({
   );
 }
 
-function ParamControl({ node, keyName, p, isWired, wiredFrom, onDisconnect }: { node: NodeInstance; keyName: string; p: ParamDef; isWired: boolean; wiredFrom: string; onDisconnect: () => void }) {
+function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin, onSelectSource, onDisconnect }: { node: NodeInstance; def: AnyNodeDef; keyName: string; p: ParamDef; isWired: boolean; wiredFrom: string; pinned: boolean; onPin: (on: boolean) => void; onSelectSource: () => void; onDisconnect: () => void }) {
+  const sockType = paramSocketType(def, keyName);
   const { ed, io } = useApp();
   const label = p.label ?? keyName;
   const value = node.params[keyName] ?? p.default;
@@ -230,8 +243,8 @@ function ParamControl({ node, keyName, p, isWired, wiredFrom, onDisconnect }: { 
     control = (
       <div className="rs-insp__wired">
         <Icon name="plug" size={13} />
-        <span>from {wiredFrom || 'a node'}</span>
-        <button className="rs-btn rs-btn--ghost" onClick={onDisconnect} title="Remove the connection and use the value here">Disconnect</button>
+        <button className="rs-insp__chip2" onClick={onSelectSource} title="Select the driving node">driven by {wiredFrom || 'a node'}</button>
+        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onDisconnect} title="Disconnect and use the value here" aria-label="Disconnect"><Icon name="close" size={12} /></button>
       </div>
     );
   } else {
@@ -277,8 +290,12 @@ function ParamControl({ node, keyName, p, isWired, wiredFrom, onDisconnect }: { 
     }
   }
   return (
-    <div className={`rs-insp__row${stacked ? ' is-stacked' : ''}`} title={p.hint}>
-      <label className="rs-insp__label">{label}</label>
+    <div className={`rs-insp__row${stacked ? ' is-stacked' : ''}`} title={p.hint} {...(sockType ? { 'data-insp-sock': '', 'data-node': node.id, 'data-port': keyName, 'data-dir': 'in', 'data-type': sockType } : {})}>
+      <label className="rs-insp__label">
+        <button className={`rs-insp__pin${pinned ? ' is-on' : ''}`} aria-pressed={pinned} title={pinned ? 'Shown on the node: click to hide' : 'Show on the node'} onClick={() => onPin(!pinned)}><Icon name="pin" size={12} /></button>
+        {sockType && <span className={`rs-insp__dot rs-sock--${sockType}`} title="Drag a wire from a node's output onto this row to drive it" />}
+        <span className="rs-insp__lt">{label}</span>
+      </label>
       <div className="rs-insp__ctl">{control}</div>
       {p.hint && <div className="rs-insp__phint">{p.hint}</div>}
     </div>

@@ -117,6 +117,20 @@ function AddMenuInner() {
     root.current?.querySelector('[data-active="1"]')?.scrollIntoView({ block: 'nearest' });
   }, [cat, item, focus, query]);
 
+  const selId = !link && ed.state.selection.length === 1 ? ed.state.selection[0] : null;
+  const selNode = selId ? ed.state.graph.nodes.find((n) => n.id === selId) : undefined;
+  const selTitle = selNode ? selNode.label || ed.registry.get(selNode.type)?.title || selNode.type : '';
+  const canDrive = (def: AnyNodeDef) => !!selNode && (Object.values(def.outputs as Record<string, { type: string }>)[0]?.type === 'number');
+  /** Add a number-producing node and open the socket picker on the selected node to choose which parameter it drives. */
+  const drive = (def: AnyNodeDef) => {
+    if (!selId) return;
+    const at = { x: Math.round(req.world.x), y: Math.round(req.world.y - 14) };
+    ed.openAddMenu(null);
+    const nid = ed.addNodeAt(def.id, at);
+    const nn = nid ? ed.state.graph.nodes.find((n) => n.id === nid) : undefined;
+    const port = Object.keys(def.outputs)[0];
+    if (nn) ed.openSocketPicker({ node: selId, from: { node: nn.id, port, type: 'number' }, x: req.clientX, y: req.clientY });
+  };
   const choose = (def: AnyNodeDef) => {
     const at = link?.side === 'in' ? { x: req.world.x - NODE_W, y: req.world.y - 20 } : { x: req.world.x, y: req.world.y - 14 };
     ed.openAddMenu(null);
@@ -171,7 +185,8 @@ function AddMenuInner() {
       setFocus('cats');
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (searching || focus === 'items') items[item] && choose(items[item]);
+      if ((searching || focus === 'items') && e.shiftKey && items[item] && canDrive(items[item])) drive(items[item]);
+      else if (searching || focus === 'items') items[item] && choose(items[item]);
       else {
         setFocus('items');
         setItem(0);
@@ -240,6 +255,7 @@ function AddMenuInner() {
               </span>
               {bindingsOf(nodeCommandId(d.id))[0] && <span className="rs-kbd rs-add__key">{bindingsOf(nodeCommandId(d.id))[0]}</span>}
               {searching && <span className="rs-add__item-cat">{CATEGORIES[d.category]?.title}</span>}
+              {canDrive(d) && <span className="rs-add__drive" role="button" title={`Drive a parameter of ${selTitle}… (Shift+Enter)`} onClick={(ev) => { ev.stopPropagation(); drive(d); }}>Drive {selTitle}…</span>}
               <span className="rs-add__assign" role="button" title="Assign a hotkey that adds this node (Ctrl+K)" onClick={(ev) => { ev.stopPropagation(); setAssign({ type: d.id }); input.current?.focus(); }}><Icon name="keyboard" size={14} /></span>
             </button>
           ))}

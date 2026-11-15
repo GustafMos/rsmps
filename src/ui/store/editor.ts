@@ -43,6 +43,8 @@ export interface ContextMenuRequest {
   clientX: number;
   clientY: number;
   nodeId: string | null;
+  /** Right-click on a parameter row of the node. */
+  paramKey?: string;
 }
 
 export interface Toast {
@@ -83,6 +85,8 @@ export interface EditorState {
   activeProject: string | null;
   /** Name of the project being loaded (editing is blocked meanwhile). */
   switching: string | null;
+  /** Socket picker for a dragged wire dropped on a node (or "drive a parameter"). */
+  socketPicker: { node: string; from: { node: string; port: string; type: SocketType }; x: number; y: number } | null;
   /** One-time support prompt currently visible. */
   supportPrompt: 'export' | 'close' | null;
   /** Running export (progress shown in a floating bar). */
@@ -160,6 +164,7 @@ export class Editor {
       switching: null,
       exportJob: null,
       supportPrompt: null,
+      socketPicker: null,
     });
   }
 
@@ -1061,6 +1066,9 @@ export class Editor {
     this.exportAbort?.abort();
   }
 
+  openSocketPicker(req: EditorState['socketPicker']): void {
+    this.patch({ socketPicker: req, addMenu: null, contextMenu: null });
+  }
   setMode(mode: 'edit' | 'scan'): void {
     this.patch({ mode, addMenu: null, contextMenu: null });
   }

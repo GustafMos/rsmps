@@ -1,5 +1,7 @@
 import { memo, useMemo } from 'react';
 import { useApp, useDefs, useEd } from '../store/context';
+import { useSelector } from '../store/createStore';
+import { nodeViewStore } from '../store/nodeView';
 import { edgeEndpoints } from '../lib/geometry';
 import { layoutFor, wirePath, type NodeLayout } from '../lib/layout';
 import type { SocketType } from '../../engine/types';
@@ -14,6 +16,7 @@ export const Wires = memo(function Wires() {
   const edges = useEd((s) => s.graph.edges);
   const selection = useEd((s) => s.selection);
   useDefs();
+  const viewVersion = useSelector(nodeViewStore, (s) => s);
 
   const items = useMemo(() => {
     const graph = { nodes, edges } as Parameters<typeof edgeEndpoints>[0];
@@ -27,7 +30,7 @@ export const Wires = memo(function Wires() {
       const type: SocketType = io.registry.get(from.type)?.outputs[e.from.port]?.type ?? 'image';
       return [{ e, d: wirePath(ep.from, ep.to), type }];
     });
-  }, [nodes, edges, io]);
+  }, [nodes, edges, io, viewVersion]);
 
   const sel = useMemo(() => new Set(selection), [selection]);
 

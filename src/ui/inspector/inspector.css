@@ -57,3 +57,15 @@
 
 .rs-json__row { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-sm); color: var(--text-dim); }
 .rs-json__pre { margin: 0; max-height: 140px; overflow: auto; padding: var(--s-2); background: var(--bg-0); border: 1px solid var(--line); font-size: var(--fs-xs); color: var(--text-dim); user-select: text; }
+
+.rs-insp__label { display: flex; align-items: center; gap: 4px; }
+.rs-insp__lt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-insp__pin { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; background: transparent; border: 0; color: var(--text-faint); opacity: 0.4; border-radius: var(--r); flex: none; }
+.rs-insp__row:hover .rs-insp__pin, .rs-insp__pin.is-on { opacity: 1; }
+.rs-insp__pin.is-on { color: var(--yellow); }
+.rs-insp__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sc, var(--sock-unknown)); flex: none; }
+.rs-insp__dot.rs-sock--image { --sc: var(--sock-image); } .rs-insp__dot.rs-sock--number { --sc: var(--sock-number); } .rs-insp__dot.rs-sock--color { --sc: var(--sock-color); } .rs-insp__dot.rs-sock--palette { --sc: var(--sock-palette); }
+.rs-insp__chip2 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; height: 22px; padding: 0 var(--s-2); background: var(--bg-3); border: 1px solid var(--line-strong); color: var(--text); font-size: var(--fs-xs); border-radius: var(--r); }
+.rs-insp__chip2:hover { border-color: var(--accent-hi); }
+.rs-insp__row[data-ok] { outline: 2px solid var(--select); outline-offset: 1px; background: #ffd24a14; }
+.rs-insp__row[data-bad] { outline: 2px solid var(--danger); outline-offset: 1px; }

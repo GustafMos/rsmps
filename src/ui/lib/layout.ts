@@ -4,6 +4,7 @@
  */
 import { paramSocketType } from '../../engine/define';
 import { paletteInputPort } from './sockets';
+import { nodeViewStore } from '../store/nodeView';
 import type { AnyNodeDef, Edge, GraphDoc, InputSchema, NodeInstance, OutputSchema, ParamDef, SocketType } from '../../engine/types';
 
 export const NODE_W = 216;
@@ -45,6 +46,14 @@ export interface MoreRow {
   kind: 'more';
   y: number;
   count: number;
+  expanded?: boolean;
+}
+
+/** Which params the node body shows: pinned ones, wired ones (always) and, when expanded, all. */
+export interface BodyView {
+  pinned?: string[];
+  expanded: boolean;
+  wired: string[];
 }
 export interface KindRow {
   kind: 'kind';
@@ -84,9 +93,9 @@ export function visibleParams(def: AnyNodeDef, params: Record<string, unknown>):
   return out;
 }
 
-export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, missing?: MissingPorts, hint = false, counts: Record<string, number> = {}): NodeLayout {
+export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, missing?: MissingPorts, hint = false, counts: Record<string, number> = {}, view: BodyView = { expanded: false, wired: [] }): NodeLayout {
   const hasSummary = true;
-  const countsKey = JSON.stringify(counts);
+  const countsKey = JSON.stringify(counts) + JSON.stringify(view);
   const missKey = missing ? missing.inputs.join(',') + '|' + missing.outputs.join(',') : '';
   const hit = cache.get(node);
   if (hit && hit.def === def && hit.missing === missKey && hit.collapsed === !!node.collapsed && hit.hint === hint && hit.counts === countsKey) return hit.layout;
@@ -144,19 +153,21 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
 
   if (def) {
     const params = visibleParams(def, node.params).filter(([k]) => !(kindRow && k === 'kind'));
-    const shown = params.slice(0, MAX_PARAM_ROWS);
+    const pinnedSet = new Set(view.pinned ?? params.slice(0, MAX_PARAM_ROWS).map(([k]) => k));
+    const wiredSet = new Set(view.wired);
+    const shown = params.filter(([k]) => view.expanded || pinnedSet.has(k) || wiredSet.has(k));
+    const hidden = params.filter(([k]) => !shown.some(([s]) => s === k));
     for (const [key, p] of shown) {
       const socket = paramSocketType(def, key);
       rows.push({ kind: 'param', y, key, def: p, socket });
       if (socket) sockets[`in:${key}`] = { x: 0, y: y + ROW_H / 2 };
       y += ROW_H;
     }
-    // hidden params that can still be wired keep a socket so existing wires stay attached
-    for (const [key] of params.slice(MAX_PARAM_ROWS)) {
-      if (paramSocketType(def, key)) sockets[`in:${key}`] = { x: 0, y: HEAD_H + PAD_Y + n * ROW_H + MAX_PARAM_ROWS * ROW_H + ROW_H / 2 };
-    }
-    if (params.length > MAX_PARAM_ROWS) {
-      rows.push({ kind: 'more', y, count: params.length - MAX_PARAM_ROWS });
+    // hidden params that can be wired get a socket at the expander row (wired ones are never hidden)
+    for (const [key] of hidden) if (paramSocketType(def, key)) sockets[`in:${key}`] = { x: 0, y: y + ROW_H / 2 };
+    const extras = params.filter(([k]) => !pinnedSet.has(k) && !wiredSet.has(k)).length;
+    if (hidden.length > 0 || (view.expanded && extras > 0)) {
+      rows.push({ kind: 'more', y, count: view.expanded ? extras : hidden.length, expanded: view.expanded });
       y += ROW_H;
     }
     if (hint) {
@@ -248,6 +259,19 @@ export function parsePortSignature(sig: string): MissingPorts {
   return { inputs: a ? a.split(',') : [], outputs: b ? b.split(',') : [] };
 }
 
+/** Pins / expansion / wired params of a node, from the shared view store and the wires. */
+export function bodyViewFor(def: AnyNodeDef, nodeId: string, edges: Edge[]): BodyView {
+  const st = nodeViewStore.get();
+  const wired = [...new Set(edges.filter((e) => e.to.node === nodeId && e.to.port in def.params).map((e) => e.to.port))];
+  return { pinned: st.pins[nodeId], expanded: !!st.expanded[nodeId], wired };
+}
+
+/** Params currently pinned on the node body (explicit pins, else the default first rows). */
+export function effectivePins(def: AnyNodeDef, node: NodeInstance): string[] {
+  const pins = nodeViewStore.get().pins[node.id];
+  return pins ?? visibleParams(def, node.params).slice(0, MAX_PARAM_ROWS).map(([k]) => k);
+}
+
 /** Wire count per multi input port. */
 export function multiCounts(def: AnyNodeDef, edges: Edge[], nodeId: string): Record<string, number> {
   const out: Record<string, number> = {};
@@ -258,7 +282,7 @@ export function multiCounts(def: AnyNodeDef, edges: Edge[], nodeId: string): Rec
 export function layoutFor(graph: GraphDoc, node: NodeInstance, def: AnyNodeDef | undefined): NodeLayout {
   const pp = def ? paletteInputPort(def) : null;
   const hint = !!pp && !graph.edges.some((e) => e.to.node === node.id && e.to.port === pp);
-  return layoutNode(node, def, def ? undefined : parsePortSignature(portSignature(graph.edges, node.id)), hint, def ? multiCounts(def, graph.edges, node.id) : {});
+  return layoutNode(node, def, def ? undefined : parsePortSignature(portSignature(graph.edges, node.id)), hint, def ? multiCounts(def, graph.edges, node.id) : {}, def ? bodyViewFor(def, node.id, graph.edges) : undefined);
 }
 
 export function nodeRect(graph: GraphDoc, node: NodeInstance, def: AnyNodeDef | undefined) {

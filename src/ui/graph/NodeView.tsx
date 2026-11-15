@@ -14,6 +14,8 @@ import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
 import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row } from '../lib/layout';
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
+import { useSelector } from '../store/createStore';
+import { nodeViewStore, toggleExpanded } from '../store/nodeView';
 import './node.css';
 import '../layers.css';
 
@@ -40,7 +42,10 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
     if (def) for (const p of Object.keys(multiCounts(def, [], node.id))) m[p] = wiredSig.split(',').filter((x) => x === p).length;
     return m;
   }, [def, wiredSig, node.id]);
-  const layout = layoutNode(node, def, def ? undefined : parsePortSignature(portSig), hint, counts);
+  const pinned = useSelector(nodeViewStore, (s) => s.pins[node.id]);
+  const expanded = useSelector(nodeViewStore, (s) => !!s.expanded[node.id]);
+  const view = useMemo(() => ({ pinned, expanded, wired: def ? [...wired].filter((k) => k in def.params) : [] }), [pinned, expanded, wired, def]);
+  const layout = layoutNode(node, def, def ? undefined : parsePortSignature(portSig), hint, counts, view);
   const [renaming, setRenaming] = useState(false);
   const kbd = useKeyboardTarget() === node.id;
   const hasEnabled = !!def && def.category === 'output' && 'enabled' in def.params;
@@ -229,8 +234,8 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
   }
   if (row.kind === 'more') {
     return (
-      <button className="rs-row rs-row--more" data-nodrag style={{ top: row.y, height: ROW_H }} onClick={() => ed.select([node.id])} title="Open the inspector for all parameters">
-        {row.count} more…
+      <button className="rs-row rs-row--more" data-nodrag data-more-row={node.id} style={{ top: row.y, height: ROW_H }} onClick={() => toggleExpanded(node.id)} title={row.expanded ? 'Show only the pinned parameters' : 'Show all parameters on the node (drop a wire here to pick one)'}>
+        {row.expanded ? 'Show fewer' : `${row.count} more…`}
       </button>
     );
   }
@@ -339,7 +344,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
     }
   }
   return (
-    <div className="rs-row rs-row--param" style={{ top: row.y, height: ROW_H }}>
+    <div className="rs-row rs-row--param" data-param-key={row.key} style={{ top: row.y, height: ROW_H }}>
       {row.socket && <Socket node={node.id} port={row.key} type={row.socket} dir="in" />}
       {control}
     </div>

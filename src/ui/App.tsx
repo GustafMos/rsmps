@@ -5,6 +5,7 @@ import { GraphView } from './graph/GraphView';
 import { Inspector } from './inspector/Inspector';
 import { AddMenu } from './menus/AddMenu';
 import { NodeContextMenu } from './menus/NodeContextMenu';
+import { SocketPicker } from './menus/SocketPicker';
 import { Sidebar } from './sidebar/Sidebar';
 import { useApp, useEd } from './store/context';
 import { TopBar } from './topbar/TopBar';
@@ -121,6 +122,7 @@ export function App() {
       <AddMenu />
       <NodeContextMenu />
       <DialogHost />
+      <SocketPicker />
       <ExportBar />
       <SupportCard />
       <Toasts />

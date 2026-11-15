@@ -1,5 +1,7 @@
 import { MenuPopup, type MenuItem } from '../components/Menu';
 import { useApp, useEd } from '../store/context';
+import { setPin } from '../store/nodeView';
+import { effectivePins } from '../lib/layout';
 
 export function NodeContextMenu() {
   const { ed } = useApp();
@@ -7,7 +9,14 @@ export function NodeContextMenu() {
   const sel = useEd((s) => s.selection);
   if (!req) return null;
   const node = ed.state.graph.nodes.find((n) => n.id === req.nodeId);
+  const def = node && ed.registry.get(node.type);
   const items: MenuItem[] = [
+    ...(req.paramKey && node && def
+      ? [
+          { label: 'Hide from node', onClick: () => setPin(node.id, req.paramKey!, false, effectivePins(def, node)) },
+          { sep: true } as MenuItem,
+        ]
+      : []),
     { label: 'View this node', onClick: () => node && ed.setViewed(node.id), shortcut: 'Ctrl+Shift+Click' },
     { label: node?.bypass ? 'Enable' : 'Bypass', onClick: () => sel.forEach((id) => ed.toggleBypass(id)), shortcut: 'B' },
     { label: node?.collapsed ? 'Expand' : 'Collapse', onClick: () => ed.toggleCollapse(sel), shortcut: 'H' },

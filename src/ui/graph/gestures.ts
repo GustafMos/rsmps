@@ -19,6 +19,7 @@ import {
 } from '../lib/geometry';
 import { layoutFor, socketWorld, wirePath } from '../lib/layout';
 import { inputsAccepting } from '../lib/sockets';
+import { compatibleSockets } from '../lib/compat';
 import type { SocketType } from '../../engine/types';
 
 const THRESHOLD = 3;
@@ -239,16 +240,18 @@ export function createGestures(app: AppCtx) {
     const path = ctl.pending;
     path?.setAttribute('class', `rs-wire rs-wire--${fixed.type} is-pending`);
     let target: HTMLElement | null = null;
+    let hoverId: string | null = null;
+    let hoverTimer: ReturnType<typeof setTimeout> | undefined;
     let mergeTo: HTMLElement | null = null;
     let moved = false;
 
     const findTarget = (ev: PointerEvent): { el: HTMLElement; err: string | null; merge?: boolean } | null => {
       const hit = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
-      const s = hit?.closest<HTMLElement>('[data-sock]');
+      const s = hit?.closest<HTMLElement>('[data-sock], [data-insp-sock]');
       if (s) return { el: s, err: errorFor(s), merge: mergeTarget(s) };
-      const nodeEl = hit?.closest<HTMLElement>('[data-node-id]');
-      if (nodeEl) {
-        const cand = Array.from(nodeEl.querySelectorAll<HTMLElement>('[data-sock]')).find((c) => !errorFor(c));
+      if (fixed.side === 'in') {
+        const nodeEl = hit?.closest<HTMLElement>('[data-node-id]');
+        const cand = nodeEl && Array.from(nodeEl.querySelectorAll<HTMLElement>('[data-sock]')).find((c) => !errorFor(c));
         if (cand) return { el: cand, err: null };
       }
       return null;
@@ -270,6 +273,22 @@ export function createGestures(app: AppCtx) {
       (ev) => {
         moved = moved || dist(ev.clientX, ev.clientY, e.clientX, e.clientY) > THRESHOLD;
         const found = findTarget(ev);
+        // hovering a node body for a moment opens the picker of every compatible socket (hidden params included)
+        if (fixed.side === 'out' && !detached) {
+          const h = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+          const nid = !found ? (h?.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId ?? null) : null;
+          const inPicker = !!h?.closest('.rs-sp');
+          if (nid !== hoverId && !inPicker) {
+            hoverId = nid;
+            clearTimeout(hoverTimer);
+            if (ed.state.socketPicker && ed.state.socketPicker.node !== nid) ed.openSocketPicker(null);
+            if (nid && nid !== fixed.node && !ed.state.socketPicker) {
+              hoverTimer = setTimeout(() => {
+                if (compatibleSockets(ed.state.graph, reg, nid, { node: fixed.node, port: fixed.port }).length) ed.openSocketPicker({ node: nid, from: fixed, x: ev.clientX + 14, y: ev.clientY + 14 });
+              }, 500);
+            }
+          }
+        }
         if (target && target !== found?.el) {
           delete target.dataset.ok;
           delete target.dataset.bad;
@@ -293,6 +312,7 @@ export function createGestures(app: AppCtx) {
         draw(ev);
       },
       (ev) => {
+        clearTimeout(hoverTimer);
         sockets.forEach((s) => {
           delete s.dataset.dim;
           delete s.dataset.merge;
@@ -324,6 +344,22 @@ export function createGestures(app: AppCtx) {
           return;
         }
         const hit = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        const pick = hit?.closest<HTMLElement>('[data-pick]');
+        const pk = ed.state.socketPicker;
+        if (pk && pick) {
+          ed.openSocketPicker(null);
+          ed.connect({ node: fixed.node, port: fixed.port }, { node: pk.node, port: pick.dataset.pick! });
+          return;
+        }
+        if (pk && hit?.closest('.rs-sp')) return;
+        const bodyNode = hit?.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId;
+        if (fixed.side === 'out' && !detached && bodyNode && bodyNode !== fixed.node) {
+          const list = compatibleSockets(ed.state.graph, reg, bodyNode, { node: fixed.node, port: fixed.port });
+          if (list.length === 1) ed.connect({ node: fixed.node, port: fixed.port }, { node: bodyNode, port: list[0].port });
+          else if (list.length === 0) ed.toast('Nothing on that node accepts this wire.', 'error');
+          else ed.openSocketPicker({ node: bodyNode, from: fixed, x: ev.clientX + 10, y: ev.clientY + 10 });
+          return;
+        }
         const onSocket = hit?.closest('[data-sock]');
         if (onSocket) {
           const err = errorFor(onSocket as HTMLElement);
@@ -426,7 +462,7 @@ export function createGestures(app: AppCtx) {
       if (nodeEl) {
         const id = nodeEl.dataset.nodeId!;
         if (!ed.state.selection.includes(id)) ed.select([id]);
-        ed.openContextMenu({ clientX: ev.clientX, clientY: ev.clientY, nodeId: id });
+        ed.openContextMenu({ clientX: ev.clientX, clientY: ev.clientY, nodeId: id, paramKey: target.closest<HTMLElement>('[data-param-key]')?.dataset.paramKey });
       } else {
         ed.openAddMenu({ clientX: ev.clientX, clientY: ev.clientY, world: ctl.toWorld(ev.clientX, ev.clientY) });
       }
