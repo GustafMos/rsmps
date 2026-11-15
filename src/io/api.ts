@@ -30,6 +30,8 @@ export interface MediaLibrary extends Host {
    * the same asset id. Hidden from `list()`; removed by `removeOwned`.
    */
   attachSequence(owner: string, name: string, frames: Blob[], fps: number): Promise<AssetInfo>;
+  /** Set when decoding this asset failed for good (null otherwise, and until something has tried to decode it). */
+  assetProblem(assetId: string): AssetProblem | null;
   /** Store a recorded take as an audio asset (lossless 32-bit float WAV). Persisted; `assetAudio` serves it immediately. */
   addRecording(name: string, pcm: PcmAudio): Promise<AssetInfo>;
   /** Delete every asset owned by `owner`. */
@@ -175,7 +177,17 @@ export interface PluginManager {
 
 /** Project persistence: the graph document itself (assets are referenced by id). */
 /** A library entry as stored: `AssetInfo` plus ownership. Hidden working assets belong to a scan project (`owner` = its id). */
-export type LibraryAsset = AssetInfo & { owner?: string; hidden?: boolean };
+export type LibraryAsset = AssetInfo & { owner?: string; hidden?: boolean; /** Video codec as read from the file, e.g. "HEVC (H.265) 10-bit". */ codec?: string };
+
+/**
+ * Why an asset cannot be used, for a "How to fix" box. `unsupported-codec`: neither WebCodecs nor the browser's own player can
+ * decode the video. `hint` is plain text with a copy-pasteable ffmpeg command.
+ */
+export interface AssetProblem {
+  code: 'unsupported-codec';
+  codec: string;
+  hint: string;
+}
 
 /**
  * Everything a scan tab needs to come back after a reload. Results (recovered frames) are NOT stored: `io.scan.restore`

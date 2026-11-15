@@ -19,11 +19,12 @@ import type { PcmAudio } from '../engine/audio/api';
 import type { Gpu } from '../engine/gpu/gpu';
 import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
-import type { LibraryAsset, MediaLibrary } from './api';
+import type { AssetProblem, LibraryAsset, MediaLibrary } from './api';
 import { encodeWav } from './wav';
 import { idbAll, idbDelete, idbPut } from './db';
 import type { SignalRouter } from './signals';
 import { uploadExternal } from './upload';
+import { ElementPool, ElementVideo, codecLabel, snapTime, unsupportedHint, unsupportedMessage } from './video-element';
 import { TimedFrameStore } from './lru';
 import { cssFont, wrapLines } from './text';
 import { errorMessage, uniqueId } from './util';
@@ -81,6 +82,15 @@ const FRAME_BUDGET_BYTES = 512 * 1024 * 1024;
 const SEEK_AHEAD_SECONDS = 1;
 const THUMB_SIDE = 160;
 
+/** Dev-only switch: serve every video through an HTMLVideoElement (localStorage.rsmpsForceVideoElement = '1' or ?forceVideoElement). Read once. */
+function forceVideoElement(): boolean {
+  try {
+    return !!import.meta.env?.DEV && (localStorage.getItem('rsmpsForceVideoElement') === '1' || /[?&]forceVideoElement\b/.test(location.search));
+  } catch {
+    return false;
+  }
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 /* Video reader: one decoder cursor per asset                                                      */
 /* ---------------------------------------------------------------------------------------------- */
@@ -99,6 +109,8 @@ class VideoReader {
   private exhausted = false;
   private chain: Promise<unknown> = Promise.resolve();
   private scratch: OffscreenCanvas | null = null;
+  /** Frames delivered so far: a decode failure before the first one means "use the browser's player instead". */
+  served = 0;
 
   constructor(
     private blob: Blob,
@@ -165,6 +177,7 @@ class VideoReader {
       this.cur = s;
       this.nextStart = Infinity;
     }
+    this.served++;
     const cur = this.cur;
     // Keep the pipeline busy: ask for the following frame while the caller uploads this one.
     if (!this.nextP && !this.exhausted) {
@@ -262,6 +275,14 @@ export class Library implements MediaLibrary {
   private listeners = new Set<() => void>();
   private frames: TimedFrameStore<Frame>;
   private readers = new Map<string, VideoReader>();
+  /** Videos served through an HTMLVideoElement because WebCodecs cannot decode them. */
+  private elementAssets = new Set<string>();
+  private pools = new Map<string, ElementPool>();
+  private problems = new Map<string, AssetProblem>();
+  private forceElement = forceVideoElement();
+  private poolSweeper: ReturnType<typeof setInterval> | null = null;
+  /** True while an export runs: video frames must be frame-exact (seek path only, never real-time playback). */
+  exact = false;
   private pending = new Map<string, Promise<Frame | null>>();
   private audio = new Map<string, Promise<PcmAudio | null>>();
   private audioBytes = new Map<string, number>();
@@ -442,6 +463,8 @@ export class Library implements MediaLibrary {
     this.frames.dropGroups(`${assetId}|`);
     this.readers.get(assetId)?.dispose();
     this.readers.delete(assetId);
+    this.dropElements(assetId);
+    this.problems.delete(assetId);
     this.audio.delete(assetId);
     const thumb = this.thumbs.get(assetId);
     this.thumbs.delete(assetId);
@@ -507,7 +530,13 @@ export class Library implements MediaLibrary {
           () => vtrack.computeDuration(),
           () => input.getDurationFromMetadata([vtrack]),
         ]);
-        return { ...base, width, height, fps, duration, hasAudio: !!atrack };
+        let codec = '';
+        try {
+          codec = codecLabel(await vtrack.getCodec(), await vtrack.getCodecParameterString().catch(() => null));
+        } catch {
+          codec = '';
+        }
+        return { ...base, width, height, fps, duration, hasAudio: !!atrack, ...(codec ? { codec } : {}) } as AssetInfo;
       }
       const duration = await firstPositive([
         () => input.computeDuration(),
@@ -623,8 +652,10 @@ export class Library implements MediaLibrary {
       reader = new VideoReader(blob, info.fps || 24);
       this.readers.set(info.id, reader);
     }
+    if (this.elementAssets.has(info.id) || this.forceElement) return this.elementFrame(info, size, group, t);
     const r = reader;
-    return r.run(async () => {
+    return r
+      .run(async () => {
       // Another request queued ahead of us may already have decoded this frame.
       const again = this.frames.find(group, t);
       if (again) return again;
@@ -640,7 +671,99 @@ export class Library implements MediaLibrary {
       const frame: Frame = { texture, width: size.width, height: size.height };
       if (this.infos.has(info.id)) this.frames.put(group, got.start, got.end, this.bytesOf(frame), frame);
       return frame;
+    })
+      .catch((err) => {
+        // WebCodecs could not decode this video (phone HEVC, 10-bit...) and never produced a frame: use the browser's player.
+        if (r.served > 0 || !this.infos.has(info.id)) throw err;
+        this.elementAssets.add(info.id);
+        r.dispose();
+        this.readers.delete(info.id);
+        return this.elementFrame(info, size, group, t);
+      });
+  }
+
+  /* ------------------------- video through an HTMLVideoElement (fallback) ------------------------ */
+
+  private poolFor(info: AssetInfo): ElementPool | null {
+    let pool = this.pools.get(info.id);
+    if (!pool) {
+      const blob = this.blobs.get(info.id);
+      if (!blob) return null;
+      pool = new ElementPool(() => new ElementVideo(blob, info.fps || 24, info.duration));
+      this.pools.set(info.id, pool);
+      this.poolSweeper ??= setInterval(() => {
+        const now = performance.now();
+        for (const p of this.pools.values()) p.sweep(now);
+      }, 250);
+    }
+    return pool;
+  }
+
+  private markUnsupported(info: AssetInfo): Error {
+    const label = (info as LibraryAsset).codec ?? 'this';
+    this.problems.set(info.id, { code: 'unsupported-codec', codec: label, hint: unsupportedHint(info.name) });
+    return new Error(unsupportedMessage(info.name, label));
+  }
+
+  assetProblem(assetId: string): AssetProblem | null {
+    return this.problems.get(assetId) ?? null;
+  }
+
+  private async elementFrame(info: AssetInfo, size: { bucket: number; width: number; height: number }, group: string, t: number): Promise<Frame | null> {
+    const pool = this.poolFor(info);
+    if (!pool) return null;
+    const fps = info.fps || 24;
+    const snapped = snapTime(t, fps);
+    const end = snapped + 1 / fps;
+    const approxGroup = `${group}|p`;
+    if (!this.exact) {
+      // Frames from real-time playback are only approximately at their time: never served to exports (this.exact).
+      const hit = this.frames.find(approxGroup, t);
+      if (hit) return hit;
+    }
+    const ev = pool.pick(t);
+    try {
+      await ev.open();
+    } catch {
+      throw this.markUnsupported(info);
+    }
+    let frame: Frame | null = null;
+    const wasExact = await ev.present(t, this.exact, async () => {
+      const texture = this.takeTexture(size.width, size.height);
+      try {
+        await uploadExternal(this.gpu.device, ev.video, texture, size.width, size.height, ev.size);
+      } catch (err) {
+        this.gpu.release(texture);
+        throw err;
+      }
+      frame = { texture, width: size.width, height: size.height };
     });
+    if (!frame) return null;
+    const f: Frame = frame;
+    if (this.infos.has(info.id)) this.frames.put(wasExact ? group : approxGroup, snapped, end, this.bytesOf(f), f);
+    return f;
+  }
+
+  private async elementThumbnail(info: AssetInfo): Promise<Blob | null> {
+    const blob = this.blobs.get(info.id);
+    if (!blob) return null;
+    const ev = new ElementVideo(blob, info.fps || 24, info.duration);
+    try {
+      await ev.open();
+      await ev.present(Math.min(1, info.duration * 0.1), true);
+      const v = ev.video;
+      const k = Math.min(1, THUMB_SIDE / Math.max(v.videoWidth, v.videoHeight));
+      const w = Math.max(1, Math.round(v.videoWidth * k));
+      const h = Math.max(1, Math.round(v.videoHeight * k));
+      const canvas = new OffscreenCanvas(w, h);
+      canvas.getContext('2d')!.drawImage(v, 0, 0, w, h);
+      return await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+    } catch {
+      this.markUnsupported(info);
+      return null;
+    } finally {
+      ev.dispose();
+    }
   }
 
   /* ----------------------------------- audio -------------------------------- */
@@ -675,7 +798,15 @@ export class Library implements MediaLibrary {
         /* fall back to mediabunny below */
       }
     }
-    return decodeTrackPcm(blob);
+    try {
+      const pcm = await decodeTrackPcm(blob);
+      if (pcm) return pcm;
+    } catch {
+      /* fall back to the browser's decoder below */
+    }
+    // AAC in MP4 decodes in every browser even when the video does not.
+    const ctx = new OfflineAudioContext(2, 1, 48000);
+    return audioBufferToPcm(await ctx.decodeAudioData(await blob.arrayBuffer()));
   }
 
   /* --------------------------------- thumbnails ----------------------------- */
@@ -711,13 +842,36 @@ export class Library implements MediaLibrary {
         reader = new VideoReader(blob, info.fps || 24);
         this.readers.set(info.id, reader);
       }
-      const out = await reader.thumbnail(Math.min(1, info.duration * 0.1), THUMB_SIDE);
+      let out: Blob | null = null;
+      if (!this.elementAssets.has(info.id) && !this.forceElement) {
+        try {
+          out = await reader.thumbnail(Math.min(1, info.duration * 0.1), THUMB_SIDE);
+        } catch {
+          out = null; // WebCodecs cannot decode it: try the browser's own player
+        }
+      }
+      out ??= await this.elementThumbnail(info);
       return out ? URL.createObjectURL(out) : null;
     }
     return null;
   }
 
   /* ----------------------------------- text --------------------------------- */
+
+  /** Release the <video> elements and object URLs of one asset (the choice of decoder is kept). */
+  private dropElements(assetId: string): void {
+    this.pools.get(assetId)?.dispose();
+    this.pools.delete(assetId);
+    if (this.pools.size === 0 && this.poolSweeper) {
+      clearInterval(this.poolSweeper);
+      this.poolSweeper = null;
+    }
+  }
+
+  /** Diagnostics: how many times the element path had to seek (tests / dev tools). */
+  elementSeeks(assetId: string): number {
+    return this.pools.get(assetId)?.totalSeeks() ?? 0;
+  }
 
   /** Host.liveFrame: webcam / URL pictures (see live.ts). Throws readable errors. */
   liveFrame(source: LiveSource, maxSide: number): Promise<Frame | null> {
@@ -763,6 +917,7 @@ export class Library implements MediaLibrary {
       this.frames.dropGroups(`${id}|`);
       this.readers.get(id)?.dispose();
       this.readers.delete(id);
+      this.dropElements(id);
       this.audio.delete(id);
       this.audioBytes.delete(id);
     }
@@ -779,6 +934,7 @@ export class Library implements MediaLibrary {
   dispose(): void {
     for (const r of this.readers.values()) r.dispose();
     this.readers.clear();
+    for (const id of [...this.pools.keys()]) this.dropElements(id);
     this.frames.clear();
   }
 }

@@ -105,6 +105,16 @@ export class ExporterImpl implements Exporter {
   /* -------------------------------------------------------------------------------------------- */
 
   async run(req: ExportRequest): Promise<ExportedFile[]> {
+    // Video frames must be frame-exact while exporting (the browser-player fallback may not use real-time playback).
+    this.d.library.exact = true;
+    try {
+      return await this.runExact(req);
+    } finally {
+      this.d.library.exact = false;
+    }
+  }
+
+  private async runExact(req: ExportRequest): Promise<ExportedFile[]> {
     const { registry } = this.d;
     const graph = req.graph;
     const ids = req.outputs.length ? req.outputs : enabledOutputs(graph, registry).map((n) => n.id);
