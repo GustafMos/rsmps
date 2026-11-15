@@ -162,3 +162,24 @@ A plugin is a single ES module with no imports whose default export is a node de
 array of them) — the same object `defineNode` takes, with an id like `myname/glitch`. It is loaded
 at runtime, validated by `Registry.register`, stored in the browser, and from then on is
 indistinguishable from a built-in node. See `docs/PLUGINS.md`.
+
+## Rules added after the first build-out (each from a real bug)
+
+13. **Scaling or repositioning an image inside another: use `sampleCrisp(tex, uv, texelsPerPixel)`** from the
+    prelude, never plain linear sampling. Enlarged pixel art must stay sharp (a pixelated layer in Stack came out blurred).
+14. **Nothing animates by default.** Spin, evolution, scroll and similar params default to 0; a freshly added node
+    is still until the user asks for motion (two cubes "both spinning" was a default spin of 1). Particles are the exception.
+15. **Set `softMax` on every number param whose cost grows with its value** (resolutions, counts, radii, iterations).
+    The UI stops sliders there and asks before applying a larger typed value. `max` stays the hard limit.
+16. **Never do unbounded work in one GPU submit.** Sequential compute passes must be split into bounded submits and
+    refuse or fall back above a pixel budget; check output sizes against `device.limits.maxTextureDimension2D` and a
+    memory budget and throw a readable `Error` (it is shown on the node). A 9.7 s error-diffusion pass froze the app.
+17. **Analysis that should run once uses a `lazy` input** and `ctx.pull(input, { seconds })` at a fixed time
+    (palette extraction). Per-frame CPU analysis must be an explicit opt-in param.
+18. **A node must produce a sensible result with only its obvious inputs wired.** Make secondary inputs optional with
+    a built-in fallback (Dither without a palette wire output nothing).
+19. **WGSL reserved words as uniform or texture names fail silently** (e.g. `target`, `size` is reserved by the kernel).
+    Use descriptive names and assert pixels in the test.
+20. **Wire order of a `multi` input is meaningful** (first = bottom layer); never sort inputs.
+21. New socket types beyond the originals: `regions` (tracked boxes), `camera`; param type `device`; node flags
+    `playable`, `maskable`. Stream nodes can publish numbers to the picture side with `io.signal` (see audio/README.md).
