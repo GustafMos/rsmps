@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OpenProject } from '../../io/api';
 import { Icon } from '../components/Icon';
-import { MenuPopup, type MenuItem } from '../components/Menu';
+import { MenuButton, MenuPopup, type MenuItem } from '../components/Menu';
 import { useApp, useEd } from '../store/context';
 import './tabs.css';
 
@@ -81,6 +81,7 @@ export function ProjectTabs() {
           onMouseEnter={(e) => setTip({ p, x: e.currentTarget.getBoundingClientRect().left })}
           onMouseLeave={() => setTip(null)}
         >
+          {(p as { kind?: string }).kind === 'scan' && <span className="rs-tab__kind" title="Scan"><Icon name="image" size={12} /></span>}
           {p.dirty && <span className="rs-tab__dot" title="Edited since the last file save" />}
           {renaming === p.id ? (
             <input
@@ -107,6 +108,7 @@ export function ProjectTabs() {
       <button className="rs-btn rs-btn--icon rs-btn--ghost rs-tabs__new" onClick={() => void ed.newProjectTab()} title="New project in a new tab (Ctrl+Alt+T)" aria-label="New tab">
         <Icon name="plus" />
       </button>
+      <MenuButton className="rs-btn rs-btn--icon rs-btn--ghost rs-tabs__new" title="New project or scan" items={[{ label: 'New project', onClick: () => void ed.newProjectTab(), shortcut: 'Ctrl+Alt+T' }, { label: 'New scan', onClick: () => void ed.newScanTab() }]}><Icon name="chevronDown" size={12} /></MenuButton>
       <span className="rs-tabs__mem" title="Only the active tab is loaded. Background tabs keep just their name and a thumbnail; undo history is cleared when you switch tabs.">
         1 live
       </span>

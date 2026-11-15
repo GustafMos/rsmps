@@ -9,6 +9,7 @@ import { hexOf } from '../lib/drag';
 import { paletteInputPort } from '../lib/sockets';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
+import { CurveField } from '../components/CurveField';
 import { LayerList } from './LayerList';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
@@ -321,6 +322,14 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         );
         break;
       }
+      case 'curve':
+        control = (
+          <div className="rs-row__pair">
+            <span className="rs-row__label">{label}</span>
+            <CurveField nodeId={node.id} keyName={row.key} label={label} value={value} min={p.min} max={p.max} />
+          </div>
+        );
+        break;
       case 'device':
         control = (
           <div className="rs-row__pair">

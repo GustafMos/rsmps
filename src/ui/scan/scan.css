@@ -54,3 +54,5 @@
 .rs-top__modes { display: flex; border: 1px solid var(--line-strong); margin-left: var(--s-2); }
 .rs-top__modes button { height: var(--ctl-h-lg); padding: 0 var(--s-3); background: var(--bg-3); border: 0; color: var(--text-dim); font-size: var(--fs-sm); }
 .rs-top__modes button.is-on { background: var(--accent); color: #fff; }
+
+.rs-sc__exportrow { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }

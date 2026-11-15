@@ -6,6 +6,10 @@ import { NumberField } from '../components/NumberField';
 import { CheckField, SelectField, TextField } from '../components/fields';
 import { useApp } from '../store/context';
 import { PageCard } from './PageCard';
+import { useEd } from '../store/context';
+import { loadSession, restoreSession, saveSession, type ScanSessionDoc } from './session';
+import { MenuButton } from '../components/Menu';
+import { QUICK_KINDS, buildQuickGraph, type QuickKind } from './quickExport';
 import './scan.css';
 
 export function ScanView() {
@@ -15,6 +19,39 @@ export function ScanView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const fileIn = useRef<HTMLInputElement>(null);
+  const tabId = useEd((s) => s.activeProject);
+  const tabName = useEd((s) => s.projects.find((p) => p.id === s.activeProject)?.name ?? 'Scan');
+  const session = useRef<ScanSessionDoc>({ files: [], manual: [], options: {} });
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const persist = useCallback(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { if (tabId) saveSession(io, tabId, session.current); }, 500);
+  }, [io, tabId]);
+  const onOptions = useCallback((o: Record<string, unknown>) => { session.current.options = o; persist(); }, [persist]);
+  const [restoredOptions, setRestoredOptions] = useState<Record<string, unknown>>({});
+
+  // reopen a saved scan (also after a page reload)
+  useEffect(() => {
+    if (!tabId) return;
+    let live = true;
+    void loadSession(io, tabId).then(async (s) => {
+      if (!s || !live || !s.files?.length) return;
+      session.current = s;
+      setRestoredOptions(s.options ?? {});
+      setBusy('Restoring your scan…');
+      try {
+        const r = await restoreSession(io, s);
+        if (live) replace(r);
+        else r.dispose();
+      } catch (err) {
+        ed.toast(`Could not restore the scan: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      } finally {
+        if (live) setBusy(null);
+      }
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId]);
 
   // dispose object URLs when leaving the tab
   useEffect(() => () => ref.current?.dispose(), []);
@@ -32,6 +69,8 @@ export function ScanView() {
     setBusy(`Looking for the page markers in ${files.length} photo${files.length === 1 ? '' : 's'}…`);
     try {
       replace(await io.scan.analyze(files));
+      session.current = { ...session.current, files, manual: [] };
+      persist();
     } catch (err) {
       ed.toast(`Scan failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
@@ -90,10 +129,10 @@ export function ScanView() {
             <Summary result={result} />
             <section className="rs-sc__pages">
               {result.report.pages.map((p) => (
-                <PageCard key={`${p.index}:${p.fileName}`} page={p} result={result} onResult={replace} />
+                <PageCard key={`${p.index}:${p.fileName}`} page={p} result={result} onResult={replace} onManual={(pageIndex, input) => { session.current.manual = [...session.current.manual.filter((m) => m.pageIndex !== pageIndex), { pageIndex, input }]; persist(); }} />
               ))}
             </section>
-            <Frames result={result} onDone={() => { replace(null); }} />
+            <Frames result={result} defaultName={tabName} initial={restoredOptions} onOptions={onOptions} onDone={() => { replace(null); session.current = { files: [], manual: [], options: {} }; persist(); }} />
           </>
         )}
       </div>
@@ -116,18 +155,48 @@ function Summary({ result }: { result: ScanResult }) {
   );
 }
 
-function Frames({ result, onDone }: { result: ScanResult; onDone: () => void }) {
+function Frames({ result, defaultName, initial, onOptions, onDone }: { result: ScanResult; defaultName: string; initial: Record<string, unknown>; onOptions: (o: Record<string, unknown>) => void; onDone: () => void }) {
   const { io, ed } = useApp();
   const r = result.report;
   const total = Math.max(r.totalFrames, result.frames.length);
-  const [name, setName] = useState(`Scan ${new Date().toLocaleDateString()}`);
-  const [fps, setFps] = useState(r.fps || 12);
-  const [drawingOnly, setDrawingOnly] = useState(false);
-  const [threshold, setThreshold] = useState(0.12);
-  const [softness, setSoftness] = useState(0.1);
-  const [missing, setMissing] = useState<'repeat' | 'blank' | 'skip'>('repeat');
+  const num = (k: string, d: number) => (typeof initial[k] === 'number' ? (initial[k] as number) : d);
+  const [name, setName] = useState(defaultName);
+  useEffect(() => setName(defaultName), [defaultName]);
+  const [fps, setFps] = useState(num('fps', r.fps || 12));
+  const [drawingOnly, setDrawingOnly] = useState(initial.drawingOnly === true);
+  const [threshold, setThreshold] = useState(num('threshold', 0.12));
+  const [softness, setSoftness] = useState(num('softness', 0.1));
+  const [missing, setMissing] = useState<'repeat' | 'blank' | 'skip'>((initial.missing as 'repeat') ?? 'repeat');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<AssetInfo | null>(null);
+  const [upscale, setUpscale] = useState(num('upscale', 1));
+  const [loops, setLoops] = useState(num('loops', 1));
+  useEffect(() => onOptions({ fps, drawingOnly, threshold, softness, missing, upscale, loops }), [fps, drawingOnly, threshold, softness, missing, upscale, loops, onOptions]);
+  const [exporting, setExporting] = useState(false);
+
+  /** Recovered frames straight to a file, without touching the open project. The temporary asset is removed afterwards unless kept. */
+  const quickExport = async (kind: QuickKind) => {
+    setExporting(true);
+    let asset = done;
+    const temp = !asset;
+    try {
+      asset ??= await io.scan.commit(result, { name: name.trim() || 'Scan', fps, drawingOnly: drawingOnly && (kind === 'sequence' || kind === 'spritesheet'), threshold, softness, missing });
+      const { graph, outId } = buildQuickGraph(io, asset, kind, { fps, upscale, loops, name: name.trim() || 'Scan' });
+      const ok = await ed.runExportGraph(graph, [outId], 'current', 0, kind === 'sequence');
+      if (temp && asset) {
+        const id = asset.id;
+        const info = asset;
+        let kept = false;
+        const drop = setTimeout(() => { if (!kept) void io.library.remove(id); }, ok ? 20500 : 0);
+        if (ok) ed.toast('Exported. The scan is not kept in the media library.', 'ok', [{ label: 'Also add to media library', run: () => { kept = true; clearTimeout(drop); setDone(info); } }]);
+      }
+    } catch (err) {
+      ed.toast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      if (temp && asset) void io.library.remove(asset.id);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const commit = async () => {
     setBusy(true);
@@ -143,8 +212,7 @@ function Frames({ result, onDone }: { result: ScanResult; onDone: () => void }) 
   };
   const toEdit = () => {
     if (!done) return;
-    ed.setMode('edit');
-    ed.addAssetNode([done.id], { x: 0, y: 240 });
+    void ed.openAssetInNewProject(done.id, name.trim() || 'Scan');
   };
 
   return (
@@ -169,10 +237,21 @@ function Frames({ result, onDone }: { result: ScanResult; onDone: () => void }) 
           </>
         )}
       </div>
+      <div className="rs-sc__opts">
+        <NumberField large label="Pixel upscale ×" integer min={1} max={4} value={upscale} defaultValue={1} onChange={setUpscale} />
+        <NumberField large label="Video loops" integer min={1} max={50} value={loops} defaultValue={1} onChange={setLoops} />
+      </div>
+      <div className="rs-sc__exportrow">
+        <div className="rs-top__split">
+          <button className="rs-btn rs-btn--primary" disabled={exporting || r.recoveredFrames === 0} onClick={() => void quickExport('mp4')} title="Straight to an MP4 file; nothing is added to your project">{exporting ? 'Exporting…' : 'Export as video'}</button>
+          <MenuButton className="rs-btn rs-btn--primary rs-top__caret" title="Other formats" items={QUICK_KINDS.map((k) => ({ label: k.label, onClick: () => void quickExport(k.id) }))}><Icon name="chevronDown" size={12} /></MenuButton>
+        </div>
+        <span className="rs-insp__hint">Uses the frame rate, upscale and loop count above. &quot;Drawing only&quot; applies to PNG sequence and spritesheet.</span>
+      </div>
       {done ? (
         <div className="rs-sc__done">
           <span>Added &quot;{done.name}&quot; ({done.width}×{done.height}).</span>
-          <button className="rs-btn rs-btn--primary" onClick={toEdit}>Back to Edit with a Media In node</button>
+          <button className="rs-btn rs-btn--primary" onClick={toEdit}>Open in a new project</button>
           <button className="rs-btn" onClick={() => setDone(null)}>Stay here</button>
           <button className="rs-btn rs-btn--ghost" onClick={onDone}>Start over</button>
         </div>

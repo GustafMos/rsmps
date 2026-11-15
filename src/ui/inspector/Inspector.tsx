@@ -15,6 +15,7 @@ import { KindPicker } from '../components/KindPicker';
 import { AUTO_COLLAPSED, KIND_GROUPS, describeOutput, hasKind } from '../lib/outputInfo';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
+import { CurveField } from '../components/CurveField';
 import { paletteInputPort } from '../lib/sockets';
 import { visibleParams } from '../lib/layout';
 import { useApp, useDef, useEd } from '../store/context';
@@ -236,7 +237,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
   const label = p.label ?? keyName;
   const value = node.params[keyName] ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, keyName, v);
-  const stacked = p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && p.multiline);
+  const stacked = p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && p.multiline);
 
   let control: React.ReactNode;
   if (isWired) {
@@ -280,6 +281,9 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
         break;
       case 'assets':
         control = <AssetsEditor value={value as string[]} accept={p.accept} onChange={set} />;
+        break;
+      case 'curve':
+        control = <CurveField large nodeId={node.id} keyName={keyName} label={label} value={value} min={p.min} max={p.max} />;
         break;
       case 'device':
         control = <DeviceField large value={String(value ?? '')} kind={p.device} onChange={set} />;

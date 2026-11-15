@@ -15,3 +15,5 @@
 .rs-tab__tip strong { color: var(--text); font-size: var(--fs-sm); }
 .rs-switching { position: fixed; inset: 0; z-index: 1600; display: grid; place-items: center; background: #000000a0; background-image: var(--dither); cursor: progress; }
 .rs-switching > div { padding: var(--s-4) var(--s-6); background: var(--bg-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-hard); font-size: var(--fs-md); }
+
+.rs-tab__kind { display: grid; place-items: center; color: var(--yellow); flex: none; margin-left: -2px; }

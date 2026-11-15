@@ -27,7 +27,7 @@ function describe(p: ScanPageReport): string[] {
   return out;
 }
 
-export function PageCard({ page, result, onResult }: { page: ScanPageReport; result: ScanResult; onResult: (r: ScanResult) => void }) {
+export function PageCard({ page, result, onResult, onManual }: { page: ScanPageReport; result: ScanResult; onResult: (r: ScanResult) => void; onManual?: (pageIndex: number, input: ScanManualInput) => void }) {
   const [fixing, setFixing] = useState(page.status === 'failed');
   const img = page.photoUrl ?? page.thumbnailUrl;
   const s = page.photoScale || 1;
@@ -77,13 +77,13 @@ export function PageCard({ page, result, onResult }: { page: ScanPageReport; res
           </ul>
         )}
         <button className="rs-btn" onClick={() => setFixing((f) => !f)}>{fixing ? 'Hide manual fix' : page.status === 'ok' ? 'Adjust by hand' : 'Fix by hand'}</button>
-        {fixing && <ManualFix page={page} result={result} onResult={onResult} />}
+        {fixing && <ManualFix page={page} result={result} onResult={onResult} onManual={onManual} />}
       </div>
     </article>
   );
 }
 
-function ManualFix({ page, result, onResult }: { page: ScanPageReport; result: ScanResult; onResult: (r: ScanResult) => void }) {
+function ManualFix({ page, result, onResult, onManual }: { page: ScanPageReport; result: ScanResult; onResult: (r: ScanResult) => void; onManual?: (pageIndex: number, input: ScanManualInput) => void }) {
   const { ed } = useApp();
   const s = page.photoScale || 1;
   const w = page.photoWidth * s;
@@ -131,6 +131,7 @@ function ManualFix({ page, result, onResult }: { page: ScanPageReport; result: S
     if (useLayout) manual.layout = { paper: paper as 'a4', landscape, columns, rows };
     try {
       onResult(await result.reanalyzePage(page.index, manual));
+      onManual?.(page.index, manual);
     } catch (err) {
       ed.toast(`Could not re-analyse: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {

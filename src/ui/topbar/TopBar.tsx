@@ -40,6 +40,7 @@ export function TopBar() {
 
   const fileItems: MenuItem[] = [
     { label: 'New project (new tab)', onClick: () => void ed.newProjectTab(), shortcut: 'Ctrl+Alt+T' },
+    { label: 'New scan (photos of printed sheets)', onClick: () => void ed.newScanTab() },
     { label: 'Open file in a new tab…', onClick: open, shortcut: 'Ctrl+O' },
     { label: 'Save…', onClick: save, shortcut: 'Ctrl+S' },
     { sep: true },
@@ -68,10 +69,6 @@ export function TopBar() {
       <div className="rs-top__brand">
         <img src="/ripscorpy-logo.png" alt="" width={34} height={34} />
         <span className="rs-top__word">RSMPS</span>
-      </div>
-      <div className="rs-top__modes" role="tablist" aria-label="Mode">
-        <button role="tab" aria-selected={mode === 'edit'} className={mode === 'edit' ? 'is-on' : ''} onClick={() => ed.setMode('edit')} title="Node editor">Edit</button>
-        <button role="tab" aria-selected={mode === 'scan'} className={mode === 'scan' ? 'is-on' : ''} onClick={() => ed.setMode('scan')} title="Scan photos of printed sheets back into an animation">Scan</button>
       </div>
       <MenuButton items={fileItems} className="rs-btn rs-btn--ghost">File <Icon name="chevronDown" size={12} /></MenuButton>
       <div className="rs-top__sep" />

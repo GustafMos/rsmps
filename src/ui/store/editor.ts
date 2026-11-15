@@ -23,6 +23,7 @@ import type { Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema,
 import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
 import { outputType } from '../../engine/graph';
+import { canCreateScan, createScanProject } from '../scan/session';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -123,6 +124,11 @@ export function getRecent(): string[] {
 }
 
 /** The output whose frame previews use: the last selected output, else the first output node. */
+/** True for a scan tab (kind comes from the newer project storage). */
+function kindOf(p: object | undefined | null): boolean {
+  return (p as { kind?: string } | undefined)?.kind === 'scan';
+}
+
 export function resolveActiveOutput(s: EditorState, registry: Registry): string | null {
   const isOut = (id: string | null) => !!id && registry.get(s.graph.nodes.find((n) => n.id === id)?.type ?? '')?.category === 'output';
   if (isOut(s.activeOutput)) return s.activeOutput;
@@ -816,6 +822,13 @@ export class Editor {
     const list = await this.io.projects.listOpen();
     let active = await this.io.projects.activeId();
     if (!active || !list.some((p) => p.id === active)) active = list[0]?.id ?? null;
+    if (active && kindOf(list.find((p) => p.id === active))) {
+      this.skipSave = true;
+      this.loadGraph(createGraph());
+      await this.io.projects.setActive(active);
+      this.patch({ projects: list, activeProject: active, mode: 'scan' });
+      return;
+    }
     const g = active ? await this.io.projects.loadProject(active).catch(() => null) : null;
     if (active && g && g.schema === 'rsmps/graph' && g.version === 2) {
       this.skipSave = true;
@@ -863,9 +876,11 @@ export class Editor {
       await this.saveWithThumb();
       const g = await this.io.switchProject(id);
       this.skipSave = true;
-      if (g) this.loadGraph(g);
+      const scan = kindOf(target);
+      if (scan) this.loadGraph(createGraph()); // a scan tab holds no graph: free the previous one
+      else if (g) this.loadGraph(g);
       else this.newGraph();
-      this.patch({ activeProject: id, switching: null });
+      this.patch({ activeProject: id, switching: null, mode: scan ? 'scan' : 'edit' });
       await this.refreshProjects();
       try {
         if (!localStorage.getItem('rsmps.ui.tabUndoNote')) {
@@ -892,12 +907,48 @@ export class Editor {
       const g = (await this.io.switchProject(p.id)) ?? doc;
       this.skipSave = true;
       this.loadGraph(g);
-      this.patch({ activeProject: p.id, switching: null });
+      this.patch({ activeProject: p.id, switching: null, mode: 'edit' });
       await this.refreshProjects();
     } catch (err) {
       this.patch({ switching: null });
       this.toast(`Could not create the tab: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
+  }
+
+  /** A scan is a tab of its own kind (needs the newer project storage). */
+  async newScanTab(): Promise<void> {
+    if (this.state.switching) return;
+    if (!canCreateScan(this.io)) return this.toast('Scan tabs need the newer project storage, which is not available yet.', 'error');
+    this.patch({ switching: 'new scan' });
+    try {
+      await this.saveWithThumb();
+      const p = await createScanProject(this.io, 'Scan');
+      await this.io.switchProject(p.id);
+      this.skipSave = true;
+      this.loadGraph(createGraph());
+      this.patch({ activeProject: p.id, switching: null, mode: 'scan' });
+      await this.refreshProjects();
+    } catch (err) {
+      this.patch({ switching: null });
+      this.toast(`Could not create the scan tab: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }
+
+  /** A graph project with Media In (this asset) -> Output, opened in a new tab. */
+  async openAssetInNewProject(assetId: string, name: string): Promise<void> {
+    const info = this.io.library.list().find((a) => a.id === assetId);
+    const src = info && sourceDefFor(this.registry, info.kind === 'image' ? 'image' : 'video');
+    if (!info || !src) return this.toast('That media is not available.', 'error');
+    let g = createGraph(name);
+    g = { ...g, project: { ...g.project, width: info.width, height: info.height, fps: info.fps || 12, duration: info.duration || g.project.duration } };
+    const a = addNode(g, this.registry, src.def.id, { x: 0, y: 0 }, { [src.key]: [assetId] });
+    const out = this.registry.list().find((d) => d.category === 'output' && Object.values(d.inputs as InputSchema).some((i) => i.type === 'image'));
+    let doc = a.graph;
+    if (out) {
+      const b = addNode(doc, this.registry, out.id, { x: 330, y: 0 });
+      doc = connect(b.graph, this.registry, { node: a.node.id, port: Object.keys(src.def.outputs)[0] }, { node: b.node.id, port: Object.keys(out.inputs).find((k) => (out.inputs as InputSchema)[k].type === 'image')! });
+    }
+    await this.newProjectTab(doc);
   }
 
   async closeTab(id: string): Promise<void> {
@@ -933,8 +984,10 @@ export class Editor {
       this.patch({ switching: p.name });
       const g = await this.io.switchProject(p.id);
       this.skipSave = true;
-      if (g) this.loadGraph(g);
-      this.patch({ activeProject: p.id, switching: null });
+      const scan = kindOf(p);
+      if (scan) this.loadGraph(createGraph());
+      else if (g) this.loadGraph(g);
+      this.patch({ activeProject: p.id, switching: null, mode: scan ? 'scan' : 'edit' });
       await this.refreshProjects();
     } catch (err) {
       this.patch({ switching: null });
@@ -944,7 +997,8 @@ export class Editor {
 
   async renameTab(id: string, name: string): Promise<void> {
     const n = name.trim() || 'Untitled';
-    if (id === this.state.activeProject) this.setName(n);
+    const isScan = kindOf(this.state.projects.find((p) => p.id === id));
+    if (id === this.state.activeProject && !isScan) this.setName(n);
     else await this.io.projects.renameProject(id, n);
     this.patch({ projects: this.state.projects.map((p) => (p.id === id ? { ...p, name: n } : p)) });
   }
@@ -1028,8 +1082,16 @@ export class Editor {
 
   /** Render and download. `outputs: []` means every enabled output. No dialog: progress is a floating bar. */
   async runExport(outputs: string[], items: 'current' | 'all', zip?: boolean): Promise<void> {
-    if (this.exportAbort) return this.toast('An export is already running.', 'info');
-    const s = this.state;
+    await this.runExportGraph(this.state.graph, outputs, items, this.state.item, zip ?? this.exportPrefs(this.state.activeProject).zip);
+  }
+
+  /** Export any graph (e.g. a throwaway one) through the floating progress bar. Resolves true on success. */
+  async runExportGraph(graph: GraphDoc, outputs: string[], items: 'current' | 'all', item: number, zip: boolean): Promise<boolean> {
+    if (this.exportAbort) {
+      this.toast('An export is already running.', 'info');
+      return false;
+    }
+    const s = { graph, item };
     const ac = new AbortController();
     this.exportAbort = ac;
     this.patch({ exportJob: { label: 'Starting…', fraction: 0 } });
@@ -1039,7 +1101,7 @@ export class Editor {
         outputs,
         items,
         item: s.item,
-        zip: zip ?? this.exportPrefs(s.activeProject).zip,
+        zip,
         signal: ac.signal,
         onProgress: (p) => this.patch({ exportJob: { label: p.label, fraction: p.fraction } }),
       });
@@ -1047,9 +1109,11 @@ export class Editor {
       this.io.exporter.download(files);
       this.toast(`Exported ${files.length} file${files.length === 1 ? '' : 's'}`, 'ok');
       setTimeout(() => this.maybeSupport('export'), 1200);
+      return true;
     } catch (err) {
       if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) this.toast('Export cancelled', 'info');
       else this.toast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      return false;
     } finally {
       this.exportAbort = null;
       this.patch({ exportJob: null });
