@@ -33,12 +33,12 @@
   "scripts": {
     "dev": "vite",
     "dev:lan": "node scripts/dev-lan.mjs",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run gen && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit --pretty",
-    "test": "vitest run",
+    "typecheck": "npm run gen && tsc --noEmit --pretty",
+    "test": "npm run gen && vitest run",
     "test:watch": "vitest",
-    "check": "tsc --noEmit && vitest run",
+    "check": "npm run gen && tsc --noEmit && vitest run",
     "cli": "node scripts/build-cli.mjs && node dist-cli/rsmps.mjs",
     "build:cli": "node scripts/build-cli.mjs",
     "desktop:dev": "node desktop/scripts/dev.mjs",
@@ -47,7 +47,8 @@
     "desktop:dist:win": "node desktop/scripts/pack.mjs --win",
     "desktop:dist:mac": "node desktop/scripts/pack.mjs --mac",
     "desktop:dist:linux": "node desktop/scripts/pack.mjs --linux",
-    "desktop:smoke": "node desktop/scripts/smoke.mjs"
+    "desktop:smoke": "node desktop/scripts/smoke.mjs",
+    "gen": "node scripts/build-cli.mjs gen"
   },
   "dependencies": {
     "fflate": "^0.8.2",
