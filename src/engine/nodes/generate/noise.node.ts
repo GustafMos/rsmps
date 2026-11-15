@@ -16,7 +16,7 @@ export default defineNode({
   params: {
     scale: { type: 'number', default: 200, min: 1, max: 4000, unit: 'px', label: 'Scale' },
     octaves: { type: 'number', default: 4, min: 1, max: 8, integer: true, label: 'Detail' },
-    evolution: { type: 'number', default: 1, min: 0, max: 16, step: 0.1, label: 'Evolution per loop', hint: '0 = still.' },
+    evolution: { type: 'number', default: 0, min: 0, max: 16, step: 0.1, label: 'Evolution per loop', hint: '0 = still.' },
     seed: { type: 'number', default: 1, min: 0, max: 9999, integer: true, label: 'Seed' },
     colorA: { type: 'color', default: [0, 0, 0, 1], label: 'Color A' },
     colorB: { type: 'color', default: [1, 1, 1, 1], label: 'Color B' },

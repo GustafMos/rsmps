@@ -39,7 +39,7 @@ export default defineNode({
     colorB: { type: 'color', default: [0.08, 0.08, 0.14, 1], label: 'Line colour' },
     lineWidth: { type: 'number', default: 3, min: 0, max: 200, unit: 'px', label: 'Line width', visibleIf: (p) => p.mode !== 'distance' },
     motion: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Motion', group: 'Animation', hint: 'How far each cell centre wanders. 0 = still.' },
-    cycles: { type: 'number', default: 1, min: 0, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Cycles per loop', group: 'Animation', hint: 'Whole laps per loop so it repeats exactly.' },
+    cycles: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Cycles per loop', group: 'Animation', hint: 'Whole laps per loop so it repeats exactly.' },
     seed: { type: 'number', default: 1, min: 0, max: 9999, integer: true, label: 'Seed' },
   },
   summary: (p) => `${p.mode} · ${Math.round(p.scale)}px${p.motion > 0 && p.cycles > 0 ? ' · moving' : ''}`,

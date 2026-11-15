@@ -52,7 +52,7 @@ export default defineNode({
     rotY: { type: 'number', default: 35, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Y (turn)', group: 'Rotation' },
     rotZ: { type: 'number', default: 0, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Z (roll)', group: 'Rotation' },
     spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
-    spinY: { type: 'number', default: 1, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
+    spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     lightAzimuth: { type: 'number', default: -35, min: -180, max: 180, step: 1, unit: 'deg', label: 'Light from (left/right)', group: 'Lighting' },
     lightElevation: { type: 'number', default: 40, min: -90, max: 90, step: 1, unit: 'deg', label: 'Light height', group: 'Lighting' },
