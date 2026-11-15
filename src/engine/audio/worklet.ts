@@ -1,0 +1,101 @@
+/**
+ * AudioWorklet entry: runs the whole audio graph (AudioGraphRunner) inside one processor.
+ * Bundled by Vite as a separate module (see engine.ts). Imports only audio code: no image nodes,
+ * no DOM, no WebGPU.
+ */
+import { registerAudioNodes } from './nodes';
+import type { FromWorklet, ToWorklet } from './protocol';
+import { WORKLET_NAME } from './protocol';
+import { AudioGraphRunner } from './runner';
+import { BLOCK_SIZE } from './types';
+
+/* AudioWorkletGlobalScope globals (not in the DOM lib). */
+declare const sampleRate: number;
+declare class AudioWorkletProcessor {
+  readonly port: MessagePort;
+  constructor();
+}
+declare function registerProcessor(name: string, ctor: new () => AudioWorkletProcessor): void;
+
+class RsmpsProcessor extends AudioWorkletProcessor {
+  private runner: AudioGraphRunner;
+  private sinceMeters = 0;
+  private reportedError = false;
+  private scratch = new Float32Array(BLOCK_SIZE * 4);
+
+  constructor() {
+    super();
+    this.runner = new AudioGraphRunner(registerAudioNodes(), { sampleRate });
+    this.port.onmessage = (e: MessageEvent<ToWorklet>) => {
+      try {
+        this.onMessage(e.data);
+      } catch (err) {
+        this.post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      }
+    };
+  }
+
+  private post(msg: FromWorklet): void {
+    this.port.postMessage(msg);
+  }
+
+  private onMessage(m: ToWorklet): void {
+    const r = this.runner;
+    switch (m.type) {
+      case 'graph':
+        r.setGraph(m.doc);
+        break;
+      case 'asset':
+        r.setAsset(m.id, { sampleRate: m.sampleRate, channels: m.channels });
+        break;
+      case 'transport':
+        r.setTransport({ playing: m.playing, seconds: m.seconds, duration: m.duration, loop: m.loop });
+        break;
+      case 'midi':
+        for (const ev of m.events) r.sendMidi(null, ev);
+        break;
+      case 'note':
+        r.sendMidi(m.nodeId, { type: m.on ? 'on' : 'off', note: m.note, velocity: m.on ? m.velocity : 0, value: 0, offset: 0, channel: 0 });
+        break;
+    }
+  }
+
+  process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
+    const out = outputs[0];
+    if (!out || out.length === 0) return true;
+    const outL = out[0];
+    const outR = out[1];
+    const inp = inputs[0];
+    const micL = inp && inp.length > 0 ? inp[0] : undefined;
+    const micR = inp && inp.length > 1 ? inp[1] : micL;
+    const total = outL.length;
+    try {
+      for (let p = 0; p < total; p += BLOCK_SIZE) {
+        const n = Math.min(BLOCK_SIZE, total - p);
+        const l = outL.subarray(p, p + n);
+        if (outR) {
+          this.runner.process(l, outR.subarray(p, p + n), n, micL?.subarray(p, p + n), micR?.subarray(p, p + n));
+        } else {
+          const tmpR = this.scratch.subarray(0, n);
+          this.runner.process(l, tmpR, n, micL?.subarray(p, p + n), micR?.subarray(p, p + n));
+          for (let i = 0; i < n; i++) l[i] = (l[i] + tmpR[i]) * 0.5;
+        }
+      }
+    } catch (err) {
+      outL.fill(0);
+      outR?.fill(0);
+      if (!this.reportedError) {
+        this.reportedError = true;
+        this.post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    this.sinceMeters += total;
+    if (this.sinceMeters >= sampleRate / 30) {
+      this.sinceMeters = 0;
+      this.post({ type: 'meters', meters: this.runner.takeMeters() });
+    }
+    return true;
+  }
+}
+
+registerProcessor(WORKLET_NAME, RsmpsProcessor);
