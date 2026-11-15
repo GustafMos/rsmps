@@ -53,6 +53,24 @@ export function GraphView() {
     };
   }, [ctl, app]);
 
+  // Native drag-and-drop, focus loss and tab switches swallow pointerup / keyup: drop back to idle on each of them
+  useEffect(() => {
+    const reset = () => gestures.reset();
+    const hidden = () => document.hidden && reset();
+    const names = ['dragstart', 'dragend', 'drop', 'pointercancel'] as const;
+    names.forEach((n) => window.addEventListener(n, reset, true));
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && reset();
+    window.addEventListener('keydown', esc);
+    window.addEventListener('blur', reset); // not captured: field blurs inside the page must not end a gesture
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      names.forEach((n) => window.removeEventListener(n, reset, true));
+      window.removeEventListener('blur', reset);
+      window.removeEventListener('keydown', esc);
+      document.removeEventListener('visibilitychange', hidden);
+    };
+  }, [gestures]);
+
   // frame the graph whenever a different document is loaded
   useEffect(() => {
     ctl.needsFit = true;

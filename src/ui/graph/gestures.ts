@@ -5,7 +5,7 @@
 import type { DragEvent as RDragEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from 'react';
 import { connectError, disconnect, inputType, outputType, wiresInto } from '../../engine/graph';
 import type { AppCtx } from '../store/context';
-import { trackPointer } from '../lib/drag';
+import { abortAllTracking, trackPointer } from '../lib/drag';
 import {
   boundsOf,
   distToPolyline,
@@ -45,6 +45,26 @@ export function createGestures(app: AppCtx) {
         els.forEach((p) => p.setAttribute('d', d));
       }
     }
+  }
+
+  function clearSpace() {
+    ctl.spaceDown = false;
+    ctl.spaceCode = null;
+    cls('is-space', false);
+  }
+
+  /** Back to idle: every transient gesture flag, class and preview. Idempotent; called after anything that can swallow pointerup. */
+  function reset() {
+    abortAllTracking();
+    clearSpace();
+    for (const c of ['is-panning', 'is-dragging', 'is-wiring', 'is-boxing', 'is-drop']) cls(c, false);
+    if (ctl.box) ctl.box.style.display = 'none';
+    if (ctl.cut) ctl.cut.style.display = 'none';
+    if (ctl.hint) ctl.hint.style.display = 'none';
+    ctl.pending?.removeAttribute('d');
+    ctl.pendingOut = null;
+    ctl.root?.querySelectorAll('.is-insert').forEach((x) => x.classList.remove('is-insert'));
+    ctl.edgeEls.forEach((els) => els.forEach((p) => (p.style.display = '')));
   }
 
   /* ------------------------------- panning -------------------------------- */
@@ -311,7 +331,7 @@ export function createGestures(app: AppCtx) {
         }
         draw(ev);
       },
-      (ev) => {
+      (ev, cancelled) => {
         clearTimeout(hoverTimer);
         sockets.forEach((s) => {
           delete s.dataset.dim;
@@ -323,6 +343,7 @@ export function createGestures(app: AppCtx) {
         if (ctl.hint) ctl.hint.style.display = 'none';
         path?.removeAttribute('d');
         if (detached) ctl.edgeEls.get(detached)?.forEach((p) => (p.style.display = ''));
+        if (cancelled) return;
         if (mergeTo) {
           ed.mergeOutputs({ node: fixed.node, port: fixed.port }, { node: mergeTo.dataset.node!, port: mergeTo.dataset.port! });
           return;
@@ -440,8 +461,9 @@ export function createGestures(app: AppCtx) {
         b = ctl.toWorld(ev.clientX, ev.clientY);
         show(ev.clientX, ev.clientY);
       },
-      (ev) => {
+      (ev, cancelled) => {
         if (line) line.style.display = 'none';
+        if (cancelled) return;
         const short = dist(ev.clientX, ev.clientY, e.clientX, e.clientY) < 4;
         const kill: string[] = [];
         for (const [id, pts] of polys) {
@@ -460,8 +482,8 @@ export function createGestures(app: AppCtx) {
     const target = e.target as HTMLElement;
     const nodeEl = target.closest<HTMLElement>('[data-node-id]');
     const edgeId = target.closest<HTMLElement>('[data-edge]')?.getAttribute('data-edge');
-    trackPointer(e, () => undefined, (ev) => {
-      if (dist(ev.clientX, ev.clientY, e.clientX, e.clientY) > 4) return;
+    trackPointer(e, () => undefined, (ev, cancelled) => {
+      if (cancelled || dist(ev.clientX, ev.clientY, e.clientX, e.clientY) > 4) return;
       if (!nodeEl && edgeId) {
         ed.openContextMenu({ clientX: ev.clientX, clientY: ev.clientY, nodeId: null, edgeId });
       } else if (nodeEl) {
@@ -506,6 +528,7 @@ export function createGestures(app: AppCtx) {
   /* -------------------------------- dispatch ------------------------------- */
 
   return {
+    reset,
     onPointerDown(e: RPointerEvent<HTMLElement>) {
       ctl.root?.focus({ preventScroll: true });
       ctl.pointer = { x: e.clientX, y: e.clientY };
@@ -514,6 +537,8 @@ export function createGestures(app: AppCtx) {
         ed.openContextMenu(null);
       }
       const t = e.target as HTMLElement;
+      // Space-pan only counts while the key is really down (a lost keyup must not leave the graph stuck in pan mode)
+      if (ctl.spaceDown && !(ctl.spaceCode && ctl.keysDown.has(ctl.spaceCode))) clearSpace();
       if (e.button === 1 || (e.button === 0 && ctl.spaceDown)) {
         e.preventDefault();
         startPan(e);

@@ -85,7 +85,7 @@ export const COMMANDS: Command[] = [
     label: 'Play / pause (hold over the graph to pan)',
     group: 'Playback',
     defaults: ['Space'],
-    run: ({ app, hover, binding }) => {
+    run: ({ app, e, hover, binding }) => {
       const { io, graphCtl: ctl } = app;
       if (io.audio.recordingState().recording) {
         void app.ed.stopRecording();
@@ -95,6 +95,7 @@ export const COMMANDS: Command[] = [
         ctl.spaceDown = true;
         ctl.spaceUsed = false;
         ctl.spaceKey = binding;
+        ctl.spaceCode = e.code;
         ctl.root?.classList.add('is-space');
       } else io.player.toggle();
     },
@@ -207,6 +208,7 @@ export function useShortcuts(app: AppCtx): void {
       lastMouse.y = e.clientY;
     };
     const keydown = (e: KeyboardEvent) => {
+      ctl.keysDown.add(e.code);
       if (isTypingTarget(e.target) || document.querySelector('.rs-dlg')) return;
       const binding = eventToBinding(e);
       if (!binding) return;
@@ -226,6 +228,7 @@ export function useShortcuts(app: AppCtx): void {
       BY_ID.get(id)?.run({ app, e, hover: ctl.hovering, binding });
     };
     const keyup = (e: KeyboardEvent) => {
+      ctl.keysDown.delete(e.code);
       if (!ctl.spaceDown) return;
       const base = (ctl.spaceKey ?? '').split('+').pop();
       const k = e.key === ' ' ? 'Space' : e.key.toUpperCase();
@@ -234,7 +237,10 @@ export function useShortcuts(app: AppCtx): void {
     window.addEventListener('pointermove', track);
     window.addEventListener('keydown', keydown);
     window.addEventListener('keyup', keyup);
+    const blur = () => ctl.keysDown.clear();
+    window.addEventListener('blur', blur);
     return () => {
+      window.removeEventListener('blur', blur);
       window.removeEventListener('pointermove', track);
       window.removeEventListener('keydown', keydown);
       window.removeEventListener('keyup', keyup);

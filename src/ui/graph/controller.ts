@@ -23,6 +23,10 @@ export class GraphController {
   spaceUsed = false;
   /** Binding that started the current hold-to-pan (so its release can be matched). */
   spaceKey: string | null = null;
+  /** `code` of the key that started hold-to-pan, to re-validate against keys really held. */
+  spaceCode: string | null = null;
+  /** Keys currently held (by `code`); cleared on blur so a lost keyup cannot leave Space stuck. */
+  readonly keysDown = new Set<string>();
   private listeners = new Set<() => void>();
   /** Called whenever pan/zoom changes (the selection toolbar follows it). */
   readonly viewListeners = new Set<() => void>();
