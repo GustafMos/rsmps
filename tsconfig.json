@@ -16,7 +16,7 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "noEmit": true,
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client", "@webgpu/types"]
   },
   "include": ["src", "tests", "vite.config.ts", "scripts"]
 }

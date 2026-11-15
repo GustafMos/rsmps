@@ -1,0 +1,97 @@
+/**
+ * WGSL helpers available in every `gpu.pass` shader.
+ * Colours in textures are sRGB-encoded and premultiplied.
+ */
+export const PRELUDE = /* wgsl */ `
+const PI: f32 = 3.14159265358979;
+const TAU: f32 = 6.28318530717959;
+
+fn unpremul(c: vec4f) -> vec4f { if (c.a <= 0.00001) { return vec4f(0.0); } return vec4f(c.rgb / c.a, c.a); }
+fn premul(c: vec4f) -> vec4f { return vec4f(c.rgb * c.a, c.a); }
+fn luma(c: vec3f) -> f32 { return dot(c, vec3f(0.2126, 0.7152, 0.0722)); }
+fn saturate1(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
+
+fn srgbToLinear(c: vec3f) -> vec3f {
+  let lo = c / 12.92;
+  let hi = pow((max(c, vec3f(0.0)) + 0.055) / 1.055, vec3f(2.4));
+  return select(hi, lo, c <= vec3f(0.04045));
+}
+fn linearToSrgb(c: vec3f) -> vec3f {
+  let lo = c * 12.92;
+  let hi = 1.055 * pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.4)) - 0.055;
+  return select(hi, lo, c <= vec3f(0.0031308));
+}
+fn linearToOklab(c: vec3f) -> vec3f {
+  let l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+  let m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+  let s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+  let l_ = pow(max(l, 0.0), 1.0 / 3.0); let m_ = pow(max(m, 0.0), 1.0 / 3.0); let s_ = pow(max(s, 0.0), 1.0 / 3.0);
+  return vec3f(
+    0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+    1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+    0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_);
+}
+fn oklabToLinear(c: vec3f) -> vec3f {
+  let l_ = c.x + 0.3963377774 * c.y + 0.2158037573 * c.z;
+  let m_ = c.x - 0.1055613458 * c.y - 0.0638541728 * c.z;
+  let s_ = c.x - 0.0894841775 * c.y - 1.2914855480 * c.z;
+  let l = l_ * l_ * l_; let m = m_ * m_ * m_; let s = s_ * s_ * s_;
+  return vec3f(
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
+}
+fn srgbToOklab(c: vec3f) -> vec3f { return linearToOklab(srgbToLinear(c)); }
+fn oklabToSrgb(c: vec3f) -> vec3f { return linearToSrgb(oklabToLinear(c)); }
+
+fn rgbToHsv(c: vec3f) -> vec3f {
+  let k = vec4f(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  let p = mix(vec4f(c.bg, k.wz), vec4f(c.gb, k.xy), step(c.b, c.g));
+  let q = mix(vec4f(p.xyw, c.r), vec4f(c.r, p.yzx), step(p.x, c.r));
+  let d = q.x - min(q.w, q.y);
+  return vec3f(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+fn hsvToRgb(c: vec3f) -> vec3f {
+  let p = abs(fract(c.xxx + vec3f(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3f(1.0), clamp(p - 1.0, vec3f(0.0), vec3f(1.0)), c.y);
+}
+
+fn hash21(p: vec2f) -> f32 {
+  var q = fract(p * vec2f(123.34, 456.21));
+  q += dot(q, q + 45.32);
+  return fract(q.x * q.y);
+}
+fn hash22(p: vec2f) -> vec2f { return vec2f(hash21(p), hash21(p + 17.17)); }
+fn hash31(p: vec3f) -> f32 {
+  var q = fract(p * 0.1031);
+  q += dot(q, q.zyx + 31.32);
+  return fract((q.x + q.y) * q.z);
+}
+
+/** Smooth value noise, 0..1. */
+fn vnoise(p: vec2f) -> f32 {
+  let i = floor(p); let f = fract(p);
+  let w = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i), hash21(i + vec2f(1.0, 0.0)), w.x),
+             mix(hash21(i + vec2f(0.0, 1.0)), hash21(i + vec2f(1.0, 1.0)), w.x), w.y);
+}
+fn vnoise3(p: vec3f) -> f32 {
+  let i = floor(p); let f = fract(p);
+  let w = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash31(i), hash31(i + vec3f(1, 0, 0)), w.x), mix(hash31(i + vec3f(0, 1, 0)), hash31(i + vec3f(1, 1, 0)), w.x), w.y),
+    mix(mix(hash31(i + vec3f(0, 0, 1)), hash31(i + vec3f(1, 0, 1)), w.x), mix(hash31(i + vec3f(0, 1, 1)), hash31(i + vec3f(1, 1, 1)), w.x), w.y),
+    w.z);
+}
+/**
+ * Noise that loops seamlessly in time: phase 0..1 travels once around a circle,
+ * so phase 0 and phase 1 give the identical field. 'speed' = how far the field evolves per loop.
+ */
+fn loopNoise(p: vec2f, phase: f32, speed: f32) -> f32 {
+  let a = phase * TAU;
+  let r = max(speed, 0.0001) / TAU;
+  let n1 = vnoise3(vec3f(p, cos(a) * r));
+  let n2 = vnoise3(vec3f(p + vec2f(37.2, 91.7), sin(a) * r));
+  return clamp((n1 + n2) * 0.5 * 1.4 - 0.2, 0.0, 1.0);
+}
+`;
