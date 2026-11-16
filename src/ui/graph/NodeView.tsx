@@ -9,6 +9,7 @@ import { hexOf } from '../lib/drag';
 import { paletteInputPort } from '../lib/sockets';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
+import { FontField } from '../components/FontField';
 import { CurveField } from '../components/CurveField';
 import { RangeField } from '../components/RangeField';
 import { LayerList } from './LayerList';
@@ -324,7 +325,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         control = (
           <div className="rs-row__pair">
             <span className="rs-row__label">{label}</span>
-            <TextField value={String(value ?? '')} onChange={set} />
+            {(p as { kind?: string }).kind === 'font' ? <FontField value={String(value ?? '')} onChange={set} /> : <TextField value={String(value ?? '')} onChange={set} />}
           </div>
         );
         break;

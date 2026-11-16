@@ -15,6 +15,7 @@ export function GraphView() {
   const nodes = useEd((s) => s.graph.nodes);
   const docRev = useEd((s) => s.docRev);
   const debug = useEd((s) => s.prefs.debug);
+  const gridSnap = useEd((s) => s.prefs.gridSnap !== false);
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
   const pending = useRef<SVGPathElement>(null);
@@ -133,6 +134,9 @@ export function GraphView() {
         </button>
         <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.autoLayout(true)} title="Auto-layout (L): arranges the selection, or everything">
           <Icon name="layout" />
+        </button>
+        <button className={`rs-btn rs-btn--icon rs-btn--ghost${gridSnap ? ' is-on' : ''}`} aria-pressed={gridSnap} onClick={() => ed.setPrefs({ gridSnap: !gridSnap })} title={gridSnap ? 'Grid snap on: dropped nodes snap to an 8 px grid' : 'Grid snap off'}>
+          <Icon name="grid" />
         </button>
         <button className={`rs-btn rs-btn--icon rs-btn--ghost${debug ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ debug: !debug })} title="Show per-node render time">
           <Icon name="search" />

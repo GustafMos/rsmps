@@ -93,9 +93,15 @@ export function createGestures(app: AppCtx) {
     }
     const before = ed.state.selection;
     let deferSingle = false;
+    // Shift-drag on a single node detaches it from its chain (decided by movement; a plain Shift-click still toggles selection)
+    const shiftDrag = e.shiftKey && !e.ctrlKey && !e.metaKey;
+    let toggledOff = false;
     if (additive) {
       ed.select([id], 'toggle');
-      if (!ed.state.selection.includes(id)) return;
+      if (!ed.state.selection.includes(id)) {
+        if (!shiftDrag) return;
+        toggledOff = true;
+      }
     } else if (!before.includes(id)) ed.select([id]);
     else deferSingle = before.length > 1;
 
@@ -108,7 +114,18 @@ export function createGestures(app: AppCtx) {
     const rects = nodeRects(g0, reg);
     const single = nodes.length === 1 ? nodes[0] : null;
     const connected = g0.edges.some((ed2) => idSet.has(ed2.from.node) || idSet.has(ed2.to.node));
-    const polylines = single && !connected ? edgePolylines(g0, reg) : null;
+    const canDetach = shiftDrag && (toggledOff || ids.length === 1);
+    let detach = false;
+    const polylines = single && (!connected || canDetach) ? edgePolylines(g0, reg) : null;
+    const hintAt = (ev: PointerEvent, text: string | null) => {
+      const h = ctl.hint;
+      if (!h) return;
+      if (!text) { h.style.display = 'none'; return; }
+      h.textContent = text;
+      h.style.display = 'block';
+      h.style.left = `${ev.clientX + 14}px`;
+      h.style.top = `${ev.clientY + 14}px`;
+    };
     let moved = false;
     let insert: string | null = null;
     let offsets = new Map<string, { dx: number; dy: number }>();
@@ -124,7 +141,11 @@ export function createGestures(app: AppCtx) {
       e,
       (ev) => {
         if (!moved && dist(ev.clientX, ev.clientY, x0, y0) < THRESHOLD) return;
-        if (!moved) cls('is-dragging', true);
+        if (!moved) {
+          cls('is-dragging', true);
+          if (canDetach && toggledOff) ed.select([id]); // the Shift-click toggled it off: this is a drag, keep it selected
+          detach = canDetach && connected;
+        }
         moved = true;
         const dx = Math.round((ev.clientX - x0) / ctl.view.zoom);
         const dy = Math.round((ev.clientY - y0) / ctl.view.zoom);
@@ -141,6 +162,8 @@ export function createGestures(app: AppCtx) {
           let bestD = 28 / ctl.view.zoom;
           const def = reg.get(single.type);
           for (const [eid, pts] of polylines) {
+            const ed2 = g0.edges.find((x) => x.id === eid);
+            if (detach && ed2 && (ed2.from.node === single.id || ed2.to.node === single.id)) continue; // its own wires go away when it is detached
             const d = distToPolyline(c, pts);
             if (d < bestD && def && edgeAccepts(eid, single.type)) {
               best = eid;
@@ -148,10 +171,12 @@ export function createGestures(app: AppCtx) {
             }
           }
           setInsert(best);
+          hintAt(ev, best ? 'Insert here' : detach ? 'Shift: move out of chain' : null);
         }
       },
       () => {
         cls('is-dragging', false);
+        if (ctl.hint) ctl.hint.style.display = 'none';
         const ins = insert;
         setInsert(null);
         if (!moved) {
@@ -160,7 +185,7 @@ export function createGestures(app: AppCtx) {
         }
         const first = offsets.values().next().value;
         if (first && first.dx === 0 && first.dy === 0 && !ins) return;
-        ed.finishDrag(offsets, ins);
+        ed.finishDrag(offsets, ins, detach ? id : undefined);
       },
     );
   }

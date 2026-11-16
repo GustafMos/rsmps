@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { SelectField } from '../components/fields';
-import { Dialog } from '../dialogs/Dialog';
+import { FloatingPanel } from '../components/FloatingPanel';
 import { hslToRgb, oklchToRgb, rgbToHsl, rgbToOklab, rgbToOklch, toHex, parseHex, type RGB } from '../lib/colorMath';
 import { useApp, useEd } from '../store/context';
 import { exportPalette } from './formats';
@@ -136,9 +136,11 @@ export function PaletteStudio() {
   const fixed = fixedCount(st.rule);
 
   return (
-    <Dialog
+    <FloatingPanel
+      id="palette-studio"
       title="Palette Studio"
-      width={1080}
+      defaultSize={{ w: 900, h: 640 }}
+      minSize={{ w: 300, h: 220 }}
       onClose={() => ed.openDialog(null)}
       footer={
         <>
@@ -253,6 +255,6 @@ export function PaletteStudio() {
           <StudioTabs colors={colors} selected={idx} onColors={setColors} />
         </div>
       </div>
-    </Dialog>
+    </FloatingPanel>
   );
 }

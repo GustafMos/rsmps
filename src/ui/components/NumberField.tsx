@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { clamp } from '../lib/drag';
 import { NumberConfirm, isQuiet } from './NumberConfirm';
 import './fields.css';
@@ -47,7 +47,8 @@ export function NumberField(p: NumberFieldProps) {
   const [draft, setDraft] = useState('');
   const [confirm, setConfirm] = useState<number | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  const gesture = useRef<{ x0: number; v0: number; moved: boolean; w: number } | null>(null);
+  const gesture = useRef<{ x0: number; lastX: number; v0: number; vf: number; moved: boolean; id: number } | null>(null);
+  const [mode, setMode] = useState<'fine' | 'coarse' | null>(null);
 
   const fix = (v: number, scrub = false) => {
     let n = v;
@@ -62,27 +63,51 @@ export function NumberField(p: NumberFieldProps) {
     return n;
   };
 
+  /**
+   * Units per pixel for scrubbing, from the param's own scale (not its hard range): one step per pixel when there are 60-400 steps
+   * in the soft range, slower for short ranges (6 px per step), and never more than the soft range over ~400 px.
+   */
+  const rate = (v: number) => {
+    const top = p.softMax ?? max;
+    if (min !== undefined && top !== undefined && Number.isFinite(min) && Number.isFinite(top) && top > min) {
+      const n = (top - min) / step;
+      const pxPerStep = n >= 400 ? 400 / n : n >= 60 ? 1 : 6;
+      return step / pxPerStep;
+    }
+    return Math.max(step, Math.abs(v) * 0.01, 0.01);
+  };
+
   const down = (e: PointerEvent<HTMLDivElement>) => {
     if (editing || p.disabled || e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    gesture.current = { x0: e.clientX, v0: value, moved: false, w: e.currentTarget.getBoundingClientRect().width };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* synthetic or already-gone pointer: scrubbing still works while the pointer stays over the field */
+    }
+    gesture.current = { x0: e.clientX, lastX: e.clientX, v0: value, vf: value, moved: false, id: e.pointerId };
   };
   const move = (e: PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
     if (!g) return;
-    const dx = e.clientX - g.x0;
-    if (!g.moved && Math.abs(dx) < 3) return;
-    g.moved = true;
-    const fine = e.shiftKey ? 0.1 : e.ctrlKey || e.metaKey ? 10 : 1;
-    let v: number;
-    const span = (p.softMax ?? max!) - min!;
-    if (bounded) v = g.v0 + (dx / Math.max(80, g.w)) * span * fine;
-    else v = g.v0 + (dx / 3) * step * fine;
-    p.onChange(fix(v, true));
+    if (!g.moved) {
+      if (Math.abs(e.clientX - g.x0) < 3) return; // dead zone: a click never changes the value
+      g.moved = true;
+      g.lastX = e.clientX;
+      return;
+    }
+    let d = e.clientX - g.lastX;
+    g.lastX = e.clientX;
+    if (Math.abs(d) > 80) d = 0; // outlier jump (lost capture, cursor warp): ignore it
+    const mult = e.shiftKey ? 0.1 : e.ctrlKey || e.metaKey ? 10 : 1;
+    const m = e.shiftKey ? 'fine' : e.ctrlKey || e.metaKey ? 'coarse' : null;
+    setMode((cur) => (cur === m ? cur : m));
+    g.vf += d * rate(g.vf) * mult; // accumulates sub-pixel / sub-step movement; integers round only on output
+    p.onChange(fix(g.vf, true));
   };
   const up = (e: PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
     gesture.current = null;
+    setMode(null);
     if (!g) return;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (!g.moved) {
@@ -103,6 +128,16 @@ export function NumberField(p: NumberFieldProps) {
   };
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
     if (editing) return;
+    if (e.key === 'Escape' && gesture.current) {
+      // Esc reverts the drag in progress
+      const g = gesture.current;
+      gesture.current = null;
+      setMode(null);
+      if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
+      if (g.moved) p.onChange(fix(g.v0));
+      e.stopPropagation();
+      return;
+    }
     if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
       p.onChange(fix(value - step * (e.shiftKey ? 10 : 1)));
       e.preventDefault();
@@ -122,6 +157,23 @@ export function NumberField(p: NumberFieldProps) {
       p.onChange(fix(p.defaultValue));
     }
   };
+
+  // wheel nudges by one step, but only while the field has keyboard focus (plain hover must never change a value)
+  const live = useRef({ value, step, fix, onChange: p.onChange });
+  live.current = { value, step, fix, onChange: p.onChange };
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      if (document.activeElement !== el) return;
+      e.preventDefault();
+      const l = live.current;
+      const dir = e.deltaY < 0 ? 1 : -1;
+      l.onChange(l.fix(l.value + dir * l.step * (e.shiftKey ? 0.1 : 1)));
+    };
+    el.addEventListener('wheel', wheel, { passive: false });
+    return () => el.removeEventListener('wheel', wheel);
+  }, []);
 
   const unit = p.unit ? (UNIT_LABEL[p.unit] ?? p.unit) : '';
   const frac = bounded ? clamp((value - min!) / ((p.softMax ?? max!) - min!), 0, 1) : 0;
@@ -145,6 +197,7 @@ export function NumberField(p: NumberFieldProps) {
     >
       {bounded && <div className="rs-nf__fill" style={{ width: `${frac * 100}%` }} />}
       {p.label && <span className="rs-nf__label">{p.label}</span>}
+      {mode && <span className="rs-nf__mode" aria-hidden="true">{mode === 'fine' ? 'Fine ÷10' : 'Coarse ×10'}</span>}
       {confirm !== null && (
         <NumberConfirm
           anchor={root.current}

@@ -1,0 +1,12 @@
+.rs-fontbtn { display: flex; align-items: center; justify-content: space-between; gap: var(--s-1); width: 100%; min-width: 0; text-align: left; cursor: pointer; }
+.rs-fontbtn__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-fontmenu { position: fixed; z-index: 1300; display: flex; flex-direction: column; max-height: min(420px, 70vh); background: var(--bg-3); border: 1px solid var(--accent-hi); box-shadow: var(--shadow-hard); }
+.rs-fontmenu__q { margin: var(--s-1); height: var(--ctl-h-lg); padding: 0 var(--s-2); background: var(--bg-0); border: 1px solid var(--line-strong); border-radius: var(--r); font-size: var(--fs-sm); }
+.rs-fontmenu__list { flex: 1; min-height: 0; overflow-y: auto; }
+.rs-fontmenu__head { padding: var(--s-1) var(--s-2); color: var(--text-dim); }
+.rs-fontmenu__row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); width: 100%; min-height: 32px; padding: 0 var(--s-2); background: transparent; border: 0; color: var(--text); text-align: left; }
+.rs-fontmenu__row.is-active { background: var(--accent); color: var(--accent-text); }
+.rs-fontmenu__row.is-cur .rs-fontmenu__name { font-weight: 700; }
+.rs-fontmenu__name { font-size: var(--fs-xs); color: inherit; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-fontmenu__sample { font-size: 18px; white-space: nowrap; }
+.rs-fontmenu__local { margin: var(--s-1); flex: none; }

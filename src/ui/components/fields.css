@@ -81,3 +81,4 @@ textarea.rs-text { height: auto; min-height: 64px; padding: var(--s-1) var(--s-2
 .rs-kind__btn.is-on { background: var(--accent); border-color: var(--accent-hi); color: #fff; }
 .rs-kind--inspector .rs-kind__btn { height: 32px; font-size: var(--fs-sm); }
 .rs-kind__what { font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.4; }
+.rs-nf__mode { position: absolute; right: 2px; top: 2px; bottom: 2px; display: flex; align-items: center; padding: 0 var(--s-1); background: var(--bg-5); border: 1px solid var(--line-strong); font-size: var(--fs-xs); color: var(--text); white-space: nowrap; pointer-events: none; z-index: 20; }

@@ -45,4 +45,8 @@
 .rs-ps__libname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
 .rs-ps__libstrip { display: flex; height: 16px; border: 1px solid #000; }
 .rs-ps__libstrip > span { flex: 1; }
-@media (max-width: 1100px) { .rs-ps { grid-template-columns: 1fr; } }
+/* the Studio lives in a floating panel: lay out by the panel width, not the window */
+.rs-ps { grid-template-columns: minmax(300px, 372px) 1fr; }
+@container (max-width: 760px) { .rs-ps { grid-template-columns: 1fr; } }
+/* compact: wheel and swatches only, the analysis panels collapse */
+@container (max-width: 560px) { .rs-ps__tabbar, .rs-ps__tabbody, .rs-ps__help { display: none; } }

@@ -19,6 +19,7 @@ import { KindPicker } from '../components/KindPicker';
 import { AUTO_COLLAPSED, KIND_GROUPS, describeOutput, hasKind } from '../lib/outputInfo';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
+import { FontField } from '../components/FontField';
 import { CurveField } from '../components/CurveField';
 import { paletteInputPort } from '../lib/sockets';
 import { visibleParams } from '../lib/layout';
@@ -301,7 +302,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
         control = <ColorField large value={value as [number, number, number, number]} onChange={set} />;
         break;
       case 'string':
-        control = <TextField large multiline={p.multiline} value={String(value ?? '')} onChange={set} />;
+        control = (p as { kind?: string }).kind === 'font' ? <FontField large value={String(value ?? '')} onChange={set} /> : <TextField large multiline={p.multiline} value={String(value ?? '')} onChange={set} />;
         break;
       case 'vec2':
         control = p.range ? <RangeField nodeId={node.id} keyName={keyName} value={value as [number, number]} defaultValue={p.default} /> : <Vec2Field large value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;

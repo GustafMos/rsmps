@@ -22,6 +22,7 @@ import type { Registry } from '../../engine/define';
 import type { AssetInfo, Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
 import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
+import { pushForGrowth, separateMoved } from '../lib/separate';
 import { outputType } from '../../engine/graph';
 import { createScanProject } from '../scan/session';
 import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/audio/timeline';
@@ -69,6 +70,8 @@ export interface UiPrefs {
   split: number;
   maximized: null | 'viewer' | 'graph';
   debug: boolean;
+  /** Snap dragged nodes to an 8 px grid on drop (default on). */
+  gridSnap?: boolean;
 }
 
 export interface EditorState {
@@ -260,6 +263,7 @@ export class Editor {
   commit(next: GraphDoc, key?: string): void {
     const s = this.state;
     if (next === s.graph) return;
+    next = pushForGrowth(s.graph, next, this.registry);
     const now = performance.now();
     const coalesce = key && key === this.lastKey && (this.holds > 0 ? this.holdPushed : now - this.lastTime < 900) && this.past.length > 0;
     if (!coalesce) {
@@ -295,7 +299,9 @@ export class Editor {
 
   edit(fn: (g: GraphDoc) => GraphDoc, key?: string): void {
     try {
-      this.commit(fn(this.state.graph), key);
+      const g0 = this.state.graph;
+      // nothing may end up on top of another node: slide added / moved nodes to free space, push neighbours down for growth
+      this.commit(separateMoved(g0, fn(g0), this.registry), key);
     } catch (err) {
       this.toast(err instanceof Error ? err.message : String(err), 'error');
     }
@@ -685,13 +691,22 @@ export class Editor {
   }
 
   /** Commit a finished node drag: positions, frame membership and optional insertion on a wire, as ONE undo step. */
-  finishDrag(deltas: ReadonlyMap<string, { dx: number; dy: number }>, insertEdge: string | null): void {
-    this.edit((g) => {
+  finishDrag(deltas: ReadonlyMap<string, { dx: number; dy: number }>, insertEdge: string | null, detachId?: string): void {
+    this.edit((g0) => {
+      // Shift-drag: lift the node out of its chain first (its source feeds its former consumers, like delete-with-heal)
+      let g = g0;
+      const lifted = detachId ? g0.nodes.find((n) => n.id === detachId) : undefined;
+      if (lifted) {
+        const healed = removeNodes(g0, this.registry, [lifted.id], true);
+        g = { ...healed, nodes: [...healed.nodes, lifted] };
+      }
       let next: GraphDoc = {
         ...g,
         nodes: g.nodes.map((n) => {
           const d = deltas.get(n.id);
-          return d ? { ...n, x: Math.round(n.x + d.dx), y: Math.round(n.y + d.dy) } : n;
+          if (!d) return n;
+          const q = (v: number) => (this.state.prefs.gridSnap === false ? Math.round(v) : Math.round(v / 8) * 8);
+          return { ...n, x: q(n.x + d.dx), y: q(n.y + d.dy) };
         }),
       };
       const moved = new Set(deltas.keys());

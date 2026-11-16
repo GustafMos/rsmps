@@ -76,6 +76,8 @@ export function TopBar() {
     { label: 'Delete', icon: 'trash', onClick: () => ed.deleteSelection(), shortcut: 'Del', disabled: !hasSel },
     { sep: true },
     { label: 'Select all', icon: 'selectAll', onClick: () => ed.selectAll(), shortcut: 'Ctrl+A' },
+    { sep: true },
+    { label: 'Tidy up', icon: 'layout', onClick: () => ed.autoLayout(true), shortcut: 'L' },
   ];
 
   return (
