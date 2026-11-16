@@ -17,6 +17,8 @@ export interface AudioBridge {
   listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]>;
   onDevicesChanged(listener: () => void): () => void;
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
+  /** Feed a MediaStream (e.g. the phone's microphone) to a node's live input; null detaches. */
+  setLiveStream(nodeId: string, stream: MediaStream | null): void;
   analyzeSignals(graph: GraphDoc, registry: Registry, assets: AudioAssetProvider, options: { duration: number; fps: number; sampleRate?: number; loop: boolean; item?: number }): Promise<SignalTracks | null>;
   hasAudio(graph: GraphDoc, registry: Registry): boolean;
   /** True when an export should render and mux graph audio (an enabled, wired Audio Out exists). */
@@ -94,6 +96,7 @@ export function createAudioBridge(): AudioBridge {
     },
     onDevicesChanged: (l) => guard(() => undefined, (e) => e.onDevicesChanged(l)),
     sendNote: (id, n, v, on) => guard(undefined, (e) => e.sendNote(id, n, v, on)),
+    setLiveStream: (id, stream) => guard(undefined, (e) => e.setLiveStream(id, stream)),
     async analyzeSignals(graph, registry, assets, options) {
       if (!mod.analyzeSignalsOffline) return null;
       return mod.analyzeSignalsOffline(graph, registry, assets, options);

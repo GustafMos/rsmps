@@ -19,6 +19,7 @@ import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { ProjectStoreImpl } from './projects';
 import { PhoneLink } from './phone';
+import { PhoneAudioRouter } from './phone-audio';
 import { RecordingController } from './recording';
 import { SignalRouter } from './signals';
 import { ScanImpl } from './scan';
@@ -56,7 +57,8 @@ export const createIo: CreateIo = async () => {
 
   // Late-bound: the governor needs the player, the player reports the governor's numbers.
   let governor!: MemoryGovernor;
-  const player = new PlayerImpl({ gpu, gate, registry, audio, library, router, memory: { snapshot: () => governor.snapshot(), relieve: () => void governor.freeMemory() } });
+  const phoneAudio = new PhoneAudioRouter((id, stream) => audio.setLiveStream(id, stream));
+  const player = new PlayerImpl({ gpu, gate, registry, audio, library, router, phoneAudio, memory: { snapshot: () => governor.snapshot(), relieve: () => void governor.freeMemory() } });
   router.onExportEnd = () => player.invalidate();
   library.subscribe(() => player.invalidate());
 
@@ -110,6 +112,7 @@ export const createIo: CreateIo = async () => {
   const phone = new PhoneLink();
   await phone.init();
   library.live.phone = phone;
+  phone.onStream((token, stream) => phoneAudio.setStream(token, stream));
   const recording = new RecordingController(audio, player, library);
   const plugins = new PluginManagerImpl(registry);
   const purgeOwned = (id: string, kind: 'graph' | 'scan') => {

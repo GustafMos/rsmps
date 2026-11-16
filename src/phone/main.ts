@@ -14,6 +14,9 @@ const preview = $<HTMLVideoElement>('preview');
 const switchBtn = $<HTMLButtonElement>('switch');
 const resSel = $<HTMLSelectElement>('res');
 const torchBtn = $<HTMLButtonElement>('torch');
+const micBtn = $<HTMLButtonElement>('mic');
+const meterEl = $<HTMLElement>('meter');
+const meterBar = $<HTMLElement>('meterBar');
 const reconnectBtn = $<HTMLButtonElement>('reconnect');
 
 const params = new URLSearchParams(location.search);
@@ -52,6 +55,44 @@ function status(text: string, kind: 'ok' | 'bad' | 'wait', detail = ''): void {
 
 /* ------------------------------------------- camera ------------------------------------------- */
 
+/** The microphone track (kept across camera switches). The page never plays any sound: the preview is muted. */
+let micTrack: MediaStreamTrack | null = null;
+let meterCtx: AudioContext | null = null;
+let meterTimer: ReturnType<typeof setInterval> | null = null;
+// Raw sound for music and MIDI: no echo cancellation, noise suppression or automatic gain; mono is enough.
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+
+/** A small input level meter on the microphone track (analysis only, nothing is routed to the speaker). */
+function startMeter(): void {
+  if (meterTimer) clearInterval(meterTimer);
+  meterTimer = null;
+  meterCtx?.close().catch(() => undefined);
+  meterCtx = null;
+  if (!micTrack) {
+    meterEl.hidden = true;
+    return;
+  }
+  meterEl.hidden = false;
+  try {
+    const ctx = new AudioContext();
+    meterCtx = ctx;
+    const src = ctx.createMediaStreamSource(new MediaStream([micTrack]));
+    const an = ctx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an); // not connected to ctx.destination: never audible
+    const buf = new Float32Array(an.fftSize);
+    meterTimer = setInterval(() => {
+      void ctx.resume().catch(() => undefined);
+      an.getFloatTimeDomainData(buf);
+      let peak = 0;
+      for (const x of buf) peak = Math.max(peak, Math.abs(x));
+      meterBar.style.width = `${Math.min(100, Math.round(peak * 140))}%`;
+    }, 100);
+  } catch {
+    meterEl.hidden = true;
+  }
+}
+
 function fakeStream(): MediaStream {
   const canvas = document.createElement('canvas');
   canvas.width = 640;
@@ -69,24 +110,65 @@ function fakeStream(): MediaStream {
   };
   draw();
   setInterval(draw, 33); // a timer, not requestAnimationFrame: the test animation must keep running in a background tab
-  return canvas.captureStream(30);
+  const out = canvas.captureStream(30);
+  // A generated 440 Hz tone as the "microphone" (test only).
+  try {
+    const ac = new AudioContext();
+    const osc = ac.createOscillator();
+    osc.frequency.value = 440;
+    const gain = ac.createGain();
+    gain.gain.value = 0.5;
+    const dest = ac.createMediaStreamDestination();
+    osc.connect(gain).connect(dest);
+    osc.start();
+    void ac.resume().catch(() => undefined);
+    document.addEventListener('pointerdown', () => void ac.resume(), { once: true });
+    dest.stream.getAudioTracks().forEach((t) => out.addTrack(t));
+  } catch {
+    /* no Web Audio: the fake phone has no sound */
+  }
+  return out;
 }
 
-async function openCamera(): Promise<void> {
-  stream?.getTracks().forEach((t) => t.stop());
+/** Open camera and microphone. The first call asks for both together; if one is refused the other still works (camera only, or sound only as a wireless microphone). */
+async function openCamera(initial = false): Promise<void> {
+  stream?.getVideoTracks().forEach((t) => t.stop()); // a phone cannot open two cameras at once
+  let got: MediaStream;
   if (fake) {
-    stream = fakeStream();
+    got = fakeStream();
   } else {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser cannot open the camera on this page (it needs https).');
     const h = Number(resSel.value);
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facing }, height: { ideal: h }, width: { ideal: Math.round((h * 16) / 9) } },
-      audio: false,
-    });
+    const video: MediaTrackConstraints = { facingMode: { ideal: facing }, height: { ideal: h }, width: { ideal: Math.round((h * 16) / 9) } };
+    const gum = (c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c);
+    try {
+      got = await gum({ video, audio: initial || !micTrack ? AUDIO_CONSTRAINTS : false });
+    } catch (first) {
+      try {
+        got = await gum({ video, audio: false }); // microphone refused: camera only
+      } catch {
+        try {
+          got = await gum({ audio: AUDIO_CONSTRAINTS }); // camera refused: sound only
+        } catch {
+          throw first;
+        }
+      }
+    }
   }
-  preview.srcObject = stream;
+  if (got.getAudioTracks()[0] && got.getAudioTracks()[0] !== micTrack) {
+    micTrack?.stop();
+    micTrack = got.getAudioTracks()[0];
+    startMeter();
+  }
+  const videoTrack = got.getVideoTracks()[0] ?? null;
+  stream = new MediaStream([...(videoTrack ? [videoTrack] : []), ...(micTrack ? [micTrack] : [])]);
+  micBtn.hidden = !micTrack;
+  micBtn.textContent = micTrack?.enabled === false ? 'Microphone off' : 'Microphone on';
+  const sub = !videoTrack ? 'Sending sound only.' : !micTrack ? 'No microphone: sending the picture only.' : '';
+  if (sub) detailEl.textContent = sub;
+  preview.srcObject = videoTrack ? new MediaStream([videoTrack]) : null; // picture only, and the element is muted: nothing is played
   await preview.play().catch(() => undefined);
-  const track = stream.getVideoTracks()[0];
+  const track = videoTrack ?? undefined;
   const caps = (track?.getCapabilities?.() ?? {}) as { torch?: boolean };
   torchBtn.hidden = !caps.torch;
   torchOn = false;
@@ -147,7 +229,7 @@ async function onOffer(sdp: string): Promise<void> {
       status('Sending your camera', 'ok', 'Keep this page open. The screen stays on.');
     }
   };
-  for (const track of stream?.getVideoTracks() ?? []) peer.addTrack(track, stream!);
+  for (const track of stream?.getTracks() ?? []) peer.addTrack(track, stream!); // video and, when allowed, the microphone
   await peer.setRemoteDescription({ type: 'offer', sdp });
   const answer = await peer.createAnswer();
   await peer.setLocalDescription(answer);
@@ -209,7 +291,7 @@ async function start(): Promise<void> {
   }
   status('Asking for the camera…', 'wait', 'Please allow camera access.');
   try {
-    await openCamera();
+    await openCamera(true);
   } catch (err) {
     const name = (err as { name?: string }).name;
     status('Camera not available', 'bad', name === 'NotAllowedError' ? 'Camera permission was denied. Allow it in the browser settings, then press Reconnect.' : String((err as Error).message ?? err));
@@ -243,6 +325,11 @@ switchBtn.onclick = async () => {
   }
 };
 resSel.onchange = () => void openCamera().catch(() => undefined);
+micBtn.onclick = () => {
+  if (!micTrack) return;
+  micTrack.enabled = !micTrack.enabled;
+  micBtn.textContent = micTrack.enabled ? 'Microphone on' : 'Microphone off';
+};
 torchBtn.onclick = async () => {
   torchOn = !torchOn;
   try {

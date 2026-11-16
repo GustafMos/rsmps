@@ -23,6 +23,7 @@
     <div id="status" class="wait">Starting…</div>
     <video id="preview" autoplay muted playsinline></video>
     <small id="detail"></small>
+    <div id="meter" hidden style="margin:0 16px 8px;height:10px;border-radius:5px;background:#1e293b;overflow:hidden"><div id="meterBar" style="height:100%;width:0;background:#22c55e"></div></div>
     <div id="steps" style="padding:0 16px 8px;text-align:center;color:#94a3b8;font-size:14px;line-height:1.6"></div>
     <div id="controls">
       <button id="switch" type="button">Switch camera</button>
@@ -31,6 +32,7 @@
         <option value="720" selected>Medium (720p)</option>
         <option value="1080">High (1080p)</option>
       </select>
+      <button id="mic" type="button" hidden>Microphone on</button>
       <button id="torch" type="button" hidden>Torch</button>
       <button id="reconnect" type="button">Reconnect</button>
     </div>

@@ -21,6 +21,7 @@ import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { feedsFromLive, liveNodeIds, stampLive } from './live-stamp';
 import type { MemoryState } from './memory';
+import { phoneAudioWired } from './phone-audio';
 import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
 import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, readFrameParams, resolveFrame, scaleSize, type ConformAnchor, type Size } from './frame';
@@ -34,6 +35,8 @@ export interface PlayerDeps {
   library: Library;
   router: SignalRouter;
   memory?: { snapshot(): MemoryState; relieve(): void };
+  /** Phone microphone routing: told about every graph so it can map pairing tokens to Phone Camera nodes. */
+  phoneAudio?: { setGraph(graph: GraphDoc): void };
 }
 
 interface FrameSpec {
@@ -511,7 +514,8 @@ export class PlayerImpl implements Player {
     const { audio, registry } = this.deps;
     this.hasSig = audio.hasSignals(graph, registry);
     this.deps.router.fps = graph.project.fps;
-    this.audioNeeded = this.hasSig || audio.hasAudio(graph, registry);
+    this.audioNeeded = this.hasSig || audio.hasAudio(graph, registry) || phoneAudioWired(graph);
+    this.deps.phoneAudio?.setGraph(graph);
     this.micNodes = graph.nodes.filter((n) => n.type === 'microphone' && !n.bypass).length;
   }
 

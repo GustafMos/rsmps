@@ -61,6 +61,8 @@ interface Session {
   expiresAt: number | null;
   detail: string;
   reached: boolean;
+  /** The remote stream handed to the audio engine (null when none). */
+  audioStream: MediaStream | null;
   /** Messages are handled strictly in order (an ICE candidate must not overtake the answer). */
   chain: Promise<void>;
 }
@@ -106,7 +108,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
-    const s: Session = { token, ws, state: 'waiting', pc: null, video, bitmap: null, frames: 0, jpeg: false, timers: [], expiresAt, detail: 'Waiting for the phone: scan the QR code and open the link.', reached: false, chain: Promise.resolve() };
+    const s: Session = { token, ws, state: 'waiting', pc: null, video, bitmap: null, frames: 0, jpeg: false, timers: [], expiresAt, detail: 'Waiting for the phone: scan the QR code and open the link.', reached: false, audioStream: null, chain: Promise.resolve() };
     this.sessions.set(token, s);
     s.timers.push(setTimeout(() => s.state === 'waiting' && this.setState(s, 'expired'), SESSION_MS));
     s.timers.push(setTimeout(() => !s.reached && s.state === 'waiting' && this.setDetail(s, UNREACHED_HINT), UNREACHED_MS));
@@ -188,7 +190,26 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     s.timers = [];
     s.pc?.close();
     s.pc = null;
+    this.emitStream(s, null);
     if (closeSocket && s.ws.readyState <= WebSocket.OPEN) s.ws.close();
+  }
+
+  private streamListeners = new Set<(token: string, stream: MediaStream | null) => void>();
+
+  /**
+   * The phone's sound: called with the remote WebRTC stream once it has an audio track, and with null when the session ends,
+   * the phone leaves or the link falls back to JPEG frames (which carry no sound). The stream is NEVER played here: the <video>
+   * used for frames stays muted, the audio engine reads the stream through Web Audio.
+   */
+  onStream(listener: (token: string, stream: MediaStream | null) => void): () => void {
+    this.streamListeners.add(listener);
+    return () => this.streamListeners.delete(listener);
+  }
+
+  private emitStream(s: Session, stream: MediaStream | null): void {
+    if (s.audioStream === stream) return;
+    s.audioStream = stream;
+    for (const l of [...this.streamListeners]) l(s.token, stream);
   }
 
   private send(s: Session, msg: unknown): void {
@@ -240,6 +261,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
       case 'phone-left':
         s.pc?.close();
         s.pc = null;
+        this.emitStream(s, null);
         this.setState(s, 'disconnected');
         break;
       case 'answer':
@@ -258,6 +280,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     s.pc?.close();
     s.jpeg = false;
     s.video.srcObject = null;
+    this.emitStream(s, null);
     if (s.state === 'disconnected') {
       s.state = 'waiting';
       this.emit(s);
@@ -271,10 +294,14 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     const pc = new RTCPeerConnection({ iceServers: [] });
     s.pc = pc;
     pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.addTransceiver('audio', { direction: 'recvonly' }); // the phone's microphone, when it allows it
     pc.onicecandidate = (e) => e.candidate && this.send(s, { type: 'ice', candidate: e.candidate.toJSON() });
     pc.ontrack = (e) => {
-      s.video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+      const stream = e.streams[0] ?? new MediaStream([e.track]);
+      s.video.srcObject = stream; // muted element: it only keeps the remote stream flowing, nothing is heard from here
       void s.video.play().catch(() => undefined);
+      if (stream.getAudioTracks().length) this.emitStream(s, stream);
+      stream.addEventListener('addtrack', () => s.pc === pc && stream.getAudioTracks().length && this.emitStream(s, stream));
       const v = s.video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
       const tick = () => {
         if (s.pc !== pc) return;
@@ -305,7 +332,8 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     s.pc?.close();
     s.pc = null;
     s.video.srcObject = null;
-    this.setDetail(s, 'The direct video link did not connect; using the slower fallback through this computer.');
+    this.emitStream(s, null);
+    this.setDetail(s, 'Video only: the direct link did not connect, so the picture comes through this computer as still frames and the phone\'s sound is not available. Sound needs a direct connection.');
     this.send(s, { type: 'use-jpeg' });
   }
 }
