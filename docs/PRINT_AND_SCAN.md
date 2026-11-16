@@ -79,3 +79,7 @@ All coordinates are mm from the top-left of the page; the frame area keeps 20 mm
 styles, font drawing), `pdf.ts`, `png.ts`, `export.ts` (the Output node's *print* kind), `scan/` (`finder`, `strip`,
 `rectify`, `refine`, `clean`, `page`, `pipeline`). Browser glue is `src/io/scan.ts`; the UI contract is in
 `src/io/api.ts` (`Io.scan`, `ScanResult`, `ScanReport`).
+
+## From the command line
+
+`rsmps graph.json out/ --kind print` (or an Output node whose kind is `print`) writes the same print sheets as the app (PDF and/or one PNG per page, as the node's Print options say), using the exporter's own sheet code. See CLI.md.

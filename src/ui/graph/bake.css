@@ -1,0 +1,14 @@
+/* Cache / Bake: node badge, frozen region, inspector panel. Greyscale on purpose: it is information, not an alert. */
+.rs-node__bake { flex: none; padding: 0 5px; margin-right: 2px; height: 16px; line-height: 14px; font-size: var(--fs-xs); border: 1px solid var(--text-faint); color: var(--text-dim); background: var(--bg-1); white-space: nowrap; }
+.rs-node__bake[data-kind='stale'] { border-style: dashed; color: var(--text); }
+.rs-node__bake[data-kind='baking'] { background: linear-gradient(90deg, var(--bg-5) var(--p, 0%), var(--bg-1) var(--p, 0%)); }
+/* Everything behind a bake costs nothing any more: show it as set aside, not as disabled. */
+.rs-node.is-frozen > :not(.rs-node__head) { opacity: 0.55; }
+.rs-node.is-frozen .rs-node__head { filter: grayscale(0.65); opacity: 0.8; }
+.rs-node.is-frozen.is-selected > :not(.rs-node__head), .rs-node.is-frozen.is-selected .rs-node__head { opacity: 1; filter: none; }
+
+.rs-bake { display: flex; flex-direction: column; gap: var(--s-2); }
+.rs-bake__state { font-size: var(--fs-sm); color: var(--text); }
+.rs-bake__facts { font-size: var(--fs-xs); color: var(--text-dim); }
+.rs-bake__bar { height: 6px; background: var(--bg-0); border: 1px solid var(--line-strong); }
+.rs-bake__bar > span { display: block; height: 100%; width: 0; background: var(--text-dim); }

@@ -19,14 +19,26 @@ results along their wires.
 
 ## What it looks like
 
-One test picture, eight looks. Every tile is a small graph of one to three nodes, rendered through the same engine the app
+One picture (a 3D render of old CRT televisions showing sea footage, by the author), eight looks. Every tile is a small graph of one to three nodes, rendered through the same engine the app
 uses (the graphs are in [scripts/screenshots/graphs](scripts/screenshots/graphs)).
 
-![The test scene next to eight looks: pixel art with dither, CRT display, analog video, scan line relief, echo trail, lens blur, halftone and 3D objects](docs/screenshots/looks.png)
+![The original render of four CRT televisions next to eight looks: pixel art with dither, CRT display, analog video, scan line relief, echo trail, lens blur, halftone and 3D objects](docs/screenshots/looks.png)
 
-The pixel-art and CRT look in motion (a looping render of the scene scrolling through Pixelate, Dither and CRT Display):
+The pixel-art and CRT look in motion (a looping render of the same picture scrolling through Pixelate, Dither and CRT Display):
 
-![A looping animation of the test scene scrolling under the pixel-art and CRT look](docs/screenshots/anim-crt.webp)
+![A looping animation of the CRT televisions scene scrolling under the pixel-art and CRT look](docs/screenshots/anim-crt.webp)
+
+### Made with RSMPS: mixed-media examples
+
+Two animations made with the Print and scan workflow (see below): the frames were printed on paper, drawn on and collaged
+by hand, photographed, and recovered by RSMPS as an animation.
+
+| | |
+| --- | --- |
+| ![A looping scan of two cats on a shelf next to a radiator, in grainy black and white paper texture](docs/screenshots/scan-example-1.webp) | ![A looping scan of a rubber ring tumbling over a motorway at night, with hand-drawn red and blue words, a torn green paper strip and a one-cent coin added on the paper](docs/screenshots/scan-example-2.webp) |
+| Cats on a shelf, printed and scanned back | Ink, paper and a coin on top of a printed animation |
+
+Footage and scans by the author.
 
 ---
 
@@ -92,7 +104,7 @@ overlays, trails, follow-crop and sprite stamping.
 ### Print and scan back
 
 Export animation frames as printable sheets with registration marks, draw on them, photograph them, and get the frames back
-aligned as an image sequence. The Scan tab finds the markers, corrects tilt and perspective, cuts the frames and hands them to
+aligned as an image sequence. The two mixed-media examples near the top of this page were made this way. The Scan tab finds the markers, corrects tilt and perspective, cuts the frames and hands them to
 a clean-up graph. The picture below is a sheet the app printed itself, "photographed" synthetically (tilted, on a
 table-coloured background) and read back; see [docs/PRINT_AND_SCAN.md](docs/PRINT_AND_SCAN.md).
 
@@ -203,9 +215,12 @@ npx electron scripts/screenshots/capture.mjs    # UI screenshots (hidden window,
 node scripts/screenshots/optimize.mjs           # keep each screenshot small
 node scripts/screenshots/make-graphs.mjs        # the small graphs behind the looks
 node scripts/screenshots/render-showcase.mjs    # looks.png, anim-crt.webp and the store crops in docs/store/assets
+npx electron scripts/screenshots/video-to-webp.mjs my-scan.mp4 --webp docs/screenshots/scan-example-1.webp --dur 4 --fps 15
 ```
 
-The capture uses only generated content and `test-assets/`; nothing from your own projects or library.
+The last command turns a video into a looping animated WebP with Electron's decoder (no ffmpeg needed); add `--contact sheet.png` to preview a video as a grid of frames.
+
+The capture uses only generated content, `test-assets/` and the author's base picture in `scripts/screenshots/assets/`; nothing from your own projects or library.
 
 ## Known limitations
 

@@ -106,6 +106,8 @@ export default defineNode({
 
 ## Layering
 
+(Kernels that need the wires of an input separately, e.g. the Media Timeline, set `perWire: true` and read `io.inWires[name]`; `io.in[name]` is still the sum.)
+
 Wire any number of sources into one input: `audio-out` and `mixer` declare `multi: true` so the editor allows it,
 and the runner sums the wires before the kernel sees them. A Volume & Pan node per layer balances them.
 

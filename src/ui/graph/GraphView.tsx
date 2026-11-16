@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { Icon } from '../components/Icon';
 import { useApp, useEd } from '../store/context';
 import { createGestures, frameGraph } from './gestures';
+import { PinchTracker, pinchView } from './touchGestures';
 import { NodeView } from './NodeView';
 import { Wires } from './Wires';
 import { Frames } from './Frames';
@@ -63,6 +64,53 @@ export function GraphView() {
       ctl.root = ctl.layer = null;
     };
   }, [ctl, app]);
+
+  // Touch: two fingers pinch-zoom and pan together. Single fingers keep working through the normal gestures; the mouse never gets here.
+  useEffect(() => {
+    const el = root.current!;
+    const tracker = new PinchTracker();
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const was = tracker.active;
+      tracker.down(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (!tracker.active) return;
+      if (!was) gestures.reset(); // the first finger had started a drag or a box select: drop it
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    const move = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const m = tracker.move(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (!tracker.active) return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (!m) return;
+      const r = ctl.rect();
+      const v = pinchView(ctl.view, m.prev, m.next, { x: r.left, y: r.top });
+      ctl.needsFit = false;
+      ctl.view.x = v.x;
+      ctl.view.y = v.y;
+      ctl.view.zoom = v.zoom;
+      ctl.applyView();
+    };
+    const up = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const was = tracker.active;
+      tracker.up(e.pointerId);
+      if (was) e.stopPropagation(); // no click or drop from the finger that is left over
+    };
+    el.addEventListener('pointerdown', down, true);
+    el.addEventListener('pointermove', move, true);
+    el.addEventListener('pointerup', up, true);
+    el.addEventListener('pointercancel', up, true);
+    return () => {
+      el.removeEventListener('pointerdown', down, true);
+      el.removeEventListener('pointermove', move, true);
+      el.removeEventListener('pointerup', up, true);
+      el.removeEventListener('pointercancel', up, true);
+      tracker.reset();
+    };
+  }, [ctl, gestures]);
 
   // expanding "N more…" or pinning a param changes a node's height: reflow the nodes below it
   useEffect(() => nodeViewStore.subscribe(() => ed.reflow()), [ed]);

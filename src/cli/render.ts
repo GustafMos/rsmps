@@ -15,14 +15,15 @@ import { Gpu, createHeadlessDevice } from '../engine/gpu/gpu';
 import { batchCount, outputNodes, upstream } from '../engine/graph';
 import type { AssetInfo, GraphDoc, ImageValue, MaskValue, NodeInstance } from '../engine/types';
 import { fitAudio } from '../io/audio-util';
-import { resolvePattern, sequencePattern, uniqueName, type NameTokens } from '../io/naming';
+import { resolvePattern, sanitizeFileName, sequencePattern, uniqueName, type NameTokens } from '../io/naming';
+import { exportPrint, readPrintParams, type PrintParams } from '../io/print/export';
 import { layoutSheet, sheetMetadata } from '../io/spritesheet';
 import { errorMessage, totalFramesOf } from '../io/util';
 import { CODECS, imageExt, normalizeImageFormat, parseCodec, VideoWriter, writePcmFile, writeStill, type CodecSpec, type ImageFormat } from './encode';
 import { NodeHost } from './host';
 
 type Img = ImageValue | MaskValue;
-export type Kind = 'image' | 'sequence' | 'video' | 'spritesheet';
+export type Kind = 'image' | 'sequence' | 'video' | 'spritesheet' | 'print';
 
 export interface Reporter {
   info(msg: string): void;
@@ -86,7 +87,8 @@ export interface RenderSummary {
 
 interface OutParams {
   name: string;
-  kind: 'auto' | Kind | 'print';
+  kind: 'auto' | Kind;
+  print: PrintParams;
   imageFormat: ImageFormat;
   quality: number;
   codec: string;
@@ -105,6 +107,7 @@ function readParams(registry: Registry, node: NodeInstance, ov: Overrides): OutP
   return {
     name: typeof p.name === 'string' && p.name.trim() ? p.name : '{name}',
     kind: ov.kind ?? kind,
+    print: readPrintParams(p),
     imageFormat: ov.imageFormat ?? normalizeImageFormat(String(p.imageFormat ?? 'png')) ?? 'png',
     quality: ov.quality ?? Math.min(1, Math.max(0.1, num(p.quality, 0.92))),
     codec: typeof p.codec === 'string' ? p.codec : 'avc',
@@ -149,15 +152,7 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
   const summary: RenderSummary = { items: 0, jobs: 0, files: [], errors: [], skipped: [], plan: [], seconds: 0 };
 
   const { nodes: outs } = selectOutputs(graph, registry, opts.outputs);
-  const usable: NodeInstance[] = [];
-  for (const out of outs) {
-    const p = readParams(registry, out, ov);
-    if (p.kind === 'print') {
-      const msg = `Output "${out.label || out.id}" uses export kind 'print', which the CLI renderer does not support yet: skipped.`;
-      summary.skipped.push(msg);
-      rep.warn(msg);
-    } else usable.push(out);
-  }
+  const usable: NodeInstance[] = outs;
   if (usable.length === 0) throw new Error('This graph has no exportable Output node (image-out). Add one and connect an image to it.');
 
   const count = batchCount(graph, registry);
@@ -246,8 +241,7 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
             if (ov.codec || firstVideo) kind = 'video';
             else if (dry) kind = frames > 1 ? 'video' : 'image';
             else kind = (await hasMotion(engine!, itemGraph, out.id, item, count, frames)) ? 'video' : 'image';
-          } else if (params.kind === 'print') throw new Error("export kind 'print' is not supported by the CLI renderer");
-          else kind = params.kind;
+          } else kind = params.kind;
           const codec: CodecSpec = ov.codec ?? CODECS[parseCodec(params.codec) ?? 'h264'];
           const w0 = itemGraph.project.width;
           const h0 = itemGraph.project.height;
@@ -274,6 +268,9 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
               break;
             case 'video':
               written = await exportVideo(ctx, codec);
+              break;
+            case 'print':
+              written = await exportPrintSheets(ctx);
               break;
           }
           for (const f of written) {
@@ -335,6 +332,10 @@ function planFiles(kind: Kind, p: OutParams, codec: CodecSpec, tokens: JobCtx['t
       return { path: uniqueName(used, `${resolvePattern(p.name, tokens(w, h))}.${codec.ext}`) };
     case 'spritesheet':
       return { path: uniqueName(used, `${resolvePattern(p.name, tokens(w, h))}.png`), note: 'plus a .json next to it' };
+    case 'print': {
+      const base = sanitizeFileName(resolvePattern(p.name, tokens(w, h)));
+      return { path: uniqueName(used, p.print.output === 'png' ? `${base}_page_01.png` : `${base}.pdf`), note: p.print.output === 'both' ? 'PDF plus one PNG per page' : p.print.output === 'png' ? 'one PNG per page' : undefined };
+    }
     case 'sequence': {
       const dir = uniqueName(used, sequenceDir(p.name, tokens(w, h)));
       return { path: `${dir}/${resolvePattern(sequencePattern(p.name), tokens(w, h, 0, frames))}.${imageExt(p.imageFormat)}`, note: `${frames} files` };
@@ -445,6 +446,32 @@ function rel(c: JobCtx, abs: string): string {
   return relative(c.outDir, abs).replace(/\\/g, '/');
 }
 
+/** Print sheets for drawing on paper: the exporter's own sheet code, fed with frames from this engine. Writes the PDF and/or page PNGs. */
+export async function exportPrintSheets(c: JobCtx): Promise<string[]> {
+  const p = c.params;
+  const title = sanitizeFileName(resolvePattern(p.name, c.tokens(c.graph.project.width, c.graph.project.height)));
+  const files = await exportPrint({
+    params: p.print,
+    title,
+    frames: c.frames,
+    fps: c.graph.project.fps,
+    renderFrame: async (f) => {
+      const px = await frameBytes(c, f, 1, false, true);
+      return { width: px.width, height: px.height, data: px.data };
+    },
+    progress: (fraction) => c.rep.progress(c.label, Math.round(fraction * 100), 100),
+    claim: (name) => uniqueName(c.used, name),
+    yieldNow: () => new Promise<void>((resolve) => setImmediate(resolve)),
+  });
+  mkdirSync(c.outDir, { recursive: true });
+  const names: string[] = [];
+  for (const f of files) {
+    writeFileSync(join(c.outDir, f.name), Buffer.from(await f.blob.arrayBuffer()));
+    names.push(f.name);
+  }
+  return names;
+}
+
 async function exportImage(c: JobCtx): Promise<string[]> {
   const p = c.params;
   const opaque = p.imageFormat === 'jpeg';
@@ -508,7 +535,9 @@ async function videoAudio(c: JobCtx, duration: number): Promise<PcmAudio | null>
       const rendered = await renderAudioOffline(graph, c.registry, (id) => c.host.assetAudio(id), { duration, loop: graph.project.loop });
       if (rendered && rendered.channels.length && rendered.channels[0].length) return rendered;
     }
-    if (c.firstVideo?.info.hasAudio) {
+    const up = upstream(graph, c.out.id);
+    // A Media Timeline upstream: the first file's sound would be the wrong sound for the edit (it comes through an Audio Output only).
+    if (c.firstVideo?.info.hasAudio && !graph.nodes.some((n) => up.has(n.id) && n.type === 'media-timeline')) {
       const source = await c.host.assetAudio(c.firstVideo.info.id);
       if (source) {
         const node = c.firstVideo.node;

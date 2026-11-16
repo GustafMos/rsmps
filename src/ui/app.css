@@ -14,6 +14,10 @@
 .rs-divider:hover { background: var(--accent-lo); }
 
 .rs-safe { flex: none; padding: var(--s-2) var(--s-4); background: #3a2d05; border-bottom: 1px solid var(--yellow); color: var(--yellow); font-size: var(--fs-sm); text-align: center; font-weight: 600; }
+.rs-safe--bar { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--s-3); text-align: left; }
+.rs-safe--bar .rs-safe__text { flex: 0 1 auto; }
+.rs-safe--bar .rs-safe__btns { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rs-safe--quiet { padding-top: var(--s-1); padding-bottom: var(--s-1); font-weight: 500; }
 .rs-panel__head .rs-caps { flex: none; white-space: nowrap; }
 .rs-panel__tip { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rs-panel__spacer { min-width: 0; }

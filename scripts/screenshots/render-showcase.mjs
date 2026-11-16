@@ -1,9 +1,9 @@
 // Renders the showcase images through the engine (the CLI renderer, so real WebGPU output, not UI screenshots):
-//   docs/screenshots/looks.png      the test scene next to eight looks, composed with sharp
+//   docs/screenshots/looks.png      the base picture next to eight looks, composed with sharp
 //   docs/screenshots/anim-crt.webp  a short looping animation of the pixel-art + CRT look (animated WebP)
 // Run:  node scripts/screenshots/make-graphs.mjs && node scripts/screenshots/render-showcase.mjs
 // Needs the CLI build (this script runs `npm run build:cli` first) and, for the animation, nothing else (PNG sequences need no ffmpeg).
-// Source picture: test-assets/scene-1920x1080.png (generated, no private media). Intermediate renders go to the OS temp folder.
+// Source picture: scripts/screenshots/assets/base-scene.png (the author's own render, 16:9). Intermediate renders go to the OS temp folder.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +14,7 @@ import sharp from 'sharp';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const graphs = join(root, 'scripts', 'screenshots', 'graphs');
 const outDir = join(root, 'docs', 'screenshots');
-const scene = join(root, 'test-assets', 'scene-1920x1080.png');
+const scene = join(root, 'scripts', 'screenshots', 'assets', 'base-scene.png');
 const work = mkdtempSync(join(tmpdir(), 'rsmps-showcase-'));
 mkdirSync(outDir, { recursive: true });
 
@@ -45,7 +45,7 @@ function render(file) {
 
 const TILE_W = 640, TILE_H = 360, GUT = 6;
 const looks = [
-  ['Original test scene', null],
+  ['Original picture', null],
   ['Pixelate + dither, Endesga 32', 'look-pixel-dither.rsmps.json'],
   ['CRT display', 'look-crt.rsmps.json'],
   ['Analog video (VHS)', 'look-analog.rsmps.json'],

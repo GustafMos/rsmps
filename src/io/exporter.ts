@@ -921,6 +921,8 @@ export class ExporterImpl implements Exporter {
         // The offline renderer works in whole blocks: cut/pad to exactly the video's duration.
         if (rendered && rendered.channels.length && rendered.channels[0].length) return fitAudio(rendered, 0, duration, false);
       }
+      // A Media Timeline upstream: the first file's sound would be the wrong sound for the edit. Its sound comes through an Audio Output only.
+      if (upstreamHas(graph, job.out.id, 'media-timeline')) return null;
       for (const n of this.mediaNodes(graph, job.out.id)) {
         const id = this.assetIdFor(n, job.item);
         const info = id ? library.assetInfo(id) : null;
@@ -936,6 +938,12 @@ export class ExporterImpl implements Exporter {
     }
     return null;
   }
+}
+
+/** True when a node of this type is upstream of `outId`. */
+function upstreamHas(graph: GraphDoc, outId: string, type: string): boolean {
+  const up = upstream(graph, outId);
+  return graph.nodes.some((n) => up.has(n.id) && n.type === type);
 }
 
 async function zipFiles(files: ExportedFile[]): Promise<Blob> {

@@ -1,4 +1,5 @@
 import type { InputSchema, OutputSchema } from '../../engine/types';
+import { effectiveDuration } from '../../engine/graph';
 import { useEffect, useRef, useState } from 'react';
 import { MemoryMeter } from './MemoryMeter';
 import { Icon } from '../components/Icon';
@@ -7,6 +8,7 @@ import { formatTime } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { useKeyboardTarget } from '../playKeys';
 import { RecordButton } from '../timeline/RecordButton';
+import { RenderPause } from './RenderPause';
 import '../palette/studio.css';
 import './transport.css';
 
@@ -15,6 +17,7 @@ export function Transport() {
   const playing = usePlayer((s) => s.playing);
   const project = useEd((s) => s.graph.project);
   const hasAudio = useEd((s) => s.graph.nodes.some((n) => hasAudioSockets(io.registry.get(n.type))));
+  const lengthSet = useEd((s) => effectiveDuration(s.graph, io.registry) !== null);
   const [volume, setVolume] = useState(1);
   const audio = usePlayer((s) => s.audio);
   const kbdTarget = useKeyboardTarget();
@@ -42,6 +45,7 @@ export function Transport() {
           <span>LOOP</span>
           <span className="rs-tp__loopstate">{project.loop ? 'ON' : 'OFF'}</span>
         </button>
+        <RenderPause />
       </div>
 
       <Readout />
@@ -49,7 +53,7 @@ export function Transport() {
 
       <div className="rs-tp__group">
         <div className="rs-tp__field"><NumberField label="FPS" value={project.fps} min={1} max={120} integer defaultValue={24} onChange={(v) => ed.setProject({ fps: v })} /></div>
-        <div className="rs-tp__field rs-tp__field--wide"><NumberField label="Length" value={project.duration} min={0.1} max={600} step={0.1} unit="s" defaultValue={4} onChange={(v) => ed.setProject({ duration: v })} /></div>
+        <div className="rs-tp__field rs-tp__field--wide"><NumberField label="Length" value={project.duration} min={0.1} max={600} step={0.1} unit="s" defaultValue={4} disabled={lengthSet} title={lengthSet ? 'The length follows the Media Timeline (untick "Set project length" on it to type a length)' : undefined} onChange={(v) => ed.setProject({ duration: v })} /></div>
         <RecordButton compact />
         {kbdTarget && (
           <span className="rs-tp__kbd" title="Computer keys play the selected node: A–; notes, 1–9 octave, Z/X octave down/up, C/V softer/harder. Esc or deselect to release the keys.">

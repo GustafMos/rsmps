@@ -1,7 +1,7 @@
 /** Graph loading and command-line overrides (inputs, --set, --size, ...). Pure functions over GraphDoc. */
 import { readFileSync } from 'node:fs';
 import type { Registry } from '../engine/define';
-import { setParam } from '../engine/graph';
+import { setParam, withEffectiveDuration } from '../engine/graph';
 import { DEFAULT_PROJECT, type GraphDoc, type NodeInstance, type ParamDef } from '../engine/types';
 import { expandInputs } from './media';
 
@@ -76,7 +76,8 @@ function parseValue(raw: string): unknown {
 }
 
 export function applyOverrides(graph: GraphDoc, registry: Registry, o: GraphOverrides): GraphDoc {
-  let g = graph;
+  // A node that sets the project length (Media Timeline) does so first; an explicit --duration below still wins.
+  let g = withEffectiveDuration(graph, registry);
   const project = { ...g.project };
   if (o.size) Object.assign(project, parseSize(o.size));
   if (o.fps !== undefined) project.fps = o.fps;

@@ -93,3 +93,14 @@
 .rs-phone__steps li { display: flex; align-items: center; gap: var(--s-2); }
 .rs-phone__steps li.is-done { color: var(--ok); }
 .rs-phone__detail { color: var(--text-dim); }
+
+/* Code editor (string params with kind: 'code') */
+.rs-code { display: flex; flex-direction: column; gap: var(--s-1); width: 100%; min-width: 0; }
+.rs-code__bar { display: flex; align-items: center; gap: var(--s-2); }
+.rs-code__examples { flex: 0 1 auto; max-width: 150px; }
+.rs-code__state { margin-left: auto; color: var(--text-3, #8a8a8a); white-space: nowrap; }
+.rs-code__area { width: 100%; box-sizing: border-box; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r); padding: var(--s-1) var(--s-2); font-size: var(--fs-sm); line-height: 1.45; tab-size: 2; white-space: pre; overflow: auto; resize: vertical; min-height: 140px; }
+.rs-code__area:hover { border-color: var(--bg-5); }
+.rs-code__area:focus { border-color: var(--accent-hi); outline: none; }
+.rs-code__help summary { cursor: pointer; color: var(--text-3, #8a8a8a); }
+.rs-code__help pre { margin: var(--s-1) 0 0; white-space: pre-wrap; font-size: var(--fs-xs, 11px); color: var(--text-2, #b0b0b0); }

@@ -361,11 +361,13 @@ export class AudioGraphRunner {
     const sums: Record<string, StereoBlock> = {};
     const merges: Record<string, MidiEvent[]> = {};
     const ins: AudioIO['in'] = {};
+    const inWires: Record<string, StereoBlock[]> = {};
     const midiIn: AudioIO['midiIn'] = {};
     for (const [name, i] of Object.entries(def.inputs as InputSchema)) {
       if (i.type === 'audio') {
         sums[name] = [new Float32Array(bs), new Float32Array(bs)];
         ins[name] = null;
+        inWires[name] = [];
       } else if (i.type === 'midi') {
         merges[name] = [];
         midiIn[name] = [];
@@ -380,6 +382,7 @@ export class AudioGraphRunner {
       frames: bs,
       sampleRate: this.sampleRate,
       in: ins,
+      inWires: kernel.perWire ? inWires : undefined,
       midiIn,
       out,
       midiOut,
@@ -471,6 +474,11 @@ export class AudioGraphRunner {
             }
           }
           io.in[name] = sum;
+        }
+        const wl = io.inWires?.[name];
+        if (wl) {
+          wl.length = 0;
+          if (srcs) for (const s of srcs) wl.push(s.node.io.out[s.port]);
         }
       }
       for (let k = 0; k < pn.midiInNames.length; k++) {

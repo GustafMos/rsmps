@@ -159,9 +159,19 @@ describe('animation exports without ffmpeg', () => {
     expect(() => readdirSync(out)).toThrow();
   });
 
-  it('skips outputs of kind print with a message', async () => {
-    const graph = await withAnimate({ kind: 'print' });
-    await expect(renderGraphBatch({ graph, registry, outDir: tempDir(), sequenceFps: 12, dryRun: true })).rejects.toThrow(/no exportable Output/);
+  it('writes print sheets (PDF) for outputs of kind print, and plans them in a dry run', async () => {
+    const graph = await withAnimate({ kind: 'print', name: 'sheet', printOutput: 'both', printDpi: 72, printColumns: 3, printRows: 4, step: 3 });
+    const plan = await renderGraphBatch({ graph, registry, outDir: join(tempDir(), 'never'), sequenceFps: 12, dryRun: true });
+    expect(plan.plan[0]).toMatchObject({ kind: 'print', path: 'sheet.pdf' });
+    const out = tempDir();
+    const sum = await renderGraphBatch({ graph, registry, outDir: out, sequenceFps: 12, gpu });
+    expect(sum.errors).toEqual([]);
+    expect(sum.skipped).toEqual([]);
+    const pdf = readFileSync(join(out, 'sheet.pdf'));
+    expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    const png = readFileSync(join(out, 'sheet_page_01.png'));
+    expect([...png.subarray(1, 4)]).toEqual([80, 78, 71]); // PNG signature
+    expect(sum.files).toEqual(expect.arrayContaining(['sheet.pdf', 'sheet_page_01.png']));
   });
 });
 

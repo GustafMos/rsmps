@@ -16,12 +16,13 @@ import { trackPointer } from './lib/drag';
 import { useShortcuts } from './shortcuts';
 import { ScanView } from './scan/ScanView';
 import { TimelineEditor } from './timeline/TimelineEditor';
+import { MediaEditor } from './timeline/MediaEditor';
+import { MEDIA_TIMELINE_ID } from '../engine/lib/media-edit';
 import { ScanQuickSettings, ScanStepper } from './scan/ScanStage';
 import { usePlayKeys } from './playKeys';
 import { useRenderWatchdog } from './watchdog';
+import { SafetyBar } from './components/SafetyBar';
 import './app.css';
-
-const SAFE = /[?&]safe/.test(location.search);
 
 export function App() {
   const { ed, io } = useApp();
@@ -31,6 +32,7 @@ export function App() {
   const prefs = useEd((s) => s.prefs);
   const mode = useEd((s) => s.mode);
   const timelineNode = useEd((s) => s.timelineNode);
+  const timelineIsMedia = useEd((s) => s.graph.nodes.find((n) => n.id === s.timelineNode)?.type === MEDIA_TIMELINE_ID);
   const scanStage = useEd((s) => s.scanStage);
   const switching = useEd((s) => s.switching);
   const center = useRef<HTMLDivElement>(null);
@@ -87,10 +89,8 @@ export function App() {
           .catch((err) => ed.toast(`Import failed: ${String(err)}`, 'error'));
       }}
     >
-      {SAFE && (
-        <div className="rs-safe" role="alert">Safe mode: rendering is off. Remove ?safe from the address to render.</div>
-      )}
       <TopBar />
+      <SafetyBar />
       <ProjectTabs />
       {switching && (
         <div className="rs-switching" role="status" aria-live="polite">
@@ -118,7 +118,7 @@ export function App() {
             <div className="rs-panel" style={{ flex: 1 }}>
               <div className="rs-panel__head"><span className="rs-caps">Node graph</span><span className="rs-panel__spacer" /><span className="rs-panel__tip">Shift+A add · Space+drag pan · wheel zoom</span>{maxBtn('graph')}</div>
               <div className="rs-panel__body"><GraphView /></div>
-              {timelineNode && <TimelineEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} />}
+              {timelineNode && (timelineIsMedia ? <MediaEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} /> : <TimelineEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} />)}
             </div>
           )}
         </section>

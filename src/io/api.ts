@@ -282,6 +282,14 @@ export interface ProjectStore {
   loadPreset(id: string): Promise<GraphDoc | null>;
   savePreset(name: string, graph: GraphDoc, thumbnail?: Blob): Promise<void>;
   deletePreset(id: string): Promise<void>;
+
+  /**
+   * Rolling backups: the last ~10 GOOD autosaves of a project (snapshots taken after a frame rendered), newest first.
+   * `recordBackup` is rate-limited by the caller (see src/ui/safety.ts); identical content is skipped.
+   */
+  recordBackup(projectId: string, graph: GraphDoc): Promise<boolean>;
+  listBackups(projectId: string): Promise<import('./backups').BackupInfo[]>;
+  loadBackup(projectId: string, backupId: string): Promise<GraphDoc | null>;
 }
 
 /** Hardware devices and the on-screen keyboard; passes straight through to the audio engine. */
@@ -324,6 +332,12 @@ export interface DeviceApi {
 
 /** State of a phone link session (QR code). */
 export type PhoneState = 'waiting' | 'connected' | 'disconnected' | 'expired';
+
+/**
+ * How far a pairing got, in order: nothing yet, the phone reached this computer, the code was accepted, video is flowing.
+ * The progress ticks in the UI come from this value, never from the wording of `detail()`.
+ */
+export type PhoneProgress = 'waiting' | 'reached' | 'accepted' | 'connected';
 
 export interface PhoneAddress {
   /** Origin to put in the QR code, e.g. https://192.168.0.5:5173 */
@@ -369,9 +383,11 @@ export interface PhoneApi {
   state(token: string): PhoneState;
   /** One plain sentence about what is happening or what to try ("Your phone reached this computer...", the firewall checklist, why it closed). */
   detail(token: string): string;
+  /** How far the pairing got (typed; drives the three progress ticks). */
+  progress(token: string): PhoneProgress;
   /** When an unused code expires (ms since epoch), null once a phone joined. Show a countdown. */
   expiresAt(token: string): number | null;
-  onState(listener: (token: string, state: PhoneState, detail: string) => void): () => void;
+  onState(listener: (token: string, state: PhoneState, detail: string, progress: PhoneProgress) => void): () => void;
   close(token: string): void;
 }
 

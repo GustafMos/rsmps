@@ -2,9 +2,12 @@ import { MenuPopup, type MenuItem } from '../components/Menu';
 import { useApp, useEd } from '../store/context';
 import { setPin } from '../store/nodeView';
 import { effectivePins } from '../lib/layout';
+import { bakeSelection } from '../store/bake';
+import { bindingsOf } from '../keymap';
 
 export function NodeContextMenu() {
-  const { ed, graphCtl } = useApp();
+  const app = useApp();
+  const { ed, graphCtl } = app;
   const req = useEd((s) => s.contextMenu);
   const sel = useEd((s) => s.selection);
   if (!req) return null;
@@ -37,6 +40,7 @@ export function NodeContextMenu() {
     { label: 'Copy', icon: 'copy', onClick: () => ed.copy(), shortcut: 'Ctrl+C' },
     { label: 'Paste', icon: 'copy', onClick: () => ed.paste(), shortcut: 'Ctrl+V', disabled: !ed.hasClipboard() },
     { label: 'Group into frame', icon: 'frame', onClick: () => ed.groupSelection(), shortcut: 'Ctrl+G' },
+    { label: 'Bake selection', icon: 'save', onClick: () => void bakeSelection(app), shortcut: bindingsOf('graph.bake')[0] },
     { label: 'Remove from frame', onClick: () => ed.removeFromFrame(sel), disabled: !node?.frame, shortcut: 'Ctrl+Alt+G' },
     { sep: true },
     { label: 'Delete', icon: 'trash', onClick: () => ed.deleteSelection(), shortcut: 'Del' },

@@ -1,11 +1,12 @@
 import { defineNode } from '../../define';
+import { withArtGrid } from '../../lib/art-grid';
 
-/** Plain block pixelation that keeps the image size. For a real art-resolution image use Pixelate. */
+/** Flat blocks painted on the full-resolution image (no art grid, size unchanged). For a real art-resolution image, or a masked art grid that Dither can follow, use Pixelate. */
 export default defineNode({
   id: 'mosaic',
   title: 'Mosaic',
   category: 'pixel',
-  description: 'Simple block pixelation that keeps the image size. Each block becomes one flat colour.',
+  description: 'Paints flat blocks on the image and keeps its size and resolution (no art grid; use Pixelate for a real low-resolution pixel-art image). Each block becomes one flat colour.',
   keywords: ['pixelate', 'blocks', 'tiles', 'censor'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
@@ -24,10 +25,11 @@ export default defineNode({
   },
   summary: (p) => `${p.block} px`,
   render(ctx) {
-    const src = ctx.in.image;
+    const input = ctx.in.image;
     // A block is a whole number of texels, never smaller than one (coarse render grids give sub-texel lengths).
-    const block = Math.max(1, Math.round(ctx.params.block));
-    const image = ctx.gpu.pass({
+    const image = withArtGrid(ctx.gpu, input, 0, (src, grid) => {
+      const block = Math.max(1, Math.round(grid.toArt(ctx.params.block)));
+      return ctx.gpu.pass({
       label: 'mosaic',
       size: src,
       textures: { src },
@@ -51,6 +53,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   }
   return acc / f32(n * n);
 }`,
+      });
     });
     return { image };
   },

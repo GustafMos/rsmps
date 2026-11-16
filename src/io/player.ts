@@ -80,6 +80,8 @@ const CACHE_BYTES = 256 * 1024 * 1024;
 /** Out-of-memory errors tolerated per frame before the error is shown. */
 const OOM_RETRIES = 3;
 const FPS_RING = 256;
+/** Frames kept waiting for the RAM cache while playing (each holds one texture of the viewed size). */
+const CAPTURE_QUEUE = 4;
 const EMPTY_ERRORS: ReadonlyMap<string, string> = new Map();
 
 function isTextured(v: unknown): v is ImageValue | MaskValue {
@@ -121,7 +123,12 @@ export class PlayerImpl implements Player {
   /** The one GPU texture cached frames are decoded into (retained by the player). */
   private restoreTex: GPUTexture | null = null;
   private cacheQuality: CacheQuality = 'compressed';
-  private pendingCapture: { frame: number; texture: GPUTexture; width: number; height: number; proxy: number; key: string; tries: number } | null = null;
+  /**
+   * Frames waiting to be packed into the RAM cache, oldest first. While paused only the latest matters (one slot); while PLAYING up to
+   * CAPTURE_QUEUE are kept, because a heavy graph never leaves the player idle: without a queue not one frame of the first pass would
+   * reach the cache and the second pass would render everything again.
+   */
+  private pendingCaptures: { frame: number; texture: GPUTexture; width: number; height: number; proxy: number; key: string; tries: number }[] = [];
   private captureTimer: ReturnType<typeof setTimeout> | null = null;
   private capturing = false;
   private capturePresenter: OffscreenPresenter | null = null;
@@ -411,8 +418,8 @@ export class PlayerImpl implements Player {
     this.capturePresenter = null;
     if (this.captureTimer) clearTimeout(this.captureTimer);
     this.captureTimer = null;
-    if (this.pendingCapture) this.gpu.release(this.pendingCapture.texture);
-    this.pendingCapture = null;
+    for (const c of this.pendingCaptures) this.gpu.release(c.texture);
+    this.pendingCaptures = [];
   }
 
   private freeRestoreTexture(): void {
@@ -461,17 +468,19 @@ export class PlayerImpl implements Player {
     if (this.cache.maxBytes <= 0) return;
     const have = this.cache.get(frame, proxy);
     if (have) return;
+    if (this.pendingCaptures.some((c) => c.frame === frame && c.key === key && c.proxy >= proxy)) return;
     this.gpu.retain(image.texture);
-    if (this.pendingCapture) {
-      this.gpu.release(this.pendingCapture.texture);
+    const room = this.playing ? CAPTURE_QUEUE : 1;
+    while (this.pendingCaptures.length >= room) {
+      this.gpu.release(this.pendingCaptures.shift()!.texture); // the oldest gives way: latest wins
       this.cacheStats.skipped++;
     }
-    this.pendingCapture = { frame, texture: image.texture, width: image.width, height: image.height, proxy, key, tries: 0 };
+    this.pendingCaptures.push({ frame, texture: image.texture, width: image.width, height: image.height, proxy, key, tries: 0 });
     this.scheduleCapture();
   }
 
   private scheduleCapture(): void {
-    if (this.captureTimer || !this.pendingCapture) return;
+    if (this.captureTimer || this.pendingCaptures.length === 0) return;
     this.captureTimer = setTimeout(() => {
       this.captureTimer = null;
       void this.runCapture();
@@ -479,21 +488,23 @@ export class PlayerImpl implements Player {
   }
 
   private async runCapture(): Promise<void> {
-    const job = this.pendingCapture;
+    const job = this.pendingCaptures[0];
     if (!job || this.capturing || this.disposed) return;
-    // Never compete with playback: wait until the player and the GPU are idle, and give up on a frame that never gets the chance.
-    const busy = this.running || this.kickQueued || this.holds > 0 || this.deps.router.exporting || this.gpu.queuedFrames > 0;
+    // Never compete with the render: paused, wait until the player and the GPU are idle. Playing, a heavy graph keeps the player busy
+    // all the time, so the only condition is that the GPU is not running far ahead (at most one frame in flight).
+    const busy = this.holds > 0 || this.deps.router.exporting || (this.playing ? this.gpu.queuedFrames > 1 : this.running || this.kickQueued || this.gpu.queuedFrames > 0);
     if (busy) {
-      if (++job.tries > 6) {
-        this.pendingCapture = null;
+      if (++job.tries > (this.playing ? 40 : 6)) {
+        this.pendingCaptures.shift();
         this.gpu.release(job.texture);
         this.cacheStats.skipped++;
+        if (this.pendingCaptures.length) this.scheduleCapture();
         return;
       }
       this.scheduleCapture();
       return;
     }
-    this.pendingCapture = null;
+    this.pendingCaptures.shift();
     this.capturing = true;
     const started = performance.now();
     try {
@@ -517,7 +528,7 @@ export class PlayerImpl implements Player {
       this.cacheStats.captureMs += performance.now() - started;
       this.gpu.release(job.texture);
       this.capturing = false;
-      if (this.pendingCapture) this.scheduleCapture();
+      if (this.pendingCaptures.length) this.scheduleCapture();
     }
   }
 
@@ -631,7 +642,7 @@ export class PlayerImpl implements Player {
     this.lostMessage = null;
     this.errors = new Map();
     this.cache.clear(); // packed frames live in RAM and would still be valid, but the key space is reset with the device
-    this.pendingCapture = null; // its texture belonged to the old device
+    this.pendingCaptures = []; // their textures belonged to the old device
     this.restoreTex = null;
     this.shown = null;
     this.size = null;
@@ -763,7 +774,9 @@ export class PlayerImpl implements Player {
     if (!view || this.disposed || this.lostMessage || !this.ctx) return null;
     if (this.deps.router.exporting || this.holds > 0) return null; // an export owns Host.signal / the GPU right now
     if (this.keyDirty) {
-      const key = renderHash(view.graph, view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}/${view.activeOutput ?? ''}`);
+      // Only what feeds the viewed node (plus the active Output, whose frame settings size the picture) is part of the key: an edit in
+      // another branch must not throw away the finished frames.
+      const key = renderHash(view.graph, view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}/${view.activeOutput ?? ''}`, view.activeOutput ? [view.activeOutput] : []);
       this.keyDirty = false;
       if (key !== this.key) {
         this.key = key;

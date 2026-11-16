@@ -1,4 +1,6 @@
 /** Small shared helpers for src/io (no browser APIs at import time, so they are unit-testable). */
+import { stableStringify } from '../engine/lib/stable-json';
+import { upstream } from '../engine/graph';
 import type { GraphDoc } from '../engine/types';
 
 /** Same string hash the engine uses for its cache keys. */
@@ -16,14 +18,21 @@ export function hashString(str: string): string {
 }
 
 /**
- * Hash of everything in a graph that can change a rendered pixel: project settings, node types,
- * params, bypass flags and wires. Positions, labels, collapsed state and frames are ignored so
- * dragging a node does not throw away the frame cache.
+ * Hash of everything that can change a pixel of the VIEWED node: project settings, and the node types, params, bypass flags and wires
+ * of the viewed node and everything upstream of it. Positions, labels, collapsed state and frames are ignored so dragging a node does
+ * not throw away the frame cache, and so is every node that does not feed the view: editing a branch the viewer is not looking at
+ * keeps the finished frames. `also`: nodes outside that chain which still matter (the active Output node: its frame settings decide
+ * the size of the picture).
  */
-export function renderHash(graph: GraphDoc, node: string | null, port: string | undefined, extra = ''): string {
-  const nodes = graph.nodes.map((n) => [n.id, n.type, n.params, n.bypass ? 1 : 0]);
-  const edges = graph.edges.map((e) => [e.from.node, e.from.port, e.to.node, e.to.port]);
-  return hashString(JSON.stringify([graph.project, nodes, edges, node, port ?? '', extra]));
+export function renderHash(graph: GraphDoc, node: string | null, port: string | undefined, extra = '', also: Iterable<string> = []): string {
+  let ids: Set<string> | null = null;
+  if (node && graph.nodes.some((n) => n.id === node)) {
+    ids = upstream(graph, node);
+    for (const id of also) ids.add(id);
+  }
+  const nodes = graph.nodes.filter((n) => !ids || ids.has(n.id)).map((n) => [n.id, n.type, n.params, n.bypass ? 1 : 0]);
+  const edges = graph.edges.filter((e) => !ids || ids.has(e.to.node)).map((e) => [e.from.node, e.from.port, e.to.node, e.to.port]);
+  return hashString(stableStringify([graph.project, nodes, edges, node, port ?? '', extra]));
 }
 
 /** Total frame count of a project (at least 1). */

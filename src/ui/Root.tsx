@@ -8,12 +8,15 @@ import { AppProvider, type AppCtx } from './store/context';
 import { Editor, resolveActiveOutput } from './store/editor';
 import { createPlayerStore } from './store/playerStore';
 import { PENDING_KEY, type PendingEdit } from './watchdog';
+import { beginSafety, installSafety, pushView, safetyStore } from './safety';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 /** A param edit whose render never finished last time (page reloaded within seconds): offer to revert it. */
 function offerRecovery(ed: Editor): void {
   try {
-    const raw = sessionStorage.getItem(PENDING_KEY);
-    sessionStorage.removeItem(PENDING_KEY);
+    if (safetyStore.get().paused) return; // safe mode: the banner offers "Undo last change" instead
+    const raw = localStorage.getItem(PENDING_KEY);
+    localStorage.removeItem(PENDING_KEY);
     if (!raw) return;
     const p = JSON.parse(raw) as PendingEdit;
     if (Date.now() - p.at > 30000 || !ed.state.graph.nodes.some((n) => n.id === p.nodeId)) return;
@@ -39,6 +42,7 @@ export function Root() {
       try {
         const io = await bootIo();
         if (cancelled) return;
+        beginSafety(); // safe start? (unclean last run, Shift, ?safe, "Reload in safe mode"): decides before anything renders
         const ed = new Editor(io);
         const playerStore = createPlayerStore(io);
         const graphCtl = new GraphController();
@@ -48,20 +52,23 @@ export function Root() {
         let lastView: string | null | undefined;
         let lastItem = -1;
         let lastActive: string | null | undefined;
+        let lastPaused: boolean | null = null;
         let lastSaved: GraphDoc | null = null;
         let lastThumb = Date.now();
         const sync = () => {
           const s = ed.state;
           const active = resolveActiveOutput(s, io.registry);
-          if (s.graph === lastGraph && s.viewedNodeId === lastView && s.item === lastItem && active === lastActive) return;
+          const paused = safetyStore.get().paused;
+          if (s.graph === lastGraph && s.viewedNodeId === lastView && s.item === lastItem && active === lastActive && paused === lastPaused) return;
           lastActive = active;
+          lastPaused = paused;
           const graphChanged = s.graph !== lastGraph;
           const edited = s.graph !== lastSaved;
           lastSaved = s.graph;
           lastGraph = s.graph;
           lastView = s.viewedNodeId;
           lastItem = s.item;
-          io.player.setView({ graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active });
+          pushView(io.player, { graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active }, paused);
           void graphChanged;
           if (edited && s.activeProject && !s.switching) {
             if (ed.skipSave) ed.skipSave = false;
@@ -77,6 +84,7 @@ export function Root() {
           }
         };
         const unsub = ed.store.subscribe(sync);
+        const unsubSafety = safetyStore.subscribe(sync);
         const unreg = io.registry.subscribe(() => {
           lastGraph = null; // plugin installed/removed: re-evaluate
           sync();
@@ -86,11 +94,15 @@ export function Root() {
         offerRecovery(ed);
         sync();
 
+        const app: AppCtx = { io, ed, playerStore, graphCtl };
+        const uninstall = installSafety(app);
         stop = () => {
+          uninstall();
+          unsubSafety();
           unsub();
           unreg();
         };
-        setBoot({ status: 'ready', app: { io, ed, playerStore, graphCtl } });
+        setBoot({ status: 'ready', app });
       } catch (err) {
         if (!cancelled) setBoot({ status: 'error', message: err instanceof Error ? err.message : String(err) });
       }
@@ -130,7 +142,9 @@ export function Root() {
   }
   return (
     <AppProvider value={boot.app}>
-      <App />
+      <ErrorBoundary app={boot.app}>
+        <App />
+      </ErrorBoundary>
     </AppProvider>
   );
 }

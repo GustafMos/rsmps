@@ -54,8 +54,8 @@ one batch item per file, in natural order (`a2` before `a10`). Put them before t
 | `--set <node>.<param>=<json>` | override a param (repeatable). Output node params work too: `--set Out.columns=8` |
 | `--fps`, `--size WxH`, `--loop` / `--no-loop` | project overrides |
 | `--duration <s\|auto>` | project length; `auto` = the length of each item's source video |
-| `--format <x>` | `png`, `webp`, `jpeg`; or `image`, `sequence`, `spritesheet`, `video`; or a codec name |
-| `--kind <image\|sequence\|spritesheet\|video>` | force the export kind of every output |
+| `--format <x>` | `png`, `webp`, `jpeg`; or `image`, `sequence`, `spritesheet`, `video`, `print`; or a codec name |
+| `--kind <image\|sequence\|spritesheet\|video\|print>` | force the export kind of every output |
 | `--codec <name>` | video codec, implies `--kind video` (below) |
 | `--quality <0.1-1>`, `--bitrate <Mbps>` | still quality (webp/jpeg), lossy video bitrate |
 | `--plugin <file.js>` | load node definitions (default/named exports; objects or arrays); repeatable |
@@ -63,7 +63,7 @@ one batch item per file, in natural order (`a2` before `a10`). Put them before t
 
 Without overrides each Output node's own params decide (`kind`, `imageFormat`, `scale`, `columns`,
 `padding`, `name`). `kind: auto` becomes a video when a source is a video or the picture changes between
-frames, otherwise a still. An Output node with kind `print` is skipped with a message.
+frames, otherwise a still. An Output node with kind `print` writes its print sheets (PDF and/or page PNGs, set by the node's Print options) with the same code as the app; see PRINT_AND_SCAN.md.
 
 ### Codecs
 

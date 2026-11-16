@@ -43,7 +43,7 @@ Options (render)
   --loop / --no-loop         project loop mode
   --size WxH                 project canvas size
   --format <x>               png|webp|jpeg, or image|sequence|spritesheet|video, or a codec name
-  --kind <image|sequence|spritesheet|video>   force the export kind of every output
+  --kind <image|sequence|spritesheet|video|print>   force the export kind of every output
   --codec <name>             video codec (implies --kind video): ${CODEC_NAMES}
   --quality <0.1-1>          still image quality (webp/jpeg)
   --bitrate <Mbps>           lossy video bitrate
@@ -233,7 +233,7 @@ async function cmdRender(argv: string[]): Promise<number> {
 
   // Export overrides.
   const ov: Overrides = {};
-  const kinds = ['image', 'sequence', 'spritesheet', 'video'];
+  const kinds = ['image', 'sequence', 'spritesheet', 'video', 'print'];
   const fmt = one(p, 'format');
   const kind = one(p, 'kind');
   const codecName = one(p, 'codec');
@@ -241,7 +241,7 @@ async function cmdRender(argv: string[]): Promise<number> {
     if (IMAGE_FORMATS.includes(fmt.toLowerCase())) ov.imageFormat = normalizeImageFormat(fmt)!;
     else if (kinds.includes(fmt.toLowerCase())) ov.kind = fmt.toLowerCase() as Kind;
     else if (parseCodec(fmt)) ov.codec = CODECS[parseCodec(fmt)!];
-    else throw new Error(`Unknown --format "${fmt}". Use png, webp, jpeg, image, sequence, spritesheet, video or a codec (${CODEC_NAMES}).`);
+    else throw new Error(`Unknown --format "${fmt}". Use png, webp, jpeg, image, sequence, spritesheet, video, print or a codec (${CODEC_NAMES}).`);
   }
   if (kind) {
     if (!kinds.includes(kind)) throw new Error(`Unknown --kind "${kind}" (${kinds.join(', ')}).`);

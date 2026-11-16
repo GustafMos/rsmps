@@ -72,3 +72,19 @@ Install with the Plugins panel (choose the `.js` file). Installing a file with t
 replaces the previous version. Removing a plugin unregisters its nodes; graphs that still use them
 keep the nodes, which show an "Unknown node type (missing plugin?)" error until the plugin is
 installed again. Installed plugins are re-registered automatically at every start-up.
+
+## Custom Shader node vs a plugin
+
+The built-in **Custom Shader** node (Stylize) lets you type a WGSL fragment shader straight into the
+inspector. WGSL is the native, open-standard shading language of WebGPU (it reads like GLSL). The code is
+either just the body of `fn fx(uv: vec2f, px: vec2f) -> vec4f`, or a full snippet that defines `fn fx`
+(and helper functions) itself. Built-ins: `src(uv)` / `src2(uv)` (the two optional input images,
+premultiplied), `HAS_SRC` / `HAS_SRC2`, `u.size`, `u.time` (seconds), `u.phase` (0..1 loop phase, use
+whole cycles so it loops), `u.a` ... `u.d` (sliders, wire-able), `u.color`, plus the prelude helpers
+(`unpremul`, `premul`, `luma`, `hash21`, `vnoise`, `loopNoise`, `hsvToRgb`, ...). Compile errors show on
+the node with the line number of *your* code.
+
+It is meant for quick experiments. The code lives in the project file as one text parameter and the node
+has fixed inputs and sliders. To **ship** an effect (own name, own inputs, own labelled parameters, reuse
+across projects), turn the shader into a plugin: copy the WGSL into the `wgsl` of a `ctx.gpu.pass(...)`
+call as in the example above and give the plugin its own `params`.

@@ -1,4 +1,5 @@
 import { defineNode } from '../../define';
+import { PIXEL_SIZE_PARAM, withArtGrid } from '../../lib/art-grid';
 import type { DitherSpace } from '../../lib/pixel-color';
 import { diffuseGpu } from '../../lib/pixel-diffuse-gpu';
 import { diffuseWavefront } from '../../lib/pixel-wavefront-gpu';
@@ -159,7 +160,9 @@ export default defineNode({
   id: 'dither',
   title: 'Dither',
   category: 'pixel',
-  description: 'Reduces an image to the wired palette with a dither pattern: ordered, pattern, palette-blend or error diffusion.',
+  description:
+    'Reduces an image to the wired palette with a dither pattern: ordered, pattern, palette-blend or error diffusion. ' +
+    'Works on the pixel grid: after a (masked) Pixelate it follows that grid, and on a full-resolution image set Pixel size to dither in chunky, fast art pixels (e.g. footage + tracked mask -> Dither).',
   keywords: ['bayer', 'floyd', 'steinberg', 'atkinson', 'halftone', 'blue noise', 'ordered', 'diffusion', 'retro', 'palette'],
   inputs: {
     image: { type: 'image', required: true, label: 'Image' },
@@ -169,6 +172,7 @@ export default defineNode({
   maskable: true,
   params: {
     fallback: FALLBACK_PARAM,
+    pixelSize: PIXEL_SIZE_PARAM,
     algorithm: {
       type: 'enum',
       default: 'bayer-4',
@@ -189,7 +193,7 @@ export default defineNode({
       step: 1,
       unit: 'px',
       label: 'Pattern scale',
-      hint: 'Size of one pattern cell. 1 = one texel of this image: after Pixelate (unit 1) that is one art pixel. On other images it scales with the media. Always rounded to a whole number of texels, never below 1, so patterns stay even on coarse or fine render grids.',
+      hint: 'Size of one pattern cell. 1 = one art pixel (one texel after Pixelate, or one grid cell when Pixel size is used). On other images it scales with the media. Always rounded to a whole number of texels, never below 1, so patterns stay even on coarse or fine render grids.',
       visibleIf: (p) => algorithmFamily(p.algorithm as string) !== 'diffusion',
     },
     colorSpace: { type: 'enum', default: 'oklab', options: SPACE_OPTIONS, label: 'Colour space' },
@@ -205,44 +209,45 @@ export default defineNode({
   },
   summary: (p, wired) => `${DITHER_ALGORITHMS.find((a) => a.id === p.algorithm)?.label ?? p.algorithm}${algorithmFamily(p.algorithm) === 'diffusion' ? (isSequential(p) ? ' · sequential (max 0.35 MP)' : ' · exact parallel') : ''} · ${paletteSummary(!!wired?.has('palette'), p.fallback)}`,
   async render(ctx) {
-    const src = ctx.in.image;
+    const input = ctx.in.image;
     const p = ctx.params;
-    const colors = clampPalette(resolvePalette(ctx.in.palette, ctx.params.fallback));
-    if (colors.length === 0) return { image: src };
+    const colors = clampPalette(resolvePalette(ctx.in.palette, p.fallback));
+    if (colors.length === 0) return { image: input };
     const space = p.colorSpace as DitherSpace;
     const family = algorithmFamily(p.algorithm);
 
-    if (family === 'diffusion') {
-      if (isSequential(p)) {
-        if (src.width * src.height > SEQUENTIAL_BUDGET) {
-          throw new Error(`Dither: ${p.algorithm === 'riemersma' ? 'Riemersma' : 'Serpentine scan'} walks pixels one by one and is limited to ${SEQUENTIAL_BUDGET / 1000}k pixels (this image is ${src.width}x${src.height}). Turn off Serpentine / choose another algorithm, or Pixelate first.`);
+    // Everything below runs on the art grid when the image carries one (or Pixel size > 0): see lib/art-grid.ts.
+    const image = withArtGrid(ctx.gpu, input, p.pixelSize, (src, grid) => {
+      if (family === 'diffusion') {
+        if (isSequential(p)) {
+          if (src.width * src.height > SEQUENTIAL_BUDGET) {
+            throw new Error(`Dither: ${p.algorithm === 'riemersma' ? 'Riemersma' : 'Serpentine scan'} walks pixels one by one and is limited to ${SEQUENTIAL_BUDGET / 1000}k pixels (this working grid is ${src.width}x${src.height}). Turn off Serpentine / choose another algorithm, or raise Pixel size.`);
+          }
+          return diffuseGpu(ctx.gpu, src, colors, { algorithm: p.algorithm, strength: p.strength * p.errorAmount, space, serpentine: p.serpentine });
         }
-        return { image: diffuseGpu(ctx.gpu, src, colors, { algorithm: p.algorithm, strength: p.strength * p.errorAmount, space, serpentine: p.serpentine }) };
+        return diffuseWavefront(ctx.gpu, src, colors, { algorithm: p.algorithm, space, amount: p.strength * p.errorAmount, jitter: p.jitter, edgeKeep: p.edgeKeep, snap: p.stable * 0.06 });
       }
-      return {
-        image: diffuseWavefront(ctx.gpu, src, colors, { algorithm: p.algorithm, space, amount: p.strength * p.errorAmount, jitter: p.jitter, edgeKeep: p.edgeKeep, snap: p.stable * 0.06 }),
-      };
-    }
 
-    const algorithm = p.algorithm;
-    const matrix = thresholdMatrix(algorithm);
-    const kind = family === 'none' ? 2 : algorithm === 'white-noise' ? 1 : algorithm === 'yliluoma' ? 3 : 0;
-    const mat = matrix ? matrixTexture(ctx.gpu, matrix.width, matrix.height, matrix.data) : matrixTexture(ctx.gpu, 1, 1, new Float32Array([0.5]));
-    const image = ctx.gpu.pass({
-      label: 'dither',
-      size: src,
-      textures: { src, pal: paletteTexture(ctx.gpu, colors, space), mat: { texture: mat.texture } },
-      uniforms: {
-        palCount: colors.length,
-        colorSpace: SPACE_INDEX[space],
-        strength: p.strength,
-        scale: Math.max(1, Math.round(p.scale)),
-        kind,
-        matW: mat.width,
-        matH: mat.height,
-        seed: p.seed,
-      },
-      wgsl: WGSL,
+      const algorithm = p.algorithm;
+      const matrix = thresholdMatrix(algorithm);
+      const kind = family === 'none' ? 2 : algorithm === 'white-noise' ? 1 : algorithm === 'yliluoma' ? 3 : 0;
+      const mat = matrix ? matrixTexture(ctx.gpu, matrix.width, matrix.height, matrix.data) : matrixTexture(ctx.gpu, 1, 1, new Float32Array([0.5]));
+      return ctx.gpu.pass({
+        label: 'dither',
+        size: src,
+        textures: { src, pal: paletteTexture(ctx.gpu, colors, space), mat: { texture: mat.texture } },
+        uniforms: {
+          palCount: colors.length,
+          colorSpace: SPACE_INDEX[space],
+          strength: p.strength,
+          scale: Math.max(1, Math.round(grid.toArt(p.scale))),
+          kind,
+          matW: mat.width,
+          matH: mat.height,
+          seed: p.seed,
+        },
+        wgsl: WGSL,
+      });
     });
     return { image };
   },

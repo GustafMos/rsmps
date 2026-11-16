@@ -5,11 +5,13 @@ import pkg from '../../../package.json';
 import { enabledOutputs } from '../../engine/graph';
 import { resolveActiveOutput } from '../store/editor';
 import { useApp, useEd } from '../store/context';
+import { reloadInSafeMode } from '../safety';
 import './topbar.css';
 import '../scan/scan.css';
 
 export function TopBar() {
-  const { io, ed } = useApp();
+  const app = useApp();
+  const { io, ed } = app;
   const name = useEd((s) => s.graph.name);
   const canUndo = useEd((s) => s.canUndo);
   const canRedo = useEd((s) => s.canRedo);
@@ -48,6 +50,8 @@ export function TopBar() {
     { label: 'Save as preset…', onClick: () => ed.openDialog('savePreset') },
     { sep: true },
     { label: 'Project settings', onClick: () => { ed.select([]); ed.setPrefs({ rightOpen: true }); } },
+    { label: 'Backups…', onClick: () => ed.openDialog('backups') },
+    { label: 'Reload in safe mode (rendering paused)', onClick: () => reloadInSafeMode(app) },
     { label: 'Palette Studio…', onClick: () => { ed.studioTarget = null; ed.openDialog('palette'); } },
     { label: 'Plugins…', onClick: () => ed.openDialog('plugins') },
     { sep: true },
@@ -62,6 +66,7 @@ export function TopBar() {
     { label: `Memory in use: ${mb} MB (this tab only)`, disabled: true },
     { label: 'Keyboard shortcuts', onClick: () => ed.openDialog('shortcuts'), shortcut: '?' },
     { label: 'Customise shortcuts…', onClick: () => ed.openDialog('keymap') },
+    { label: 'About RSMPS…', onClick: () => ed.openDialog('about') },
   ];
 
   const hasSel = useEd((s) => s.selection.length > 0);

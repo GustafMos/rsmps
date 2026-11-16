@@ -16,6 +16,8 @@ mkdirSync(stage, { recursive: true });
 // web build minus source maps (phone.html and its assets stay: the on-demand phone server serves them)
 cpSync(join(root, 'dist'), join(stage, 'web'), { recursive: true, filter: (p) => !p.endsWith('.map') });
 cpSync(join(root, 'desktop', 'main.mjs'), join(stage, 'main.mjs'));
+cpSync(join(root, 'desktop', 'backups.mjs'), join(stage, 'backups.mjs')); // imported by main.mjs
+cpSync(join(root, 'desktop', 'crash.mjs'), join(stage, 'crash.mjs'));
 cpSync(join(root, 'desktop', 'build', 'phone-server.mjs'), join(stage, 'phone-server.mjs'));
 cpSync(join(root, 'desktop', 'build', 'addons.mjs'), join(stage, 'addons.mjs'));
 cpSync(join(root, 'desktop', 'build', 'icon-256.png'), join(stage, 'icon.png')); // window icon (Windows/Linux)

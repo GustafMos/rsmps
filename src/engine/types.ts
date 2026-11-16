@@ -27,6 +27,11 @@ export interface ImageValue {
   width: number;
   height: number;
   unit: number;
+  /**
+   * Art-grid marker (docs/ENGINE.md rule 28): this image is a crisp (nearest) upscale of an art grid, one art pixel covers
+   * `cell` texels (>= 1, may be fractional). Absent or 1 = a normal image. Per-pixel pixel-art nodes work on the grid.
+   */
+  cell?: number;
 }
 
 /** A coverage mask. Same storage as an image; coverage lives in `.r` (rgb = coverage, a = 1). */
@@ -185,8 +190,11 @@ export interface StringParam extends ParamBase {
   /**
    * What the text is, so the UI can offer the right picker instead of a bare text box.
    *  - 'font': a font family name: shown as a dropdown of available fonts, each previewed in itself, still typeable.
+   *  - 'code': source code (WGSL): monospace editor that applies on blur / Ctrl+Enter, with an optional examples menu.
    */
-  kind?: 'font';
+  kind?: 'font' | 'code';
+  /** For kind 'code': ready-made snippets offered in the editor's Examples menu. */
+  examples?: readonly { label: string; code: string }[];
   multiline?: boolean;
 }
 export interface Vec2Param extends ParamBase {
@@ -501,9 +509,10 @@ export interface RenderCtx<P extends ParamSchema, I extends InputSchema> {
   /**
    * Re-evaluate an input at another time (seconds), or fetch a `lazy` input (omit `at` for the current frame).
    * For temporal nodes (echo, retime, loop cross-fade) and run-once analysis on a fixed frame.
-   * The result is only valid during this render call.
+   * `wire` picks one wire of a `multi` input (0 = the first, in wire order; default 0): a lazy multi input is how an editing
+   * node evaluates only the sources it actually shows. The result is only valid during this render call.
    */
-  pull<K extends keyof I>(input: K, at?: { seconds: number }): Promise<SocketValueMap[I[K]['type']] | null>;
+  pull<K extends keyof I>(input: K, at?: { seconds: number; wire?: number }): Promise<SocketValueMap[I[K]['type']] | null>;
   /**
    * Structural signature of everything upstream of an input (node types, stored params, wiring, project settings, frame
    * size). It changes only when the graph is edited, never from frame to frame, and does not evaluate anything. Empty string when
@@ -553,6 +562,14 @@ export interface NodeDef<
    * Only valid when output and input have the same size.
    */
   maskable?: boolean;
+  /** Keep the node working in saved graphs but leave it out of the add menu (it was folded into another node). */
+  hidden?: boolean;
+  /**
+   * Project length contributed by this node, in seconds, or null when it does not set one. When it returns a number the
+   * whole project (playback and export) is exactly that long: `projectLength` is read ONLY by `effectiveDuration` in graph.ts,
+   * which the editor store and the CLI apply to `project.duration`. Receives the node's resolved params. Must be pure.
+   */
+  projectLength?: (params: ParamsOf<P>) => number | null;
 }
 
 /** Type-erased definition as stored in the registry. */

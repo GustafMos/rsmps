@@ -18,9 +18,12 @@ Windows, macOS and Linux. Builds are **unsigned** for now; the places where sign
    git push origin main vX.Y.Z
    ```
    The tag must equal `v` plus the `package.json` version, or the release job stops.
-5. The **Release** workflow runs (Actions tab). It can also be started by hand (Run workflow) to test the pipeline.
-6. When it is green, open Releases: a **draft** `RSMPS X.Y.Z` exists with all files, `SHA256SUMS.txt` and the changelog
-   notes. Read it, then press Publish.
+5. The **Source release** workflow runs on the tag and publishes a GitHub Release `RSMPS X.Y.Z` with the changelog notes
+   and GitHub's source archives. It contains no installers: it exists so people can follow versions and build from the
+   matching source.
+6. To build the installers, start the **Release** workflow by hand (Actions > Release > Run workflow, pick the tag).
+   The files are attached to the run as artifacts for 14 days (download them for itch.io / Gumroad). It only creates a
+   **draft** release with the installers when no release for that version exists yet.
 
 ## What CI produces
 

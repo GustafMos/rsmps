@@ -98,6 +98,11 @@ export interface AudioIO {
    * summed by the host. READ-ONLY: never write into an input buffer (it may be another node's output).
    */
   in: Record<string, StereoBlock | null>;
+  /**
+   * Only for kernels with `perWire: true`: the blocks of EACH wire of every audio input, in wire order (empty array when unwired).
+   * `in` still holds their sum. Lets an editing node gate, fade and mix wires individually. READ-ONLY.
+   */
+  inWires?: Record<string, StereoBlock[]>;
   /** MIDI inputs by name: all events for this block from all wires, sorted by `offset`. Empty array when unwired. READ-ONLY. */
   midiIn: Record<string, MidiEvent[]>;
   /**
@@ -129,6 +134,8 @@ export interface AudioKernel<S = any> { // eslint-disable-line @typescript-eslin
    * consumes its outputs. For nodes with a side effect on the host (the Timeline records what is wired to it).
    */
   runWhenFed?: boolean;
+  /** Fill `io.inWires` (one block per wire) in addition to the summed `io.in`. Costs nothing for other kernels. */
+  perWire?: boolean;
   /**
    * Host command channel (arm / start / stop recording ...). Called between blocks, never from process().
    * The return value goes back to the caller of `AudioGraphRunner.control`.

@@ -13,6 +13,7 @@ import { isLayerType } from '../lib/layout';
 import { Piano } from './Piano';
 import { RecordButton } from '../timeline/RecordButton';
 import { isTimelineDef } from '../timeline/TimelineEditor';
+import { MEDIA_TIMELINE_ID } from '../../engine/lib/media-edit';
 import { RangeField } from '../components/RangeField';
 import { DrumGrid, looksLikeDrumPattern } from './DrumGrid';
 import { KindPicker } from '../components/KindPicker';
@@ -24,10 +25,13 @@ import { CurveField } from '../components/CurveField';
 import { paletteInputPort } from '../lib/sockets';
 import { visibleParams } from '../lib/layout';
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
-import { AssetsEditor, JsonEditor, PaletteEditor } from './editors';
+import { bakeSelection } from '../store/bake';
+import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
+import { CodecSelect, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
 import { ProjectSettingsPanel } from './ProjectSettings';
+import { BakePanel } from './BakePanel';
 import './inspector.css';
 
 export function Inspector() {
@@ -60,7 +64,8 @@ function Description({ text }: { text: string }) {
 }
 
 function MultiPanel({ count }: { count: number }) {
-  const { ed } = useApp();
+  const app = useApp();
+  const { ed } = app;
   return (
     <div className="rs-insp__scroll">
       <div className="rs-insp__sec">
@@ -68,6 +73,7 @@ function MultiPanel({ count }: { count: number }) {
         <div className="rs-insp__actions">
           <button className="rs-btn" onClick={() => ed.groupSelection()} title="Ctrl+G"><Icon name="frame" /> Group</button>
           <button className="rs-btn" onClick={() => ed.autoLayout(true)}><Icon name="layout" /> Arrange</button>
+          <button className="rs-btn" onClick={() => void bakeSelection(app)} title="Put a Cache / Bake node after these nodes and bake them: the nodes stop costing time and memory"><Icon name="save" /> Bake</button>
           <button className="rs-btn" onClick={() => ed.duplicate()} title="Ctrl+D">Duplicate</button>
           <button className="rs-btn rs-btn--danger" onClick={() => ed.deleteSelection()} title="Delete"><Icon name="trash" /> Delete</button>
         </div>
@@ -170,6 +176,15 @@ function NodePanel({ id }: { id: string }) {
         ))}
         {def.cpu && <p className="rs-insp__warn">Heavy CPU node: may be slow on large images.</p>}
       </div>
+      {node.type === MEDIA_TIMELINE_ID && (
+        <div className="rs-insp__sec">
+          <div className="rs-caps">Edit</div>
+          <div className="rs-insp__actions">
+            <button className="rs-btn rs-btn--primary" onClick={() => ed.openTimeline(id)}>Open editor</button>
+          </div>
+          <p className="rs-insp__hint">Wire pictures into Clips and sounds into Sounds: each new wire is added at the end. Arrange, trim, fade and layer them in the strip under the graph.</p>
+        </div>
+      )}
       {isTimelineDef(def) && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Timeline</div>
@@ -182,6 +197,7 @@ function NodePanel({ id }: { id: string }) {
           {(!wired.has('recordAudio') || !wired.has('recordMidi')) && <p className="rs-insp__hint">Nothing is wired into the record inputs yet: these buttons add the source node and connect it. Then arm a track (the ● button) and press Record.</p>}
         </div>
       )}
+      {node.type === 'cache' && <BakePanel node={node} />}
       {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
       {def.playable && (
         <div className="rs-insp__sec">
@@ -287,7 +303,8 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
   const label = p.label ?? keyName;
   const value = node.params[keyName] ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, keyName, v);
-  const stacked = (p.type === 'vec2' && p.range) || p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && p.multiline);
+  const isCode = p.type === 'string' && p.kind === 'code';
+  const stacked = (p.type === 'vec2' && p.range) || p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && (p.multiline || p.kind === 'code'));
 
   let control: React.ReactNode;
   if (isWired) {
@@ -315,13 +332,13 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
         control = <CheckField value={!!value} onChange={set} label={value ? 'On' : 'Off'} />;
         break;
       case 'enum':
-        control = <SelectField large value={String(value)} options={p.options} onChange={set} label={label} />;
+        control = keyName === 'codec' && hasFfmpegOptions(p.options) ? <CodecSelect value={String(value)} options={p.options} onChange={set} label={label} /> : <SelectField large value={String(value)} options={p.options} onChange={set} label={label} />;
         break;
       case 'color':
         control = <ColorField large value={value as [number, number, number, number]} onChange={set} />;
         break;
       case 'string':
-        control = (p as { kind?: string }).kind === 'font' ? <FontField large value={String(value ?? '')} onChange={set} /> : <TextField large multiline={p.multiline} value={String(value ?? '')} onChange={set} />;
+        control = p.kind === 'font' ? <FontField large value={String(value ?? '')} onChange={set} /> : p.kind === 'code' ? <CodeEditor value={String(value ?? '')} onChange={set} examples={p.examples} help={p.hint} defaultValue={p.default} /> : <TextField large multiline={p.multiline} value={String(value ?? '')} onChange={set} />;
         break;
       case 'vec2':
         control = p.range ? <RangeField nodeId={node.id} keyName={keyName} value={value as [number, number]} defaultValue={p.default} /> : <Vec2Field large value={value as [number, number]} min={p.min} max={p.max} step={p.step} unit={p.unit} defaultValue={p.default} onChange={set} />;
@@ -344,14 +361,14 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
     }
   }
   return (
-    <div className={`rs-insp__row${stacked ? ' is-stacked' : ''}`} title={p.hint} {...(sockType ? { 'data-insp-sock': '', 'data-node': node.id, 'data-port': keyName, 'data-dir': 'in', 'data-type': sockType } : {})}>
+    <div className={`rs-insp__row${stacked ? ' is-stacked' : ''}`} title={isCode ? undefined : p.hint} {...(sockType ? { 'data-insp-sock': '', 'data-node': node.id, 'data-port': keyName, 'data-dir': 'in', 'data-type': sockType } : {})}>
       <label className="rs-insp__label">
         <button className={`rs-insp__pin${pinned ? ' is-on' : ''}`} aria-pressed={pinned} title={pinned ? 'Shown on the node: click to hide' : 'Show on the node'} onClick={() => onPin(!pinned)}><Icon name="pin" size={12} /></button>
         {sockType && <span className={`rs-insp__dot rs-sock--${sockType}`} title="Drag a wire from a node's output onto this row to drive it" />}
         <span className="rs-insp__lt">{label}</span>
       </label>
       <div className="rs-insp__ctl">{control}</div>
-      {p.hint && <div className="rs-insp__phint">{p.hint}</div>}
+      {p.hint && !isCode && <div className="rs-insp__phint">{p.hint}</div>}
     </div>
   );
 }

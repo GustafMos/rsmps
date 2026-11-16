@@ -17,6 +17,7 @@ import {
   uid,
   updateNode,
   createGraph,
+  withEffectiveDuration,
 } from '../../engine/graph';
 import type { Registry } from '../../engine/define';
 import type { AssetInfo, Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
@@ -25,12 +26,15 @@ import { autoLayout, needsLayout } from '../lib/autolayout';
 import { pushBelow, separateMoved } from '../lib/separate';
 import { outputType } from '../../engine/graph';
 import { createScanProject } from '../scan/session';
+import { reconcileMediaEdits, type DescribeSource } from '../../engine/lib/media-edit-graph';
+import { clipMap } from '../../engine/lib/media-time';
+import { DEFAULT_CLIP_SECONDS } from '../../engine/lib/media-edit';
 import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/audio/timeline';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
 
-export type DialogId = 'export' | 'plugins' | 'presets' | 'savePreset' | 'shortcuts' | 'keymap' | 'palette' | null;
+export type DialogId = 'export' | 'backups' | 'about' | 'plugins' | 'presets' | 'savePreset' | 'shortcuts' | 'keymap' | 'palette' | null;
 
 export interface AddMenuRequest {
   clientX: number;
@@ -216,6 +220,7 @@ export class Editor {
     let g: GraphDoc = { ...doc, nodes: doc.nodes ?? [], edges: doc.edges ?? [], frames: doc.frames ?? [] };
     g.nodes = g.nodes.map((n) => ({ ...n, x: Number.isFinite(n.x) ? n.x : 0, y: Number.isFinite(n.y) ? n.y : 0, params: n.params ?? {} }));
     if (needsLayout(g)) g = autoLayout(g, this.registry);
+    g = withEffectiveDuration(g, this.registry);
     if (keepHistory) this.past.push(this.state.graph);
     else this.past = [];
     this.future = [];
@@ -262,9 +267,31 @@ export class Editor {
 
   /* ------------------------------- history -------------------------------- */
 
+  /** What a newly wired source is, for the Media Timeline: label and natural length (Media In knows its file). */
+  private describeSource: DescribeSource = ({ node, port }, to) => {
+    const def = this.registry.get(node.type);
+    const name = node.label || def?.title || node.type;
+    if (node.type === 'media-in' && (port === 'image' || port === 'audio')) {
+      const ids = node.params.assets;
+      const id = Array.isArray(ids) && typeof ids[0] === 'string' ? ids[0] : null;
+      const info = id ? this.io.library.list().find((a) => a.id === id) : null;
+      if (info && id) {
+        if (info.kind !== 'video') return { name: info.name || name, duration: DEFAULT_CLIP_SECONDS };
+        const p = { trim: Array.isArray(node.params.trim) ? (node.params.trim as number[]) : [0, 1], fps: Number(node.params.fps) || 0, offset: 0, loopVideo: true };
+        const m = clipMap({ duration: info.duration, fps: info.fps }, p);
+        const hasAudio = info.hasAudio && node.params.mute !== true;
+        return { name: info.name || name, duration: m.span / m.rate, asset: hasAudio || to === 'sounds' ? id : undefined, assetIn: m.a, hasAudio };
+      }
+    }
+    return { name, duration: 0 };
+  };
+
   /** Replace the document. `key` coalesces rapid edits (slider drags) into one undo step. */
   commit(next: GraphDoc, key?: string): void {
     const s = this.state;
+    if (next === s.graph) return;
+    // Media Timeline bookkeeping: new / removed / reordered wires update its edit, and a node that sets the project length sets it.
+    next = withEffectiveDuration(reconcileMediaEdits(s.graph, next, this.describeSource), this.registry);
     if (next === s.graph) return;
     const now = performance.now();
     const coalesce = key && key === this.lastKey && (this.holds > 0 ? this.holdPushed : now - this.lastTime < 900) && this.past.length > 0;
@@ -453,12 +480,12 @@ export class Editor {
     try {
       const node = this.state.graph.nodes.find((n) => n.id === nodeId);
       if (!node || JSON.stringify(value).length > 300) return;
-      const prevRaw = sessionStorage.getItem('rsmps.pendingEdit');
+      const prevRaw = localStorage.getItem('rsmps.pendingEdit');
       const prev = prevRaw ? JSON.parse(prevRaw) : null;
       const same = prev && prev.nodeId === nodeId && prev.key === key && Date.now() - prev.at < 15000;
       const def = this.registry.get(node.type);
       const label = `${node.label || def?.title || node.type} · ${(def?.params as Record<string, { label?: string }> | undefined)?.[key]?.label ?? key}`;
-      sessionStorage.setItem('rsmps.pendingEdit', JSON.stringify({ nodeId, key, label, oldValue: same ? prev.oldValue : node.params[key], newValue: value, at: Date.now() }));
+      localStorage.setItem('rsmps.pendingEdit', JSON.stringify({ nodeId, key, label, oldValue: same ? prev.oldValue : node.params[key], newValue: value, at: Date.now() }));
     } catch {
       /* storage unavailable */
     }

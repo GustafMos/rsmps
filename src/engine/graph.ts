@@ -4,6 +4,7 @@
  */
 import { Registry, canConnect, paramSocketType } from './define';
 import { defaultParams } from './engine';
+import { resolveParams } from './audio/params';
 import { DEFAULT_PROJECT, type Edge, type GraphDoc, type NodeInstance, type SocketType } from './types';
 
 let counter = 0;
@@ -243,4 +244,30 @@ export function groupOutputs(graph: GraphDoc, nodeIds: Iterable<string>, registr
     byKey.set(key, e);
   }
   return [...byKey.values()];
+}
+
+/**
+ * Project length demanded by the graph, or null when no node sets one (see `NodeDef.projectLength`). The ONE place that computes it:
+ * the editor store applies it to `project.duration` on every edit and load, the CLI before its overrides. With several nodes the longest
+ * wins; bypassed nodes do not count. Whole frames, at least one.
+ */
+export function effectiveDuration(graph: GraphDoc, registry: Registry): number | null {
+  let best: number | null = null;
+  for (const n of graph.nodes) {
+    if (n.bypass) continue;
+    const def = registry.get(n.type);
+    if (!def?.projectLength) continue;
+    const len = def.projectLength(resolveParams(def, n.params) as never);
+    if (typeof len === 'number' && Number.isFinite(len) && len > 0 && (best === null || len > best)) best = len;
+  }
+  if (best === null) return null;
+  const fps = graph.project.fps > 0 ? graph.project.fps : 1;
+  return Math.max(1, Math.round(best * fps)) / fps;
+}
+
+/** The graph with `project.duration` following `effectiveDuration`. The same object when nothing changes (cheap to call on every edit). */
+export function withEffectiveDuration(graph: GraphDoc, registry: Registry): GraphDoc {
+  const d = effectiveDuration(graph, registry);
+  if (d === null || d === graph.project.duration) return graph;
+  return { ...graph, project: { ...graph.project, duration: d } };
 }

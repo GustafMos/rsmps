@@ -1,7 +1,7 @@
 // Scene definitions for capture.mjs. A scene's `nodes` are placed at `at: [x, y]` (graph units); `edges` are
 // 'nodeKey.port' pairs; a param value '@asset:scene' is replaced by the id of the imported test image.
 
-const SCENE = 'test-assets/scene-1920x1080.png';
+const SCENE = 'scripts/screenshots/assets/base-scene.png';
 
 /** A 4 s mono 16-bit WAV with a kick and hi-hat pattern, so the timeline shows a real waveform. Generated, no media used. */
 function drumLoopWav() {

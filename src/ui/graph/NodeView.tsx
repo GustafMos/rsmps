@@ -21,7 +21,10 @@ import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature,
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
 import { useSelector } from '../store/createStore';
 import { nodeViewStore, toggleExpanded } from '../store/nodeView';
+import { bakeStatusOf } from '../lib/bake';
+import { bakeStore, frozenIds, statusDeps } from '../store/bake';
 import './node.css';
+import './bake.css';
 import '../layers.css';
 
 const catColor = (def: AnyNodeDef | undefined) => (def ? (CATEGORIES[def.category]?.color ?? '#7f8c9b') : '#ff5c6c');
@@ -90,12 +93,19 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   const title = node.label || def?.title || node.type;
   const missing = !def;
   const hasAudioOut = !!def && Object.values(def.outputs as OutputSchema).some((o) => o.type === 'audio');
+  // Cache / Bake: a small grey badge (baked / stale / baking N%), and a dimmed look for everything a bake has made unnecessary.
+  const app = useApp();
+  const isCache = node.type === 'cache';
+  const bakeFraction = useSelector(bakeStore, (s) => (isCache ? s.jobs[node.id]?.fraction : undefined));
+  const bake = useEd((s) => (isCache ? bakeStatusOf(s.graph, node, statusDeps(app, s.graph, bakeFraction === undefined ? null : { fraction: bakeFraction })) : null), (a, b) => a?.badge === b?.badge && a?.kind === b?.kind);
+  const frozen = useEd((s) => frozenIds(app, s.graph).has(node.id));
 
   return (
     <div
       ref={el}
-      className={`rs-node${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}${exportOff ? ' is-notexported' : ''}`}
+      className={`rs-node${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}${exportOff ? ' is-notexported' : ''}${frozen ? ' is-frozen' : ''}`}
       data-node-id={node.id}
+      title={frozen ? 'Frozen: everything after this node is baked, so it is not calculated any more' : undefined}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: layout.width, height: layout.height, ['--cat' as string]: catColor(def) }}
     >
       {exportOff && <span className="rs-node__off">not exported</span>}
@@ -141,6 +151,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
         {error && !missingReq.length && (
           <span className="rs-node__err" data-nodrag title={error} aria-label={`Error: ${error}`}>
             <Icon name="warn" size={16} />
+          </span>
+        )}
+        {bake?.badge && (
+          <span className="rs-node__bake rs-num" data-nodrag data-kind={bake.kind} style={bakeFraction !== undefined ? ({ ['--p' as string]: `${Math.round(bakeFraction * 100)}%` }) : undefined} title={bake.text}>
+            {bake.badge}
           </span>
         )}
         {debug && <NodeTiming id={node.id} />}
@@ -325,7 +340,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         control = (
           <div className="rs-row__pair">
             <span className="rs-row__label">{label}</span>
-            {(p as { kind?: string }).kind === 'font' ? <FontField value={String(value ?? '')} onChange={set} /> : <TextField value={String(value ?? '')} onChange={set} />}
+            {p.kind === 'font' ? <FontField value={String(value ?? '')} onChange={set} /> : p.kind === 'code' ? <span className="rs-row__label" title="Edit the code in the Inspector">{String(value ?? '').split('\n').length} lines · edit in Inspector</span> : <TextField value={String(value ?? '')} onChange={set} />}
           </div>
         );
         break;

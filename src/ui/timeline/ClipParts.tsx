@@ -6,7 +6,7 @@ import { getPeaks, type Peaks } from './peaks';
 const MAX_W = 4096;
 
 /** Min/max waveform of an audio clip (source region offset .. offset + srcLength, repeated when looping). */
-export function ClipWave({ clip, pps }: { clip: TimelineClip; pps: number }) {
+export function ClipWave({ clip, pps }: { clip: Pick<TimelineClip, 'length' | 'offset' | 'loop' | 'srcLength' | 'asset'>; pps: number }) {
   const { io } = useApp();
   const cv = useRef<HTMLCanvasElement>(null);
   const [peaks, setPeaks] = useState<Peaks | null>(null);
@@ -51,8 +51,8 @@ export function ClipWave({ clip, pps }: { clip: TimelineClip; pps: number }) {
   return <canvas ref={cv} className="rs-tl__wave" width={w} height={40} style={{ width: clip.length * pps }} aria-hidden="true" />;
 }
 
-/** Fade corner handles + loop handle for a clip. `onDrag` receives the pointer event and which handle was grabbed. */
-export function ClipHandles({ clip, pps, onGrab }: { clip: TimelineClip; pps: number; onGrab: (e: React.PointerEvent, part: 'fadeIn' | 'fadeOut' | 'loop') => void }) {
+/** Fade corner handles + loop handle (optional) for a clip. `onGrab` receives the pointer event and which handle was grabbed. */
+export function ClipHandles({ clip, pps, onGrab, loopHandle = true }: { clip: Pick<TimelineClip, 'length' | 'fadeIn' | 'fadeOut' | 'loop'>; pps: number; onGrab: (e: React.PointerEvent, part: 'fadeIn' | 'fadeOut' | 'loop') => void; loopHandle?: boolean }) {
   const w = clip.length * pps;
   const fi = Math.min(w, clip.fadeIn * pps);
   const fo = Math.min(w, clip.fadeOut * pps);
@@ -66,7 +66,7 @@ export function ClipHandles({ clip, pps, onGrab }: { clip: TimelineClip; pps: nu
       )}
       <span className="rs-tl__fade rs-tl__fade--l" style={{ left: fi }} title="Drag to fade in" onPointerDown={(e) => onGrab(e, 'fadeIn')} />
       <span className="rs-tl__fade rs-tl__fade--r" style={{ right: fo }} title="Drag to fade out" onPointerDown={(e) => onGrab(e, 'fadeOut')} />
-      <span className={`rs-tl__loophandle${clip.loop ? ' is-on' : ''}`} title={clip.loop ? 'Looping: drag to change the length, click to turn looping off' : 'Drag right to repeat this clip, click to loop it'} onPointerDown={(e) => onGrab(e, 'loop')}>↻</span>
+      {loopHandle && <span className={`rs-tl__loophandle${clip.loop ? ' is-on' : ''}`} title={clip.loop ? 'Looping: drag to change the length, click to turn looping off' : 'Drag right to repeat this clip, click to loop it'} onPointerDown={(e) => onGrab(e, 'loop')}>↻</span>}
     </>
   );
 }

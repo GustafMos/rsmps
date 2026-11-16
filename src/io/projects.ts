@@ -11,6 +11,8 @@ import type { ScanSession } from './api';
 import { ProjectSession, type OpenProject } from './session';
 import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import { errorMessage, uniqueId } from './util';
+import { BackupStore, type BackupInfo } from './backups';
+import { mirrorBackup } from './desktop-backups';
 
 const AUTOSAVE_DELAY_MS = 400;
 const FILE_TYPES = [{ description: 'RSMPS project', accept: { 'application/json': ['.rsmps.json', '.json'] } }];
@@ -52,6 +54,11 @@ export class ProjectStoreImpl implements ProjectStore {
     delete: (k) => idbDelete('projects', k),
   });
   private thumbUrls = new Map<string, string>();
+  private backups = new BackupStore({
+    get: (k) => idbGet('projects', k),
+    put: (k, v) => idbPut('projects', k, v),
+    delete: (k) => idbDelete('projects', k),
+  });
   /** Problems found in the last opened file (unknown node types, bad wires). The nodes are kept. */
   lastOpenProblems: { nodeId?: string; message: string }[] = [];
 
@@ -61,6 +68,7 @@ export class ProjectStoreImpl implements ProjectStore {
   }
 
   constructor(private registry: Registry) {
+    this.backups.onStored = (project, entry) => mirrorBackup(project, entry);
     if (typeof window !== 'undefined') {
       const flush = () => void this.flush();
       window.addEventListener('pagehide', flush);
@@ -257,6 +265,24 @@ export class ProjectStoreImpl implements ProjectStore {
       console.warn(`"${file.name}" opened with ${this.lastOpenProblems.length} problem(s):`, this.lastOpenProblems);
     }
     return graph;
+  }
+
+  /* -------------------------------- backups -------------------------------- */
+
+  async recordBackup(projectId: string, graph: GraphDoc): Promise<boolean> {
+    try {
+      return await this.backups.record(projectId, graph);
+    } catch (err) {
+      console.warn('Backup failed:', errorMessage(err));
+      return false;
+    }
+  }
+  listBackups(projectId: string): Promise<BackupInfo[]> {
+    return this.backups.list(projectId);
+  }
+  async loadBackup(projectId: string, backupId: string): Promise<GraphDoc | null> {
+    const g = await this.backups.get(projectId, backupId);
+    return g ? parseGraph(structuredClone(g)) : null;
   }
 
   /* --------------------------------- presets -------------------------------- */

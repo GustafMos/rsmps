@@ -52,6 +52,14 @@
 .rs-tl__pop { position: absolute; z-index: 30; width: 230px; padding: var(--s-2); display: flex; flex-direction: column; gap: var(--s-2); background: var(--bg-3); border: 1px solid var(--accent-hi); box-shadow: var(--shadow-hard); }
 .rs-tl__pop .rs-caps { display: flex; justify-content: space-between; align-items: center; }
 
+/* Media Timeline (video editor strip): greyscale, same chrome as the audio timeline */
+.rs-tl__clip--v { background: color-mix(in srgb, var(--text) 16%, var(--bg-3)); border-color: var(--text-dim); }
+.rs-tl__clip--a { background: color-mix(in srgb, var(--text) 8%, var(--bg-2)); border-color: var(--line-strong); }
+.rs-tl__lane--split { border-top: 2px solid var(--line-strong); }
+.rs-tl__end { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--text-dim); pointer-events: none; z-index: 3; }
+.rs-tl__len { font-size: var(--fs-sm); color: var(--text-dim); }
+.rs-tl__lbl { font-size: var(--fs-xs); color: var(--text-dim); width: 22px; text-align: center; }
+
 .rs-pr { position: fixed; inset: 8vh 4vw 84px; z-index: 1090; display: flex; flex-direction: column; background: var(--bg-2); border: 1px solid var(--accent-hi); box-shadow: var(--shadow-hard); outline: none; }
 .rs-pr__bar { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2); background: var(--bg-3); border-bottom: 1px solid var(--line); flex: none; flex-wrap: wrap; }
 .rs-pr__bar .rs-btn { height: var(--ctl-h); padding: 0 var(--s-2); }

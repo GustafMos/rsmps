@@ -18,6 +18,30 @@ export function testGpu(): Promise<Gpu> {
   return shared;
 }
 
+/**
+ * Render counters. `EvalResult.timings` holds only the nodes that actually rendered in an evaluation (cache hits are absent), so
+ * "which nodes rendered" is exactly its key set. `renderedNodes(await engine.evaluate(...))` is the sorted list of node ids;
+ * `RenderTally` adds them up over many evaluations ("this node rendered once in 60 frames").
+ */
+export function renderedNodes(r: { timings: Map<string, number> }): string[] {
+  return [...r.timings.keys()].sort();
+}
+
+export class RenderTally {
+  readonly counts = new Map<string, number>();
+  add(r: { timings: Map<string, number> }): string[] {
+    const ids = renderedNodes(r);
+    for (const id of ids) this.counts.set(id, (this.counts.get(id) ?? 0) + 1);
+    return ids;
+  }
+  get(id: string): number {
+    return this.counts.get(id) ?? 0;
+  }
+  reset(): void {
+    this.counts.clear();
+  }
+}
+
 export interface Pixels {
   data: Uint8ClampedArray;
   width: number;

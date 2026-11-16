@@ -9,10 +9,14 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, existsSync, rmSync } 
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createBackupMirror, MAX_BODY as BACKUP_MAX_BODY } from './backups.mjs';
+import { UNRESPONSIVE_DIALOG, onChildGone, onRendererGone, withSafeParam } from './crash.mjs';
 
 const SCHEME = 'app';
 const HOST = 'rsmps';
 const ORIGIN = `${SCHEME}://${HOST}`;
+// Same paragraph as the README and the in-app About box (src/ui/aboutCopy.ts; a test keeps them equal).
+const NOT_AFFILIATED = "RSMPS is an independent project. It is not affiliated with, sponsored by or endorsed by Blackmagic Design, the Blender Foundation, Adobe, Ableton, Apple, or any other company, product or creator mentioned here. DaVinci Resolve, Fusion, Blender, Adobe Color, Ableton Live and ProRes are trademarks of their respective owners. They are named only to describe what inspired this tool or what it works with. Adobe Color inspired Palette Studio; Blender's shader nodes and DaVinci Resolve's Fusion page inspired the node workflow.";
 const HOMEPAGE = 'https://github.com/GustafMos/rsmps';
 const KOFI = 'https://ko-fi.com/ripscorpy';
 
@@ -155,8 +159,38 @@ async function handleInternal(request, rel, url) {
     if (!phone) return json(unavailableInfo());
     return json(rel.endsWith('start') ? await phoneStart() : await phone.stop());
   }
+  if (rel === '/__rsmps/backups' || rel.startsWith('/__rsmps/backups/')) return handleBackups(request, rel, url);
   if (rel === '/__rsmps/addons' || rel.startsWith('/__rsmps/addons/')) return handleAddons(request, rel);
   if (rel === '/__rsmps/export/ffmpeg' || rel.startsWith('/__rsmps/export/ffmpeg/')) return handleExport(request, rel);
+  return new Response('Not found', { status: 404 });
+}
+
+// ---- autosave backups (desktop/backups.mjs) ---------------------------------------------------------------------------------
+
+let backupMirror = null;
+const backups = () => (backupMirror ??= createBackupMirror(join(app.getPath('userData'), 'backups')));
+
+async function handleBackups(request, rel, url) {
+  try {
+    if (rel === '/__rsmps/backups') {
+      if (request.method === 'GET') return json({ backups: backups().list() });
+      if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+      if (Number(request.headers.get('content-length') ?? 0) > BACKUP_MAX_BODY) return new Response('Too large', { status: 413 });
+      backups().write(await request.json());
+      return json({ ok: true });
+    }
+    if (rel === '/__rsmps/backups/file' && request.method === 'GET') {
+      return new Response(backups().read(url.searchParams.get('name') ?? ''), { headers: { 'content-type': 'application/json; charset=utf-8' } });
+    }
+    if (rel === '/__rsmps/backups/reveal' && request.method === 'POST') {
+      const dir = backups().dir;
+      mkdirSync(dir, { recursive: true });
+      void shell.openPath(dir);
+      return json({ path: dir });
+    }
+  } catch (err) {
+    return json({ error: String(err?.message ?? err) }, 400);
+  }
   return new Response('Not found', { status: 404 });
 }
 
@@ -464,8 +498,50 @@ function createWindow() {
   });
   if (!smoke) trackState(win);
   void win.loadURL(devUrl ?? `${ORIGIN}/index.html`);
+  if (!smoke) watchHealth(win);
   return win;
 }
+
+// ---- crash and hang recovery (policy in crash.mjs) ----------------------------------------------------------------------------
+
+/** Reload the page with rendering paused (?safe=1): the project opens, nothing is evaluated. */
+function reloadSafe(w) {
+  if (!w || w.isDestroyed()) return;
+  const wc = w.webContents;
+  const current = wc.getURL();
+  const target = !current || current.startsWith('chrome-error') ? (devUrl ?? `${ORIGIN}/index.html`) : current;
+  void w.loadURL(withSafeParam(target));
+}
+
+let reloads = [];
+let askingHang = false;
+
+function watchHealth(w) {
+  const wc = w.webContents;
+  wc.on('unresponsive', async () => {
+    if (askingHang || w.isDestroyed()) return;
+    askingHang = true;
+    try {
+      const r = await dialog.showMessageBox(w, { type: 'warning', title: UNRESPONSIVE_DIALOG.title, message: UNRESPONSIVE_DIALOG.message, detail: UNRESPONSIVE_DIALOG.detail, buttons: UNRESPONSIVE_DIALOG.buttons, defaultId: 0, cancelId: 0, noLink: true });
+      if (r.response === 1) reloadSafe(w);
+    } finally {
+      askingHang = false;
+    }
+  });
+  wc.on('render-process-gone', (_e, d) => {
+    const plan = onRendererGone(d.reason, reloads, Date.now());
+    reloads = plan.recentReloads;
+    if (plan.action === 'reload-safe') reloadSafe(w);
+    else if (plan.action === 'ask') {
+      void dialog.showMessageBox(w, { type: 'error', title: 'RSMPS keeps crashing', message: 'RSMPS crashed several times in a row.', detail: 'Reload in safe mode to open the project with rendering paused, or close the app. Your project is saved automatically and backups are in the app data folder (Project > Backups).', buttons: ['Reload in safe mode', 'Close'], defaultId: 0, cancelId: 1, noLink: true }).then((r) => (r.response === 0 ? reloadSafe(w) : w.close()));
+    }
+  });
+}
+
+app.on('child-process-gone', (_e, details) => {
+  if (smoke || !win || !onChildGone(details.type, details.reason)) return;
+  reloadSafe(win); // the GPU process died: the page's WebGPU device is gone with it
+});
 
 // ---- menu and About ------------------------------------------------------------------------------------------------
 
@@ -477,6 +553,8 @@ function showAbout() {
     '',
     `Electron ${process.versions.electron} / Chromium ${process.versions.chrome} / Node ${process.versions.node}`,
     'Third-party licences: THIRD_PARTY_LICENSES.txt in the application resources folder.',
+    '',
+    NOT_AFFILIATED,
   ].join('\n');
   const opts = { type: 'info', title: 'About RSMPS', message: 'RipScorpy Media Processing Suite (RSMPS)', detail, buttons: ['OK', 'Source code', 'Support on Ko-fi'], defaultId: 0, cancelId: 0, noLink: true };
   (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)).then((r) => {
@@ -528,6 +606,7 @@ function buildMenu() {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
+        { label: 'Reload in safe mode (rendering paused)', click: () => reloadSafe(win) },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },

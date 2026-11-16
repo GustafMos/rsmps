@@ -8,6 +8,8 @@ import { frameGraph } from './graph/gestures';
 import { isTypingTarget } from './lib/drag';
 import { NODE_DEFAULTS, NODE_PREFIX, bindingsOf, eventToBinding, overrideIds, setDefaultsLookup } from './keymap';
 import type { AppCtx } from './store/context';
+import { bakeSelection } from './store/bake';
+import { togglePaused } from './safety';
 
 export interface KeyCtx {
   app: AppCtx;
@@ -76,6 +78,7 @@ export const COMMANDS: Command[] = [
   },
   { id: 'graph.unframe', label: 'Remove selection from its frame', group: 'Graph', defaults: ['Ctrl+Alt+G'], run: (c) => c.app.ed.removeFromFrame(sel(c.app)) },
   { id: 'graph.frame', label: 'Frame all (or selection)', group: 'Graph', defaults: ['F', 'Home'], run: ({ app }) => frameGraph(app, sel(app).length > 0) },
+  { id: 'graph.bake', label: 'Bake selection (Cache / Bake node after it)', group: 'Graph', defaults: ['Ctrl+Shift+B'], run: ({ app }) => void bakeSelection(app) },
   { id: 'graph.bypass', label: 'Bypass selected nodes', group: 'Graph', defaults: ['B'], run: ({ app }) => sel(app).forEach((id) => app.ed.toggleBypass(id)) },
   { id: 'graph.collapse', label: 'Collapse / expand selected nodes', group: 'Graph', defaults: ['H'], run: ({ app }) => sel(app).length && app.ed.toggleCollapse(sel(app)) },
   { id: 'graph.layout', label: 'Auto-layout', group: 'Graph', defaults: ['L'], run: (c) => c.app.ed.autoLayout(true) },
@@ -107,6 +110,7 @@ export const COMMANDS: Command[] = [
       if (!ctl.spaceUsed) app.io.player.toggle();
     },
   },
+  { id: 'play.pauseRender', label: 'Pause / resume rendering (edits still apply, nothing is evaluated)', group: 'Playback', defaults: ['Ctrl+Shift+P'], run: ({ app }) => togglePaused(app) },
   { id: 'play.back', label: 'Previous frame', group: 'Playback', defaults: ['ArrowLeft'], run: (c) => c.app.io.player.step(-1) },
   { id: 'play.fwd', label: 'Next frame', group: 'Playback', defaults: ['ArrowRight'], run: (c) => c.app.io.player.step(1) },
   { id: 'play.itemPrev', label: 'Previous batch item', group: 'Playback', defaults: ['Ctrl+ArrowLeft'], run: ({ app }) => app.ed.setItem(app.ed.state.item - 1) },

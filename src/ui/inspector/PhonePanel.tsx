@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AnyNodeDef, NodeInstance, ParamDef } from '../../engine/types';
-import type { PhoneAddress, PhoneSessionInfo, PhoneState } from '../../io/api';
+import type { PhoneAddress, PhoneProgress, PhoneSessionInfo, PhoneState } from '../../io/api';
+import { phoneSteps } from '../../io/phone';
 import { Icon } from '../components/Icon';
 import { useApp } from '../store/context';
 
@@ -47,6 +48,20 @@ function usePhoneDetail(token: string): string {
     });
   }, [io, token]);
   return detail;
+}
+
+/** How far the pairing got (typed: the ticks never depend on the wording of the help text). */
+function usePhoneProgress(token: string): PhoneProgress {
+  const { io } = useApp();
+  const [p, setP] = useState<PhoneProgress>(() => (token ? io.phone.progress(token) : 'waiting'));
+  useEffect(() => {
+    setP(token ? io.phone.progress(token) : 'waiting');
+    if (!token) return;
+    return io.phone.onState((t, _s, _d, progress) => {
+      if (t === token) setP(progress);
+    });
+  }, [io, token]);
+  return p;
 }
 
 function useCountdown(until: number | null, on: boolean): number {
@@ -102,6 +117,7 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
   const [addrs, setAddrs] = useState<PhoneAddress[]>([]);
   const [address, setAddress] = useState('');
   const detail = usePhoneDetail(token);
+  const progress = usePhoneProgress(token);
   useEffect(() => {
     let live = true;
     if (io.phone.available) void io.phone.addresses().then((a) => { if (live) { setAddrs(a); setAddress((cur) => cur || a[0]?.url || ''); } }).catch(() => undefined);
@@ -188,9 +204,10 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
       )}
       {token && state && state !== 'expired' && (
         <ol className="rs-phone__steps" aria-label="Progress">
-          {[['Reached your computer', state === 'connected' || /reached|accepted|connect/i.test(detail)], ['Code accepted', state === 'connected' || /accepted|Connecting the video/i.test(detail)], ['Video connected', state === 'connected']].map(([label, ok]) => (
-            <li key={String(label)} className={ok ? 'is-done' : ''}><Icon name={ok ? 'check' : 'more'} size={16} />{String(label)}</li>
-          ))}
+          {(['Reached your computer', 'Code accepted', 'Video connected'] as const).map((label, i) => {
+            const ok = phoneSteps(progress, state)[i];
+            return <li key={label} className={ok ? 'is-done' : ''}><Icon name={ok ? 'check' : 'more'} size={16} />{label}</li>;
+          })}
         </ol>
       )}
       {token && state && detail && state !== 'connected' && <p className="rs-insp__hint rs-phone__detail">{detail}</p>}

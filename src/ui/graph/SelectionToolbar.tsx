@@ -2,13 +2,16 @@ import { useLayoutEffect, useMemo, useRef } from 'react';
 import { Icon, type IconName } from '../components/Icon';
 import { nodeRect } from '../lib/layout';
 import { useApp, useEd } from '../store/context';
+import { bakeSelection } from '../store/bake';
+import { bindingsOf } from '../keymap';
 
 /**
  * Floating toolbar above the selected nodes: the mouse / touch way to the common shortcuts. It lives outside the scaled node
  * layer (constant on-screen size), follows pan and zoom, stays inside the graph view and hides while a gesture is running.
  */
 export function SelectionToolbar() {
-  const { ed, graphCtl: ctl } = useApp();
+  const app = useApp();
+  const { ed, graphCtl: ctl } = app;
   const selection = useEd((s) => s.selection);
   const graph = useEd((s) => s.graph);
   const el = useRef<HTMLDivElement>(null);
@@ -60,6 +63,7 @@ export function SelectionToolbar() {
       {btn('trash', 'Delete', 'Delete (Del)', () => ed.deleteSelection())}
       {btn('bypass', 'Bypass', 'Bypass (B)', () => selection.forEach((id) => ed.toggleBypass(id)), !!single?.bypass)}
       {single && btn('monitor', 'View', 'View this node (Ctrl+Shift+click)', () => ed.setViewed(single.id), ed.state.viewedNodeId === single.id)}
+      {btn('save', 'Bake', `Bake selection: freeze these nodes into a stored sequence${bindingsOf('graph.bake')[0] ? ` (${bindingsOf('graph.bake')[0]})` : ''}`, () => void bakeSelection(app))}
       {selection.length > 1 && btn('frame', 'Group', 'Group into frame (Ctrl+G)', () => ed.groupSelection())}
       <button
         className="rs-seltb__btn"

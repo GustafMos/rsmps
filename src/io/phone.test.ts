@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newToken, pickOrigin } from './phone';
+import { advanceProgress, newToken, phoneSteps, pickOrigin } from './phone';
 
 describe('phone link helpers', () => {
   it('makes 128-bit hex tokens that differ', () => {
@@ -30,5 +30,20 @@ describe('QR addresses', () => {
     const a = buildAddresses(cands, { protocol: 'https:', hostname: 'pc.tail1234.ts.net', port: '5173', origin: 'https://pc.tail1234.ts.net:5173' });
     expect(a[0]).toMatchObject({ url: 'https://pc.tail1234.ts.net:5173', kind: 'tailscale' });
     expect(a).toHaveLength(3);
+  });
+});
+
+describe('phone progress ticks come from a typed progress, not from wording', () => {
+  it('only moves forward', () => {
+    expect(advanceProgress('waiting', 'reached')).toBe('reached');
+    expect(advanceProgress('accepted', 'reached')).toBe('accepted');
+    expect(advanceProgress('connected', 'waiting')).toBe('connected');
+  });
+  it('maps progress and state to the three ticks', () => {
+    expect(phoneSteps('waiting', 'waiting')).toEqual([false, false, false]);
+    expect(phoneSteps('reached', 'waiting')).toEqual([true, false, false]);
+    expect(phoneSteps('accepted', 'waiting')).toEqual([true, true, false]);
+    expect(phoneSteps('accepted', 'connected')).toEqual([true, true, true]);
+    expect(phoneSteps('connected', 'disconnected')).toEqual([true, true, false]);
   });
 });

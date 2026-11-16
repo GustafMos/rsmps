@@ -8,6 +8,8 @@ import { PresetsDialog, SavePresetDialog } from './PresetsDialog';
 import { PaletteStudio } from '../palette/PaletteStudio';
 import { KeymapDialog } from './KeymapDialog';
 import { ShortcutsDialog } from './ShortcutsDialog';
+import { BackupsDialog } from './BackupsDialog';
+import { AboutDialog } from './AboutDialog';
 
 export function DialogHost() {
   const dialog = useEd((s) => s.dialog);
@@ -26,6 +28,10 @@ export function DialogHost() {
       return <KeymapDialog />;
     case 'shortcuts':
       return <ShortcutsDialog />;
+    case 'backups':
+      return <BackupsDialog />;
+    case 'about':
+      return <AboutDialog />;
     default:
       return null;
   }

@@ -61,6 +61,7 @@ function AddMenuInner() {
   const allowed = useMemo(
     () =>
       defs.filter((d) => {
+        if (d.hidden) return false;
         if (!link) return true;
         return link.side === 'out' ? inputsAccepting(d, link.type).length > 0 : outputsFeeding(d, link.type).length > 0;
       }),

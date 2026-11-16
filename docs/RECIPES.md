@@ -87,6 +87,25 @@ solid lines) and Upscale (edge-sharpened 2x). Put the **Scan** frames in through
 4. Add **CRT Display** (Trinitron or consumer preset) after it for scan lines and a curved screen. The finished chain is the
    **ASCII terminal** preset.
 
+## Edit several clips into one video
+
+1. Add a **Media Timeline** (`media-timeline`, category Time). Wire each clip into its **Clips** input: a **Media In** with a video, a
+   generator, or a whole effect chain: anything that produces a picture. Every new wire is added at the end of the timeline, with the
+   file's own length (5 s when it is not known), so three wires already make a playable sequence. A file with sound also gets a linked
+   sound clip.
+2. Select the node and press **Open editor** in the inspector: a strip opens under the graph. Drag a clip to move it (also to another
+   track: higher tracks are in front), drag its edges to trim, drag the corner handles to fade, **S** splits at the playhead, **Del**
+   deletes, edges snap to other clips and the playhead (hold **Alt** to move freely). Double-click a clip for opacity / volume and
+   exact fades. Clips that overlap on the same track cross-dissolve over the overlap.
+3. Tick **Set project length** (in the strip or the inspector) so playback and export are exactly as long as the edit. The Length field
+   in the transport is then locked to it.
+4. For sound, wire the node's **Sound** output into an **Audio Output**; that is what you hear and what is exported with the video. Sound
+   from a wired source that is not a file (a synth, for example) goes into the **Sounds** input: it is gated and faded by its clip but
+   cannot be moved in time.
+
+Only the clips visible at the current frame are evaluated, so a long edit of heavy sources costs the same as one clip.
+Fit decides how clips of another shape sit in the frame (Fit inside, Fill, Stretch); the Background colour shows where no clip is.
+
 ## More presets
 
 **ASCII terminal**: Color Adjust, then ASCII Art in green terminal colours with glow.

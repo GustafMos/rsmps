@@ -3,7 +3,7 @@
  * phone camera over WebRTC (host candidates only: both devices are on the same network) and falls back to JPEG frames over
  * the WebSocket when WebRTC does not connect in a few seconds. Provides `Host.liveFrame` with a video element or a bitmap.
  */
-import type { PhoneAddress, PhoneApi, PhoneSessionInfo, PhoneState } from './api';
+import type { PhoneAddress, PhoneApi, PhoneProgress, PhoneSessionInfo, PhoneState } from './api';
 import { UNREACHED_HINT, closeMessage } from '../phone/messages';
 import type { PhoneProvider } from './live';
 import { qrSvg } from './qr';
@@ -63,8 +63,23 @@ export function pickOrigin(origins: string[], page: { hostname: string; origin: 
   return origins[0];
 }
 
+const PROGRESS_ORDER: PhoneProgress[] = ['waiting', 'reached', 'accepted', 'connected'];
+
+/** Progress only moves forward within one pairing. */
+export function advanceProgress(cur: PhoneProgress, next: PhoneProgress): PhoneProgress {
+  return PROGRESS_ORDER.indexOf(next) > PROGRESS_ORDER.indexOf(cur) ? next : cur;
+}
+
+/** The three ticks of the pairing checklist: reached the computer, code accepted, video connected. */
+export function phoneSteps(progress: PhoneProgress, state: PhoneState): [boolean, boolean, boolean] {
+  if (state === 'connected') return [true, true, true];
+  const at = PROGRESS_ORDER.indexOf(progress);
+  return [at >= 1, at >= 2, false];
+}
+
 interface Session {
   token: string;
+  progress: PhoneProgress;
   ws: WebSocket;
   state: PhoneState;
   pc: RTCPeerConnection | null;
@@ -89,7 +104,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
   private origins: string[] = [];
   private candidates: { address: string; label: string; kind: 'lan' | 'tailscale' | 'other' }[] = [];
   private sessions = new Map<string, Session>();
-  private listeners = new Set<(token: string, state: PhoneState, detail: string) => void>();
+  private listeners = new Set<(token: string, state: PhoneState, detail: string, progress: PhoneProgress) => void>();
 
   constructor(private desktop: DesktopClient | null = isDesktop() ? new DesktopClient() : null) {}
 
@@ -178,7 +193,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
-    const s: Session = { token, ws, state: 'waiting', pc: null, video, bitmap: null, frames: 0, jpeg: false, timers: [], expiresAt, detail: 'Waiting for the phone: scan the QR code and open the link.', reached: false, audioStream: null, chain: Promise.resolve() };
+    const s: Session = { token, progress: 'waiting', ws, state: 'waiting', pc: null, video, bitmap: null, frames: 0, jpeg: false, timers: [], expiresAt, detail: 'Waiting for the phone: scan the QR code and open the link.', reached: false, audioStream: null, chain: Promise.resolve() };
     this.sessions.set(token, s);
     s.timers.push(setTimeout(() => s.state === 'waiting' && this.setState(s, 'expired'), SESSION_MS));
     s.timers.push(setTimeout(() => !s.reached && s.state === 'waiting' && this.setDetail(s, UNREACHED_HINT), UNREACHED_MS));
@@ -206,11 +221,15 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     return this.sessions.get(token)?.detail ?? 'This phone session is not active any more. Make a new QR code.';
   }
 
+  progress(token: string): PhoneProgress {
+    return this.sessions.get(token)?.progress ?? 'waiting';
+  }
+
   expiresAt(token: string): number | null {
     return this.sessions.get(token)?.expiresAt ?? null;
   }
 
-  onState(listener: (token: string, state: PhoneState, detail: string) => void): () => void {
+  onState(listener: (token: string, state: PhoneState, detail: string, progress: PhoneProgress) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -248,7 +267,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
   }
 
   private emit(s: Session): void {
-    for (const l of [...this.listeners]) l(s.token, s.state, s.detail);
+    for (const l of [...this.listeners]) l(s.token, s.state, s.detail, s.progress);
   }
 
   private setDetail(s: Session, text: string): void {
@@ -292,6 +311,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     s.frames++;
     if (s.state !== 'connected') {
       s.detail = 'Video connected';
+      s.progress = 'connected';
       this.setState(s, 'connected');
     }
   }
@@ -322,11 +342,13 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
         break;
       case 'reached':
         s.reached = true;
+        s.progress = advanceProgress(s.progress, 'reached');
         if (typeof msg.expiresAt === 'number') s.expiresAt = msg.expiresAt;
         this.setDetail(s, 'Your phone reached this computer. Waiting for it to open the camera...');
         break;
       case 'phone-joined':
         s.reached = true;
+        s.progress = advanceProgress(s.progress, 'accepted');
         this.setDetail(s, 'Code accepted. Connecting the video...');
         await this.startPeer(s);
         break;

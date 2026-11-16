@@ -1,10 +1,8 @@
 name: Release
 
-# Push a tag like v0.4.0 (or run manually) to build the desktop apps on Windows, macOS and Linux and create a DRAFT
+# Run manually (Actions > Release > Run workflow, on a tag) to build the desktop apps on Windows, macOS and Linux and create a DRAFT
 # GitHub Release. Nothing is published automatically. See docs/RELEASING.md.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -108,6 +106,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists (the public source release). Installers stay as workflow artifacts."
+            exit 0
+          fi
           gh release create "v${VERSION}" artifacts/* \
             --draft \
             --title "RSMPS ${VERSION}" \

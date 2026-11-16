@@ -1,4 +1,5 @@
 import { defineNode } from '../../define';
+import { withArtGrid } from '../../lib/art-grid';
 import type { DitherSpace } from '../../lib/pixel-color';
 import { PALETTE_WGSL, SPACE_INDEX, clampPalette, paletteTexture } from '../../lib/pixel-gpu';
 
@@ -41,13 +42,13 @@ export default defineNode({
     },
   },
   render(ctx) {
-    const src = ctx.in.image;
+    const input = ctx.in.image;
     const from = clampPalette(ctx.in.from.colors);
     const to = clampPalette(ctx.in.to.colors);
-    if (from.length === 0 || to.length === 0) return { image: src };
+    if (from.length === 0 || to.length === 0) return { image: input };
     const space = ctx.params.colorSpace as DitherSpace;
     // The "to" colours reuse the palette texture layout; only row 0 (sRGB) is read from it.
-    const image = ctx.gpu.pass({
+    const image = withArtGrid(ctx.gpu, input, 0, (src) => ctx.gpu.pass({
       label: 'palette-swap',
       size: src,
       textures: { src, pal: paletteTexture(ctx.gpu, from, space), dst: paletteTexture(ctx.gpu, to, space) },
@@ -67,7 +68,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   }
   return premul(vec4f(out, s.a));
 }`,
-    });
+    }));
     return { image };
   },
 });

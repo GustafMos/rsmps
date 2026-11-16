@@ -1,5 +1,6 @@
 import { defineNode } from '../../define';
 import type { ImageValue } from '../../types';
+import { upscaleArtGrid } from '../../lib/art-grid';
 import { assertTextureSize } from '../../lib/pixel-gpu';
 import { gaussianBlur } from '../filter/blur.node';
 
@@ -57,11 +58,21 @@ export default defineNode({
   title: 'Pixelate',
   category: 'pixel',
   description:
-    'Downsamples to a pixel-art grid. The grid size comes from the parameters, so photos of any resolution land on the same art resolution. Edge-aware mode keeps outlines on cell borders.',
-  keywords: ['downsample', 'resolution', 'art grid', 'sprite', 'low res', 'edge aware', 'block'],
+    'Turns the image into a real low-resolution pixel-art image (the output is the small art grid, so everything after it works in art pixels). Edge-aware mode keeps outlines on cell borders. ' +
+    'With a Mask connected (or Mix below 1) only the masked part is pixelated and the frame KEEPS ITS SIZE: the art grid is scaled back up crisply over the original, and later Dither / Quantize nodes follow the same grid. ' +
+    'Versus Mosaic: Pixelate changes the resolution of the image (or, masked, builds a true art grid); Mosaic only paints flat blocks on the full-resolution image and has no art grid.',
+  keywords: ['downsample', 'resolution', 'art grid', 'sprite', 'low res', 'edge aware', 'block', 'mask', 'tracked'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
+  maskable: true,
   params: {
+    keepSize: {
+      type: 'bool',
+      default: false,
+      label: 'Keep source size',
+      group: 'Grid',
+      hint: 'Scale the art grid back up (crisp) to the size of the source, so the frame size is unchanged. Automatic when a Mask is connected or Mix is below 1.',
+    },
     mode: {
       type: 'enum',
       default: 'fixed-height',
@@ -362,6 +373,12 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   return premul(vec4f(clamp(s.rgb + (s.rgb - sb.rgb) * u.amount, vec3f(0.0), vec3f(1.0)), c.a));
 }`,
       });
+    }
+    // Keep the frame size: the kernel does this itself when a mask / mix < 1 is in play; this is the explicit switch.
+    if (p.keepSize) {
+      const art = image;
+      image = upscaleArtGrid(gpu, art, { width: src.width, height: src.height, unit: src.unit }, src.height / H);
+      gpu.recycle(art);
     }
     return { image };
   },

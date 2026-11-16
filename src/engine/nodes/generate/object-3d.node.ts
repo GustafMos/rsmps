@@ -1,6 +1,7 @@
 import { defineNode } from '../../define';
 import { cameraBasis, PROJECTION_ID, simpleCamera } from '../../lib/gen-camera';
 import { rgba, rotationZYX } from '../../lib/gen-common';
+import { modelFilesSummary, renderModel } from '../../lib/model-render';
 import type { CameraValue } from '../../types';
 
 const SHAPES = { cube: 0, sphere: 1, cylinder: 2, cone: 3, torus: 4, pyramid: 5, capsule: 6, octahedron: 7 } as const;
@@ -9,8 +10,9 @@ export default defineNode({
   id: 'object-3d',
   title: '3D Object',
   category: 'generate',
-  description: 'A lit 3D primitive (cube, sphere, cylinder, cone, torus, pyramid, capsule, octahedron) that can spin in a perfect loop. Transparent background.',
-  keywords: ['cube', 'sphere', 'cylinder', 'cone', 'torus', 'donut', 'pyramid', 'capsule', 'octahedron', '3d', 'model', 'spin', 'rotate', 'raymarch', 'cel', 'toon'],
+  description:
+    'A lit 3D object that can spin in a perfect loop: a primitive (cube, sphere, cylinder, cone, torus, pyramid, capsule, octahedron) or your own model (choose "Custom model…" in Shape, then add a .glb, .gltf or .obj file). Transparent background.',
+  keywords: ['cube', 'sphere', 'cylinder', 'cone', 'torus', 'donut', 'pyramid', 'capsule', 'octahedron', '3d', 'model', 'spin', 'rotate', 'raymarch', 'cel', 'toon', 'glb', 'gltf', 'obj', 'mesh', 'import', 'upload', 'custom', 'wavefront', 'low poly'],
   inputs: { size: { type: 'image', label: 'Size from' }, camera: { type: 'camera', label: 'Camera' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
@@ -27,9 +29,47 @@ export default defineNode({
         { value: 'pyramid', label: 'Pyramid' },
         { value: 'capsule', label: 'Capsule' },
         { value: 'octahedron', label: 'Octahedron' },
+        { value: 'custom', label: 'Custom model…' },
       ],
     },
-    baseColor: { type: 'color', default: [0.35, 0.6, 0.95, 1], label: 'Colour' },
+    model: {
+      type: 'assets',
+      default: [],
+      accept: 'model',
+      label: '3D model',
+      hint: 'A .glb, .gltf or .obj file (up to 2 million triangles; not Draco/meshopt-compressed, not multi-file .gltf). With several files, each batch item uses its own.',
+      visibleIf: (p) => p.shape === 'custom',
+    },
+    baseColor: { type: 'color', default: [0.35, 0.6, 0.95, 1], label: 'Colour', visibleIf: (p) => p.shape !== 'custom' || p.colorMode !== 'model' },
+    colorMode: {
+      type: 'enum',
+      default: 'model',
+      label: 'Model colour',
+      group: 'Custom model',
+      visibleIf: (p) => p.shape === 'custom',
+      options: [
+        { value: 'model', label: 'As in the file' },
+        { value: 'tint', label: 'Tint the file’s colours (Colour above)' },
+        { value: 'override', label: 'One flat colour (Colour above)' },
+      ],
+    },
+    autoFit: { type: 'bool', default: true, label: 'Fit to view', group: 'Custom model', hint: 'Centre the model and scale it to fill the same space as the primitives.', visibleIf: (p) => p.shape === 'custom' },
+    shading: {
+      type: 'enum',
+      default: 'smooth',
+      label: 'Model shading',
+      group: 'Custom model',
+      visibleIf: (p) => p.shape === 'custom',
+      options: [
+        { value: 'smooth', label: 'Smooth' },
+        { value: 'flat', label: 'Flat (faceted, low-poly look)' },
+        { value: 'unlit', label: 'Unlit (colours only)' },
+      ],
+    },
+    nearestTexture: { type: 'bool', default: false, label: 'Crisp texture (no smoothing)', group: 'Custom model', hint: 'Nearest-neighbour texture sampling, for pixel-art textures.', visibleIf: (p) => p.shape === 'custom' },
+    backFaces: { type: 'bool', default: false, label: 'Show back faces', group: 'Custom model', hint: 'Draw both sides of every triangle, not only the ones the file marks double-sided.', visibleIf: (p) => p.shape === 'custom' },
+    wireframe: { type: 'bool', default: false, label: 'Wireframe overlay', group: 'Custom model', hint: 'Limited to 300,000 triangles.', visibleIf: (p) => p.shape === 'custom' },
+    wireColor: { type: 'color', default: [0, 0, 0, 0.6], label: 'Wireframe colour', group: 'Custom model', visibleIf: (p) => p.shape === 'custom' && p.wireframe === true },
     posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
     posY: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Y (up)', group: 'Object' },
     posZ: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Z (away)', group: 'Object' },
@@ -54,7 +94,7 @@ export default defineNode({
     spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
-    bevel: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Edge bevel', group: 'Object', hint: '0 = perfectly sharp edges and corners. About 0.07 gives the slightly soft edge older versions had; 1 rounds the shape right off. Applies to cube, cylinder, cone, pyramid and octahedron.' },
+    bevel: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Edge bevel', group: 'Object', hint: '0 = perfectly sharp edges and corners. About 0.07 gives the slightly soft edge older versions had; 1 rounds the shape right off. Applies to cube, cylinder, cone, pyramid and octahedron.', visibleIf: (p) => p.shape !== 'custom' },
     lightAzimuth: { type: 'number', default: -35, min: -180, max: 180, step: 1, unit: 'deg', label: 'Light from (left/right)', group: 'Lighting' },
     lightElevation: { type: 'number', default: 40, min: -90, max: 90, step: 1, unit: 'deg', label: 'Light height', group: 'Lighting' },
     ambient: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Ambient light', group: 'Lighting' },
@@ -63,10 +103,14 @@ export default defineNode({
     cel: { type: 'bool', default: false, label: 'Flat (cel) shading', group: 'Lighting', hint: 'Posterises the light into a few flat bands. Great for pixel art.' },
     celSteps: { type: 'number', default: 3, min: 2, max: 8, step: 1, integer: true, label: 'Shading bands', group: 'Lighting', visibleIf: (p) => p.cel === true },
   },
-  summary: (p) => `${p.shape} · ${p.cameraType}${p.cel ? ` · ${p.celSteps}-band cel` : ''}${p.spinX || p.spinY || p.spinZ ? ' · spinning' : ''}`,
-  render(ctx) {
+  summary: (p) => `${p.shape === 'custom' ? modelFilesSummary(p) : p.shape} · ${p.cameraType}${p.cel ? ` · ${p.celSteps}-band cel` : ''}${p.spinX || p.spinY || p.spinZ ? ' · spinning' : ''}`,
+  async render(ctx) {
     const p = ctx.params;
     const size = ctx.in.size ?? ctx.canvas;
+    if (p.shape === 'custom') {
+      // Same renderer as the legacy 3D Model node (lib/model-render.ts): imported mesh, same camera and lighting params.
+      return { image: await renderModel(ctx, p, size, ctx.in.camera, null) };
+    }
     const spinning = p.spinX !== 0 || p.spinY !== 0 || p.spinZ !== 0;
     const phase = spinning ? ctx.time.phase : 0;
     const R = rotationZYX(p.rotX + 360 * p.spinX * phase, p.rotY + 360 * p.spinY * phase, p.rotZ + 360 * p.spinZ * phase);

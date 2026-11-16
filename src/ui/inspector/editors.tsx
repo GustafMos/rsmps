@@ -254,3 +254,93 @@ export function JsonEditor({ value, onChange }: { value: unknown; onChange: (v: 
     </div>
   );
 }
+
+/* ------------------------------- Code editor ------------------------------ */
+
+/**
+ * Plain monospace editor for `kind: 'code'` string params (WGSL in the Custom Shader node). Edits stay in a local draft and are
+ * applied on blur or Ctrl/Cmd+Enter, so a half-typed shader never recompiles on every key. Tab inserts two spaces
+ * (Escape then Tab leaves the field for keyboard users). The Examples menu replaces the code and applies at once.
+ */
+export function CodeEditor({ value, onChange, examples, help, defaultValue }: { value: string; onChange: (v: string) => void; examples?: readonly { label: string; code: string }[]; help?: string; defaultValue?: string }) {
+  const [draft, setDraft] = useState(value);
+  const applied = useRef(value);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const escaped = useRef(false);
+  // Follow outside changes (undo, loading a project, another editor) but never overwrite what is being typed.
+  if (value !== applied.current) {
+    applied.current = value;
+    if (draft !== value) setDraft(value);
+  }
+  const apply = (text: string) => {
+    if (text === applied.current) return;
+    applied.current = text;
+    onChange(text);
+  };
+  const dirty = draft !== applied.current;
+  const lines = draft.split('\n').length;
+
+  return (
+    <div className="rs-code">
+      <div className="rs-code__bar">
+        {examples && examples.length > 0 && (
+          <select
+            className="rs-input rs-code__examples"
+            value=""
+            aria-label="Examples"
+            title="Replace the code with an example"
+            onChange={(e) => {
+              const ex = examples[Number(e.target.value)];
+              if (ex) { setDraft(ex.code); apply(ex.code); }
+            }}
+          >
+            <option value="">Examples…</option>
+            {examples.map((ex, i) => <option key={ex.label} value={i}>{ex.label}</option>)}
+          </select>
+        )}
+        {defaultValue !== undefined && (
+          <button className="rs-btn rs-btn--ghost" title="Restore the default code" onClick={() => { setDraft(defaultValue); apply(defaultValue); }}>Reset</button>
+        )}
+        <span className="rs-code__state rs-caps">{dirty ? 'Ctrl+Enter to apply' : `${lines} line${lines === 1 ? '' : 's'}`}</span>
+      </div>
+      <textarea
+        ref={area}
+        className="rs-code__area rs-mono"
+        data-nodrag
+        value={draft}
+        rows={Math.min(24, Math.max(10, lines + 1))}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        wrap="off"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => apply(draft)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            apply(draft);
+            return;
+          }
+          if (e.key === 'Escape') { escaped.current = true; return; }
+          if (e.key === 'Tab' && !e.shiftKey && !escaped.current) {
+            e.preventDefault();
+            const el = e.currentTarget;
+            const { selectionStart: s, selectionEnd: en } = el;
+            const next = draft.slice(0, s) + '  ' + draft.slice(en);
+            setDraft(next);
+            requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = s + 2; });
+            return;
+          }
+          escaped.current = false;
+        }}
+      />
+      {help && (
+        <details className="rs-code__help">
+          <summary className="rs-caps">What can I use?</summary>
+          <pre className="rs-mono">{help}</pre>
+        </details>
+      )}
+    </div>
+  );
+}

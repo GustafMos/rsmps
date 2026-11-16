@@ -6,6 +6,7 @@
  */
 import { Registry, canConnect, paramSocketType } from './define';
 import { Gpu } from './gpu/gpu';
+import { stableStringify } from './lib/stable-json';
 import type {
   AnyNodeDef,
   CanvasInfo,
@@ -86,6 +87,18 @@ export interface ColdStats {
   lost: number;
 }
 
+/**
+ * The cheap CPU part (regions, numbers) of an expensive per-frame analysis node (`cpu: true`: detect, track...), kept for many frames.
+ * The full entry holds the node's textures and is limited to a couple of frames per node; this one weighs nothing, so a Track node
+ * that looks back over 100+ frames finds every earlier detection here instead of re-running the readback for each of them.
+ * Keyed by structure + frame (see `liteKeyOf`), so it can be looked up WITHOUT evaluating the node's inputs.
+ */
+interface LiteEntry {
+  node: string;
+  outputs: Record<string, Value | null>;
+  lastUsed: number;
+}
+
 interface NodeResult {
   key: string;
   /** Time-varying (see Entry.tv). */
@@ -110,6 +123,8 @@ interface Scope {
   timings: Map<string, number>;
   /** Frame size at proxy 1 (what a baked sequence is made at). */
   fullCanvas: { width: number; height: number };
+  /** structSig results for this evaluation (the graph does not change during one), shared with the sub-scopes of `pull`. */
+  sigMemo: Map<string, string>;
 }
 
 function hash(str: string): string {
@@ -129,12 +144,15 @@ function isTextured(v: unknown): v is ImageValue | MaskValue {
   return !!v && typeof v === 'object' && 'texture' in (v as object);
 }
 
+/** Sockets whose values are GPU textures; every other output (regions, numbers, colours...) is a small CPU value. */
+const isTextureSocket = (type: string): boolean => type === 'image' || type === 'mask';
+
 /** Signature of a value for cache keys: textures are identified by the key of the node that made them. */
 function valueSig(v: Value | Value[] | null, sourceKey: string): string {
   if (v === null) return 'null';
   if (Array.isArray(v) && v.length && isTextured(v[0])) return sourceKey;
   if (isTextured(v)) return sourceKey;
-  return JSON.stringify(v);
+  return stableStringify(v);
 }
 
 export function defaultParams(def: AnyNodeDef): Record<string, unknown> {
@@ -185,6 +203,9 @@ export class Engine {
   private cacheBytes = 0;
   /** What a node read last time under a given static signature: decides whether time/item enter its key. */
   private reads = new Map<string, { time: boolean; item: boolean }>();
+  private lite = new Map<string, LiteEntry>();
+  /** Upper bound of CPU-only analysis results kept (see LiteEntry). */
+  static readonly LITE_MAX = 6000;
   private tick = 0;
   /** How many time-varying entries a node may keep (default 2). Raised for nodes whose output a downstream node `pull`s at other times. */
   private pullAllow = new Map<string, { n: number; tick: number }>();
@@ -218,6 +239,9 @@ export class Engine {
     this.registry = registry;
     this.host = host;
   }
+
+  /** Set by the UI: when it returns true the evaluation stops at the next node ("Pause rendering"). Never aborts a 'final' (export) pass unless the hook says so. */
+  shouldAbort: ((quality: 'preview' | 'final') => boolean) | null = null;
 
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -263,6 +287,7 @@ export class Engine {
       errors: new Map(),
       timings: new Map(),
       fullCanvas: { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) },
+      sigMemo: new Map(),
     };
 
     const node = scope.nodes.get(req.node);
@@ -304,7 +329,7 @@ export class Engine {
     }
     const frame0 = canvas ?? graph.project;
     const fullCanvas = { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) };
-    const scope = { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas } as unknown as Scope;
+    const scope = { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas, sigMemo: new Map() } as unknown as Scope;
     return `${port}:${this.structSig(node, scope, new Set(), true)}`;
   }
 
@@ -324,8 +349,11 @@ export class Engine {
     this.cache.clear();
     this.cacheBytes = 0;
     this.reads.clear();
-    // Pixels in the RAM tier stay valid when the cache is only cleared to save memory, not when content changed.
-    if (!opts.demote) this.dropCold();
+    // Pixels in the RAM tier (and the weightless analysis results) stay valid when the cache is only cleared to save memory, not when content changed.
+    if (!opts.demote) {
+      this.dropCold();
+      this.lite.clear();
+    }
   }
 
   private dropCold(): void {
@@ -460,11 +488,15 @@ export class Engine {
     return { key, outputs, tv: false };
   }
 
-  private evalNode(id: string, scope: Scope): Promise<NodeResult | null> {
-    const memoKey = `${id}@${scope.frame}`;
+  /**
+   * `lite`: the caller only reads outputs that are not textures (regions, numbers), so a weightless LiteEntry is as good as a full
+   * result and the node's inputs need not be evaluated at all.
+   */
+  private evalNode(id: string, scope: Scope, lite = false): Promise<NodeResult | null> {
+    const memoKey = `${id}@${scope.frame}${lite ? '~' : ''}`;
     const existing = scope.memo.get(memoKey);
     if (existing) return existing;
-    const promise = this.evalNodeInner(id, scope).catch((err) => {
+    const promise = this.evalNodeInner(id, scope, lite).catch((err) => {
       scope.errors.set(id, err instanceof Error ? err.message : String(err));
       return null;
     });
@@ -472,7 +504,16 @@ export class Engine {
     return promise;
   }
 
-  private async evalNodeInner(id: string, scope: Scope): Promise<NodeResult | null> {
+  /** Key of a node's CPU-only results: everything that decides them (structure upstream, frame, item, quality), no evaluation needed. */
+  private liteKeyOf(id: string, scope: Scope): string {
+    return `${this.structSig(id, scope, new Set(), false, scope.sigMemo)}|${scope.frame}|${scope.item}/${scope.itemCount}|${scope.quality}`;
+  }
+
+  private liteCapable(def: AnyNodeDef): boolean {
+    return def.cpu === true && Object.values(def.outputs as Record<string, { type: string }>).some((o) => !isTextureSocket(o.type));
+  }
+
+  private async evalNodeInner(id: string, scope: Scope, lite = false): Promise<NodeResult | null> {
     const node = scope.nodes.get(id);
     if (!node) return null;
     const def = this.registry.get(node.type);
@@ -481,11 +522,23 @@ export class Engine {
       return null;
     }
     if (!def.render) return null; // stream-domain only node: nothing to do per frame
+    if (this.shouldAbort?.(scope.quality)) throw new Error('Rendering is paused');
     const stackKey = `${id}@${scope.frame}`;
     if (scope.stack.has(stackKey)) throw new Error('Cycle in graph');
     scope.stack.add(stackKey);
 
     try {
+      // 0. Analysis nodes: a weightless result for this frame may exist already; then nothing upstream needs to run.
+      let liteKey = '';
+      if (!node.bypass && this.liteCapable(def)) {
+        liteKey = this.liteKeyOf(id, scope);
+        const hit = lite ? this.lite.get(liteKey) : undefined;
+        if (hit) {
+          hit.lastUsed = this.tick;
+          return { key: `lite:${liteKey}`, outputs: hit.outputs, tv: true };
+        }
+      }
+
       // 1. Gather inputs (sockets and param sockets) from upstream.
       const edges = scope.inbound.get(id) ?? [];
       const inputs: Record<string, Value | Value[] | null> = {};
@@ -504,11 +557,11 @@ export class Engine {
           lazyWired.add(edge.to.port);
           continue;
         }
-        const up = await this.evalNode(edge.from.node, scope);
-        if (up?.tv) tvIn = true;
-        const value = up?.outputs[edge.from.port] ?? null;
         const upDef = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '');
         const fromType = upDef?.outputs[edge.from.port]?.type;
+        const up = await this.evalNode(edge.from.node, scope, !!fromType && !isTextureSocket(fromType));
+        if (up?.tv) tvIn = true;
+        const value = up?.outputs[edge.from.port] ?? null;
         const port = edge.to.port;
         const idef = def.inputs[port];
         if (idef) {
@@ -569,13 +622,16 @@ export class Engine {
 
       // 5. Cache lookup.
       const staticSig = hash(
-        `${def.id}|${JSON.stringify(raw)}|${sortByPort(sigs).join('|')}|u${ref.unit}|c${scope.canvas.width}x${scope.canvas.height}|${scope.quality}`,
+        `${def.id}|${stableStringify(raw)}|${sortByPort(sigs).join('|')}|u${ref.unit}|c${scope.canvas.width}x${scope.canvas.height}|${scope.quality}`,
       );
       const readsKey = `${id}|${staticSig}`;
       const known = this.reads.get(readsKey);
       const fullKey = (r: { time: boolean; item: boolean }) =>
         staticSig + (r.time ? `@${scope.frame}/${scope.graph.project.fps}/${scope.graph.project.duration}/${scope.graph.project.loop}` : '') + (r.item ? `#${scope.item}/${scope.itemCount}` : '');
       if (known) {
+        // Most recently used last: the pruning in evict() then drops what no frame asks for any more, never the static nodes in use.
+        this.reads.delete(readsKey);
+        this.reads.set(readsKey, known);
         const hit = this.cache.get(fullKey(known));
         if (hit) {
           hit.lastUsed = this.tick;
@@ -620,15 +676,16 @@ export class Engine {
           const edge = edges.find((e) => e.to.port === input);
           return edge ? `${edge.from.port}:${this.structSig(edge.from.node, scope, new Set(), true)}` : '';
         },
-        pull: async (input: string, at?: { seconds: number }) => {
-          const edge = edges.find((e) => e.to.port === input);
+        pull: async (input: string, at?: { seconds: number; wire?: number }) => {
+          const edge = edges.filter((e) => e.to.port === input)[at?.wire ?? 0];
           if (!edge) return null;
           // No `at` = current frame. That only makes this node time-dependent when what it pulled varies with time: a static
           // upstream gives the same picture on every frame, so a pass-through node (Cache / Bake) stays cacheable.
           const frame = Math.max(0, Math.round((at ? at.seconds : scope.seconds) * project.fps));
           const sub: Scope = { ...scope, frame, seconds: frame / project.fps };
           if (frame !== scope.frame) this.widenAllowance(edge.from.node, Math.abs(scope.frame - frame) + 1);
-          const up = await this.evalNode(edge.from.node, sub);
+          const pulledType = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '')?.outputs[edge.from.port]?.type;
+          const up = await this.evalNode(edge.from.node, sub, !!pulledType && !isTextureSocket(pulledType));
           if (!at && up?.tv) used.time = true;
           const v = up?.outputs[edge.from.port] ?? null;
           if (isTextured(v)) {
@@ -672,6 +729,11 @@ export class Engine {
       const tv = used.time || tvIn;
       this.cache.set(key, { key, node: id, tv, outputs, bytes, lastUsed: this.tick, renderMs });
       this.cacheBytes += bytes;
+      if (liteKey && tv) {
+        const cpuOnly: Record<string, Value | null> = {};
+        for (const [port, v] of Object.entries(outputs)) if (!isTextured(v) && !(Array.isArray(v) && v.length && isTextured(v[0]))) cpuOnly[port] = v;
+        this.lite.set(liteKey, { node: id, outputs: cpuOnly, lastUsed: this.tick });
+      }
       return { key, outputs, tv };
     } finally {
       scope.stack.delete(stackKey);
@@ -710,7 +772,7 @@ export class Engine {
     }
     // `full`: independent of the playback proxy, so a signature taken while playing equals one taken while paused.
     const c = full ? scope.fullCanvas : scope.canvas;
-    const sig = hash(`${node.type}|${JSON.stringify(node.params)}${media}|${node.bypass ? 1 : 0}|${ins}|${c.width}x${c.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
+    const sig = hash(`${node.type}|${stableStringify(node.params)}${media}|${node.bypass ? 1 : 0}|${ins}|${c.width}x${c.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
     seen.delete(id);
     memo.set(id, sig);
     return sig;
@@ -725,12 +787,16 @@ export class Engine {
     if (!outName || !inName) return;
     const out = outputs[outName] as ImageValue | null;
     const src = inputs[inName] as ImageValue | null;
-    if (!out || !src || out.width !== src.width || out.height !== src.height) return;
+    if (!out || !src) return;
+    // An effect that returned a smaller image (Pixelate's art grid) is crisp-upscaled to the source size by the nearest
+    // sampling below, and the result is stamped with the grid cell (art-grid rule, docs/ENGINE.md 28).
+    const same = out.width === src.width && out.height === src.height;
+    if (!same && (out.width > src.width || out.height > src.height)) return;
     const textures: Record<string, { texture: GPUTexture }> = { ta: src, tb: out };
     if (mask) textures.m = mask;
-    outputs[outName] = this.gpu.pass({
+    const blended = this.gpu.pass({
       label: 'effect-mask',
-      size: out,
+      size: same ? out : src,
       textures,
       uniforms: { mix },
       wgsl: `fn fx(uv: vec2f, px: vec2f) -> vec4f {
@@ -740,6 +806,8 @@ export class Engine {
   return mix(a, b, k);
 }`,
     });
+    const cell = same ? out.cell : src.height / out.height;
+    outputs[outName] = cell !== undefined && cell > 1 ? { ...blended, cell } : blended;
   }
 
   private checkOutputs(def: AnyNodeDef, outputs: Record<string, Value | null>): void {
@@ -805,6 +873,7 @@ export class Engine {
     this.cache.clear();
     this.cacheBytes = 0;
     this.reads.clear();
+    this.lite.clear();
     this.pullAllow.clear();
     this.dropCold(); // the key space is gone with the cache
   }
@@ -814,17 +883,47 @@ export class Engine {
     return this.cacheBytes;
   }
 
-  /** LRU eviction. Runs only between evaluations, so nothing in use is ever freed. */
+  /**
+   * Eviction, run only between evaluations so nothing in use is ever freed. What goes first is what is cheapest to get back per byte
+   * it frees: value = render time x (a time-keyed entry is rarely asked for again, the player keeps the finished frames) / (1 + age),
+   * divided by its size. An expensive static result (a heavy generator everything downstream uses) therefore outlives cheap or
+   * per-frame ones. The entries the previous evaluation used (the picture on screen and everything it was made from) are not
+   * candidates in the first pass; they are only touched when nothing else gets the cache under its hard budget.
+   * RAM spill (`demote`) is tried before an expensive entry is dropped.
+   */
   private evict(): void {
+    if (this.lite.size > Engine.LITE_MAX) {
+      const byAge = [...this.lite.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+      for (const [k] of byAge.slice(0, Math.ceil(Engine.LITE_MAX * 0.25))) this.lite.delete(k);
+    }
+    if (this.reads.size > 20000) {
+      // Oldest first (insertion order, refreshed on use): never forgets what static nodes in use need.
+      let drop = 5000;
+      for (const k of this.reads.keys()) {
+        if (drop-- <= 0) break;
+        this.reads.delete(k);
+      }
+    }
     if (this.cacheBytes <= this.cacheBudget && this.cache.size < 4000) return;
-    const entries = [...this.cache.values()].sort((a, b) => a.lastUsed - b.lastUsed);
-    for (const entry of entries) {
-      if (this.cacheBytes <= this.cacheBudget * 0.7 && this.cache.size < 3000) break;
+    const value = (e: Entry): number => ((e.renderMs + 0.5) * (e.tv ? 0.25 : 1)) / (1 + (this.tick - e.lastUsed) / 8) / (e.bytes / 1048576 + 0.1);
+    const entries = [...this.cache.values()].sort((a, b) => value(a) - value(b) || a.lastUsed - b.lastUsed);
+    const working = this.tick - 1;
+    const drop = (entry: Entry) => {
       this.cache.delete(entry.key);
       this.cacheBytes -= entry.bytes;
       if (!this.demote(entry)) this.releaseEntry(entry);
+    };
+    for (const entry of entries) {
+      if (this.cacheBytes <= this.cacheBudget * 0.7 && this.cache.size < 3000) break;
+      if (entry.lastUsed >= working) continue;
+      drop(entry);
     }
-    if (this.reads.size > 20000) this.reads.clear();
+    if (this.cacheBytes > this.cacheBudget || this.cache.size >= 4000) {
+      for (const entry of entries) {
+        if (this.cacheBytes <= this.cacheBudget * 0.7 && this.cache.size < 3000) break;
+        if (this.cache.get(entry.key) === entry) drop(entry);
+      }
+    }
   }
 }
 

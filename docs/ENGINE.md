@@ -220,3 +220,52 @@ upstream (no evaluation, independent of proxy and frame); the node compares it w
 `stale`. The hidden `baked*` params are written by the UI from `BakeResult.params`.
 `groupOutputWires(graph, nodeIds)` / `groupOutputs(...)` in `graph.ts` list the wires that leave a set of nodes: that is
 where cache nodes go to bake a whole group.
+
+### Cache keys, eviction and the player's frame cache
+
+- A node result is keyed by node type + resolved params + the keys of its inputs + unit/canvas size/quality, plus the INTEGER frame when
+  the node read the clock (`ctx.time`) and the item when it read the item. Never seconds (float noise), object identity or wall-clock time.
+  Keys and structural signatures are built with `stableStringify` (sorted keys): deep-equal params in a different key order give the same key.
+  `src/engine/__tests__/caching.test.ts` asserts, per scenario, exactly which nodes render (`renderedNodes` / `RenderTally` in testing.ts).
+- Time-keyed entries are limited per node (`TIMED_KEEP`, widened for nodes that are `pull`ed over a span). Entries of `cpu: true` nodes that have
+  a non-picture output (detect, track: regions, numbers) additionally leave a weightless "lite" record keyed by structure + frame
+  (`liteKeyOf`), so a consumer that only reads such an output (Track looking back over 100+ frames) finds the earlier detections without
+  evaluating the node's inputs or repeating a GPU readback. A consumer reading the node's picture or mask output is not served by it.
+- Eviction (between evaluations only): lowest value per byte goes first, where value = render time (x 0.25 for time-keyed entries) / (1 + age).
+  An expensive static result outlives cheap or per-frame ones; what the previous evaluation used is not a candidate unless the hard budget
+  demands it; RAM spill (`demote`) is tried before an expensive entry is dropped.
+- The player's RAM frame cache is keyed by `renderHash`: project settings + the viewed node and everything UPSTREAM of it (+ the active
+  Output). Editing another branch keeps the finished frames. While playing, up to 4 frames wait to be packed, so even a heavy graph fills the
+  cache during its first pass and the second pass is served from it with zero node renders.
+
+### The art-grid rule
+
+28. **Art grids.** `ImageValue.cell` (optional, >= 1, may be fractional) says "this image is a crisp (nearest) upscale of an art
+    grid; one art pixel covers `cell` texels". Absent or 1 = a normal image. It is set by Pixelate (when it keeps the source size:
+    `Keep source size`, or any Mask / Mix < 1) and by the kernel's `applyMask`, which crisp-upscales a maskable node's smaller output
+    to the input size before blending and stamps `cell = inputHeight / outputHeight`. Per-pixel pixel-art nodes (Dither, Quantize,
+    Palette Swap, Mosaic) must work on the grid when `cell > 1`: wrap the effect in `withArtGrid(gpu, image, pixelSizeTexels, (art, grid) => ...)`
+    from `lib/art-grid.ts`. It point-samples the input at cell centres down to `round(size / cell)`, runs your function on that
+    small image, crisp-upscales the result back to the input size and keeps `cell`. Convert any length you use with `grid.toArt(texels)`.
+    Never read `image.cell` yourself, never allocate the grid image yourself, and return an image of exactly the art size. Dither and
+    Quantize also take the shared `PIXEL_SIZE_PARAM` (`pixelSize`, 0 = follow the image): > 0 forces a grid of that many unit pixels,
+    so full-resolution footage + a tracked mask gives chunky, fast dither in one node. The mask blend still runs at full input
+    resolution, so mask edges stay as authored. Nodes that do not preserve the grid (blur, warp...) simply do not copy `cell`.
+
+## Editing nodes (Media Timeline)
+
+29. **Evaluate only what is shown.** A node that picks among several picture sources (an editor, a switcher) declares the input
+    `multi` AND `lazy` and fetches each source it needs with `ctx.pull('clips', { seconds, wire })`. `wire` is the position of the
+    wire among that input's wires (wire order, as for layer inputs). Sources it does not pull are never evaluated: there is a test that
+    counts renders (`nodes/time/media-timeline.test.ts`). The input is `lazy`, so the node itself reads the clock and renders per frame.
+30. **A node can set the project length** with `projectLength?(params) => seconds | null` on its definition. Only
+    `effectiveDuration(graph, registry)` / `withEffectiveDuration` in `graph.ts` reads it: the editor store applies it to
+    `project.duration` on every commit and load (so player, exporter and UI all see one number), and the CLI applies it before its
+    `--duration` override. Do not compute the length anywhere else. The result is a whole number of frames, at least one frame.
+31. **Per-wire audio**: a kernel with `perWire: true` also gets `io.inWires[name]`, one block per wire in wire order (`io.in` is still
+    the sum). Use it to gate, fade or route wires individually; do not use it to mix (the host already sums).
+32. **Edits are pure data with pure helpers** (`lib/media-edit.ts`): which clips are active, local time, fades, moves, trims and splits
+    are plain functions shared by the node, its audio kernel, the editor UI and the tests. `lib/media-edit-graph.ts` keeps the clip
+    sources in step with the wires (new wire = new clip at the end; removed or reordered wire = clips follow their source); the editor
+    store calls it on every commit. A node that has both `render` and `audio` must also be listed in the glob of `audio/nodes.ts`
+    (the audio worklet only imports what is listed there).
