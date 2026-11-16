@@ -43,6 +43,9 @@ import type { Library } from './library';
 import { imageExtension, resolvePattern, sanitizeFileName, sequencePattern, uniqueName, type NameTokens } from './naming';
 import { exportPrint, readPrintParams, type PrintParams } from './print/export';
 import { layoutSheet, sheetMetadata } from './spritesheet';
+import { isDesktop, type FfmpegExportClient } from './desktop';
+import { ffmpegFallbackCodec, ffmpegMissingMessage, ffmpegOnlyCodec, videoRoute, type FfmpegCodec } from './export-codecs';
+import { savedEntry, streamToFfmpeg } from './export-ffmpeg';
 import { errorMessage, hashString, isAbort, throwIfAborted, totalFramesOf, yieldToEventLoop } from './util';
 
 export interface ExporterDeps {
@@ -56,6 +59,15 @@ export interface ExporterDeps {
   player?: { hold(): () => void };
   watch?: GpuWatch;
   governor?: { enter(mode: 'export'): () => void };
+  /** Desktop app only: FFmpeg export endpoints (ProRes-compatible, alpha formats). Absent in the web version. */
+  ffmpeg?: FfmpegExportClient | null;
+}
+
+/** Thrown inside the WebCodecs path when it cannot encode H.264 / H.265 and FFmpeg can. */
+class FfmpegFallback extends Error {
+  constructor(public codec: FfmpegCodec) {
+    super('Use FFmpeg');
+  }
 }
 
 type Img = ImageValue | MaskValue;
@@ -223,10 +235,13 @@ export class ExporterImpl implements Exporter {
     if (notes.length) {
       files.push({ name: uniqueName(run.used, 'errors.txt'), blob: new Blob([notes.join('\n') + '\n'], { type: 'text/plain' }) });
     }
-    if (req.zip && files.length > 1) {
-      return [{ name: `${sanitizeFileName(graph.name || 'export')}.zip`, blob: await zipFiles(files) }];
+    // Files FFmpeg already saved through the native dialog are not part of a ZIP.
+    const saved = files.filter((f) => f.savedPath);
+    const rest = files.filter((f) => !f.savedPath);
+    if (req.zip && rest.length > 1) {
+      return [...saved, { name: `${sanitizeFileName(graph.name || 'export')}.zip`, blob: await zipFiles(rest) }];
     }
-    return files;
+    return [...saved, ...rest];
   }
 
   /**
@@ -249,7 +264,7 @@ export class ExporterImpl implements Exporter {
   }
 
   download(files: ExportedFile[]): void {
-    files.forEach((file, i) => {
+    files.filter((f) => !f.savedPath).forEach((file, i) => {
       setTimeout(() => {
         const url = URL.createObjectURL(file.blob);
         const a = document.createElement('a');
@@ -388,7 +403,7 @@ export class ExporterImpl implements Exporter {
       case 'spritesheet':
         return this.exportSheet(job, run);
       case 'video':
-        return this.exportVideo(job, run);
+        return this.exportVideoRouted(job, run);
       case 'print':
         return this.exportPrintSheets(job, run);
     }
@@ -714,6 +729,68 @@ export class ExporterImpl implements Exporter {
 
   /* ------------------------------------- video -------------------------------------------------- */
 
+  /** FFmpeg-only formats stream to the desktop app; everything else is the WebCodecs path (with FFmpeg as a fallback for H.264 / H.265). */
+  private async exportVideoRouted(job: Job, run: Run): Promise<ExportedFile[]> {
+    const only = ffmpegOnlyCodec(job.params.codec);
+    if (only) {
+      const route = videoRoute(job.params.codec, await this.ffmpegReady());
+      if (route === 'missing') throw new Error(ffmpegMissingMessage(isDesktop()));
+      return this.exportVideoFfmpeg(job, run, only);
+    }
+    try {
+      return await this.exportVideo(job, run);
+    } catch (err) {
+      if (!(err instanceof FfmpegFallback)) throw err;
+      run.warnings.push(`${job.label}: this app's built-in encoder cannot make ${err.codec.id === 'hevc' ? 'H.265' : 'H.264'} video, so FFmpeg was used.`);
+      return this.exportVideoFfmpeg(job, run, err.codec);
+    }
+  }
+
+  private async ffmpegReady(): Promise<boolean> {
+    try {
+      return (await this.d.ffmpeg?.info())?.available === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async exportVideoFfmpeg(job: Job, run: Run, codec: FfmpegCodec): Promise<ExportedFile[]> {
+    const { gpu, ffmpeg } = this.d;
+    if (!ffmpeg) throw new Error(ffmpegMissingMessage(isDesktop()));
+    const project = run.req.graph.project;
+    const frames = totalFramesOf(project);
+    const render = async (f: number) => {
+      throwIfAborted(run.req.signal);
+      const img = await this.renderFrame(job, run, f);
+      gpu.retain(img.texture);
+      const comp = this.compose(img, job.params.scale, codec.even);
+      try {
+        // Formats without alpha get the picture over black (premultiplied), exactly what the WebCodecs path does.
+        const data = await gpu.read(comp.drawable, codec.alpha);
+        return { width: comp.drawable.width, height: comp.drawable.height, data };
+      } finally {
+        comp.release();
+        gpu.release(img.texture);
+      }
+    };
+    const result = await streamToFfmpeg({
+      client: ffmpeg,
+      codec,
+      fps: project.fps,
+      frames,
+      bitrateMbps: job.params.bitrate,
+      signal: run.req.signal,
+      name: (size) => resolvePattern(job.params.name, this.tokens(job, size.width, size.height)),
+      render,
+      audio: () => this.videoAudio(job, run, frames / project.fps),
+      onProgress: (fraction, label) => run.progress(fraction, label),
+      yieldNow: yieldToEventLoop,
+    });
+    if (!result.saved || !result.path) throw new DOMException('Save canceled', 'AbortError'); // the user closed the Save dialog
+    run.progress(1, result.path);
+    return [savedEntry(result.path)];
+  }
+
   private async exportVideo(job: Job, run: Run): Promise<ExportedFile[]> {
     const { gpu } = this.d;
     const graph = run.req.graph;
@@ -763,6 +840,8 @@ export class ExporterImpl implements Exporter {
             outW = width;
             outH = height;
             const quality = new Quality({ bitrate: job.params.bitrate * 1_000_000 });
+            const fallback = ffmpegFallbackCodec(job.params.codec);
+            if (fallback && !(await canEncodeVideo(job.params.codec as VideoCodec, { width, height, frameRate: fps, quality }).catch(() => false)) && (await this.ffmpegReady())) throw new FfmpegFallback(fallback);
             chosen = await this.pickCodec(job.params.codec, width, height, fps, quality);
             output = new Output({ format: chosen.webm ? new WebMOutputFormat() : new Mp4OutputFormat(), target: new BufferTarget() });
             videoSource = new VideoSampleSource({ codec: chosen.codec, quality });

@@ -133,6 +133,11 @@ export interface ExportProgress {
 export interface ExportedFile {
   name: string;
   blob: Blob;
+  /**
+   * Desktop app, FFmpeg formats: the file was already written where the user chose in a native Save dialog. `blob` is empty and
+   * `exporter.download` skips it; show this path instead.
+   */
+  savedPath?: string;
 }
 
 export interface ExportRequest {
@@ -346,8 +351,17 @@ export interface PhoneSessionInfo {
  * and offer Disconnect (`close`). Sessions live in memory: after a page reload the QR code must be made again.
  */
 export interface PhoneApi {
-  /** True when the dev server runs in LAN mode (https, reachable from the network). Decided once at start-up. */
+  /**
+   * True when a phone can be linked: the dev server runs in LAN mode (https, reachable from the network), or this is the desktop
+   * app, which starts its phone server on demand (see `startServer`). Decided once at start-up.
+   */
   available: boolean;
+  /**
+   * Desktop app: start the phone server (the first time the user is asked to allow it; later it only starts). Call it before
+   * `createSession`; `createSession` also calls it when the server is not running. `declined` = the user said no (offer a retry).
+   * Elsewhere (dev LAN mode) the server is already running and this resolves `{ ok: true }`. Absent on older implementations.
+   */
+  startServer?(): Promise<{ ok: boolean; declined?: boolean; error?: string }>;
   /** Addresses a phone could use to reach this computer, best first (physical Wi-Fi, then Tailscale, then others). Offer them in a dropdown. */
   addresses(): Promise<PhoneAddress[]>;
   /** `address` = the `url` of one of `addresses()` (default: the first). The QR code always uses the protocol and port of THIS page's server. */
@@ -359,6 +373,36 @@ export interface PhoneApi {
   expiresAt(token: string): number | null;
   onState(listener: (token: string, state: PhoneState, detail: string) => void): () => void;
   close(token: string): void;
+}
+
+export type { AddonInfo, AddonState } from './desktop';
+
+/** Result of an add-on action. `declined`: the user refused the native confirmation. `canceled`: the file picker was closed. */
+export interface AddonActionResult {
+  ok: boolean;
+  info?: import('./desktop').AddonInfo;
+  declined?: boolean;
+  canceled?: boolean;
+  /** Plain words, ready to show. */
+  error?: string;
+}
+
+/**
+ * Official add-ons (optional software the desktop app can fetch on request, e.g. FFmpeg for ProRes-compatible export). Web version:
+ * `supported` is false and every call resolves empty / not ok. While something installs the list is polled and `onChange` fires
+ * with each update (including download progress); the states and numbers come straight from the desktop app.
+ */
+export interface AddonsApi {
+  supported: boolean;
+  list(): Promise<import('./desktop').AddonInfo[]>;
+  /** Asks the user in a native dialog first, then downloads in the background: watch `onChange`. */
+  install(id: string): Promise<AddonActionResult>;
+  cancel(id: string): Promise<AddonActionResult>;
+  remove(id: string): Promise<AddonActionResult>;
+  /** "Use one I already have": opens a native file picker. */
+  locate(id: string): Promise<AddonActionResult>;
+  /** Called with the full list after every change. Returns an unsubscribe function. */
+  onChange(listener: (list: import('./desktop').AddonInfo[]) => void): () => void;
 }
 
 export interface MemoryInfo {
@@ -387,9 +431,12 @@ export interface Io {
   devices: DeviceApi;
   /** Phone as a camera through a QR code (LAN mode only). */
   phone: PhoneApi;
+  /** Official add-ons (desktop app only; `supported` is false in the web version). */
+  addons: AddonsApi;
   /**
-   * What this running copy of the app can do, for `NodeDef.requires`. The hosted web version and the packaged
-   * desktop app have no local server, so 'local-server' is absent there; it is present under `npm run dev:lan`.
+   * What this running copy of the app can do, for `NodeDef.requires`. The hosted web version has no local
+   * server, so 'local-server' is absent there; it is present under `npm run dev:lan` and in the packaged desktop app (which starts
+   * its phone server on demand).
    * The UI warns on nodes whose requirements are not met.
    */
   capabilities(): ReadonlySet<import('../engine/types').Capability>;

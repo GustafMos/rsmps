@@ -10,6 +10,8 @@ import { registerBuiltins } from '../engine/nodes';
 import type { Io, CreateIo } from './api';
 import { createAudioBridge } from './audio-bridge';
 import { ExporterImpl } from './exporter';
+import { AddonsImpl } from './addons';
+import { DesktopClient, isDesktop } from './desktop';
 import { MemoryGovernor, defaultBudget } from './memory';
 import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
@@ -79,7 +81,8 @@ export const createIo: CreateIo = async () => {
     defaultBudget({ vendor: adapterInfo?.vendor, architecture: adapterInfo?.architecture, description: adapterInfo?.description, deviceMemoryGB }),
   );
   governor.start();
-  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router, player, watch, governor });
+  const desktop = isDesktop() ? new DesktopClient() : null; // the packaged app's add-ons and FFmpeg export; never touched on the web
+  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router, player, watch, governor, ffmpeg: desktop });
 
   // A lost GPU device is replaced in place: the Gpu object (and so engine, library, player) keeps working, all caches and texture
   // handles are dropped, the canvas is reconnected and the current view renders again. Editor state is untouched.
@@ -109,7 +112,7 @@ export const createIo: CreateIo = async () => {
   };
   watchLoss(device);
   watch.onError((m) => player.reportGpuError(m));
-  const phone = new PhoneLink();
+  const phone = new PhoneLink(desktop);
   await phone.init();
   library.live.phone = phone;
   phone.onStream((token, stream) => phoneAudio.setStream(token, stream));
@@ -152,6 +155,7 @@ export const createIo: CreateIo = async () => {
       };
     },
     phone,
+    addons: new AddonsImpl(desktop),
     capabilities: () => new Set(phone.available ? (["local-server"] as const) : []),
     devices: {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),

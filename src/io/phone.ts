@@ -7,6 +7,7 @@ import type { PhoneAddress, PhoneApi, PhoneSessionInfo, PhoneState } from './api
 import { UNREACHED_HINT, closeMessage } from '../phone/messages';
 import type { PhoneProvider } from './live';
 import { qrSvg } from './qr';
+import { DesktopClient, isDesktop, phoneSocketUrl, type LanInfo } from './desktop';
 
 export const LAN_MESSAGE =
   'The phone camera needs LAN mode: run "npm run dev:lan" and open the https address it prints. Phones only allow cameras on https pages, and the app must be reachable from your network.';
@@ -41,6 +42,20 @@ export function buildAddresses(
   return out;
 }
 
+/** Desktop app: the QR addresses are the candidates' own URLs (the phone server has its own port). */
+export function desktopAddresses(info: Pick<LanInfo, 'candidates'>): PhoneAddress[] {
+  return info.candidates.map((c) => ({ url: c.url, label: c.label, kind: c.kind }));
+}
+
+/** Words for a phone server that did not start. */
+export function startFailure(info: LanInfo): { ok: false; declined?: boolean; error?: string } {
+  if (info.declined) return { ok: false, declined: true, error: 'Phone connections were not allowed, so the phone cannot link. Allow them to continue.' };
+  return { ok: false, error: info.error || 'The phone link could not start. Check that no other program is using the port, then try again.' };
+}
+
+/** After the last session closes the desktop server is stopped, but not instantly: "New code" closes the old one and opens another. */
+export const STOP_GRACE_MS = 3000;
+
 export function pickOrigin(origins: string[], page: { hostname: string; origin: string }): string | null {
   if (origins.length === 0) return null;
   const local = ['localhost', '127.0.0.1', '[::1]', '::1'];
@@ -69,13 +84,27 @@ interface Session {
 
 export class PhoneLink implements PhoneApi, PhoneProvider {
   available = false;
+  private desktopInfo: LanInfo | null = null;
+  private stopTimer: ReturnType<typeof setTimeout> | null = null;
   private origins: string[] = [];
   private candidates: { address: string; label: string; kind: 'lan' | 'tailscale' | 'other' }[] = [];
   private sessions = new Map<string, Session>();
   private listeners = new Set<(token: string, state: PhoneState, detail: string) => void>();
 
-  /** Ask the dev server whether LAN mode is on. Never throws. */
+  constructor(private desktop: DesktopClient | null = isDesktop() ? new DesktopClient() : null) {}
+
+  /** Ask the dev server (or the desktop app) whether the phone link can work. Never throws. */
   async init(): Promise<void> {
+    if (this.desktop) {
+      try {
+        const info = await this.desktop.lanInfo();
+        this.desktopInfo = info;
+        this.available = info.desktop && info.ws !== ''; // available on demand: the server starts when the user asks
+      } catch {
+        this.available = false;
+      }
+      return;
+    }
     try {
       const res = await Promise.race([fetch('/__rsmps/lan-info', { cache: 'no-store' }), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 1500))]);
       const info = (await res.json()) as { lan?: boolean; origins?: string[]; candidates?: { address: string; label: string; kind: 'lan' | 'tailscale' | 'other' }[] };
@@ -87,22 +116,63 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     }
   }
 
+  /** Desktop app: start the phone server (native confirmation the first time). Elsewhere the dev server is already listening. */
+  async startServer(): Promise<{ ok: boolean; declined?: boolean; error?: string }> {
+    if (!this.desktop) return { ok: this.available, ...(this.available ? {} : { error: LAN_MESSAGE }) };
+    this.cancelStop();
+    try {
+      const info = await this.desktop.lanStart();
+      this.desktopInfo = info;
+      return info.state === 'on' && info.lan ? { ok: true } : startFailure(info);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private cancelStop(): void {
+    if (this.stopTimer) clearTimeout(this.stopTimer);
+    this.stopTimer = null;
+  }
+
+  /** Desktop app: stop the server when no session is waiting or connected any more. */
+  private stopIfIdle(): void {
+    if (!this.desktop || this.stopTimer) return;
+    this.stopTimer = setTimeout(() => {
+      this.stopTimer = null;
+      const busy = [...this.sessions.values()].some((s) => s.state === 'waiting' || s.state === 'connected');
+      if (!busy) void this.desktop?.lanStop().then((i) => (this.desktopInfo = i)).catch(() => undefined);
+    }, STOP_GRACE_MS);
+  }
+
   unavailable(): string {
     return this.available ? 'This phone session is not active any more. Make a new QR code.' : LAN_MESSAGE;
   }
 
   async addresses(): Promise<PhoneAddress[]> {
     if (!this.available) return [];
+    if (this.desktop) {
+      try {
+        this.desktopInfo = await this.desktop.lanInfo(); // addresses are known while the server is off
+      } catch {
+        /* use the last answer */
+      }
+      return this.desktopInfo ? desktopAddresses(this.desktopInfo) : [];
+    }
     return buildAddresses(this.candidates, location);
   }
 
   async createSession(opts: { address?: string } = {}): Promise<PhoneSessionInfo> {
     if (!this.available) throw new Error(LAN_MESSAGE);
+    if (this.desktop && this.desktopInfo?.state !== 'on') {
+      const started = await this.startServer();
+      if (!started.ok) throw new Error(started.error ?? 'The phone link could not start.');
+    }
+    this.cancelStop();
     const origin = opts.address ?? (await this.addresses())[0]?.url ?? pickOrigin(this.origins, location);
     if (!origin) throw new Error('No network address was found for this computer, so a phone cannot reach it. Connect to Wi-Fi or a network and restart "npm run dev:lan".');
     const token = newToken();
     const url = `${origin}/phone?token=${token}`;
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/__rsmps/phone-ws?role=desktop&token=${token}`);
+    const ws = new WebSocket(this.desktop && this.desktopInfo ? phoneSocketUrl(this.desktopInfo.ws, token) : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/__rsmps/phone-ws?role=desktop&token=${token}`);
     ws.binaryType = 'arraybuffer';
     const expiresAt = Date.now() + SESSION_MS;
     const video = document.createElement('video');
@@ -123,7 +193,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     };
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error('Could not reach the dev server for the phone link.'));
+      ws.onerror = () => reject(new Error(this.desktop ? 'Could not reach the phone link server on this computer.' : 'Could not reach the dev server for the phone link.'));
     });
     return { token, url, qrSvg: qrSvg(url), expiresAt };
   }
@@ -151,6 +221,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     this.teardown(s);
     this.sessions.delete(token);
     this.setState(s, 'disconnected');
+    this.stopIfIdle();
   }
 
   /* ------------------------------------- PhoneProvider ------------------------------------- */
@@ -173,6 +244,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     if (state === 'disconnected' && !s.detail.startsWith('The computer') && s.detail === 'Video connected') s.detail = 'The phone disconnected. Open the link on it again.';
     if (state === 'expired' || state === 'disconnected') this.teardown(s, state === 'expired');
     this.emit(s);
+    if (state === 'expired') this.stopIfIdle();
   }
 
   private emit(s: Session): void {
