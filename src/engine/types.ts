@@ -386,6 +386,38 @@ export interface NodeGpu {
   read(image: ImageValue | MaskValue, straight?: boolean): Promise<Uint8ClampedArray>;
   /** Small lookup texture from float data (palettes, kernels, curves). width*height*4 floats, rgba16float, nearest. */
   dataTexture(data: Float32Array, width: number, height: number): { texture: GPUTexture };
+  /**
+   * Hand a temporary back to the pool NOW (instead of when the node's render ends). Use it in multi-pass loops
+   * (`const prev = rec; rec = pass(...rec...); recycle(prev)`): without it every iteration stays alive until the render
+   * returns, which turned a 78-pass sort of a 4K image into 5 GB of textures. Only for textures THIS render created and no longer
+   * needs (never inputs, never anything you return). Queued GPU work that still reads it is safe.
+   */
+  recycle(image: { texture: GPUTexture }): void;
+  /** Pooled, tracked buffer of at least `size` bytes (COPY_DST is always added). Contents are undefined unless `clear`. Give it back with `releaseScratch`. */
+  scratch(size: number, usage: number, label?: string, opts?: { clear?: boolean }): GPUBuffer;
+  releaseScratch(buffer: GPUBuffer): void;
+  /** Pooled, tracked texture for attachments (multisampled colour, depth). Give it back with `releaseScratchTexture`. */
+  scratchTexture(desc: { width: number; height: number; format: GPUTextureFormat; usage: number; sampleCount?: number; label?: string }): GPUTexture;
+  releaseScratchTexture(texture: GPUTexture): void;
+  /** Cached default view of a texture (never call `texture.createView()` per frame). */
+  view(texture: GPUTexture): GPUTextureView;
+  /** Compute pipeline from WGSL, cached (bounded) by label + code. */
+  computePipeline(label: string, code: string, entryPoint?: string): GPUComputePipeline;
+  /** Tracked buffer that the node owns for a long time (vertex/index data of a model). Free it with `destroyBuffer`. */
+  createBuffer(desc: GPUBufferDescriptor, category?: string): GPUBuffer;
+  destroyBuffer(buffer: GPUBuffer): void;
+}
+
+/**
+ * System-RAM tier for expensive cached results. The engine stays DOM-free: the IO layer injects an implementation. Pixels are
+ * premultiplied RGBA8, row 0 on top; a store may compress them but MUST return exactly what it was given (lossless), because the
+ * engine serves them back as if they had just been rendered.
+ */
+export interface ColdStore {
+  put(key: string, pixels: { data: Uint8Array; width: number; height: number }): Promise<boolean> | boolean;
+  get(key: string): Promise<{ data: Uint8Array; width: number; height: number } | null>;
+  delete(key: string): void;
+  has(key: string): boolean;
 }
 
 /** Services the application provides. The engine never touches files, the DOM or the network itself. */
@@ -472,6 +504,12 @@ export interface RenderCtx<P extends ParamSchema, I extends InputSchema> {
    * The result is only valid during this render call.
    */
   pull<K extends keyof I>(input: K, at?: { seconds: number }): Promise<SocketValueMap[I[K]['type']] | null>;
+  /**
+   * Structural signature of everything upstream of an input (node types, stored params, wiring, project settings, frame
+   * size). It changes only when the graph is edited, never from frame to frame, and does not evaluate anything. Empty string when
+   * the input is not wired. Used by the Cache / Bake node to tell whether its baked sequence is still fresh.
+   */
+  inputSignature(input: keyof I): string;
 }
 
 export interface NodeDef<

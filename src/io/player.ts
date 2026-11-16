@@ -6,7 +6,9 @@
  * - Playing: a requestAnimationFrame clock locked to the project fps picks the frame index from wall time,
  *   so slow frames are dropped rather than the clock drifting.
  * - Paused: any view change re-renders at full resolution (or the forced proxy).
- * - Finished frames are kept as GPU textures (bounded by bytes) so the second pass of a loop is free.
+ * - Finished frames are kept in SYSTEM RAM, packed (see pixel-codec.ts), not as GPU textures: when the player is idle a shown frame is
+ *   read back and packed in the background, and playing a cached frame decodes it into ONE reusable texture. The GPU holds none of
+ *   them, so a long loop costs RAM (budgeted by the governor's ram budget) instead of VRAM.
  */
 import type { Registry } from '../engine/define';
 import type { EvalResult } from '../engine/engine';
@@ -17,6 +19,8 @@ import type { AudioBridge } from './audio-bridge';
 import { ProxyController, frameAtTime } from './clock';
 import { OffscreenPresenter, presentToBlob } from './encode';
 import { RenderedFrameCache } from './frame-cache';
+import { isLossy, packFrame, unpackBytes, unpackToBitmap, type CacheQuality, type Packed } from './pixel-codec';
+import { uploadExternal } from './upload';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { feedsFromLive, liveNodeIds, stampLive } from './live-stamp';
@@ -71,7 +75,8 @@ interface Job {
 
 type Shown = { texture: GPUTexture; width: number; height: number };
 
-const CACHE_BYTES = 512 * 1024 * 1024;
+/** RAM for packed frames until the governor sets the real budget. */
+const CACHE_BYTES = 256 * 1024 * 1024;
 /** Out-of-memory errors tolerated per frame before the error is shown. */
 const OOM_RETRIES = 3;
 const FPS_RING = 256;
@@ -112,7 +117,16 @@ export class PlayerImpl implements Player {
   private kickQueued = false;
   private disposed = false;
 
-  private cache: RenderedFrameCache<Shown>;
+  private cache: RenderedFrameCache<Packed>;
+  /** The one GPU texture cached frames are decoded into (retained by the player). */
+  private restoreTex: GPUTexture | null = null;
+  private cacheQuality: CacheQuality = 'compressed';
+  private pendingCapture: { frame: number; texture: GPUTexture; width: number; height: number; proxy: number; key: string; tries: number } | null = null;
+  private captureTimer: ReturnType<typeof setTimeout> | null = null;
+  private capturing = false;
+  private capturePresenter: OffscreenPresenter | null = null;
+  /** Diagnostics of the RAM frame cache. */
+  readonly cacheStats = { captured: 0, skipped: 0, restored: 0, restoreMs: 0, captureMs: 0, rawBytes: 0 };
   private shown: Shown | null = null;
   private shownKey = '';
   private shownFrame = -1;
@@ -153,7 +167,7 @@ export class PlayerImpl implements Player {
 
   constructor(private deps: PlayerDeps) {
     this.gpu = deps.gpu;
-    this.cache = new RenderedFrameCache<Shown>(CACHE_BYTES, (img) => this.gpu.release(img.texture));
+    this.cache = new RenderedFrameCache<Packed>(CACHE_BYTES, () => undefined);
     deps.audio.setAssets((id) => deps.library.assetAudio(id));
   }
 
@@ -302,7 +316,14 @@ export class PlayerImpl implements Player {
     this.gpu.retain(img.texture);
     try {
       this.snapshotPresenter ??= new OffscreenPresenter(this.gpu, false);
-      return await presentToBlob(this.snapshotPresenter, img, 'image/png');
+      const presenter = this.snapshotPresenter;
+      try {
+        return await presentToBlob(presenter, img, 'image/png');
+      } finally {
+        // A snapshot is rare: do not keep a WebGPU canvas (and its textures) around for it.
+        presenter.dispose();
+        this.snapshotPresenter = null;
+      }
     } catch (err) {
       console.warn('Snapshot failed:', err);
       return null;
@@ -333,7 +354,9 @@ export class PlayerImpl implements Player {
     this.playing = false;
     cancelAnimationFrame(this.raf);
     this.cache.clear();
+    this.dropCapture();
     this.setShown(null);
+    this.freeRestoreTexture();
     this.listeners.clear();
     this.deps.audio.stop();
     try {
@@ -366,9 +389,136 @@ export class PlayerImpl implements Player {
     return spec;
   }
 
-  /** Bytes held by the RAM cache of rendered frames. */
+  /** Bytes of SYSTEM RAM held by the cache of rendered (packed) frames. */
   get cacheBytes(): number {
     return this.cache.bytes;
+  }
+
+  /** 'compressed' (default: exact when the picture deflates well, lossy JPEG/WebP otherwise) or 'lossless' (always exact, more RAM). */
+  setCacheQuality(q: CacheQuality): void {
+    if (q === this.cacheQuality) return;
+    this.cacheQuality = q;
+    this.cache.clear();
+    this.dirty = true;
+  }
+
+  getCacheQuality(): CacheQuality {
+    return this.cacheQuality;
+  }
+
+  private dropCapture(): void {
+    this.capturePresenter?.dispose();
+    this.capturePresenter = null;
+    if (this.captureTimer) clearTimeout(this.captureTimer);
+    this.captureTimer = null;
+    if (this.pendingCapture) this.gpu.release(this.pendingCapture.texture);
+    this.pendingCapture = null;
+  }
+
+  private freeRestoreTexture(): void {
+    // A frame still on screen holds its own reference, so releasing ours is always right.
+    if (this.restoreTex) this.gpu.release(this.restoreTex);
+    this.restoreTex = null;
+  }
+
+  /** The reusable texture cached frames are decoded into, resized when the frame size changes. */
+  private restoreTarget(width: number, height: number): GPUTexture {
+    if (this.restoreTex && (this.restoreTex.width !== width || this.restoreTex.height !== height)) this.freeRestoreTexture();
+    if (!this.restoreTex) {
+      this.restoreTex = this.gpu.acquire(width, height);
+      this.gpu.retain(this.restoreTex);
+    }
+    return this.restoreTex;
+  }
+
+  /** Decode a cached packed frame into the reusable texture. Null when it cannot be decoded (the frame is rendered instead). */
+  private async restore(p: Packed): Promise<Shown | null> {
+    const started = performance.now();
+    try {
+      const tex = this.restoreTarget(p.width, p.height);
+      const device = this.gpu.device;
+      if (isLossy(p)) {
+        const bmp = await unpackToBitmap(p);
+        try {
+          await uploadExternal(device, bmp, tex, p.width, p.height);
+        } finally {
+          bmp.close();
+        }
+      } else {
+        const bytes = await unpackBytes(p);
+        device.queue.writeTexture({ texture: tex }, bytes as BufferSource, { bytesPerRow: p.width * 4, rowsPerImage: p.height }, [p.width, p.height]);
+      }
+      this.cacheStats.restored++;
+      this.cacheStats.restoreMs += performance.now() - started;
+      return { texture: tex, width: p.width, height: p.height };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Remember the frame on screen for later: it is read back and packed when nothing else is going on. Latest wins. */
+  private queueCapture(frame: number, image: Shown, proxy: number, key: string): void {
+    if (this.cache.maxBytes <= 0) return;
+    const have = this.cache.get(frame, proxy);
+    if (have) return;
+    this.gpu.retain(image.texture);
+    if (this.pendingCapture) {
+      this.gpu.release(this.pendingCapture.texture);
+      this.cacheStats.skipped++;
+    }
+    this.pendingCapture = { frame, texture: image.texture, width: image.width, height: image.height, proxy, key, tries: 0 };
+    this.scheduleCapture();
+  }
+
+  private scheduleCapture(): void {
+    if (this.captureTimer || !this.pendingCapture) return;
+    this.captureTimer = setTimeout(() => {
+      this.captureTimer = null;
+      void this.runCapture();
+    }, 25);
+  }
+
+  private async runCapture(): Promise<void> {
+    const job = this.pendingCapture;
+    if (!job || this.capturing || this.disposed) return;
+    // Never compete with playback: wait until the player and the GPU are idle, and give up on a frame that never gets the chance.
+    const busy = this.running || this.kickQueued || this.holds > 0 || this.deps.router.exporting || this.gpu.queuedFrames > 0;
+    if (busy) {
+      if (++job.tries > 6) {
+        this.pendingCapture = null;
+        this.gpu.release(job.texture);
+        this.cacheStats.skipped++;
+        return;
+      }
+      this.scheduleCapture();
+      return;
+    }
+    this.pendingCapture = null;
+    this.capturing = true;
+    const started = performance.now();
+    try {
+      const raw = await this.gpu.readRaw({ texture: job.texture, width: job.width, height: job.height });
+      if (job.key === this.key && !this.disposed) {
+        // Lossy packing draws the texture into a canvas and lets the browser encode it: no pixel loops on the main thread.
+        const lossy = async (alpha: boolean) => {
+          this.capturePresenter ??= new OffscreenPresenter(this.gpu, false);
+          return presentToBlob(this.capturePresenter, { texture: job.texture, width: job.width, height: job.height }, alpha ? 'image/webp' : 'image/jpeg', alpha ? 0.9 : 0.92);
+        };
+        const packed = await packFrame(raw, job.width, job.height, this.cacheQuality, lossy);
+        if (job.key === this.key && this.cache.put(job.frame, packed, job.proxy, packed.bytes)) {
+          this.cacheStats.captured++;
+          this.cacheStats.rawBytes += raw.byteLength;
+          this.markChanged(); // the "cached frames" bar
+        }
+      }
+    } catch {
+      /* the cache is an optimisation */
+    } finally {
+      this.cacheStats.captureMs += performance.now() - started;
+      this.gpu.release(job.texture);
+      this.capturing = false;
+      if (this.pendingCapture) this.scheduleCapture();
+    }
   }
 
   /**
@@ -378,7 +528,9 @@ export class PlayerImpl implements Player {
   releaseCaches(): void {
     this.pause();
     this.cache.clear();
+    this.dropCapture();
     this.clearOutput();
+    this.freeRestoreTexture();
     this.view = null;
     this.key = '';
     this.keyDirty = true;
@@ -422,6 +574,7 @@ export class PlayerImpl implements Player {
   hold(): () => void {
     this.holds++;
     this.cache.clear();
+    this.dropCapture();
     let released = false;
     return () => {
       if (released) return;
@@ -460,7 +613,7 @@ export class PlayerImpl implements Player {
     return this.playing;
   }
 
-  /** Byte budget of the RAM frame cache (set by the memory governor). */
+  /** Byte budget of the RAM frame cache, in system RAM (set by the memory governor). */
   setCacheBudget(bytes: number): void {
     this.cache.setMaxBytes(bytes);
   }
@@ -477,7 +630,9 @@ export class PlayerImpl implements Player {
   onDeviceReset(): void {
     this.lostMessage = null;
     this.errors = new Map();
-    this.cache.clear(); // releases are no-ops: the Gpu forgot the old textures
+    this.cache.clear(); // packed frames live in RAM and would still be valid, but the key space is reset with the device
+    this.pendingCapture = null; // its texture belonged to the old device
+    this.restoreTex = null;
     this.shown = null;
     this.size = null;
     this.rendered = null;
@@ -639,8 +794,16 @@ export class PlayerImpl implements Player {
     const live = this.liveSignals() || this.hasLive;
     const cached = live ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
-      this.show(cached.image, job, cached.proxy, job.frameSpec.pixelSize ? 1 : cached.proxy);
-      return;
+      const img = await this.restore(cached.image);
+      if (img) {
+        if (this.keyDirty || job.key !== this.key) {
+          this.markChanged();
+          return;
+        }
+        this.show(img, job, cached.proxy, job.frameSpec.pixelSize ? 1 : cached.proxy);
+        return;
+      }
+      this.cache.clear(); // undecodable: render it again
     }
     const started = performance.now();
     let res: EvalResult;
@@ -681,12 +844,11 @@ export class PlayerImpl implements Player {
         this.gpu.retain(shownValue.texture);
         return { texture: shownValue.texture, width: shownValue.width, height: shownValue.height };
       });
-      let kept = false;
       try {
-        if (!live && this.cache.put(job.frame, image, job.proxy, bytesOf(image))) kept = true;
         this.show(image, job, job.proxy, job.frameSpec.pixelSize ? 1 : job.proxy);
+        if (!live) this.queueCapture(job.frame, image, job.proxy, job.key);
       } finally {
-        if (!kept) this.gpu.release(image.texture);
+        this.gpu.release(image.texture);
       }
       if (this.playing && this.proxyMode === 'auto' && !job.frameSpec.pixelSize) {
         // Wait for the GPU so the measurement is real and the queue cannot run away.

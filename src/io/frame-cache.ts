@@ -33,6 +33,10 @@ export class RenderedFrameCache<I> {
     return this.lru.bytes;
   }
 
+  get maxBytes(): number {
+    return this.lru.maxBytes;
+  }
+
   /** The cached frame if it is at least as sharp as `minProxy`. */
   get(frame: number, minProxy: number): CachedFrame<I> | undefined {
     const e = this.lru.peek(frame);

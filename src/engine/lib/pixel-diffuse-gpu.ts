@@ -115,21 +115,6 @@ fn main() {
 }
 `;
 
-const pipelines = new WeakMap<GPUDevice, GPUComputePipeline>();
-
-function pipelineFor(device: GPUDevice): GPUComputePipeline {
-  let p = pipelines.get(device);
-  if (!p) {
-    p = device.createComputePipeline({
-      label: 'dither-diffuse',
-      layout: 'auto',
-      compute: { module: device.createShaderModule({ label: 'dither-diffuse', code: WGSL }), entryPoint: 'main' },
-    });
-    pipelines.set(device, p);
-  }
-  return p;
-}
-
 export interface DiffuseGpuOptions {
   algorithm: string;
   strength: number;
@@ -137,10 +122,11 @@ export interface DiffuseGpuOptions {
   serpentine: boolean;
 }
 
-function storage(device: GPUDevice, data: Float32Array | Uint32Array, label: string): GPUBuffer {
-  const buffer = device.createBuffer({ label, size: Math.max(16, Math.ceil(data.byteLength / 16) * 16), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(buffer, 0, data as BufferSource);
-  return buffer;
+function storage(gpu: NodeGpu, data: Float32Array | Uint32Array, label: string): { buf: GPUBuffer; size: number } {
+  const size = Math.max(16, Math.ceil(data.byteLength / 16) * 16);
+  const buf = gpu.scratch(size, GPUBufferUsage.STORAGE, label);
+  gpu.device.queue.writeBuffer(buf, 0, data as BufferSource);
+  return { buf, size };
 }
 
 /** Error-diffuse `src` onto `palette` (sRGB 0..1) on the GPU. Alpha is kept; transparent pixels are untouched. */
@@ -161,45 +147,50 @@ export function diffuseGpu(gpu: NodeGpu, src: ImageValue, palette: Rgb[], opts: 
   kernel.taps.forEach((t, i) => tapData.set([t[0], t[1], t[2] / kernel.divisor, 0], i * 4));
   const orderData = riemersma ? hilbertOrder(width, height) : new Uint32Array(4);
 
-  const palBuf = storage(device, palData, 'diffuse-palette');
-  const tapBuf = storage(device, tapData, 'diffuse-taps');
-  const orderBuf = storage(device, orderData, 'diffuse-order');
-  const errBuf = device.createBuffer({ label: 'diffuse-error', size: Math.max(16, width * height * 16), usage: GPUBufferUsage.STORAGE });
-  const stateBuf = device.createBuffer({ label: 'diffuse-state', size: 18 * 16, usage: GPUBufferUsage.STORAGE });
+  const pal = storage(gpu, palData, 'diffuse-palette');
+  const tap = storage(gpu, tapData, 'diffuse-taps');
+  const order = storage(gpu, orderData, 'diffuse-order');
+  // Pooled and cleared: the error plane and the walker state must start at zero, but need not be a fresh allocation every frame.
+  const errSize = Math.max(16, width * height * 16);
+  const errBuf = gpu.scratch(errSize, GPUBufferUsage.STORAGE, 'diffuse-error', { clear: true });
+  const stateBuf = gpu.scratch(18 * 16, GPUBufferUsage.STORAGE, 'diffuse-state', { clear: true });
 
-  const dst = gpu.alloc(width, height, src.unit);
-  const pipeline = pipelineFor(device);
-  const layout = pipeline.getBindGroupLayout(0);
-  const total = width * height;
-  const params = new ArrayBuffer(48);
-  new Uint32Array(params).set([width, height, n, riemersma ? 1 : 0, opts.serpentine ? 1 : 0, SPACE_INDEX[opts.space], kernel.taps.length, CHUNK, total]);
-  new Float32Array(params)[9] = Math.min(1, Math.max(0, opts.strength));
-  const ubo = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(ubo, 0, params);
-  const bindGroup = device.createBindGroup({
-    layout,
-    entries: [
-      { binding: 0, resource: { buffer: ubo } },
-      { binding: 1, resource: src.texture.createView() },
-      { binding: 2, resource: dst.texture.createView() },
-      { binding: 3, resource: { buffer: palBuf } },
-      { binding: 4, resource: { buffer: tapBuf } },
-      { binding: 5, resource: { buffer: errBuf } },
-      { binding: 6, resource: { buffer: orderBuf } },
-      { binding: 7, resource: { buffer: stateBuf } },
-    ],
-  });
-  // Several submits of at most SUBMIT_STEPS pixels each, so no single submission runs for long.
-  for (let from = 0; from < total; from += SUBMIT_STEPS) {
-    const encoder = device.createCommandEncoder({ label: 'dither-diffuse' });
-    const pass = encoder.beginComputePass();
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    for (let start = from; start < Math.min(total, from + SUBMIT_STEPS); start += CHUNK) pass.dispatchWorkgroups(1);
-    pass.end();
-    device.queue.submit([encoder.finish()]);
+  let dst!: ImageValue;
+  const ubo = gpu.scratch(48, GPUBufferUsage.UNIFORM, 'diffuse-uniforms');
+  try {
+    dst = gpu.alloc(width, height, src.unit);
+    const pipeline = gpu.computePipeline('dither-diffuse', WGSL);
+    const layout = pipeline.getBindGroupLayout(0);
+    const total = width * height;
+    const params = new ArrayBuffer(48);
+    new Uint32Array(params).set([width, height, n, riemersma ? 1 : 0, opts.serpentine ? 1 : 0, SPACE_INDEX[opts.space], kernel.taps.length, CHUNK, total]);
+    new Float32Array(params)[9] = Math.min(1, Math.max(0, opts.strength));
+      device.queue.writeBuffer(ubo, 0, params);
+    const bindGroup = device.createBindGroup({
+      layout,
+      entries: [
+        { binding: 0, resource: { buffer: ubo, size: 48 } },
+        { binding: 1, resource: gpu.view(src.texture) },
+        { binding: 2, resource: gpu.view(dst.texture) },
+        { binding: 3, resource: { buffer: pal.buf, size: pal.size } },
+        { binding: 4, resource: { buffer: tap.buf, size: tap.size } },
+        { binding: 5, resource: { buffer: errBuf, size: errSize } },
+        { binding: 6, resource: { buffer: order.buf, size: order.size } },
+        { binding: 7, resource: { buffer: stateBuf, size: 18 * 16 } },
+      ],
+    });
+    // Several submits of at most SUBMIT_STEPS pixels each, so no single submission runs for long.
+    for (let from = 0; from < total; from += SUBMIT_STEPS) {
+      const encoder = device.createCommandEncoder({ label: 'dither-diffuse' });
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      for (let start = from; start < Math.min(total, from + SUBMIT_STEPS); start += CHUNK) pass.dispatchWorkgroups(1);
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+    }
+  } finally {
+    for (const b of [ubo, pal.buf, tap.buf, order.buf, errBuf, stateBuf]) gpu.releaseScratch(b);
   }
-  const temp = [ubo];
-  for (const b of [...temp, palBuf, tapBuf, orderBuf, errBuf, stateBuf]) b.destroy();
   return dst;
 }

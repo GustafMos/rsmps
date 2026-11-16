@@ -12,7 +12,10 @@ import { createAudioBridge } from './audio-bridge';
 import { ExporterImpl } from './exporter';
 import { AddonsImpl } from './addons';
 import { DesktopClient, isDesktop } from './desktop';
-import { MemoryGovernor, defaultBudget } from './memory';
+import { MemoryGovernor, defaultBudget, defaultRamBudget } from './memory';
+import { RamColdStore } from './ram-store';
+import { BakeImpl, BAKE_OWNER } from './bake';
+import type { CacheQuality } from './pixel-codec';
 import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
 import { Library } from './library';
@@ -50,6 +53,9 @@ export const createIo: CreateIo = async () => {
 
   const library = new Library(gpu);
   const engine = new Engine(gpu, registry, library);
+  // System-RAM tier: expensive results the GPU cache would evict are kept here (compressed, exact) instead of being recomputed.
+  const cold = new RamColdStore(0);
+  engine.setColdStore(cold);
   library.onInvalidate = () => engine.clear();
   const gate = new EvalGate(engine);
   const audio = createAudioBridge();
@@ -71,15 +77,35 @@ export const createIo: CreateIo = async () => {
       gpu,
       exclusive: (fn) => gate.exclusive(fn),
       setEngineBudget: (b) => void gate.setCacheBudget(b),
-      clearEngine: () => gate.clearEngine(),
-      setPlayerBudget: (b) => player.setCacheBudget(b),
+      clearEngine: () => gate.clearEngine(true), // memory pressure, not an edit: expensive results move to the RAM tier
+      setPlayerBudget: () => undefined, // finished frames no longer live on the GPU (see setRamBudgets)
+      setRamBudgets: (frames, coldBytes) => {
+        player.setCacheBudget(frames);
+        cold.setMaxBytes(coldBytes);
+      },
+      ramUsed: () => player.cacheBytes + cold.bytes,
+      dropRam: () => {
+        player.dropFrameCache();
+        cold.clear();
+      },
       dropPlayerFrames: () => player.dropFrameCache(),
       setMediaBudget: (b) => void library.setFrameBudget(b),
       dropMediaFrames: () => library.dropFrames(),
       isPlaying: () => player.isPlaying,
     },
     defaultBudget({ vendor: adapterInfo?.vendor, architecture: adapterInfo?.architecture, description: adapterInfo?.description, deviceMemoryGB }),
+    undefined,
+    defaultRamBudget(deviceMemoryGB),
   );
+  const QUALITY_KEY = 'rsmpsCacheQuality';
+  const readQuality = (): CacheQuality => {
+    try {
+      return localStorage.getItem(QUALITY_KEY) === 'lossless' ? 'lossless' : 'compressed';
+    } catch {
+      return 'compressed';
+    }
+  };
+  player.setCacheQuality(readQuality());
   governor.start();
   const desktop = isDesktop() ? new DesktopClient() : null; // the packaged app's add-ons and FFmpeg export; never touched on the web
   const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router, player, watch, governor, ffmpeg: desktop });
@@ -120,12 +146,19 @@ export const createIo: CreateIo = async () => {
   const plugins = new PluginManagerImpl(registry);
   const purgeOwned = (id: string, kind: 'graph' | 'scan') => {
     if (kind === 'scan') void library.removeOwned(id);
+    // Baked regions of a closed project go with it.
+    for (const a of library.list({ includeHidden: true }) as { owner?: string }[]) {
+      if (a.owner?.startsWith(`${BAKE_OWNER}${id}:`)) void library.removeOwned(a.owner);
+    }
   };
   const projects = new ProjectStoreImpl(registry);
   projects.onPurge = purgeOwned;
 
+  const bake = new BakeImpl({ engine, gpu, registry, gate, library, player, governor, activeProject: () => projects.activeId() });
+
   const io: Io = {
     engine,
+    bake,
     registry,
     library,
     player,
@@ -133,7 +166,23 @@ export const createIo: CreateIo = async () => {
     plugins,
     projects,
     scan: new ScanImpl(library),
-    memoryBudget: { get: () => governor.get(), set: (b) => governor.set(b), auto: () => governor.auto() },
+    memoryBudget: {
+      get: () => governor.get(),
+      set: (b) => governor.set(b),
+      auto: () => governor.auto(),
+      ramBudget: { get: () => governor.getRam(), set: (b) => governor.setRam(b), auto: () => governor.autoRam() },
+      cacheQuality: {
+        get: () => player.getCacheQuality(),
+        set: (q) => {
+          player.setCacheQuality(q);
+          try {
+            localStorage.setItem(QUALITY_KEY, q);
+          } catch {
+            /* lasts for this session */
+          }
+        },
+      },
+    },
     freeMemory: () => governor.freeMemory(),
     async switchProject(id) {
       await projects.flush(); // (a) the old project's pending save
@@ -147,11 +196,28 @@ export const createIo: CreateIo = async () => {
       return graph;
     },
     memory() {
+      const st = gpu.stats();
+      const cpu = library.cpuBytes();
       return {
         engineCacheBytes: (engine as unknown as { cacheBytes?: number }).cacheBytes ?? 0,
-        gpuPoolBytes: gpu.allocatedBytes,
+        gpuPoolBytes: st.categories['pooled-texture']?.bytes ?? 0,
         frameCacheBytes: player.cacheBytes,
         decodedMediaBytes: library.decodedBytes(),
+        gpuTotalBytes: st.totalBytes,
+        gpuPeakBytes: st.peakBytes,
+        gpuByCategory: Object.fromEntries(Object.entries(st.categories).map(([k, v]) => [k, { count: v.count, bytes: v.bytes, peakBytes: v.peakBytes }])),
+        gpuObjects: st.objects,
+        gpuCaches: st.caches,
+        gpuWorstScope: st.worstScope,
+        gpuIdleBytes: st.idleBytes + st.scratchIdleBytes,
+        ramBudgetBytes: governor.getRam(),
+        ramFrameCacheBytes: player.cacheBytes,
+        ramColdBytes: cold.bytes,
+        ramColdRatio: cold.ratio,
+        coldTier: engine.coldStats(),
+        frameCache: { ...player.cacheStats, quality: player.getCacheQuality() },
+        audioPcmBytes: cpu.audioPcmBytes,
+        modelBytes: cpu.fileBytes,
       };
     },
     phone,

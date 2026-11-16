@@ -11,6 +11,7 @@ import type {
   CanvasInfo,
   Edge,
   GraphDoc,
+  ColdStore,
   Host,
   ImageValue,
   MaskValue,
@@ -58,6 +59,31 @@ interface Entry {
   outputs: Record<string, Value | null>;
   bytes: number;
   lastUsed: number;
+  /** Milliseconds the render took (0 for restored entries): decides whether the result is worth keeping in the RAM tier. */
+  renderMs: number;
+}
+
+/** What the RAM tier remembers about an entry whose pixels sit in the ColdStore. */
+interface ColdMeta {
+  node: string;
+  renderMs: number;
+  bytes: number;
+  lastUsed: number;
+  outputs: Record<string, { t: 'null' } | { t: 'value'; v: Value } | { t: 'tex'; kind: 'image' | 'mask'; unit: number; slot: number }>;
+  slots: { width: number; height: number }[];
+}
+
+/** Counters of the RAM tier: does it pay off? `promoteMs` (restore time) against `savedMs` (the render time it avoided). */
+export interface ColdStats {
+  entries: number;
+  demoted: number;
+  skippedDemote: number;
+  promoted: number;
+  promoteMs: number;
+  savedMs: number;
+  misses: number;
+  /** Demoted entries that were evicted from the store before they were needed again. */
+  lost: number;
 }
 
 interface NodeResult {
@@ -82,6 +108,8 @@ interface Scope {
   stack: Set<string>;
   errors: Map<string, string>;
   timings: Map<string, number>;
+  /** Frame size at proxy 1 (what a baked sequence is made at). */
+  fullCanvas: { width: number; height: number };
 }
 
 function hash(str: string): string {
@@ -165,6 +193,26 @@ export class Engine {
   /** Upper bound for a node that is pulled over a span of frames (echo, trails, retime). */
   static readonly TIMED_KEEP_MAX = 16;
 
+  /** System-RAM tier (injected by the IO layer). */
+  private cold: ColdStore | null = null;
+  private coldIndex = new Map<string, ColdMeta>();
+  private coldMinMs = 4;
+  private demoteInFlight = 0;
+  /** Smoothed cost of restoring one MB (ms): an entry is only demoted when recomputing costs clearly more. */
+  private promoteMsPerMB = 0.8;
+  private coldCounters: ColdStats = { entries: 0, demoted: 0, skippedDemote: 0, promoted: 0, promoteMs: 0, savedMs: 0, misses: 0, lost: 0 };
+
+  /** Install (or remove) the RAM tier. Expensive static results that the LRU would evict are read back into it and uploaded again on the next use. */
+  setColdStore(store: ColdStore | null, opts: { minRenderMs?: number } = {}): void {
+    this.cold = store;
+    if (opts.minRenderMs !== undefined) this.coldMinMs = opts.minRenderMs;
+    if (!store) this.coldIndex.clear();
+  }
+
+  coldStats(): ColdStats {
+    return { ...this.coldCounters, entries: this.coldIndex.size };
+  }
+
   constructor(gpu: Gpu, registry: Registry, host: Host) {
     this.gpu = gpu;
     this.registry = registry;
@@ -181,9 +229,9 @@ export class Engine {
   }
 
   private async evaluateNow(req: EvalRequest): Promise<EvalResult> {
+    await this.gpu.throttle(); // never more than a couple of frames of GPU work in flight (export would otherwise queue unbounded)
     this.tick++;
     this.gpu.advance();
-    this.gpu.sweep();
     this.evictTimed();
     this.evict();
     const { graph } = req;
@@ -214,6 +262,7 @@ export class Engine {
       stack: new Set(),
       errors: new Map(),
       timings: new Map(),
+      fullCanvas: { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) },
     };
 
     const node = scope.nodes.get(req.node);
@@ -237,7 +286,26 @@ export class Engine {
         }
       }
     }
+    this.gpu.fence();
     return { value, errors: scope.errors, timings: scope.timings };
+  }
+
+  /**
+   * The signature a Cache / Bake node sees for `ctx.inputSignature`, computed without evaluating anything: structure of everything
+   * upstream of an output port (types, stored params, wiring, project settings, frame size). `canvas` = the frame size at proxy 1
+   * (default: the project canvas).
+   */
+  signatureOf(graph: GraphDoc, node: string, port: string, canvas?: { width: number; height: number }): string {
+    const inbound = new Map<string, Edge[]>();
+    for (const e of graph.edges) {
+      const list = inbound.get(e.to.node);
+      if (list) list.push(e);
+      else inbound.set(e.to.node, [e]);
+    }
+    const frame0 = canvas ?? graph.project;
+    const fullCanvas = { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) };
+    const scope = { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas } as unknown as Scope;
+    return `${port}:${this.structSig(node, scope, new Set(), true)}`;
   }
 
   /** Texels per unit pixel for an image of this size. */
@@ -248,11 +316,148 @@ export class Engine {
   }
 
   /** Drop every cached result (e.g. after assets changed on disk). */
-  clear(): void {
-    for (const entry of this.cache.values()) this.releaseEntry(entry);
+  clear(opts: { demote?: boolean } = {}): void {
+    for (const entry of this.cache.values()) {
+      if (opts.demote && this.demote(entry)) continue;
+      this.releaseEntry(entry);
+    }
     this.cache.clear();
     this.cacheBytes = 0;
     this.reads.clear();
+    // Pixels in the RAM tier stay valid when the cache is only cleared to save memory, not when content changed.
+    if (!opts.demote) this.dropCold();
+  }
+
+  private dropCold(): void {
+    if (this.cold) for (const [key, meta] of this.coldIndex) meta.slots.forEach((_, i) => this.cold!.delete(`${key}#${i}`));
+    this.coldIndex.clear();
+  }
+
+  /* ------------------------------ RAM tier (cold) ------------------------------ */
+
+  private coldEligible(entry: Entry): { textures: GPUTexture[]; slots: { width: number; height: number }[] } | null {
+    if (!this.cold || entry.tv || entry.renderMs < Math.max(this.coldMinMs, (entry.bytes / 1048576) * this.promoteMsPerMB * 1.5)) return null;
+    const textures: GPUTexture[] = [];
+    const slots: { width: number; height: number }[] = [];
+    for (const v of Object.values(entry.outputs)) {
+      if (v === null || !isTextured(v)) continue;
+      if (v.texture.format !== 'rgba8unorm') return null; // intermediates in rgba16float are not worth the readback
+      if (!textures.includes(v.texture)) {
+        textures.push(v.texture);
+        slots.push({ width: v.texture.width, height: v.texture.height });
+      }
+    }
+    return textures.length > 0 && textures.length <= 3 ? { textures, slots } : null;
+  }
+
+  /**
+   * An entry that is about to be evicted but was expensive to make: read its pixels back into the RAM tier (asynchronously, off
+   * the evaluation path) and release the GPU copy afterwards. Returns true when the readback now owns the entry's textures.
+   */
+  private demote(entry: Entry): boolean {
+    const store = this.cold;
+    const plan = this.coldEligible(entry);
+    if (!store || !plan) return false;
+    const known = this.coldIndex.get(entry.key);
+    if (known && store.has(`${entry.key}#0`)) {
+      known.lastUsed = this.tick; // already in the RAM tier from an earlier demotion
+      return false;
+    }
+    if (this.demoteInFlight >= 2) {
+      this.coldCounters.skippedDemote++;
+      return false;
+    }
+    this.demoteInFlight++;
+    const key = entry.key;
+    const outputs: ColdMeta['outputs'] = {};
+    for (const [port, v] of Object.entries(entry.outputs)) {
+      if (v === null) outputs[port] = { t: 'null' };
+      else if (isTextured(v)) outputs[port] = { t: 'tex', kind: (v as { kind: 'image' | 'mask' }).kind, unit: (v as ImageValue).unit, slot: plan.textures.indexOf(v.texture) };
+      else outputs[port] = { t: 'value', v };
+    }
+    for (const t of plan.textures) this.gpu.retain(t); // the readback owns them until it has finished
+    this.releaseEntry(entry);
+    void (async () => {
+      try {
+        let ok = true;
+        for (let i = 0; i < plan.textures.length && ok; i++) {
+          const t = plan.textures[i];
+          const raw = await this.gpu.readRaw({ texture: t, width: t.width, height: t.height });
+          ok = await store.put(`${key}#${i}`, { data: new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength), width: t.width, height: t.height });
+        }
+        if (ok) {
+          this.coldIndex.set(key, { node: entry.node, renderMs: entry.renderMs, bytes: entry.bytes, lastUsed: this.tick, outputs, slots: plan.slots });
+          this.coldCounters.demoted++;
+          while (this.coldIndex.size > 2000) {
+            const oldest = this.coldIndex.keys().next().value as string;
+            this.coldIndex.get(oldest)!.slots.forEach((_, i) => store.delete(`${oldest}#${i}`));
+            this.coldIndex.delete(oldest);
+          }
+        } else plan.textures.forEach((_, i) => store.delete(`${key}#${i}`));
+      } catch {
+        /* the readback is an optimisation only */
+      } finally {
+        for (const t of plan.textures) this.gpu.release(t);
+        this.demoteInFlight--;
+      }
+    })();
+    return true;
+  }
+
+  /** Bring a demoted result back onto the GPU. Null when it is not in the RAM tier (or was evicted from it). */
+  private async promote(key: string, node: string): Promise<NodeResult | null> {
+    const meta = this.coldIndex.get(key);
+    const store = this.cold;
+    if (!meta || !store) return null;
+    const started = performance.now();
+    const pixels: { data: Uint8Array; width: number; height: number }[] = [];
+    for (let i = 0; i < meta.slots.length; i++) {
+      const p = await store.get(`${key}#${i}`);
+      if (!p) {
+        this.coldIndex.delete(key);
+        meta.slots.forEach((_, j) => store.delete(`${key}#${j}`));
+        this.coldCounters.lost++;
+        this.coldCounters.misses++;
+        return null;
+      }
+      pixels.push(p);
+    }
+    const outputs: Record<string, Value | null> = {};
+    const retained = new Set<GPUTexture>();
+    this.gpu.begin('promote');
+    try {
+      const uploaded = pixels.map((p) => this.gpu.upload(p.data, p.width, p.height, 1, false).texture);
+      for (const [port, o] of Object.entries(meta.outputs)) {
+        if (o.t === 'null') outputs[port] = null;
+        else if (o.t === 'value') outputs[port] = o.v;
+        else {
+          const slot = meta.slots[o.slot];
+          outputs[port] = { kind: o.kind, texture: uploaded[o.slot], width: slot.width, height: slot.height, unit: o.unit } as ImageValue;
+        }
+      }
+      for (const t of uploaded) {
+        if (!retained.has(t)) {
+          retained.add(t);
+          this.gpu.retain(t);
+        }
+      }
+    } finally {
+      this.gpu.end();
+    }
+    const old = this.cache.get(key);
+    if (old) {
+      this.releaseEntry(old);
+      this.cacheBytes -= old.bytes;
+    }
+    this.cache.set(key, { key, node: meta.node || node, tv: false, outputs, bytes: meta.bytes, lastUsed: this.tick, renderMs: meta.renderMs });
+    this.cacheBytes += meta.bytes;
+    meta.lastUsed = this.tick;
+    const ms = performance.now() - started;
+    this.promoteMsPerMB = this.promoteMsPerMB * 0.8 + (ms / Math.max(0.25, meta.bytes / 1048576)) * 0.2;
+    this.coldCounters.promoted++;
+    this.coldCounters.promoteMs += ms;
+    this.coldCounters.savedMs += meta.renderMs;
+    return { key, outputs, tv: false };
   }
 
   private evalNode(id: string, scope: Scope): Promise<NodeResult | null> {
@@ -376,6 +581,8 @@ export class Engine {
           hit.lastUsed = this.tick;
           return { key: hit.key, outputs: hit.outputs, tv: hit.tv };
         }
+        const restored = await this.promote(fullKey(known), id);
+        if (restored) return restored;
       }
 
       // 6. Render.
@@ -409,14 +616,20 @@ export class Engine {
         proxy: scope.proxy,
         unitFor: (w: number, h: number) => this.unitFor(scope.graph, w, h, scope.proxy),
         px: (unitPixels: number, r?: { unit: number }) => unitPixels * (r ?? ref).unit,
+        inputSignature: (input: string) => {
+          const edge = edges.find((e) => e.to.port === input);
+          return edge ? `${edge.from.port}:${this.structSig(edge.from.node, scope, new Set(), true)}` : '';
+        },
         pull: async (input: string, at?: { seconds: number }) => {
           const edge = edges.find((e) => e.to.port === input);
           if (!edge) return null;
-          // No `at` = current frame, which makes the node time-dependent (through the clock getter).
-          const frame = Math.max(0, Math.round((at ? at.seconds : time.seconds) * project.fps));
+          // No `at` = current frame. That only makes this node time-dependent when what it pulled varies with time: a static
+          // upstream gives the same picture on every frame, so a pass-through node (Cache / Bake) stays cacheable.
+          const frame = Math.max(0, Math.round((at ? at.seconds : scope.seconds) * project.fps));
           const sub: Scope = { ...scope, frame, seconds: frame / project.fps };
           if (frame !== scope.frame) this.widenAllowance(edge.from.node, Math.abs(scope.frame - frame) + 1);
           const up = await this.evalNode(edge.from.node, sub);
+          if (!at && up?.tv) used.time = true;
           const v = up?.outputs[edge.from.port] ?? null;
           if (isTextured(v)) {
             this.gpu.retain(v.texture);
@@ -427,7 +640,7 @@ export class Engine {
       };
       let outputs: Record<string, Value | null>;
       const retained = new Set<GPUTexture>();
-      this.gpu.begin();
+      this.gpu.begin(`${def.id}:${id}`);
       try {
         outputs = ((await def.render(ctx as never)) ?? {}) as Record<string, Value | null>;
         this.checkOutputs(def, outputs);
@@ -443,7 +656,8 @@ export class Engine {
         pulled.forEach((t) => this.gpu.release(t));
         this.gpu.end();
       }
-      scope.timings.set(id, (scope.timings.get(id) ?? 0) + performance.now() - started);
+      const renderMs = performance.now() - started;
+      scope.timings.set(id, (scope.timings.get(id) ?? 0) + renderMs);
 
       // 7. Store.
       this.reads.set(readsKey, used);
@@ -456,7 +670,7 @@ export class Engine {
         this.cacheBytes -= old.bytes;
       }
       const tv = used.time || tvIn;
-      this.cache.set(key, { key, node: id, tv, outputs, bytes, lastUsed: this.tick });
+      this.cache.set(key, { key, node: id, tv, outputs, bytes, lastUsed: this.tick, renderMs });
       this.cacheBytes += bytes;
       return { key, outputs, tv };
     } finally {
@@ -465,17 +679,41 @@ export class Engine {
   }
 
   /** Hash of a node and everything upstream of it (types, stored params, wiring): changes only when the graph is edited. */
-  private structSig(id: string, scope: Scope, seen: Set<string>): string {
+  private structSig(id: string, scope: Scope, seen: Set<string>, full = false, memo: Map<string, string> = new Map()): string {
+    const done = memo.get(id);
+    if (done) return done;
     if (seen.has(id)) return 'cycle';
     seen.add(id);
     const node = scope.nodes.get(id);
-    if (!node) return 'missing';
+    if (!node) {
+      seen.delete(id);
+      return 'missing';
+    }
     const ins = (scope.inbound.get(id) ?? [])
-      .map((e) => `${e.to.port}<${e.from.port}:${this.structSig(e.from.node, scope, seen)}`)
+      .map((e) => `${e.to.port}<${e.from.port}:${this.structSig(e.from.node, scope, seen, full, memo)}`)
       .sort()
       .join(',');
     const p = scope.graph.project;
-    return hash(`${node.type}|${JSON.stringify(node.params)}|${node.bypass ? 1 : 0}|${ins}|${scope.canvas.width}x${scope.canvas.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
+    // Media a node reads: a replaced file under the same id (different size or length) changes the signature too.
+    let media = '';
+    const def = this.registry.get(node.type);
+    if (def) {
+      for (const [key, pd] of Object.entries(def.params as Record<string, ParamDef>)) {
+        const v = node.params[key];
+        if (pd.type === 'assets' && Array.isArray(v)) {
+          for (const a of v) {
+            const info = typeof a === 'string' ? this.host.assetInfo(a) : null;
+            media += info ? `|${info.width}x${info.height}x${info.duration}x${info.fps}` : '|?';
+          }
+        }
+      }
+    }
+    // `full`: independent of the playback proxy, so a signature taken while playing equals one taken while paused.
+    const c = full ? scope.fullCanvas : scope.canvas;
+    const sig = hash(`${node.type}|${JSON.stringify(node.params)}${media}|${node.bypass ? 1 : 0}|${ins}|${c.width}x${c.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
+    seen.delete(id);
+    memo.set(id, sig);
+    return sig;
   }
 
   /** Fusion-style effect mask + mix, applied by the kernel for `maskable` nodes. */
@@ -568,6 +806,7 @@ export class Engine {
     this.cacheBytes = 0;
     this.reads.clear();
     this.pullAllow.clear();
+    this.dropCold(); // the key space is gone with the cache
   }
 
   /** Bytes of texture memory held by cached node results. */
@@ -583,7 +822,7 @@ export class Engine {
       if (this.cacheBytes <= this.cacheBudget * 0.7 && this.cache.size < 3000) break;
       this.cache.delete(entry.key);
       this.cacheBytes -= entry.bytes;
-      this.releaseEntry(entry);
+      if (!this.demote(entry)) this.releaseEntry(entry);
     }
     if (this.reads.size > 20000) this.reads.clear();
   }

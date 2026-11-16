@@ -183,3 +183,40 @@ indistinguishable from a built-in node. See `docs/PLUGINS.md`.
 20. **Wire order of a `multi` input is meaningful** (first = bottom layer); never sort inputs.
 21. New socket types beyond the originals: `regions` (tracked boxes), `camera`; param type `device`; node flags
     `playable`, `maskable`. Stream nodes can publish numbers to the picture side with `io.signal` (see audio/README.md).
+
+## GPU memory (rules added by the memory pass)
+
+Measured before the pass: one Pixel Sort on a 4K image held **5.9 GB** of textures for a moment (78 passes of a 67 MB
+texture, all alive until the node's render returned), and the app created ~7,000 buffers, ~15,000 views and ~6,600
+bind groups in a 3-minute session. Firefox frees the memory behind a dropped wrapper only when it garbage-collects it,
+so those peaks and that churn show up there as gigabytes that the memory governor never saw.
+
+22. **Multi-pass loops recycle.** `const prev = rec; rec = gpu.pass(... rec ...); gpu.recycle(prev);` Temporaries that
+    a loop produced are handed back with `gpu.recycle(image)` as soon as the next pass has consumed them; otherwise
+    every iteration stays alive until `render` returns. `gpu.stats().worstScope` names the node that held the most.
+23. **Never create GPU objects yourself.** No `device.createBuffer/createTexture` in `src` outside `gpu/gpu.ts` (a test
+    enforces it). Use `gpu.scratch(size, usage, label, { clear })` + `gpu.releaseScratch` for per-render buffers (pooled,
+    byte-capped, reusable without any fence because queue operations are ordered), `gpu.scratchTexture` for attachments,
+    `gpu.createBuffer/destroyBuffer` for long-lived buffers (vertex/index data: keep a small LRU and destroy on eviction),
+    `gpu.view(texture)` instead of `texture.createView()`, `gpu.computePipeline(label, wgsl)` instead of a module-level
+    cache. Everything is counted in `gpu.stats()` / `Io.memory()` by category.
+24. **Numbers go in uniforms, never in WGSL text.** Every distinct shader string is a pipeline that is never freed.
+    `src/engine/__tests__/pipeline-bounds.test.ts` renders every node with moved sliders and fails on a new shader.
+    The pipeline cache is an LRU with a cap anyway.
+25. **A pass allocates nothing.** Uniforms are written into a pooled buffer, views are cached per texture, bind groups
+    are cached by (pipeline, uniform buffer, texture identities) and dropped when a texture dies. After warm-up an
+    animated chain creates no buffer, texture, view or pipeline (`src/engine/gpu/memory.test.ts`).
+26. **GPU work is throttled**: an evaluation waits (`gpu.throttle`) while more than two frames of work are queued, so an
+    export loop cannot queue unbounded work.
+27. **RAM tier.** The engine can demote an expensive static result (render time above a threshold that adapts to the
+    measured restore cost) to an injected `ColdStore` instead of recomputing it after eviction (`Engine.setColdStore`).
+    The store must be lossless. `Engine.coldStats()` reports demoted / promoted and render time saved vs restore time.
+
+### Cache / Bake node
+
+`cache` (category time) passes its input through until the user bakes it (`Io.bake.bake`). Baked, it serves a stored
+sequence and its `lazy` input is never evaluated. `ctx.inputSignature('image')` is the structural signature of everything
+upstream (no evaluation, independent of proxy and frame); the node compares it with the one stored at bake time and reports
+`stale`. The hidden `baked*` params are written by the UI from `BakeResult.params`.
+`groupOutputWires(graph, nodeIds)` / `groupOutputs(...)` in `graph.ts` list the wires that leave a set of nodes: that is
+where cache nodes go to bake a whole group.

@@ -3,7 +3,7 @@ import { cameraBasis, PROJECTION_ID, simpleCamera } from '../../lib/gen-camera';
 import { rgba, rotationZYX } from '../../lib/gen-common';
 import { ModelError, type ParsedModel } from '../../lib/gen-model';
 import { parseModelBytes } from '../../lib/gen-model-load';
-import type { ImageValue } from '../../types';
+import type { ImageValue, NodeGpu } from '../../types';
 
 /**
  * 3D Model: renders an imported glTF (.glb / self-contained .gltf) or .obj mesh with the same camera system and lighting
@@ -14,13 +14,13 @@ import type { ImageValue } from '../../types';
  * CACHING. The engine caches node RESULTS, not buffers, and a node must stay stateless (rule 9). Parsing a model and
  * uploading it to the GPU are expensive and the inputs never change between frames, so two WeakMaps hold DERIVED,
  * IMMUTABLE data:
- *   parsed:  ArrayBuffer returned by Host.assetBytes  ->  ParsedModel (or the error it produced)
- *   gpuData: same ArrayBuffer -> GPUDevice -> vertex/index buffers
+ *   parsed:  ArrayBuffer returned by Host.assetBytes  ->  ParsedModel (or the error it produced)   (WeakMap: CPU memory only)
+ *   gpuData: same ArrayBuffer -> vertex/index buffers (a small LRU of at most MAX_GPU_MODELS models / MAX_GPU_MODEL_BYTES)
  * This is safe because (a) both are pure functions of the file bytes (same bytes, same result, so the cache can never
- * change what a render produces), (b) the host returns the SAME ArrayBuffer object for an asset until it is removed or
- * replaced (assumption stated by the host contract), so a changed file is a new key, and (c) entries die with the
- * ArrayBuffer (WeakMap), and GPU buffers die with their device: a recovered/replaced device is a different key, so a
- * lost device's buffers are never touched again. Nothing is released by hand.
+ * change what a render produces) and (b) the host returns the SAME ArrayBuffer object for an asset until it is removed or
+ * replaced (assumption stated by the host contract), so a changed file is a new key. GPU buffers are created through
+ * ctx.gpu.createBuffer (counted in gpu.stats()) and DESTROYED when a model falls out of the LRU or its device is replaced:
+ * nothing waits for garbage collection (Firefox frees the GPU memory behind a dropped wrapper only when it collects it).
  *
  * EXOTIC CAMERAS. Perspective and orthographic are exact. Fisheye, panoramic and cylindrical projections are applied per
  * VERTEX in the vertex shader, so straight triangle edges stay straight between vertices: dense meshes look right, huge
@@ -33,7 +33,31 @@ interface GpuModel {
   index: GPUBuffer;
   wire: GPUBuffer | null;
 }
-const gpuData = new WeakMap<ArrayBuffer, WeakMap<GPUDevice, GpuModel>>();
+interface CachedModel extends GpuModel {
+  device: GPUDevice;
+  gpu: NodeGpu;
+  bytes: number;
+}
+const gpuData = new Map<ArrayBuffer, CachedModel>();
+const MAX_GPU_MODELS = 3;
+const MAX_GPU_MODEL_BYTES = 384 * 1024 * 1024;
+
+function destroyModel(m: CachedModel): void {
+  for (const b of [m.vertex, m.index, m.wire]) if (b) m.gpu.destroyBuffer(b);
+}
+
+/** Drop the least recently used models until the cache fits (never keep). */
+function trimModels(keep: ArrayBuffer | null): void {
+  let total = 0;
+  for (const m of gpuData.values()) total += m.bytes;
+  for (const [k, m] of [...gpuData]) {
+    if (gpuData.size <= MAX_GPU_MODELS && total <= MAX_GPU_MODEL_BYTES) break;
+    if (k === keep) continue;
+    total -= m.bytes;
+    destroyModel(m);
+    gpuData.delete(k);
+  }
+}
 
 interface Pipelines {
   cull: GPURenderPipeline;
@@ -188,7 +212,7 @@ fn toonLit(diff: f32) -> f32 {
 @fragment fn fsWire() -> @location(0) vec4f { return vec4f(fr.wire.rgb * fr.wire.a, fr.wire.a); }
 `;
 
-function getPipelines(device: GPUDevice): Promise<Pipelines> {
+function getPipelines(device: GPUDevice, gpu: NodeGpu): Promise<Pipelines> {
   let p = pipelines.get(device);
   if (!p) {
     p = (async () => {
@@ -232,7 +256,8 @@ function getPipelines(device: GPUDevice): Promise<Pipelines> {
           depthStencil: wire ? { ...depthStencil, depthWriteEnabled: false } : depthStencil,
           multisample: { count: 4 },
         });
-      const white = device.createTexture({ size: [1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      // Lives as long as the pipelines (one per device); created through the Gpu so it is counted.
+      const white = gpu.scratchTexture({ width: 1, height: 1, format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, label: 'model-3d white' });
       device.queue.writeTexture({ texture: white }, new Uint8Array([255, 255, 255, 255]), { bytesPerRow: 4 }, [1, 1]);
       return {
         cull: make('back', false),
@@ -251,17 +276,25 @@ function getPipelines(device: GPUDevice): Promise<Pipelines> {
   return p;
 }
 
-function uploadModel(device: GPUDevice, key: ArrayBuffer, m: ParsedModel, wantWire: boolean): GpuModel {
-  let perDevice = gpuData.get(key);
-  if (!perDevice) gpuData.set(key, (perDevice = new WeakMap()));
-  let g = perDevice.get(device);
-  if (!g) {
+function uploadModel(gpu: NodeGpu, key: ArrayBuffer, m: ParsedModel, wantWire: boolean): GpuModel {
+  const device = gpu.device;
+  let g = gpuData.get(key);
+  if (g && g.device !== device) {
+    // A device was replaced after a loss: the old buffers went with it.
+    destroyModel(g);
+    gpuData.delete(key);
+    g = undefined;
+  }
+  if (g) {
+    gpuData.delete(key); // refresh LRU position
+    gpuData.set(key, g);
+  } else {
     const vBytes = m.vertexCount * 36;
     const iBytes = m.indices.length * 4;
     if (vBytes > device.limits.maxBufferSize || iBytes > device.limits.maxBufferSize) {
       throw new Error(`This model needs ${Math.round(Math.max(vBytes, iBytes) / 1048576)} MB in one GPU buffer, more than this graphics card allows. Reduce its size in your 3D tool.`);
     }
-    const vertex = device.createBuffer({ label: 'model-3d vertices', size: vBytes, usage: GPUBufferUsage.VERTEX, mappedAtCreation: true });
+    const vertex = gpu.createBuffer({ label: 'model-3d vertices', size: vBytes, usage: GPUBufferUsage.VERTEX, mappedAtCreation: true }, 'vertex-buffer');
     const f = new Float32Array(vertex.getMappedRange());
     const u = new Uint32Array(f.buffer);
     for (let i = 0; i < m.vertexCount; i++) {
@@ -277,11 +310,12 @@ function uploadModel(device: GPUDevice, key: ArrayBuffer, m: ParsedModel, wantWi
       u[o + 8] = (m.colors[i * 4] | (m.colors[i * 4 + 1] << 8) | (m.colors[i * 4 + 2] << 16) | (m.colors[i * 4 + 3] << 24)) >>> 0;
     }
     vertex.unmap();
-    const index = device.createBuffer({ label: 'model-3d indices', size: Math.max(16, iBytes), usage: GPUBufferUsage.INDEX, mappedAtCreation: true });
+    const index = gpu.createBuffer({ label: 'model-3d indices', size: Math.max(16, iBytes), usage: GPUBufferUsage.INDEX, mappedAtCreation: true }, 'index-buffer');
     new Uint32Array(index.getMappedRange()).set(m.indices);
     index.unmap();
-    g = { vertex, index, wire: null };
-    perDevice.set(device, g);
+    g = { vertex, index, wire: null, device, gpu, bytes: vBytes + iBytes };
+    gpuData.set(key, g);
+    trimModels(key);
   }
   if (wantWire && !g.wire) {
     if (m.triangleCount > MAX_WIRE_TRIANGLES) {
@@ -292,10 +326,11 @@ function uploadModel(device: GPUDevice, key: ArrayBuffer, m: ParsedModel, wantWi
       const [a, b, c] = [m.indices[t], m.indices[t + 1], m.indices[t + 2]];
       edges.set([a, b, b, c, c, a], t * 2);
     }
-    const wire = device.createBuffer({ label: 'model-3d wire', size: edges.byteLength, usage: GPUBufferUsage.INDEX, mappedAtCreation: true });
+    const wire = gpu.createBuffer({ label: 'model-3d wire', size: edges.byteLength, usage: GPUBufferUsage.INDEX, mappedAtCreation: true }, 'index-buffer');
     new Uint32Array(wire.getMappedRange()).set(edges);
     wire.unmap();
     g.wire = wire;
+    g.bytes += edges.byteLength;
   }
   return g;
 }
@@ -393,7 +428,7 @@ export default defineNode({
 
     const clearOnly = () => {
       const enc = device.createCommandEncoder();
-      enc.beginRenderPass({ colorAttachments: [{ view: out.texture.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
+      enc.beginRenderPass({ colorAttachments: [{ view: ctx.gpu.view(out.texture), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
       device.queue.submit([enc.finish()]);
       return { image: out };
     };
@@ -466,14 +501,15 @@ export default defineNode({
     ]);
 
     // --- GPU resources ----------------------------------------------------
-    const pl = await getPipelines(device);
-    const gm = uploadModel(device, bytes, model, p.wireframe);
-    const frameBuf = device.createBuffer({ size: frame.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const gpu = ctx.gpu;
+    const pl = await getPipelines(device, gpu);
+    const gm = uploadModel(gpu, bytes, model, p.wireframe);
+    const frameBuf = gpu.scratch(frame.byteLength, GPUBufferUsage.UNIFORM, 'model-3d frame');
     device.queue.writeBuffer(frameBuf, 0, frame);
     const frameBind = device.createBindGroup({
       layout: pl.frameLayout,
       entries: [
-        { binding: 0, resource: { buffer: frameBuf } },
+        { binding: 0, resource: { buffer: frameBuf, size: frame.byteLength } },
         { binding: 1, resource: pl.nearest },
         { binding: 2, resource: pl.linear },
       ],
@@ -487,26 +523,27 @@ export default defineNode({
         // the host caches decoded textures per ArrayBuffer object (stable slice kept in the parsed model)
         tex = (await ctx.host.decodeImageBytes(mat.texture.data, mat.texture.mime))?.texture ?? null;
       }
-      const ub = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      const ub = gpu.scratch(32, GPUBufferUsage.UNIFORM, 'model-3d material');
       device.queue.writeBuffer(ub, 0, new Float32Array([...mat.baseColor, mat.alphaMode === 'opaque' ? 0 : 1, mat.alphaCutoff, tex ? 1 : 0, 0]));
       temp.push(ub);
       matBinds.push(
         device.createBindGroup({
           layout: pl.matLayout,
           entries: [
-            { binding: 0, resource: { buffer: ub } },
-            { binding: 1, resource: (tex ?? pl.white).createView() },
+            { binding: 0, resource: { buffer: ub, size: 32 } },
+            { binding: 1, resource: gpu.view(tex ?? pl.white) },
           ],
         }),
       );
     }
 
-    const msaa = device.createTexture({ size: [W, H], format: 'rgba8unorm', sampleCount: 4, usage: GPUTextureUsage.RENDER_ATTACHMENT });
-    const depth = device.createTexture({ size: [W, H], format: 'depth24plus', sampleCount: 4, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    // Multisampled colour + depth are 8x the frame in memory: pooled and reused instead of created and destroyed every render.
+    const msaa = gpu.scratchTexture({ width: W, height: H, format: 'rgba8unorm', sampleCount: 4, usage: GPUTextureUsage.RENDER_ATTACHMENT, label: 'model-3d msaa' });
+    const depth = gpu.scratchTexture({ width: W, height: H, format: 'depth24plus', sampleCount: 4, usage: GPUTextureUsage.RENDER_ATTACHMENT, label: 'model-3d depth' });
     const enc = device.createCommandEncoder({ label: 'model-3d' });
     const rp = enc.beginRenderPass({
-      colorAttachments: [{ view: msaa.createView(), resolveTarget: out.texture.createView(), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] }],
-      depthStencilAttachment: { view: depth.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' },
+      colorAttachments: [{ view: gpu.view(msaa), resolveTarget: gpu.view(out.texture), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] }],
+      depthStencilAttachment: { view: gpu.view(depth), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' },
     });
     rp.setBindGroup(0, frameBind);
     rp.setVertexBuffer(0, gm.vertex);
@@ -525,9 +562,9 @@ export default defineNode({
     }
     rp.end();
     device.queue.submit([enc.finish()]);
-    msaa.destroy();
-    depth.destroy();
-    for (const b of temp) b.destroy();
+    gpu.releaseScratchTexture(msaa);
+    gpu.releaseScratchTexture(depth);
+    for (const b of temp) gpu.releaseScratch(b);
     return { image: out };
   },
 });

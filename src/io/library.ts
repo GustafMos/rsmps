@@ -418,7 +418,7 @@ export class Library implements MediaLibrary {
     return info;
   }
 
-  async attachSequence(owner: string, name: string, frames: Blob[], fps: number): Promise<AssetInfo> {
+  async attachSequence(owner: string, name: string, frames: Blob[], fps: number, meta?: Record<string, unknown>): Promise<AssetInfo> {
     if (frames.length === 0) throw new Error('An image sequence needs at least one frame.');
     const rate = Number.isFinite(fps) && fps > 0 ? fps : 12;
     const probe = await createImageBitmap(frames[0]).catch(() => null);
@@ -427,7 +427,7 @@ export class Library implements MediaLibrary {
     probe.close();
     const existing = [...this.infos.values()].find((a) => (a as LibraryAsset).owner === owner);
     const id = existing?.id ?? uniqueId('a');
-    const info: LibraryAsset = { id, name, kind: 'video', width, height, duration: frames.length / rate, fps: rate, hasAudio: false, owner, hidden: true };
+    const info: LibraryAsset = { id, name, kind: 'video', width, height, duration: frames.length / rate, fps: rate, hasAudio: false, owner, hidden: true, ...(meta ?? {}) };
     if (existing) {
       // Same id, new frames: drop everything decoded for the old ones so the engine and player re-render.
       this.frames.dropGroups(`${id}|`);
@@ -648,7 +648,7 @@ export class Library implements MediaLibrary {
   }
 
   /** Image-sequence asset: frame = floor(seconds x fps), clamped to the last frame. */
-  private decodeSequenceFrame(info: AssetInfo, stills: Blob[], size: { bucket: number; width: number; height: number }, group: string, t: number): Promise<Frame | null> {
+  private decodeSequenceFrame(info: AssetInfo, stills: Blob[], size: { bucket: number; width: number; height: number }, group: string, t: number, ahead = true): Promise<Frame | null> {
     const idx = Math.min(stills.length - 1, Math.max(0, Math.floor(t * info.fps + 1e-6)));
     const key = `${group}#${idx}`;
     let p = this.pending.get(key);
@@ -679,7 +679,22 @@ export class Library implements MediaLibrary {
       })().finally(() => this.pending.delete(key));
       this.pending.set(key, p);
     }
+    if (ahead) this.readAhead(info, stills, size, group, idx);
     return p;
+  }
+
+  /**
+   * Playing a sequence (a baked region) decodes the next frames while the current one is used, like a video decoder does: two
+   * frames ahead, wrapping at the end (baked clips loop). Skipped for exports (they ask in order anyway).
+   */
+  private readAhead(info: AssetInfo, stills: Blob[], size: { bucket: number; width: number; height: number }, group: string, idx: number): void {
+    if (this.exact || stills.length < 3 || !(info as LibraryAsset).owner) return;
+    for (let d = 1; d <= 2; d++) {
+      const next = (idx + d) % stills.length;
+      const t = next / info.fps;
+      if (this.frames.find(group, t + 1e-6) || this.pending.has(`${group}#${next}`)) continue;
+      void this.decodeSequenceFrame(info, stills, size, group, t + 1e-6, false).catch(() => undefined);
+    }
   }
 
   private decodeVideoFrame(info: AssetInfo, size: { bucket: number; width: number; height: number }, group: string, t: number): Promise<Frame | null> {
@@ -990,6 +1005,15 @@ export class Library implements MediaLibrary {
     for (const n of this.bytesSize.values()) pcm += n;
     for (const n of this.audioBytes.values()) pcm += n;
     return this.frames.bytes + pcm;
+  }
+
+  /** CPU memory this library holds for decoded sound and cached file bytes (models), for the memory readout. */
+  cpuBytes(): { audioPcmBytes: number; fileBytes: number } {
+    let audio = 0;
+    let files = 0;
+    for (const n of this.audioBytes.values()) audio += n;
+    for (const n of this.bytesSize.values()) files += n;
+    return { audioPcmBytes: audio, fileBytes: files };
   }
 
   /** Drop every decoded frame and cached byte buffer (they are decoded / read again on demand). */

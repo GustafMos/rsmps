@@ -14,9 +14,14 @@ export type Mode = 'paused' | 'playing' | 'export';
 export type Pressure = 'ok' | 'high' | 'critical';
 
 export interface MemoryState {
+  /** Everything this app has live on the GPU (textures of every kind, buffers). */
   allocatedBytes: number;
   budgetBytes: number;
   pressure: Pressure;
+  /** System RAM used by the spill caches (compressed rendered frames, RAM tier of expensive results). */
+  ramBytes?: number;
+  /** System-RAM budget of those caches. */
+  ramBudgetBytes?: number;
 }
 
 export interface AdapterHints {
@@ -35,6 +40,23 @@ export function defaultBudget(h: AdapterHints): number {
   if (h.deviceMemoryGB !== undefined && h.deviceMemoryGB <= 4) return 384 * MB;
   if (discrete && !integrated) return 768 * MB;
   return 384 * MB;
+}
+
+const STORAGE_RAM_KEY = 'rsmpsRamBudgetMB';
+
+/**
+ * System RAM the spill caches may use: 1.5 GB by default, less on machines that report little memory
+ * (navigator.deviceMemory exists in Chromium only, capped at 8 GB by the browser; Firefox reports nothing and gets 1.5 GB).
+ */
+export function defaultRamBudget(deviceMemoryGB?: number): number {
+  if (deviceMemoryGB === undefined) return 1536 * MB;
+  return Math.max(256, Math.min(1536, Math.round(deviceMemoryGB * 1024 * 0.2))) * MB;
+}
+
+/** How the RAM budget is shared: finished frames for playback, and expensive node results demoted from the GPU. */
+export function splitRam(total: number, mode: Mode): { frames: number; cold: number } {
+  if (mode === 'export') return { frames: 0, cold: Math.round(total * 0.7) };
+  return { frames: Math.round(total * 0.6), cold: Math.round(total * 0.4) };
 }
 
 export interface Split {
@@ -94,6 +116,10 @@ export interface GovernorTargets {
   setMediaBudget(bytes: number): void;
   dropMediaFrames(): void;
   isPlaying(): boolean;
+  /** System-RAM caches (optional so older targets keep working). */
+  setRamBudgets?(frames: number, cold: number): void;
+  ramUsed?(): number;
+  dropRam?(): void;
 }
 
 export class MemoryGovernor {
@@ -105,16 +131,55 @@ export class MemoryGovernor {
   private hiddenTimer: ReturnType<typeof setTimeout> | null = null;
   private busy = false;
   private step = 0;
+  private ramTotal: number;
+  private ramManual: boolean;
 
   constructor(
     private t: GovernorTargets,
     private autoBytes: number,
     private storage: Storage | null = typeof localStorage !== 'undefined' ? localStorage : null,
+    private autoRamBytes: number = defaultRamBudget(),
   ) {
     const stored = readStoredBudget(storage);
     this.manual = stored !== null;
     this.total = stored ?? autoBytes;
+    let ram: number | null = null;
+    try {
+      const v = Number(storage?.getItem(STORAGE_RAM_KEY));
+      if (Number.isFinite(v) && v >= 64) ram = Math.round(v) * MB;
+    } catch {
+      /* storage blocked */
+    }
+    this.ramManual = ram !== null;
+    this.ramTotal = ram ?? autoRamBytes;
     this.apply('paused');
+  }
+
+  /** System-RAM budget for the spill caches. */
+  getRam(): number {
+    return this.ramTotal;
+  }
+
+  setRam(bytes: number): void {
+    this.ramTotal = Math.max(64 * MB, Math.round(bytes));
+    this.ramManual = true;
+    try {
+      this.storage?.setItem(STORAGE_RAM_KEY, String(Math.round(this.ramTotal / MB)));
+    } catch {
+      /* the setting lasts for this session */
+    }
+    this.apply(this.mode);
+  }
+
+  autoRam(): void {
+    this.ramTotal = this.autoRamBytes;
+    this.ramManual = false;
+    try {
+      this.storage?.removeItem(STORAGE_RAM_KEY);
+    } catch {
+      /* ignore */
+    }
+    this.apply(this.mode);
   }
 
   get(): number {
@@ -146,7 +211,13 @@ export class MemoryGovernor {
 
   snapshot(): MemoryState {
     const allocatedBytes = this.t.gpu.allocatedBytes;
-    return { allocatedBytes, budgetBytes: this.total, pressure: pressureOf(allocatedBytes, this.total) };
+    return {
+      allocatedBytes,
+      budgetBytes: this.total,
+      pressure: pressureOf(allocatedBytes, this.total),
+      ramBytes: this.t.ramUsed?.() ?? 0,
+      ramBudgetBytes: this.ramTotal,
+    };
   }
 
   /** An export (or anything else heavy) asks for a mode for its duration. Returns the function that ends it. */
@@ -170,6 +241,13 @@ export class MemoryGovernor {
     this.t.setEngineBudget(s.engine);
     this.t.setPlayerBudget(s.player);
     this.t.setMediaBudget(s.media);
+    const lim = (this.t.gpu as { limits?: { idleBytes: number; scratchBytes: number } }).limits;
+    if (lim) {
+      lim.idleBytes = Math.max(32 * MB, s.idle);
+      lim.scratchBytes = Math.max(32 * MB, s.idle);
+    }
+    const r = splitRam(this.ramTotal, mode);
+    this.t.setRamBudgets?.(r.frames, r.cold);
   }
 
   /** Start watching: rebalance when playback starts/stops, enforce the budget, free memory when the tab stays hidden. */
@@ -229,6 +307,7 @@ export class MemoryGovernor {
     this.t.dropMediaFrames();
     await this.t.clearEngine();
     await this.t.exclusive(() => this.t.gpu.trim());
+    // The RAM tier is kept: it is what makes freeing GPU memory cheap (results come back from RAM instead of being recomputed).
     this.step = 0;
   }
 }

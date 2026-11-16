@@ -149,6 +149,9 @@ export class ExporterImpl implements Exporter {
       await this.d.gate.exclusive(() => this.d.gpu.trim());
       this.d.library.exact = false;
       this.releaseConformed();
+      // The WebGPU canvases used for encoding keep swap-chain textures alive: give them back instead of holding them until the next export.
+      for (const p of this.presenters.values()) p.dispose();
+      this.presenters.clear();
       unhold?.();
     }
   }

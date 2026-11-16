@@ -51,8 +51,11 @@ export class EvalGate {
     return run;
   }
 
-  /** Drop the engine cache at a moment when no evaluation is running. */
-  clearEngine(): Promise<void> {
-    return this.exclusive(() => this.engine.clear());
+  /**
+   * Drop the engine cache at a moment when no evaluation is running. demote: the cache is only being cleared to give GPU
+   * memory back (not because content changed), so expensive results move to the RAM tier instead of being thrown away.
+   */
+  clearEngine(demote = false): Promise<void> {
+    return this.exclusive(() => this.engine.clear({ demote }));
   }
 }

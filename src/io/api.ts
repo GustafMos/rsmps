@@ -29,7 +29,7 @@ export interface MediaLibrary extends Host {
    * The hidden working sequence owned by `owner` (a scan project id): created on first call, then REPLACED in place under
    * the same asset id. Hidden from `list()`; removed by `removeOwned`.
    */
-  attachSequence(owner: string, name: string, frames: Blob[], fps: number): Promise<AssetInfo>;
+  attachSequence(owner: string, name: string, frames: Blob[], fps: number, meta?: Record<string, unknown>): Promise<AssetInfo>;
   /** Set when decoding this asset failed for good (null otherwise, and until something has tried to decode it). */
   assetProblem(assetId: string): AssetProblem | null;
   /** Store a recorded take as an audio asset (lossless 32-bit float WAV). Persisted; `assetAudio` serves it immediately. */
@@ -414,6 +414,89 @@ export interface MemoryInfo {
   frameCacheBytes: number;
   /** Library decoded frames and PCM. */
   decodedMediaBytes: number;
+  /** Everything the app has live on the GPU: pooled and scratch textures, uniform/storage/vertex/index/readback buffers. */
+  gpuTotalBytes?: number;
+  /** Highest value gpuTotalBytes has had in this session. */
+  gpuPeakBytes?: number;
+  /** Per category (pooled-texture, scratch-texture, texture, uniform-buffer, scratch-buffer, readback-buffer, vertex-buffer, index-buffer, ...). */
+  gpuByCategory?: Record<string, { count: number; bytes: number; peakBytes: number }>;
+  /** Live and cumulative object counts (textures, buffers, views, bind groups, pipelines, submits). */
+  gpuObjects?: Record<string, number>;
+  gpuCaches?: Record<string, number>;
+  /** The node render that held the most texture bytes at once. */
+  gpuWorstScope?: { label: string; bytes: number; textures: number };
+  /** Idle (reusable) bytes in the pools: what a trim could give back. */
+  gpuIdleBytes?: number;
+  /** System RAM (not GPU): budget of the spill caches, the packed player frames, the RAM tier of expensive results. */
+  ramBudgetBytes?: number;
+  ramFrameCacheBytes?: number;
+  ramColdBytes?: number;
+  /** Compressed size / raw size of the RAM tier. */
+  ramColdRatio?: number;
+  /** RAM-tier counters: entries, demoted, promoted, savedMs (render time avoided) vs promoteMs (time to bring results back). */
+  coldTier?: { entries: number; demoted: number; skippedDemote: number; promoted: number; promoteMs: number; savedMs: number; misses: number; lost: number };
+  /** Counters of the player's RAM frame cache. */
+  frameCache?: { captured: number; skipped: number; restored: number; restoreMs: number; captureMs: number; rawBytes: number; quality: 'compressed' | 'lossless' };
+  /** Decoded sound (system RAM) and cached model/file bytes (system RAM). */
+  audioPcmBytes?: number;
+  modelBytes?: number;
+}
+
+/** Options of Io.bake.bake. */
+export interface BakeOptions {
+  /** 'lossless' (PNG: exact, used by exports) or 'compressed' (high-quality WebP: much smaller, exports re-render live unless the node says otherwise). */
+  quality: 'lossless' | 'compressed';
+  onProgress?: (p: { frame: number; frames: number; fraction: number; bytes: number }) => void;
+  /** Abort a running bake: nothing is stored and the promise rejects with an AbortError. */
+  signal?: AbortSignal;
+  /** Batch item to bake when the picture depends on it (default 0). Other items stay live. */
+  item?: number;
+  /** Project the node belongs to (default: the active project). Used to name and later purge the stored sequence. */
+  projectId?: string;
+  /** Stop with an error when the encoded frames exceed this many bytes (default 3 GB). */
+  maxBytes?: number;
+}
+
+export interface BakeResult {
+  /** Hidden library sequence that holds the frames. */
+  assetId: string;
+  /** Structural signature of everything upstream at bake time (what the node compares to detect a stale bake). */
+  signature: string;
+  frames: number;
+  /** Stored size in bytes (encoded frames). */
+  bytes: number;
+  /** The batch item that was baked, or null when the picture does not depend on the item. */
+  item: number | null;
+  itemDependent: boolean;
+  /** Write EXACTLY these into the Cache / Bake node's params (all strings): baked, bakedSignature, bakedQuality, bakedItem, bakedUnit, bakedWidth, bakedCanvas. */
+  params: Record<string, string>;
+}
+
+export interface BakeInfo {
+  assetId: string;
+  signature: string;
+  frames: number;
+  bytes: number;
+  quality: 'lossless' | 'compressed';
+  item: number | null;
+  fps: number;
+  width: number;
+  height: number;
+  createdAt: number;
+  /** A bake of this node is running right now. */
+  running: boolean;
+}
+
+/** Baking of Cache / Bake nodes. */
+export interface BakeApi {
+  /** Render every frame of the node's input for the whole project loop at full resolution and store it. Does NOT edit the graph: write result.params into the node. */
+  bake(graph: GraphDoc, nodeId: string, opts: BakeOptions): Promise<BakeResult>;
+  /** Delete the stored sequence of a node. The UI then clears the node's baked* params (the node serves nothing from a missing sequence and reports stale). */
+  unbake(nodeId: string): Promise<void>;
+  /** What is stored for a node (also after a reload), or null. */
+  info(nodeId: string): BakeInfo | null;
+  /** Remove stored sequences of a project whose Cache / Bake node no longer exists. Returns how many were removed. */
+  prune(projectId: string, graph: GraphDoc): Promise<number>;
 }
 
 export interface Io {
@@ -447,10 +530,20 @@ export interface Io {
    * list stays shared. Returns the new project's graph (null if unknown). The caller must then `player.setView` with it.
    */
   switchProject(id: string): Promise<GraphDoc | null>;
+  /** Baked regions (Cache / Bake nodes). */
+  bake: BakeApi;
   /** Best-effort memory readout in bytes. */
   memory(): MemoryInfo;
   /** Total GPU memory the app may use (bytes). `set` is remembered across sessions; `auto` goes back to the detected default. */
-  memoryBudget: { get(): number; set(bytes: number): void; auto(): void };
+  memoryBudget: {
+    get(): number;
+    set(bytes: number): void;
+    auto(): void;
+    /** System-RAM budget (bytes) of the spill caches: compressed rendered frames for playback and the RAM tier of expensive node results. Remembered across sessions. */
+    ramBudget: { get(): number; set(bytes: number): void; auto(): void };
+    /** Preview cache quality: 'compressed' (default; exact whenever the picture deflates well, lossy JPEG/WebP otherwise) or 'lossless'. Remembered across sessions. */
+    cacheQuality: { get(): 'compressed' | 'lossless'; set(q: 'compressed' | 'lossless'): void };
+  };
   /** Release everything that can be rebuilt (frame caches, engine cache, idle textures). The picture on screen stays. */
   freeMemory(): Promise<void>;
   /** Evaluate once, outside the player (thumbnails, node previews). */

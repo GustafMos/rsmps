@@ -204,6 +204,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
 
     // 2. pointer jumping: every pixel learns the start of its span (11 doublings cover 2048)
     for (let i = 0; i < 11; i++) {
+      const prev = rec;
       rec = gpu.pass({
         label: 'pixel-sort-jump',
         size,
@@ -217,12 +218,14 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   return vec4f(jump.r, me.g, me.b, me.a);
 }`,
       });
+      gpu.recycle(prev); // ping-pong: without this all 78 passes of the network stay alive until the render ends (5 GB at 4K)
     }
 
     // 3. bitonic sorting network over (start, key, index)
     if (p.mode === 'sort') {
       for (let k = 2; k <= CHUNK; k *= 2) {
         for (let j = k / 2; j >= 1; j = Math.floor(j / 2)) {
+          const prev = rec;
           rec = gpu.pass({
             label: 'pixel-sort-bitonic',
             size,
@@ -250,6 +253,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   return r;
 }`,
           });
+          gpu.recycle(prev);
         }
       }
     }
@@ -276,6 +280,11 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
 }`,
     });
 
+    gpu.recycle(rec);
+    if (tilt) {
+      gpu.recycle(base);
+      if (mask) gpu.recycle(mask as { texture: GPUTexture });
+    }
     if (!tilt) return { image: sorted };
     // 5. rotate back
     const image = gpu.pass({

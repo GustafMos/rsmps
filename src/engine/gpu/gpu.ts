@@ -1,6 +1,14 @@
 /**
- * The single GPU context of the engine: one device, a texture pool, a pipeline
- * cache and the full-screen pass helper nodes use. Nothing here knows about graphs.
+ * The single GPU context of the engine: one device, a texture pool, caches and the full-screen pass helper nodes use.
+ * Nothing here knows about graphs.
+ *
+ * Memory rules (each one exists because of a measured problem, see docs/ENGINE.md "GPU memory"):
+ *  - EVERYTHING the app allocates on the device is created through this class (`createBuffer`, `createTexture`, `scratch`,
+ *    `acquire`, ...) so `stats()` can account for it. `src/engine/gpu/ledger.test.ts` fails when a file creates a raw
+ *    buffer or texture.
+ *  - Nothing relies on garbage collection: buffers and textures are destroyed explicitly or pooled; views, bind groups and
+ *    pipelines (which cannot be destroyed) are cached and bounded instead of created per pass.
+ *  - Every pool has a byte cap and an age sweep; the least recently used goes first.
  */
 import type { ImageValue, MaskValue, NodeGpu, PassOptions, UniformValue } from '../types';
 import { PASS_PRELUDE, PRELUDE } from './prelude';
@@ -50,19 +58,189 @@ function layoutUniforms(uniforms: Record<string, UniformValue>): UniformLayout {
 /** Root-scope size at which a leak warning is printed (dev only). */
 const ROOT_SCOPE_WARN = 48;
 
+const BYTES_PER_TEXEL: Record<string, number> = {
+  rgba8unorm: 4,
+  'rgba8unorm-srgb': 4,
+  bgra8unorm: 4,
+  rgba16float: 8,
+  rgba32float: 16,
+  r8unorm: 1,
+  r16float: 2,
+  r32float: 4,
+  rg32float: 8,
+  depth24plus: 4,
+  'depth24plus-stencil8': 4,
+  depth32float: 4,
+};
+
+/** Bytes of a texture (every sample counts: a 4x multisampled 1080p target is 4x the memory). */
+export function textureBytes(width: number, height: number, format: string, sampleCount = 1, layers = 1): number {
+  return width * height * layers * (BYTES_PER_TEXEL[format] ?? 4) * sampleCount;
+}
+
+/** Buffer sizes are rounded up to eighths of a power of two (at most 12.5% waste) so near-equal requests share a buffer. */
+export function bucketSize(n: number): number {
+  if (n <= 256) return 256;
+  const p = 2 ** Math.floor(Math.log2(n));
+  const step = p / 8;
+  return Math.ceil(n / step) * step;
+}
+
+export interface CategoryStats {
+  count: number;
+  bytes: number;
+  peakCount: number;
+  peakBytes: number;
+  created: number;
+  destroyed: number;
+}
+
+export interface GpuStats {
+  /** Bytes in pooled textures, in use + idle. (Compatibility: see `totalBytes` for everything.) */
+  allocatedBytes: number;
+  idleBytes: number;
+  idleTextures: number;
+  retainedTextures: number;
+  rootScope: number;
+  /** Every byte this app has live on the device: pooled textures, scratch textures, buffers of every kind. */
+  totalBytes: number;
+  peakBytes: number;
+  /** Per category (`pooled-texture`, `scratch-texture`, `texture`, `uniform-buffer`, `scratch-buffer`, `readback-buffer`, `vertex-buffer`, ...). */
+  categories: Record<string, CategoryStats>;
+  /** Idle scratch buffers/textures waiting for reuse. */
+  scratchIdleBytes: number;
+  /** Distinct idle sizes in the texture pool. */
+  idleSizes: number;
+  /** Objects created minus destroyed, and creation counters. Views, bind groups and pipelines cannot be destroyed: they are cached and bounded. */
+  objects: {
+    liveTextures: number;
+    liveBuffers: number;
+    buffersCreated: number;
+    texturesCreated: number;
+    viewsCreated: number;
+    liveViews: number;
+    bindGroupsCreated: number;
+    liveBindGroups: number;
+    pipelinesCreated: number;
+    livePipelines: number;
+    shaderModulesCreated: number;
+    samplersCreated: number;
+    submits: number;
+  };
+  caches: { bindGroupHits: number; bindGroupMisses: number; viewHits: number; pipelineHits: number; pipelineEvictions: number; dataTextureHits: number; scratchHits: number; scratchMisses: number };
+  /** The node render that held the most texture bytes at once (diagnostic: a multi-pass node that forgot `recycle`). */
+  worstScope: { label: string; bytes: number; textures: number };
+  /** Number of distinct shader variants compiled per pass label (a label with many variants bakes numbers into WGSL). */
+  pipelineVariants: Record<string, number>;
+}
+
+/** Limits of the pools. The memory governor adjusts `idleBytes`. */
+export interface GpuLimits {
+  /** Idle pooled textures kept for reuse. */
+  idleBytes: number;
+  /** Distinct idle texture sizes kept. */
+  idleSizes: number;
+  /** Share of `idleBytes` that rgba16float textures may use while idle. */
+  idle16Share: number;
+  /** Idle scratch buffers / textures kept. */
+  scratchBytes: number;
+  /** Evaluations an idle scratch item or texture size survives without use. */
+  maxAge: number;
+  pipelines: number;
+  bindGroups: number;
+  dataTextures: number;
+}
+
+interface Scope {
+  set: Set<GPUTexture>;
+  label: string;
+  bytes: number;
+}
+
+interface PipelineEntry {
+  id: number;
+  pipeline: GPURenderPipeline;
+  layout: GPUBindGroupLayout;
+}
+
+interface ScratchItem<T> {
+  obj: T;
+  tick: number;
+  bytes: number;
+}
+
 export class Gpu {
   /** The current device. Replaced (never the Gpu object) by `replaceDevice` after a device loss. */
   device: GPUDevice;
+  readonly limits: GpuLimits = {
+    idleBytes: 384 * 1024 * 1024,
+    idleSizes: 16,
+    idle16Share: 0.25,
+    scratchBytes: 192 * 1024 * 1024,
+    maxAge: 240,
+    pipelines: 320,
+    bindGroups: 1536,
+    dataTextures: 96,
+  };
+
   private pool = new Map<string, GPUTexture[]>();
   private pooled = new Set<GPUTexture>();
   private refs = new Map<GPUTexture, number>();
   /** Stack of scopes; each holds textures handed out inside it (recycled at `end()` if nobody retained them). */
-  private fresh: Set<GPUTexture>[] = [new Set()];
-  private pipelines = new Map<string, { pipeline: GPURenderPipeline; layout: GPUBindGroupLayout }>();
-  private linear: GPUSampler;
-  private nearest: GPUSampler;
-  private blitPipelines = new Map<string, GPURenderPipeline>();
+  private fresh: Scope[] = [{ set: new Set(), label: 'root', bytes: 0 }];
+  private pipelines = new Map<string, PipelineEntry>();
+  private pipelineSeq = 0;
+  private computePipelines = new Map<string, GPUComputePipeline>();
+  private linear!: GPUSampler;
+  private nearest!: GPUSampler;
+  private blitPipelines = new Map<string, { pipeline: GPURenderPipeline; layout: GPUBindGroupLayout }>();
   private pendingErrors: Promise<string | null>[] = [];
+  private layouts = new Map<string, UniformLayout>();
+  private variantCodes = new Map<string, Set<string>>();
+
+  /* accounting */
+  private cats = new Map<string, CategoryStats>();
+  private ledger = new Map<object, { cat: string; bytes: number }>();
+  private total = 0;
+  private totalPeak = 0;
+  private counters = {
+    buffersCreated: 0,
+    texturesCreated: 0,
+    viewsCreated: 0,
+    bindGroupsCreated: 0,
+    pipelinesCreated: 0,
+    shaderModulesCreated: 0,
+    samplersCreated: 0,
+    submits: 0,
+    bindGroupHits: 0,
+    bindGroupMisses: 0,
+    viewHits: 0,
+    pipelineHits: 0,
+    pipelineEvictions: 0,
+    dataTextureHits: 0,
+    scratchHits: 0,
+    scratchMisses: 0,
+  };
+  private worst = { label: '', bytes: 0, textures: 0 };
+
+  /* caches that must be dropped when a texture dies */
+  private views = new WeakMap<GPUTexture, GPUTextureView>();
+  private liveViews = 0;
+  private texIds = new WeakMap<object, number>();
+  private texSeq = 0;
+  private bindGroups = new Map<string, GPUBindGroup>();
+  private bgByTexture = new Map<number, Set<string>>();
+  private uniformData = new Map<number, Float32Array>();
+  private dataTextures = new Map<string, { texture: GPUTexture; tick: number }>();
+
+  /* scratch pools */
+  private scratchFree = new Map<string, ScratchItem<GPUBuffer>[]>();
+  private scratchTexFree = new Map<string, ScratchItem<GPUTexture>[]>();
+  private scratchUsed = new Set<GPUBuffer | GPUTexture>();
+  private scratchKey = new WeakMap<GPUBuffer | GPUTexture, string>();
+
+  /* work throttle */
+  private fences: Promise<void>[] = [];
 
   /** Resolve shader compilation results gathered since the last call; throws the first error. Cheap when nothing was compiled. */
   async checkErrors(): Promise<void> {
@@ -72,13 +250,20 @@ export class Gpu {
     if (first) throw new Error(first);
   }
 
-  /** Bytes currently allocated in pooled textures (in use + idle). */
-  allocatedBytes = 0;
+  /** Everything this app has live on the device, in bytes (pooled and scratch textures, every buffer). */
+  get allocatedBytes(): number {
+    return this.total;
+  }
 
   constructor(device: GPUDevice) {
     this.device = device;
-    this.linear = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
-    this.nearest = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+    this.makeSamplers();
+  }
+
+  private makeSamplers(): void {
+    this.linear = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+    this.nearest = this.device.createSampler({ magFilter: 'nearest', minFilter: 'nearest', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+    this.counters.samplersCreated += 2;
   }
 
   /**
@@ -87,18 +272,138 @@ export class Gpu {
    * library and player keep working with it.
    */
   replaceDevice(device: GPUDevice): void {
+    // The old device's memory goes away with the device; best effort explicit destroy so nothing waits for GC.
+    try {
+      this.device.destroy();
+    } catch {
+      /* already lost */
+    }
     this.device = device;
     this.pool.clear();
     this.pooled.clear();
     this.refs.clear();
-    this.fresh = [new Set()];
+    this.fresh = [{ set: new Set(), label: 'root', bytes: 0 }];
     this.pipelines.clear();
+    this.computePipelines.clear();
     this.blitPipelines.clear();
     this.pendingErrors = [];
     this.keyUse.clear();
-    this.allocatedBytes = 0;
-    this.linear = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
-    this.nearest = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+    this.views = new WeakMap();
+    this.liveViews = 0;
+    this.bindGroups.clear();
+    this.bgByTexture.clear();
+    this.dataTextures.clear();
+    this.scratchFree.clear();
+    this.scratchTexFree.clear();
+    this.scratchUsed.clear();
+    this.fences = [];
+    this.ledger.clear();
+    this.cats.forEach((c) => {
+      c.count = 0;
+      c.bytes = 0;
+    });
+    this.total = 0;
+    this.makeSamplers();
+  }
+
+  /* ------------------------------- accounting ------------------------------- */
+
+  private cat(name: string): CategoryStats {
+    let c = this.cats.get(name);
+    if (!c) {
+      c = { count: 0, bytes: 0, peakCount: 0, peakBytes: 0, created: 0, destroyed: 0 };
+      this.cats.set(name, c);
+    }
+    return c;
+  }
+
+  private track(obj: object, category: string, bytes: number): void {
+    this.ledger.set(obj, { cat: category, bytes });
+    const c = this.cat(category);
+    c.count++;
+    c.created++;
+    c.bytes += bytes;
+    c.peakCount = Math.max(c.peakCount, c.count);
+    c.peakBytes = Math.max(c.peakBytes, c.bytes);
+    this.total += bytes;
+    this.totalPeak = Math.max(this.totalPeak, this.total);
+  }
+
+  private untrack(obj: object): void {
+    const e = this.ledger.get(obj);
+    if (!e) return;
+    this.ledger.delete(obj);
+    const c = this.cat(e.cat);
+    c.count--;
+    c.destroyed++;
+    c.bytes -= e.bytes;
+    this.total -= e.bytes;
+  }
+
+  /** Create a buffer that this app owns for a while (vertex/index data, long-lived storage). Counted in `stats()`. Free with `destroyBuffer`. */
+  createBuffer(desc: GPUBufferDescriptor, category = 'buffer'): GPUBuffer {
+    const buf = this.device.createBuffer(desc);
+    this.counters.buffersCreated++;
+    this.track(buf, category, desc.size);
+    return buf;
+  }
+
+  destroyBuffer(buf: GPUBuffer): void {
+    this.forgetTexture(buf);
+    this.untrack(buf);
+    this.scratchUsed.delete(buf);
+    buf.destroy();
+  }
+
+  /** Create a texture outside the pool (the pool recycles by size; use this for textures that live a long time). Free with `destroyTexture`. */
+  createTexture(desc: GPUTextureDescriptor, category = 'texture'): GPUTexture {
+    const tex = this.device.createTexture(desc);
+    this.counters.texturesCreated++;
+    const [w, h = 1, l = 1] = Array.isArray(desc.size) ? (desc.size as number[]) : [(desc.size as GPUExtent3DDictStrict).width, (desc.size as GPUExtent3DDictStrict).height ?? 1, (desc.size as GPUExtent3DDictStrict).depthOrArrayLayers ?? 1];
+    this.track(tex, category, textureBytes(w, h, desc.format, desc.sampleCount ?? 1, l));
+    return tex;
+  }
+
+  destroyTexture(tex: GPUTexture): void {
+    this.forgetTexture(tex);
+    this.untrack(tex);
+    this.scratchUsed.delete(tex);
+    tex.destroy();
+  }
+
+  /** Drop everything cached about a texture that is going away: its view and every bind group that names it. */
+  private forgetTexture(tex: GPUTexture | GPUBuffer): void {
+    if (this.views.delete(tex as GPUTexture)) this.liveViews--;
+    const id = this.texIds.get(tex);
+    if (id === undefined) return;
+    const keys = this.bgByTexture.get(id);
+    if (keys) {
+      for (const k of keys) this.bindGroups.delete(k);
+      this.bgByTexture.delete(id);
+    }
+  }
+
+  private texId(tex: GPUTexture | GPUBuffer): number {
+    let id = this.texIds.get(tex);
+    if (id === undefined) {
+      id = ++this.texSeq;
+      this.texIds.set(tex, id);
+    }
+    return id;
+  }
+
+  /** Cached default view of a texture. */
+  view(tex: GPUTexture): GPUTextureView {
+    let v = this.views.get(tex);
+    if (v) {
+      this.counters.viewHits++;
+      return v;
+    }
+    v = tex.createView();
+    this.counters.viewsCreated++;
+    this.liveViews++;
+    this.views.set(tex, v);
+    return v;
   }
 
   /* ---------------------------- texture lifetime ------------------------ */
@@ -119,13 +424,17 @@ export class Gpu {
           GPUTextureUsage.COPY_DST |
           GPUTextureUsage.STORAGE_BINDING,
       });
+      this.counters.texturesCreated++;
+      this.track(tex, 'pooled-texture', textureBytes(w, h, format));
       this.pooled.add(tex);
-      this.allocatedBytes += w * h * (format === 'rgba8unorm' ? 4 : 8);
     }
     this.keyUse.set(key, this.useTick);
     const scope = this.fresh[this.fresh.length - 1];
-    scope.add(tex);
-    if (this.fresh.length === 1 && scope.size === ROOT_SCOPE_WARN && !this.warnedRoot && import.meta.env?.DEV) {
+    if (!scope.set.has(tex)) {
+      scope.set.add(tex);
+      scope.bytes += textureBytes(w, h, format);
+    }
+    if (this.fresh.length === 1 && scope.set.size === ROOT_SCOPE_WARN && !this.warnedRoot && import.meta.env?.DEV) {
       this.warnedRoot = true;
       console.warn('GPU textures are being acquired outside gpu.scoped()/a node render and never retained: they will never be recycled (leak). See Gpu.scoped.');
     }
@@ -140,7 +449,7 @@ export class Gpu {
   retain(tex: GPUTexture): void {
     if (!this.pooled.has(tex)) return;
     this.refs.set(tex, (this.refs.get(tex) ?? 0) + 1);
-    this.fresh[0].delete(tex); // an owner exists now: the root scope no longer needs to track it
+    this.fresh[0].set.delete(tex); // an owner exists now: the root scope no longer needs to track it
   }
 
   release(tex: GPUTexture): void {
@@ -154,9 +463,15 @@ export class Gpu {
     this.recycle(tex);
   }
 
-  /** Open a temp-texture scope (the kernel wraps every node render in begin/end). */
-  begin(): void {
-    this.fresh.push(new Set());
+  /** Return an unretained temporary to the pool right now (multi-pass loops). No-op for retained or foreign textures. */
+  recycleNow(tex: GPUTexture): void {
+    if (!this.pooled.has(tex) || this.refs.has(tex)) return;
+    this.recycle(tex);
+  }
+
+  /** Open a temp-texture scope (the kernel wraps every node render in begin/end). `label` names the scope in `stats().worstScope`. */
+  begin(label = 'scope'): void {
+    this.fresh.push({ set: new Set(), label, bytes: 0 });
   }
 
   /**
@@ -185,29 +500,87 @@ export class Gpu {
   }
 
   /** Memory and ownership counters for diagnostics and tests. `rootScope` should stay near 0. */
-  stats(): { allocatedBytes: number; idleBytes: number; idleTextures: number; retainedTextures: number; rootScope: number } {
+  stats(): GpuStats {
     let idleBytes = 0;
     let idleTextures = 0;
+    let idleSizes = 0;
     for (const list of this.pool.values()) {
+      if (list.length) idleSizes++;
       for (const t of list) {
-        idleBytes += t.width * t.height * (t.format === 'rgba8unorm' ? 4 : 8);
+        idleBytes += textureBytes(t.width, t.height, t.format);
         idleTextures++;
       }
     }
-    return { allocatedBytes: this.allocatedBytes, idleBytes, idleTextures, retainedTextures: this.refs.size, rootScope: this.fresh[0].size };
+    let scratchIdle = 0;
+    for (const l of this.scratchFree.values()) for (const i of l) scratchIdle += i.bytes;
+    for (const l of this.scratchTexFree.values()) for (const i of l) scratchIdle += i.bytes;
+    const categories: Record<string, CategoryStats> = {};
+    for (const [k, v] of this.cats) categories[k] = { ...v };
+    let liveTextures = 0;
+    let liveBuffers = 0;
+    for (const [k, v] of this.cats) {
+      if (/texture/.test(k)) liveTextures += v.count;
+      else liveBuffers += v.count;
+    }
+    const pipelineVariants: Record<string, number> = {};
+    for (const [label, set] of this.variantCodes) pipelineVariants[label] = set.size;
+    const c = this.counters;
+    return {
+      allocatedBytes: this.total,
+      idleBytes,
+      idleTextures,
+      retainedTextures: this.refs.size,
+      rootScope: this.fresh[0].set.size,
+      totalBytes: this.total,
+      peakBytes: this.totalPeak,
+      categories,
+      scratchIdleBytes: scratchIdle,
+      idleSizes,
+      objects: {
+        liveTextures,
+        liveBuffers,
+        buffersCreated: c.buffersCreated,
+        texturesCreated: c.texturesCreated,
+        viewsCreated: c.viewsCreated,
+        liveViews: this.liveViews,
+        bindGroupsCreated: c.bindGroupsCreated,
+        liveBindGroups: this.bindGroups.size,
+        pipelinesCreated: c.pipelinesCreated,
+        livePipelines: this.pipelines.size + this.computePipelines.size + this.blitPipelines.size,
+        shaderModulesCreated: c.shaderModulesCreated,
+        samplersCreated: c.samplersCreated,
+        submits: c.submits,
+      },
+      caches: {
+        bindGroupHits: c.bindGroupHits,
+        bindGroupMisses: c.bindGroupMisses,
+        viewHits: c.viewHits,
+        pipelineHits: c.pipelineHits,
+        pipelineEvictions: c.pipelineEvictions,
+        dataTextureHits: c.dataTextureHits,
+        scratchHits: c.scratchHits,
+        scratchMisses: c.scratchMisses,
+      },
+      worstScope: { ...this.worst },
+      pipelineVariants,
+    };
   }
 
   /** Close the scope: every texture acquired inside it that nobody retained goes back to the pool. */
   end(): void {
-    const set = this.fresh.length > 1 ? this.fresh.pop()! : this.fresh[0];
-    for (const tex of set) {
+    const scope = this.fresh.length > 1 ? this.fresh.pop()! : this.fresh[0];
+    if (this.fresh.length >= 1 && scope !== this.fresh[0] && scope.bytes > this.worst.bytes) {
+      this.worst = { label: scope.label, bytes: scope.bytes, textures: scope.set.size };
+    }
+    for (const tex of scope.set) {
       if (!this.refs.has(tex)) this.recycle(tex);
     }
-    set.clear();
+    scope.set.clear();
+    scope.bytes = 0;
   }
 
   private recycle(tex: GPUTexture): void {
-    this.fresh[0].delete(tex);
+    this.fresh[0].set.delete(tex);
     // A texture that trim() already destroyed can still be named by an open scope: never put it back into the pool
     // (it would be handed out again and every pass using it would be silently dropped).
     if (!this.pooled.has(tex)) return;
@@ -217,62 +590,278 @@ export class Gpu {
     this.pool.set(key, list);
   }
 
-/** Destroy idle pooled textures (call when memory is tight or sizes changed a lot). Never during an evaluation. */
+  /** Destroy idle pooled textures and scratch items (call when memory is tight or sizes changed a lot). Never during an evaluation. */
   trim(): void {
+    this.dropDataTextures(); // first: they go back to the pool, then the pool is emptied
     for (const list of this.pool.values()) for (const tex of list) this.destroyIdle(tex);
     this.pool.clear();
+    this.trimScratch(0);
   }
 
   private destroyIdle(tex: GPUTexture): void {
-    this.allocatedBytes -= tex.width * tex.height * (tex.format === 'rgba8unorm' ? 4 : 8);
+    this.forgetTexture(tex);
+    this.untrack(tex);
     this.pooled.delete(tex);
-    this.fresh[0].delete(tex);
+    this.fresh[0].set.delete(tex);
     tex.destroy();
   }
 
-  /** Called once per evaluation: ages the pool. */
+  /** Called once per evaluation: ages the pools and enforces their caps (a safe point: nothing is mid-render). */
   advance(): void {
     this.useTick++;
+    this.sweep();
+    this.enforceCaps();
   }
 
   /** Destroy idle textures of sizes not acquired for `maxAge` evaluations (a resolution that is no longer in use). Safe between evaluations. */
-  sweep(maxAge = 90): void {
+  sweep(maxAge = this.limits.maxAge): void {
     for (const [key, list] of [...this.pool]) {
       if (list.length === 0 || this.useTick - (this.keyUse.get(key) ?? 0) <= maxAge) continue;
       for (const tex of list) this.destroyIdle(tex);
       this.pool.delete(key);
     }
+    // idle scratch that has not been used for a long time
+    for (const [key, list] of [...this.scratchFree]) {
+      const keep = list.filter((i) => this.useTick - i.tick <= maxAge);
+      for (const i of list) if (!keep.includes(i)) this.destroyBuffer(i.obj);
+      if (keep.length) this.scratchFree.set(key, keep);
+      else this.scratchFree.delete(key);
+    }
+    for (const [key, list] of [...this.scratchTexFree]) {
+      const keep = list.filter((i) => this.useTick - i.tick <= maxAge);
+      for (const i of list) if (!keep.includes(i)) this.destroyTexture(i.obj);
+      if (keep.length) this.scratchTexFree.set(key, keep);
+      else this.scratchTexFree.delete(key);
+    }
+  }
+
+  private idleSize(): { bytes: number; bytes16: number; sizes: number } {
+    let bytes = 0;
+    let bytes16 = 0;
+    let sizes = 0;
+    for (const list of this.pool.values()) {
+      if (list.length) sizes++;
+      for (const t of list) {
+        const b = textureBytes(t.width, t.height, t.format);
+        bytes += b;
+        if (t.format === 'rgba16float') bytes16 += b;
+      }
+    }
+    return { bytes, bytes16, sizes };
+  }
+
+  /** Strict caps: distinct idle sizes, total idle bytes, idle rgba16float bytes. The least recently used size goes first. */
+  private enforceCaps(): void {
+    const lim = this.limits;
+    let { bytes, bytes16, sizes } = this.idleSize();
+    if (bytes <= lim.idleBytes && sizes <= lim.idleSizes && bytes16 <= lim.idleBytes * lim.idle16Share) {
+      this.trimScratch(lim.scratchBytes);
+      this.trimDataTextures();
+      return;
+    }
+    const keys = [...this.pool.keys()].sort((a, b) => (this.keyUse.get(a) ?? 0) - (this.keyUse.get(b) ?? 0));
+    const over = () => bytes > lim.idleBytes || sizes > lim.idleSizes || bytes16 > lim.idleBytes * lim.idle16Share;
+    for (const key of keys) {
+      if (!over()) break;
+      const list = this.pool.get(key);
+      if (!list || list.length === 0) continue;
+      const is16 = key.endsWith('rgba16float');
+      // A size that only breaks the rgba16float share must be a 16-bit size.
+      if (!is16 && bytes <= lim.idleBytes && sizes <= lim.idleSizes) continue;
+      while (list.length && over()) {
+        const tex = list.pop()!;
+        const b = textureBytes(tex.width, tex.height, tex.format);
+        bytes -= b;
+        if (is16) bytes16 -= b;
+        this.destroyIdle(tex);
+      }
+      if (list.length === 0) {
+        this.pool.delete(key);
+        sizes--;
+      }
+    }
+    this.trimScratch(lim.scratchBytes);
+    this.trimDataTextures();
   }
 
   /** Destroy idle textures, least recently used sizes first, until the idle pool holds at most `maxBytes`. Safe between evaluations. */
   trimIdleTo(maxBytes: number): void {
-    let idle = 0;
-    for (const list of this.pool.values()) for (const t of list) idle += t.width * t.height * (t.format === 'rgba8unorm' ? 4 : 8);
-    if (idle <= maxBytes) return;
-    const keys = [...this.pool.keys()].sort((a, b) => (this.keyUse.get(a) ?? 0) - (this.keyUse.get(b) ?? 0));
-    for (const key of keys) {
-      const list = this.pool.get(key)!;
-      while (list.length && idle > maxBytes) {
-        const tex = list.pop()!;
-        idle -= tex.width * tex.height * (tex.format === 'rgba8unorm' ? 4 : 8);
-        this.destroyIdle(tex);
+    let { bytes: idle } = this.idleSize();
+    if (idle > maxBytes) {
+      const keys = [...this.pool.keys()].sort((a, b) => (this.keyUse.get(a) ?? 0) - (this.keyUse.get(b) ?? 0));
+      for (const key of keys) {
+        const list = this.pool.get(key)!;
+        while (list.length && idle > maxBytes) {
+          const tex = list.pop()!;
+          idle -= textureBytes(tex.width, tex.height, tex.format);
+          this.destroyIdle(tex);
+        }
+        if (list.length === 0) this.pool.delete(key);
+        if (idle <= maxBytes) break;
       }
-      if (list.length === 0) this.pool.delete(key);
-      if (idle <= maxBytes) break;
     }
+    this.trimScratch(maxBytes);
+  }
+
+  /** Bytes of idle pooled textures plus idle scratch (what a trim could give back). */
+  get idleTotalBytes(): number {
+    let b = this.idleSize().bytes;
+    for (const l of this.scratchFree.values()) for (const i of l) b += i.bytes;
+    for (const l of this.scratchTexFree.values()) for (const i of l) b += i.bytes;
+    return b;
+  }
+
+  /* ---------------------------- scratch buffers ---------------------------- */
+
+  /**
+   * A pooled buffer of at least `size` bytes. Give it back with `releaseScratch` (it stays allocated for reuse and is trimmed by
+   * the idle cap / age sweep). Reuse is safe without any fence: queue operations are ordered, so a later `writeBuffer` or
+   * submit can never overtake work that is still reading the previous contents.
+   */
+  scratch(size: number, usage: number, label = 'scratch', opts: { clear?: boolean } = {}): GPUBuffer {
+    const bytes = bucketSize(Math.max(4, Math.ceil(size / 4) * 4));
+    const u = usage | GPUBufferUsage.COPY_DST;
+    const key = `${bytes}:${u}`;
+    const free = this.scratchFree.get(key);
+    let buf: GPUBuffer;
+    const hit = free?.pop();
+    if (hit) {
+      buf = hit.obj;
+      this.counters.scratchHits++;
+    } else {
+      this.counters.scratchMisses++;
+      const cat = u & GPUBufferUsage.UNIFORM ? 'uniform-buffer' : u & GPUBufferUsage.MAP_READ ? 'readback-buffer' : 'scratch-buffer';
+      buf = this.device.createBuffer({ label, size: bytes, usage: u });
+      this.counters.buffersCreated++;
+      this.track(buf, cat, bytes);
+      this.scratchKey.set(buf, key);
+    }
+    this.scratchUsed.add(buf);
+    if (opts.clear && hit && !(u & GPUBufferUsage.MAP_READ)) {
+      const enc = this.device.createCommandEncoder();
+      enc.clearBuffer(buf);
+      this.device.queue.submit([enc.finish()]);
+      this.counters.submits++;
+    }
+    return buf;
+  }
+
+  releaseScratch(buf: GPUBuffer): void {
+    if (!this.scratchUsed.delete(buf)) return;
+    const key = this.scratchKey.get(buf);
+    if (!key) return;
+    const list = this.scratchFree.get(key) ?? [];
+    list.push({ obj: buf, tick: this.useTick, bytes: buf.size });
+    this.scratchFree.set(key, list);
+  }
+
+  /** Pooled attachment texture (multisampled colour, depth). Not part of the recycle-by-scope pool: give it back explicitly. */
+  scratchTexture(desc: { width: number; height: number; format: GPUTextureFormat; usage: number; sampleCount?: number; label?: string }): GPUTexture {
+    const w = Math.max(1, Math.round(desc.width));
+    const h = Math.max(1, Math.round(desc.height));
+    const samples = desc.sampleCount ?? 1;
+    const key = `${w}x${h}:${desc.format}:${desc.usage}:${samples}`;
+    const hit = this.scratchTexFree.get(key)?.pop();
+    let tex: GPUTexture;
+    if (hit) {
+      tex = hit.obj;
+      this.counters.scratchHits++;
+    } else {
+      this.counters.scratchMisses++;
+      tex = this.device.createTexture({ label: desc.label, size: [w, h], format: desc.format, usage: desc.usage, sampleCount: samples });
+      this.counters.texturesCreated++;
+      this.track(tex, 'scratch-texture', textureBytes(w, h, desc.format, samples));
+      this.scratchKey.set(tex, key);
+    }
+    this.scratchUsed.add(tex);
+    return tex;
+  }
+
+  releaseScratchTexture(tex: GPUTexture): void {
+    if (!this.scratchUsed.delete(tex)) return;
+    const key = this.scratchKey.get(tex);
+    if (!key) return;
+    const list = this.scratchTexFree.get(key) ?? [];
+    list.push({ obj: tex, tick: this.useTick, bytes: this.ledger.get(tex)?.bytes ?? 0 });
+    this.scratchTexFree.set(key, list);
+  }
+
+  /** Destroy idle scratch items, oldest first, until at most `maxBytes` remain idle. */
+  private trimScratch(maxBytes: number): void {
+    const items: { tick: number; bytes: number; destroy: () => void; list: ScratchItem<never>[]; ref: ScratchItem<never> }[] = [];
+    let idle = 0;
+    for (const list of this.scratchFree.values()) {
+      for (const i of list) {
+        idle += i.bytes;
+        items.push({ tick: i.tick, bytes: i.bytes, destroy: () => this.destroyBuffer(i.obj), list: list as never, ref: i as never });
+      }
+    }
+    for (const list of this.scratchTexFree.values()) {
+      for (const i of list) {
+        idle += i.bytes;
+        items.push({ tick: i.tick, bytes: i.bytes, destroy: () => this.destroyTexture(i.obj), list: list as never, ref: i as never });
+      }
+    }
+    if (idle <= maxBytes) return;
+    items.sort((a, b) => a.tick - b.tick);
+    for (const it of items) {
+      if (idle <= maxBytes) break;
+      it.destroy();
+      it.list.splice(it.list.indexOf(it.ref), 1);
+      idle -= it.bytes;
+    }
+  }
+
+  /* ------------------------------ work throttle ----------------------------- */
+
+  /** Remember that everything submitted so far is one frame's worth of work (call at the end of an evaluation). */
+  fence(): void {
+    const p: Promise<void> = this.device.queue
+      .onSubmittedWorkDone()
+      .catch(() => undefined)
+      .then(() => {
+        const i = this.fences.indexOf(p);
+        if (i >= 0) this.fences.splice(i, 1);
+      });
+    this.fences.push(p);
+  }
+
+  /** Wait until at most `maxQueued` frames of GPU work are outstanding, so a fast CPU loop (export) cannot queue unbounded work and memory. */
+  async throttle(maxQueued = 2): Promise<void> {
+    while (this.fences.length > maxQueued) await this.fences[0];
+  }
+
+  /** Frames of GPU work submitted but not yet finished. */
+  get queuedFrames(): number {
+    return this.fences.length;
   }
 
   /* ------------------------------- passes ------------------------------- */
 
-  pass(options: PassOptions): ImageValue {
-    const format: Format = options.format ?? 'rgba8unorm';
-    const width = Math.max(1, Math.round(options.size.width));
-    const height = Math.max(1, Math.round(options.size.height));
-    const textures = options.textures ?? {};
-    const names = Object.keys(textures).filter((n) => textures[n]);
-    const uniforms = options.uniforms ?? {};
-    const layout = layoutUniforms(uniforms);
+  private layoutFor(uniforms: Record<string, UniformValue>): { key: string; layout: UniformLayout } {
+    let key = '';
+    for (const name in uniforms) {
+      const v = uniforms[name];
+      key += `${name}:${typeof v === 'number' || typeof v === 'boolean' ? 1 : v.length},`;
+    }
+    let layout = this.layouts.get(key);
+    if (!layout) {
+      layout = layoutUniforms(uniforms);
+      this.layouts.set(key, layout);
+    }
+    return { key, layout };
+  }
 
+  private passPipeline(options: PassOptions, names: string[], format: Format, layout: UniformLayout, layoutKey: string): PipelineEntry {
+    const cacheKey = `${format}|${names.join(',')}|${layoutKey}|${options.wgsl}`;
+    let entry = this.pipelines.get(cacheKey);
+    if (entry) {
+      this.counters.pipelineHits++;
+      // refresh LRU position
+      this.pipelines.delete(cacheKey);
+      this.pipelines.set(cacheKey, entry);
+      return entry;
+    }
     const decls = names.map((n, i) => `@group(0) @binding(${3 + i}) var ${n}: texture_2d<f32>;`).join('\n');
     const code = `${layout.wgsl}
 @group(0) @binding(0) var<uniform> u: U;
@@ -283,79 +872,131 @@ ${PRELUDE}
 ${PASS_PRELUDE}
 ${options.wgsl}
 ${VERTEX}`;
-
-    const cacheKey = `${format}|${code}`;
-    let entry = this.pipelines.get(cacheKey);
-    if (!entry) {
-      const bgl = this.device.createBindGroupLayout({
-        entries: [
-          { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
-          { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-          { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-          ...names.map((_, i) => ({
-            binding: 3 + i,
-            visibility: GPUShaderStage.FRAGMENT,
-            texture: { sampleType: 'float' as const },
-          })),
-        ],
-      });
-      // Shader mistakes (including WGSL reserved words used as names) otherwise fail silently with a blank image.
-      this.device.pushErrorScope('validation');
-      const module = this.device.createShaderModule({ label: options.label, code });
-      const pipeline = this.device.createRenderPipeline({
-        label: options.label,
-        layout: this.device.createPipelineLayout({ bindGroupLayouts: [bgl] }),
-        vertex: { module, entryPoint: 'vs_main' },
-        fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
-        primitive: { topology: 'triangle-list' },
-      });
-      const label = options.label ?? 'pass';
-      this.pendingErrors.push(
-        this.device.popErrorScope().then((err) => (err ? `Shader "${label}" failed to compile: ${err.message.split(/\r?\n/).slice(0, 6).join(' ')}` : null)),
-      );
-      entry = { pipeline, layout: bgl };
-      this.pipelines.set(cacheKey, entry);
-    }
-
-    const data = new Float32Array(layout.size / 4);
-    const values: Record<string, UniformValue> = { size: [width, height], ...uniforms };
-    for (const f of layout.fields) {
-      const v = values[f.name];
-      const base = f.offset / 4;
-      if (typeof v === 'number') data[base] = v;
-      else if (typeof v === 'boolean') data[base] = v ? 1 : 0;
-      else for (let i = 0; i < f.count; i++) data[base + i] = v[i];
-    }
-    const ubo = this.device.createBuffer({ size: layout.size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.device.queue.writeBuffer(ubo, 0, data);
-
-    const target = this.acquire(width, height, format);
-    const bindGroup = this.device.createBindGroup({
-      layout: entry.layout,
+    const bgl = this.device.createBindGroupLayout({
       entries: [
-        { binding: 0, resource: { buffer: ubo } },
-        { binding: 1, resource: this.linear },
-        { binding: 2, resource: this.nearest },
-        ...names.map((n, i) => {
-          const tex = textures[n]!.texture;
-          if (tex === target) throw new Error(`pass "${options.label ?? ''}": texture "${n}" cannot be both input and output`);
-          return { binding: 3 + i, resource: tex.createView() };
-        }),
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        ...names.map((_, i) => ({
+          binding: 3 + i,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' as const },
+        })),
       ],
     });
+    // Shader mistakes (including WGSL reserved words used as names) otherwise fail silently with a blank image.
+    this.device.pushErrorScope('validation');
+    const module = this.device.createShaderModule({ label: options.label, code });
+    this.counters.shaderModulesCreated++;
+    const pipeline = this.device.createRenderPipeline({
+      label: options.label,
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [bgl] }),
+      vertex: { module, entryPoint: 'vs_main' },
+      fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    this.counters.pipelinesCreated++;
+    const label = options.label ?? 'pass';
+    this.pendingErrors.push(
+      this.device.popErrorScope().then((err) => (err ? `Shader "${label}" failed to compile: ${err.message.split(/\r?\n/).slice(0, 6).join(' ')}` : null)),
+    );
+    let variants = this.variantCodes.get(label);
+    if (!variants) this.variantCodes.set(label, (variants = new Set()));
+    if (variants.size < 64) variants.add(options.wgsl);
+    entry = { id: ++this.pipelineSeq, pipeline, layout: bgl };
+    this.pipelines.set(cacheKey, entry);
+    // Pipelines cannot be destroyed: bound the cache so distinct shaders (numbers baked into WGSL) cannot grow it for ever.
+    while (this.pipelines.size > this.limits.pipelines) {
+      const oldest = this.pipelines.keys().next().value as string;
+      this.pipelines.delete(oldest);
+      this.counters.pipelineEvictions++;
+    }
+    return entry;
+  }
+
+  pass(options: PassOptions): ImageValue {
+    const format: Format = options.format ?? 'rgba8unorm';
+    const width = Math.max(1, Math.round(options.size.width));
+    const height = Math.max(1, Math.round(options.size.height));
+    const textures = options.textures ?? {};
+    const names: string[] = [];
+    for (const n in textures) if (textures[n]) names.push(n);
+    const uniforms = options.uniforms ?? {};
+    const { key: layoutKey, layout } = this.layoutFor(uniforms);
+    const entry = this.passPipeline(options, names, format, layout, layoutKey);
+
+    // Uniforms: one pooled buffer per size bucket, rewritten for every pass. Safe because queue operations are ordered:
+    // the next writeBuffer runs after the previous submit's commands have finished reading it.
+    let data = this.uniformData.get(layout.size);
+    if (!data) this.uniformData.set(layout.size, (data = new Float32Array(layout.size / 4)));
+    data.fill(0);
+    for (const f of layout.fields) {
+      const v = f.name === 'size' ? undefined : uniforms[f.name];
+      const base = f.offset / 4;
+      if (f.name === 'size') {
+        data[base] = width;
+        data[base + 1] = height;
+      } else if (typeof v === 'number') data[base] = v;
+      else if (typeof v === 'boolean') data[base] = v ? 1 : 0;
+      else if (v) for (let i = 0; i < f.count; i++) data[base + i] = v[i];
+    }
+    const ubo = this.scratch(layout.size, GPUBufferUsage.UNIFORM, 'pass-uniforms');
+    this.device.queue.writeBuffer(ubo, 0, data as unknown as BufferSource, 0, layout.size / 4);
+
+    const target = this.acquire(width, height, format);
+    let bgKey = `${entry.id}|${this.texId(ubo)}`;
+    for (const n of names) {
+      const tex = textures[n]!.texture;
+      if (tex === target) throw new Error(`pass "${options.label ?? ''}": texture "${n}" cannot be both input and output`);
+      bgKey += `|${this.texId(tex)}`;
+    }
+    let bindGroup = this.bindGroups.get(bgKey);
+    if (bindGroup) {
+      this.counters.bindGroupHits++;
+      this.bindGroups.delete(bgKey);
+      this.bindGroups.set(bgKey, bindGroup);
+    } else {
+      this.counters.bindGroupMisses++;
+      bindGroup = this.device.createBindGroup({
+        layout: entry.layout,
+        entries: [
+          { binding: 0, resource: { buffer: ubo, size: layout.size } },
+          { binding: 1, resource: this.linear },
+          { binding: 2, resource: this.nearest },
+          ...names.map((n, i) => ({ binding: 3 + i, resource: this.view(textures[n]!.texture) })),
+        ],
+      });
+      this.counters.bindGroupsCreated++;
+      this.cacheBindGroup(bgKey, bindGroup, [ubo, ...names.map((n) => textures[n]!.texture)]);
+    }
 
     const encoder = this.device.createCommandEncoder();
     const rp = encoder.beginRenderPass({
-      colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
+      colorAttachments: [{ view: this.view(target), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
     });
     rp.setPipeline(entry.pipeline);
     rp.setBindGroup(0, bindGroup);
     rp.draw(3);
     rp.end();
     this.device.queue.submit([encoder.finish()]);
-    ubo.destroy();
+    this.counters.submits++;
+    this.releaseScratch(ubo);
 
     return { kind: 'image', texture: target, width, height, unit: options.size.unit ?? 1 };
+  }
+
+  private cacheBindGroup(key: string, group: GPUBindGroup, texs: (GPUTexture | GPUBuffer)[]): void {
+    this.bindGroups.set(key, group);
+    for (const t of texs) {
+      const id = this.texId(t);
+      let set = this.bgByTexture.get(id);
+      if (!set) this.bgByTexture.set(id, (set = new Set()));
+      set.add(key);
+    }
+    while (this.bindGroups.size > this.limits.bindGroups) {
+      const oldest = this.bindGroups.keys().next().value as string;
+      this.bindGroups.delete(oldest);
+    }
   }
 
   passMask(options: PassOptions): MaskValue {
@@ -392,6 +1033,22 @@ ${VERTEX}`;
   }
 
   async read(image: { texture: GPUTexture; width: number; height: number }, straight = true): Promise<Uint8ClampedArray> {
+    const raw = await this.readRaw(image);
+    if (straight) {
+      for (let i = 0; i < raw.length; i += 4) {
+        const a = raw[i + 3];
+        if (a !== 0 && a !== 255) {
+          raw[i] = Math.round((raw[i] * 255) / a);
+          raw[i + 1] = Math.round((raw[i + 1] * 255) / a);
+          raw[i + 2] = Math.round((raw[i + 2] * 255) / a);
+        }
+      }
+    }
+    return raw;
+  }
+
+  /** Premultiplied RGBA8 of an image (rgba16float is converted on the GPU). Uses a pooled staging buffer. */
+  async readRaw(image: { texture: GPUTexture; width: number; height: number }): Promise<Uint8ClampedArray> {
     const { width, height } = image;
     let texture = image.texture;
     if (texture.format !== 'rgba8unorm') {
@@ -403,77 +1060,139 @@ ${VERTEX}`;
       }).texture;
     }
     const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
-    const buffer = this.device.createBuffer({ size: bytesPerRow * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const buffer = this.scratch(bytesPerRow * height, GPUBufferUsage.MAP_READ, 'readback');
     const encoder = this.device.createCommandEncoder();
     encoder.copyTextureToBuffer({ texture }, { buffer, bytesPerRow, rowsPerImage: height }, [width, height]);
     this.device.queue.submit([encoder.finish()]);
+    this.counters.submits++;
     if (texture !== image.texture) {
       // The conversion copy is queued: later passes are ordered after it, so the temporary can be reused right away.
       this.retain(texture);
       this.release(texture);
     }
-    await buffer.mapAsync(GPUMapMode.READ);
-    const mapped = new Uint8Array(buffer.getMappedRange());
-    const out = new Uint8ClampedArray(width * height * 4);
-    for (let y = 0; y < height; y++) out.set(mapped.subarray(y * bytesPerRow, y * bytesPerRow + width * 4), y * width * 4);
-    buffer.unmap();
-    buffer.destroy();
-    if (straight) {
-      for (let i = 0; i < out.length; i += 4) {
-        const a = out[i + 3];
-        if (a !== 0 && a !== 255) {
-          out[i] = Math.round((out[i] * 255) / a);
-          out[i + 1] = Math.round((out[i + 1] * 255) / a);
-          out[i + 2] = Math.round((out[i + 2] * 255) / a);
-        }
-      }
+    try {
+      await buffer.mapAsync(GPUMapMode.READ, 0, bytesPerRow * height);
+      const mapped = new Uint8Array(buffer.getMappedRange(0, bytesPerRow * height));
+      const out = new Uint8ClampedArray(width * height * 4);
+      if (bytesPerRow === width * 4) out.set(mapped.subarray(0, width * height * 4));
+      else for (let y = 0; y < height; y++) out.set(mapped.subarray(y * bytesPerRow, y * bytesPerRow + width * 4), y * width * 4);
+      buffer.unmap();
+      return out;
+    } finally {
+      this.releaseScratch(buffer);
     }
-    return out;
   }
 
+  /**
+   * Small lookup texture from float data. Cached by content: palettes and kernels are identical from frame to frame, so
+   * they are uploaded once (and kept until the cache cap or a trim drops them) instead of once per render.
+   */
   dataTexture(data: Float32Array, width: number, height: number): { texture: GPUTexture } {
     if (data.length !== width * height * 4) throw new Error('dataTexture: need width*height*4 floats');
+    const u32 = new Uint32Array(data.buffer, data.byteOffset, data.length);
+    let h1 = 2166136261;
+    let h2 = 0x9e3779b1;
+    for (let i = 0; i < u32.length; i++) {
+      h1 = Math.imul(h1 ^ u32[i], 16777619);
+      h2 = Math.imul(h2 + u32[i], 0x85ebca6b) ^ (h2 >>> 13);
+    }
+    const key = `${width}x${height}:${(h1 >>> 0).toString(36)}${(h2 >>> 0).toString(36)}:${data.length}`;
+    const hit = this.dataTextures.get(key);
+    if (hit && this.pooled.has(hit.texture)) {
+      this.counters.dataTextureHits++;
+      hit.tick = this.useTick;
+      this.dataTextures.delete(key);
+      this.dataTextures.set(key, hit);
+      return { texture: hit.texture };
+    }
     const half = new Uint16Array(data.length);
     for (let i = 0; i < data.length; i++) half[i] = toHalf(data[i]);
     const texture = this.acquire(width, height, 'rgba16float');
     this.device.queue.writeTexture({ texture }, half, { bytesPerRow: width * 8, rowsPerImage: height }, [width, height]);
+    // Owned by the cache from now on: retained, so scopes do not recycle it and nobody overwrites it.
+    this.retain(texture);
+    this.dataTextures.set(key, { texture, tick: this.useTick });
     return { texture };
+  }
+
+  private trimDataTextures(): void {
+    while (this.dataTextures.size > this.limits.dataTextures) {
+      const [key, v] = this.dataTextures.entries().next().value as [string, { texture: GPUTexture }];
+      this.dataTextures.delete(key);
+      this.release(v.texture);
+    }
+  }
+
+  private dropDataTextures(): void {
+    for (const v of this.dataTextures.values()) this.release(v.texture);
+    this.dataTextures.clear();
   }
 
   /** Draw an image into a canvas texture (viewer, encoder). `nearest` keeps pixel art crisp. */
   blit(image: { texture: GPUTexture }, target: GPUTexture, nearest = true): void {
     const key = `${target.format}:${nearest}`;
-    let pipeline = this.blitPipelines.get(key);
-    if (!pipeline) {
+    let entry = this.blitPipelines.get(key);
+    if (!entry) {
       const module = this.device.createShaderModule({
         code: `@group(0) @binding(0) var smp: sampler;
 @group(0) @binding(1) var src: texture_2d<f32>;
 fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smp, uv, 0.0); }
 ${VERTEX}`,
       });
-      pipeline = this.device.createRenderPipeline({
+      this.counters.shaderModulesCreated++;
+      const pipeline = this.device.createRenderPipeline({
         layout: 'auto',
         vertex: { module, entryPoint: 'vs_main' },
         fragment: { module, entryPoint: 'fs_main', targets: [{ format: target.format }] },
       });
-      this.blitPipelines.set(key, pipeline);
+      this.counters.pipelinesCreated++;
+      entry = { pipeline, layout: pipeline.getBindGroupLayout(0) };
+      this.blitPipelines.set(key, entry);
     }
-    const bindGroup = this.device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: nearest ? this.nearest : this.linear },
-        { binding: 1, resource: image.texture.createView() },
-      ],
-    });
+    const bgKey = `blit|${key}|${this.texId(image.texture)}`;
+    let bindGroup = this.bindGroups.get(bgKey);
+    if (bindGroup) this.counters.bindGroupHits++;
+    else {
+      this.counters.bindGroupMisses++;
+      bindGroup = this.device.createBindGroup({
+        layout: entry.layout,
+        entries: [
+          { binding: 0, resource: nearest ? this.nearest : this.linear },
+          { binding: 1, resource: this.view(image.texture) },
+        ],
+      });
+      this.counters.bindGroupsCreated++;
+      this.cacheBindGroup(bgKey, bindGroup, [image.texture]);
+    }
     const encoder = this.device.createCommandEncoder();
     const rp = encoder.beginRenderPass({
+      // The canvas texture is a new object every frame: its view cannot be cached.
       colorAttachments: [{ view: target.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
     });
-    rp.setPipeline(pipeline);
+    rp.setPipeline(entry.pipeline);
     rp.setBindGroup(0, bindGroup);
     rp.draw(3);
     rp.end();
     this.device.queue.submit([encoder.finish()]);
+    this.counters.submits++;
+  }
+
+  /** Compute pipeline from WGSL, cached (bounded) by label + code. */
+  computePipeline(label: string, code: string, entryPoint = 'main'): GPUComputePipeline {
+    const key = `${label}|${entryPoint}|${code}`;
+    let p = this.computePipelines.get(key);
+    if (p) {
+      this.computePipelines.delete(key);
+      this.computePipelines.set(key, p);
+      return p;
+    }
+    const module = this.device.createShaderModule({ label, code });
+    this.counters.shaderModulesCreated++;
+    p = this.device.createComputePipeline({ label, layout: 'auto', compute: { module, entryPoint } });
+    this.counters.pipelinesCreated++;
+    this.computePipelines.set(key, p);
+    while (this.computePipelines.size > 64) this.computePipelines.delete(this.computePipelines.keys().next().value as string);
+    return p;
   }
 
   /** The restricted facade handed to nodes. */
@@ -486,9 +1205,20 @@ ${VERTEX}`,
       upload: (d, w, h, unit, straight) => this.upload(d, w, h, unit, straight),
       read: (img, straight) => this.read(img, straight),
       dataTexture: (d, w, h) => this.dataTexture(d, w, h),
+      recycle: (img) => this.recycleNow(img.texture),
+      scratch: (size, usage, label, opts) => this.scratch(size, usage, label, opts),
+      releaseScratch: (b) => this.releaseScratch(b),
+      scratchTexture: (d) => this.scratchTexture(d),
+      releaseScratchTexture: (t) => this.releaseScratchTexture(t),
+      view: (t) => this.view(t),
+      computePipeline: (l, c, e) => this.computePipeline(l, c, e),
+      createBuffer: (d, c) => this.createBuffer(d, c),
+      destroyBuffer: (b) => this.destroyBuffer(b),
     };
   }
 }
+
+type GPUExtent3DDictStrict = { width: number; height?: number; depthOrArrayLayers?: number };
 
 const f32 = new Float32Array(1);
 const u32 = new Uint32Array(f32.buffer);

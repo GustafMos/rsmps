@@ -123,8 +123,6 @@ fn main(@builtin(local_invocation_index) lid: u32) {
 }
 `;
 
-const pipelines = new WeakMap<GPUDevice, GPUComputePipeline>();
-
 export interface WavefrontOptions {
   algorithm: string;
   space: DitherSpace;
@@ -173,60 +171,56 @@ export function diffuseWavefront(gpu: NodeGpu, src: ImageValue, palette: Rgb[], 
   const tapData = new Float32Array(kernel.taps.length * 4);
   kernel.taps.forEach((t, i) => tapData.set([t[0], t[1], t[2] / kernel.divisor, 0], i * 4));
 
-  const mk = (data: Float32Array, label: string): GPUBuffer => {
-    const b = device.createBuffer({ label, size: Math.max(16, Math.ceil(data.byteLength / 16) * 16), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(b, 0, data as BufferSource);
-    return b;
+  const need = (bytes: number) => Math.max(16, Math.ceil(bytes / 16) * 16);
+  const mk = (data: Float32Array, label: string): { buf: GPUBuffer; size: number } => {
+    const size = need(data.byteLength);
+    const buf = gpu.scratch(size, GPUBufferUsage.STORAGE, label);
+    device.queue.writeBuffer(buf, 0, data as BufferSource);
+    return { buf, size };
   };
-  const palBuf = mk(palData, 'wavefront-palette');
-  const tapBuf = mk(tapData, 'wavefront-taps');
-  const storeBuf = device.createBuffer({ label: 'wavefront-store', size: Math.max(32, width * height * 32), usage: GPUBufferUsage.STORAGE });
-  const bn = thresholdMatrix('blue-noise')!;
-  const noise = matrixTexture(gpu, bn.width, bn.height, bn.data);
+  const pal = mk(palData, 'wavefront-palette');
+  const tap = mk(tapData, 'wavefront-taps');
+  // Pooled and cleared (the algorithm accumulates into it): the same buffer serves every frame instead of a fresh 32 bytes/pixel one.
+  const storeSize = Math.max(32, width * height * 32);
+  const storeBuf = gpu.scratch(storeSize, GPUBufferUsage.STORAGE, 'wavefront-store', { clear: true });
+  const ubo = gpu.scratch(64, GPUBufferUsage.UNIFORM, 'wavefront-uniforms');
+  let dst!: ImageValue;
+  try {
+    const bn = thresholdMatrix('blue-noise')!;
+    const noise = matrixTexture(gpu, bn.width, bn.height, bn.data);
 
-  const dst = gpu.alloc(width, height, src.unit);
-  let pipeline = pipelines.get(device);
-  if (!pipeline) {
-    pipeline = device.createComputePipeline({
-      label: 'dither-wavefront',
-      layout: 'auto',
-      compute: { module: device.createShaderModule({ label: 'dither-wavefront', code: WGSL }), entryPoint: 'main' },
-    });
-    pipelines.set(device, pipeline);
-  }
-  const layout = pipeline.getBindGroupLayout(0);
-  const waves = width + skew * (height - 1);
-  const temp: GPUBuffer[] = [];
-  const srcView = src.texture.createView();
-  const dstView = dst.texture.createView();
-  const noiseView = noise.texture.createView();
-  for (let from = 0; from < waves; from += WAVES_PER_SUBMIT) {
-    const params = new ArrayBuffer(64);
-    new Uint32Array(params).set([width, height, n, skew, SPACE_INDEX[opts.space], kernel.taps.length, from, Math.min(waves, from + WAVES_PER_SUBMIT)]);
-    new Float32Array(params).set([opts.amount, opts.jitter, opts.edgeKeep, opts.snap, spacing], 8);
-    const ubo = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(ubo, 0, params);
-    temp.push(ubo);
+    dst = gpu.alloc(width, height, src.unit);
+    const pipeline = gpu.computePipeline('dither-wavefront', WGSL);
+    const layout = pipeline.getBindGroupLayout(0);
+    const waves = width + skew * (height - 1);
     const bindGroup = device.createBindGroup({
       layout,
       entries: [
-        { binding: 0, resource: { buffer: ubo } },
-        { binding: 1, resource: srcView },
-        { binding: 2, resource: dstView },
-        { binding: 3, resource: { buffer: palBuf } },
-        { binding: 4, resource: { buffer: tapBuf } },
-        { binding: 5, resource: { buffer: storeBuf } },
-        { binding: 6, resource: noiseView },
+        { binding: 0, resource: { buffer: ubo, size: 64 } },
+        { binding: 1, resource: gpu.view(src.texture) },
+        { binding: 2, resource: gpu.view(dst.texture) },
+        { binding: 3, resource: { buffer: pal.buf, size: pal.size } },
+        { binding: 4, resource: { buffer: tap.buf, size: tap.size } },
+        { binding: 5, resource: { buffer: storeBuf, size: storeSize } },
+        { binding: 6, resource: gpu.view(noise.texture) },
       ],
     });
-    const encoder = device.createCommandEncoder({ label: 'dither-wavefront' });
-    const pass = encoder.beginComputePass();
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(1);
-    pass.end();
-    device.queue.submit([encoder.finish()]);
+    const params = new ArrayBuffer(64);
+    for (let from = 0; from < waves; from += WAVES_PER_SUBMIT) {
+      new Uint32Array(params).set([width, height, n, skew, SPACE_INDEX[opts.space], kernel.taps.length, from, Math.min(waves, from + WAVES_PER_SUBMIT)]);
+      new Float32Array(params).set([opts.amount, opts.jitter, opts.edgeKeep, opts.snap, spacing], 8);
+      // One uniform buffer for every submit: writeBuffer is ordered after the previous submit, so it cannot overwrite values still in use.
+      device.queue.writeBuffer(ubo, 0, params);
+      const encoder = device.createCommandEncoder({ label: 'dither-wavefront' });
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(1);
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+    }
+  } finally {
+    for (const buf of [pal.buf, tap.buf, storeBuf, ubo]) gpu.releaseScratch(buf);
   }
-  for (const b of [...temp, palBuf, tapBuf, storeBuf]) b.destroy();
   return dst;
 }

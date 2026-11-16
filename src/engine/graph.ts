@@ -215,3 +215,32 @@ export function moveWire(graph: GraphDoc, edgeId: string, delta: number): GraphD
   let i = 0;
   return { ...graph, edges: graph.edges.map((e) => (e.to.node === edge.to.node && e.to.port === edge.to.port ? reordered[i++] : e)) };
 }
+
+/**
+ * Wires that leave a set of nodes: from a node inside `nodeIds` to a node outside it. This is where a Cache / Bake node goes to
+ * bake the whole set ("bake this group"): one cache node per distinct (node, port) leaving the set, rewired in front of every
+ * consumer outside. Wires are returned in graph order; `port` is the output socket on the inside node.
+ * Only the output ports whose type can feed a Cache / Bake node (images) matter to the caller; the type is included to filter.
+ */
+export function groupOutputWires(graph: GraphDoc, nodeIds: Iterable<string>, registry?: Registry): { edge: Edge; from: { node: string; port: string }; type: SocketType | null }[] {
+  const inside = new Set(nodeIds);
+  const out: { edge: Edge; from: { node: string; port: string }; type: SocketType | null }[] = [];
+  for (const edge of graph.edges) {
+    if (inside.has(edge.from.node) && !inside.has(edge.to.node)) {
+      out.push({ edge, from: edge.from, type: registry ? outputType(graph, registry, edge.from.node, edge.from.port) : null });
+    }
+  }
+  return out;
+}
+
+/** The distinct (node, port) outputs that leave a set of nodes: one Cache / Bake node is needed per entry. */
+export function groupOutputs(graph: GraphDoc, nodeIds: Iterable<string>, registry?: Registry): { node: string; port: string; type: SocketType | null; consumers: Edge[] }[] {
+  const byKey = new Map<string, { node: string; port: string; type: SocketType | null; consumers: Edge[] }>();
+  for (const w of groupOutputWires(graph, nodeIds, registry)) {
+    const key = `${w.from.node}:${w.from.port}`;
+    const e = byKey.get(key) ?? { node: w.from.node, port: w.from.port, type: w.type, consumers: [] };
+    e.consumers.push(w.edge);
+    byKey.set(key, e);
+  }
+  return [...byKey.values()];
+}

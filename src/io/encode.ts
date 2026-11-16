@@ -36,6 +36,17 @@ export class OffscreenPresenter {
     });
   }
 
+  /** Give the canvas context (and its swap-chain textures) back. Safe to call twice; the presenter is not usable afterwards. */
+  dispose(): void {
+    try {
+      this.ctx.unconfigure();
+    } catch {
+      /* already gone */
+    }
+    this.canvas.width = 1;
+    this.canvas.height = 1;
+  }
+
   /** Draw `image` 1:1 into a canvas of its own size and return the canvas, ready to capture. */
   present(image: Drawable): OffscreenCanvas {
     if (this.canvas.width !== image.width || this.canvas.height !== image.height) {
