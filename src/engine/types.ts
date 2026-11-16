@@ -396,6 +396,8 @@ export interface Host {
   assetFrame(assetId: string, seconds: number, maxSide: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
   /** Raw bytes of an asset (3D models and other files a node parses itself). Null when missing. */
   assetBytes?(assetId: string): Promise<ArrayBuffer | null>;
+  /** Decode encoded image bytes (PNG/JPEG/WebP), e.g. a texture embedded in a model file. Null when not decodable or unavailable. */
+  decodeImageBytes?(bytes: ArrayBuffer, mime: string): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
   /** Decoded PCM of an audio asset or a video's sound track (used by the audio engine, not by render nodes). */
   assetAudio?(assetId: string): Promise<{ sampleRate: number; channels: Float32Array[] } | null>;
   /**

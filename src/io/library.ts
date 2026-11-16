@@ -57,9 +57,25 @@ function extOf(name: string): string {
   return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
 }
 
+const MODEL_EXT = ['glb', 'gltf', 'obj'];
+
+/** First bytes of a file say whether it really is a 3D model of the kind its name claims. */
+export function sniffModel(ext: string, head: Uint8Array): { ok: boolean; reason?: string } {
+  const text = () => new TextDecoder().decode(head.subarray(0, 64)).trimStart();
+  if (ext === 'glb') return head.length >= 12 && head[0] === 0x67 && head[1] === 0x6c && head[2] === 0x54 && head[3] === 0x46 ? { ok: true } : { ok: false, reason: 'This .glb file does not start with the "glTF" marker: it is damaged or not a GLB.' };
+  if (ext === 'gltf') return text().startsWith('{') ? { ok: true } : { ok: false, reason: 'This .gltf file is not JSON.' };
+  return head.length > 0 ? { ok: true } : { ok: false, reason: 'This model file is empty.' };
+}
+
+/** A GLB renamed to something else is still recognised by its first four bytes. */
+export function isGlbMagic(head: Uint8Array): boolean {
+  return head.length >= 4 && head[0] === 0x67 && head[1] === 0x6c && head[2] === 0x54 && head[3] === 0x46;
+}
+
 export function detectKind(file: { name: string; type: string }): Kind | null {
   const ext = extOf(file.name);
   const type = file.type.toLowerCase();
+  if (MODEL_EXT.includes(ext) || type === 'model/gltf-binary' || type === 'model/gltf+json' || type === 'model/obj') return 'model';
   if (MIDI_EXT.includes(ext) || type === 'audio/midi' || type === 'audio/x-midi' || type === 'audio/mid') return 'midi';
   if (type.startsWith('image/') || IMAGE_EXT.includes(ext)) return 'image';
   if (type.startsWith('video/') || VIDEO_EXT.includes(ext)) return 'video';
@@ -81,6 +97,12 @@ const FRAME_BUDGET_BYTES = 512 * 1024 * 1024;
 /** Forward distance (s) over which the decoder keeps decoding instead of re-seeking. */
 const SEEK_AHEAD_SECONDS = 1;
 const THUMB_SIDE = 160;
+/** Placeholder thumbnail of a 3D model: a plain cube outline. */
+const MODEL_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#1e293b"/><g fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linejoin="round"><path d="M32 10 52 21v22L32 54 12 43V21z"/><path d="M12 21 32 32 52 21M32 32v22"/></g></svg>',
+)}`;
+/** Raw file bytes kept in memory for `assetBytes` (models and the like); older ones are read again when needed. */
+const BYTES_CACHE_MAX = 192 * 1024 * 1024;
 /** Decoded sound kept in memory (bytes); older tracks are decoded again when needed. */
 const AUDIO_CACHE_BYTES = 256 * 1024 * 1024;
 /** Longest sound track decoded (seconds): longer ones are cut with a warning, so one huge file cannot exhaust memory. */
@@ -471,6 +493,8 @@ export class Library implements MediaLibrary {
     this.dropElements(assetId);
     this.problems.delete(assetId);
     this.audio.delete(assetId);
+    this.bytes.delete(assetId);
+    this.bytesSize.delete(assetId);
     const thumb = this.thumbs.get(assetId);
     this.thumbs.delete(assetId);
     void thumb?.then((url) => url && URL.revokeObjectURL(url));
@@ -484,8 +508,17 @@ export class Library implements MediaLibrary {
   }
 
   private async probe(file: File): Promise<AssetInfo> {
-    const kind = detectKind(file);
-    if (!kind) throw new Error('Unsupported file type.');
+    let kind = detectKind(file);
+    if (!kind) {
+      // Unknown name: a GLB is still recognised by its magic bytes.
+      if (isGlbMagic(new Uint8Array(await file.slice(0, 4).arrayBuffer()))) kind = 'model';
+      else throw new Error('Unsupported file type. Images, videos, audio, MIDI and 3D models (.glb, .gltf, .obj) can be imported.');
+    }
+    if (kind === 'model') {
+      const verdict = sniffModel(extOf(file.name) || 'glb', new Uint8Array(await file.slice(0, 64).arrayBuffer()));
+      if (!verdict.ok) throw new Error(verdict.reason);
+      return { id: uniqueId('a'), name: file.name, kind, width: 0, height: 0, duration: 0, fps: 0, hasAudio: false };
+    }
     const id = uniqueId('a');
     const base: AssetInfo = { id, name: file.name, kind, width: 0, height: 0, duration: 0, fps: 0, hasAudio: false };
     if (kind === 'midi') return base;
@@ -850,6 +883,7 @@ export class Library implements MediaLibrary {
   private async makeThumbnail(info: AssetInfo): Promise<string | null> {
     const blob = this.blobs.get(info.id);
     if (!blob) return null;
+    if (info.kind === 'model') return MODEL_ICON; // a neutral placeholder: models are not rendered for thumbnails
     if (info.kind === 'image' || this.sequences.has(info.id)) {
       const long = Math.max(info.width, info.height);
       const scale = Math.min(1, THUMB_SIDE / Math.max(1, long));
@@ -943,6 +977,8 @@ export class Library implements MediaLibrary {
       this.readers.get(id)?.dispose();
       this.readers.delete(id);
       this.dropElements(id);
+      this.bytes.delete(id);
+      this.bytesSize.delete(id);
       this.audio.delete(id);
       this.audioBytes.delete(id);
     }
@@ -951,13 +987,95 @@ export class Library implements MediaLibrary {
   /** Decoded frames (GPU) plus decoded PCM, in bytes. */
   decodedBytes(): number {
     let pcm = 0;
+    for (const n of this.bytesSize.values()) pcm += n;
     for (const n of this.audioBytes.values()) pcm += n;
     return this.frames.bytes + pcm;
   }
 
-  /** Drop every decoded frame (they are decoded again on demand). */
+  /** Drop every decoded frame and cached byte buffer (they are decoded / read again on demand). */
   dropFrames(): void {
     this.frames.clear();
+    this.bytes.clear();
+  }
+
+  /* ----------------------------------- raw bytes ----------------------------------- */
+
+  private bytes = new Map<string, Promise<ArrayBuffer | null>>();
+  private bytesSize = new Map<string, number>();
+
+  /**
+   * The file's bytes (the first frame for an image sequence). The SAME ArrayBuffer instance is returned for the same asset until
+   * the asset is removed or replaced, or the cache evicts it under pressure (a new instance after that): consumers may memoise
+   * parsed data keyed by the buffer object.
+   */
+  assetBytes(assetId: string): Promise<ArrayBuffer | null> {
+    const blob = this.blobs.get(assetId);
+    if (!blob) return Promise.resolve(null);
+    let p = this.bytes.get(assetId);
+    if (!p) {
+      p = blob.arrayBuffer().then(
+        (buf) => {
+          this.bytesSize.set(assetId, buf.byteLength);
+          this.evictBytes(assetId);
+          return buf;
+        },
+        () => {
+          this.bytes.delete(assetId);
+          return null;
+        },
+      );
+      this.bytes.set(assetId, p);
+    }
+    return p;
+  }
+
+  private evictBytes(keep: string): void {
+    let total = 0;
+    for (const n of this.bytesSize.values()) total += n;
+    for (const id of [...this.bytes.keys()]) {
+      if (total <= BYTES_CACHE_MAX) break;
+      if (id === keep) continue;
+      total -= this.bytesSize.get(id) ?? 0;
+      this.bytes.delete(id);
+      this.bytesSize.delete(id);
+    }
+  }
+
+  private imageGroups = new WeakMap<ArrayBuffer, string>();
+  private imageGroupCounter = 0;
+
+  /**
+   * Decode PNG/JPEG/WebP bytes found inside a model file into a GPU texture (premultiplied). Cached per buffer object, inside
+   * the decoded-frame store (so it counts toward the memory budget and is evicted under pressure).
+   */
+  async decodeImageBytes(bytes: ArrayBuffer, mime: string): Promise<Frame | null> {
+    let group = this.imageGroups.get(bytes);
+    if (!group) {
+      group = `bytes:${++this.imageGroupCounter}:${mime}`;
+      this.imageGroups.set(bytes, group);
+    }
+    const hit = this.frames.find(group, 0);
+    if (hit) return hit;
+    let bmp: ImageBitmap;
+    try {
+      bmp = await createImageBitmap(new Blob([bytes], { type: mime }), { premultiplyAlpha: 'none' });
+    } catch {
+      return null;
+    }
+    const w = bmp.width;
+    const h = bmp.height;
+    const texture = this.takeTexture(w, h);
+    try {
+      await uploadExternal(this.gpu.device, bmp, texture, w, h);
+    } catch {
+      this.gpu.release(texture);
+      return null;
+    } finally {
+      bmp.close();
+    }
+    const frame: Frame = { texture, width: w, height: h };
+    this.frames.put(group, 0, Infinity, this.bytesOf(frame), frame);
+    return frame;
   }
 
   /**

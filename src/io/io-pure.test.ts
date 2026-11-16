@@ -259,3 +259,26 @@ describe('plugin module scanning', () => {
     expect(collectDefs({ default: { nope: 1 } })).toEqual([]);
   });
 });
+
+import { isGlbMagic, sniffModel } from './library';
+
+describe('3D model files', () => {
+  it('detects models by extension and mime', () => {
+    expect(detectKind({ name: 'ship.GLB', type: '' })).toBe('model');
+    expect(detectKind({ name: 'a.gltf', type: 'model/gltf+json' })).toBe('model');
+    expect(detectKind({ name: 'thing.obj', type: '' })).toBe('model');
+    expect(detectKind({ name: 'x', type: 'model/gltf-binary' })).toBe('model');
+    expect(detectKind({ name: 'readme.txt', type: 'text/plain' })).toBeNull();
+  });
+  it('checks the magic bytes of a GLB and the shape of the other formats', () => {
+    const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 0, 0, 0, 0]);
+    expect(isGlbMagic(glb)).toBe(true);
+    expect(isGlbMagic(new Uint8Array([1, 2, 3, 4]))).toBe(false);
+    expect(sniffModel('glb', glb).ok).toBe(true);
+    expect(sniffModel('glb', new Uint8Array(16)).ok).toBe(false);
+    expect(sniffModel('gltf', new TextEncoder().encode('  {"asset":{"version":"2.0"}}')).ok).toBe(true);
+    expect(sniffModel('gltf', new TextEncoder().encode('not json')).reason).toMatch(/not JSON/);
+    expect(sniffModel('obj', new TextEncoder().encode('v 0 0 0')).ok).toBe(true);
+    expect(sniffModel('obj', new Uint8Array(0)).ok).toBe(false);
+  });
+});
