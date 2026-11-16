@@ -2,6 +2,12 @@
 
 All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify Studio) are documented here.
 
+## [0.5.1] - 2026-11-16
+
+### Added
+
+- Desktop app: an update notice. Once a day (and from File > Check for updates...) it asks GitHub whether a newer release exists and shows a small dismissible notice with What's new, Get it and Skip this version. Nothing is downloaded or installed, nothing but the request itself is sent, and it can be turned off in the About dialog.
+
 ## [0.5.0] - 2026-11-16
 
 ### Added

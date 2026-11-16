@@ -10,6 +10,7 @@ import { createPlayerStore } from './store/playerStore';
 import { PENDING_KEY, type PendingEdit } from './watchdog';
 import { beginSafety, installSafety, pushView, safetyStore } from './safety';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { startUpdateCheck } from './updateNotice';
 
 /** A param edit whose render never finished last time (page reloaded within seconds): offer to revert it. */
 function offerRecovery(ed: Editor): void {
@@ -96,7 +97,9 @@ export function Root() {
 
         const app: AppCtx = { io, ed, playerStore, graphCtl };
         const uninstall = installSafety(app);
+        const cancelUpdate = startUpdateCheck(ed);
         stop = () => {
+          cancelUpdate();
           uninstall();
           unsubSafety();
           unsub();

@@ -554,6 +554,8 @@ function showAbout() {
     `Electron ${process.versions.electron} / Chromium ${process.versions.chrome} / Node ${process.versions.node}`,
     'Third-party licences: THIRD_PARTY_LICENSES.txt in the application resources folder.',
     '',
+    'The app asks GitHub once a day whether a newer version exists and sends nothing else. Turn it off in the About dialog inside the app.',
+    '',
     NOT_AFFILIATED,
   ].join('\n');
   const opts = { type: 'info', title: 'About RSMPS', message: 'RipScorpy Media Processing Suite (RSMPS)', detail, buttons: ['OK', 'Source code', 'Support on Ko-fi'], defaultId: 0, cancelId: 0, noLink: true };

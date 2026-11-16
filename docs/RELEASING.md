@@ -123,3 +123,11 @@ any file whose SHA-256 differs from the pin. To update the Windows build:
 Windows installer: `desktop/installer.nsh` adds an unticked "Download FFmpeg after install" page (compiled in the build, not
 click-tested). Ticking only writes `%APPDATA%\RSMPS\addon-requests.json`; the app reads and deletes it on first launch and runs
 the in-app install. Test it: `npm run desktop:smoke:addons` after `node desktop/scripts/pack.mjs --dir`.
+
+## Update notice (what a release must keep working)
+
+The desktop app asks `https://api.github.com/repos/GustafMos/rsmps/releases/latest` once a day and compares `tag_name` (`vX.Y.Z`)
+with its own version. Drafts, pre-releases and tags that are not plain `vX.Y.Z` are ignored, so publish the release (not a draft)
+for people to be told. "What's new" opens the release page; "Get it" opens it too until `DOWNLOAD_URL` in
+`src/io/update-links.ts` is set to the itch.io / Gumroad page (currently `null`). The request is made by the renderer: the app's
+CSP already allows `https:` in `connect-src`, and the GitHub API answers with permissive CORS, so no main-process endpoint is used.

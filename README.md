@@ -158,6 +158,8 @@ SmartScreen and macOS Gatekeeper show a one-time warning ([docs/RELEASING.md](do
   the source stays MIT and nothing is held back. itch.io: TODO (page not published yet) · Gumroad: TODO (page not published
   yet). See [docs/STORE.md](docs/STORE.md).
 
+**Update check:** the desktop app asks GitHub once a day whether a newer version exists and sends nothing else (no account, no identifiers). It only tells you; it never downloads or installs anything. Turn it off in File > About RSMPS.
+
 The desktop app does not include ffmpeg, so ProRes and other ffmpeg-only formats are available through the command line below
 only. The phone link is off in the desktop app.
 

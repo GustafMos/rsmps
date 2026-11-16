@@ -6,6 +6,8 @@ import { enabledOutputs } from '../../engine/graph';
 import { resolveActiveOutput } from '../store/editor';
 import { useApp, useEd } from '../store/context';
 import { reloadInSafeMode } from '../safety';
+import { isDesktop } from '../../io/desktop';
+import { checkNow } from '../updateNotice';
 import './topbar.css';
 import '../scan/scan.css';
 
@@ -67,6 +69,7 @@ export function TopBar() {
     { label: 'Keyboard shortcuts', onClick: () => ed.openDialog('shortcuts'), shortcut: '?' },
     { label: 'Customise shortcuts…', onClick: () => ed.openDialog('keymap') },
     { label: 'About RSMPS…', onClick: () => ed.openDialog('about') },
+    ...(isDesktop() ? [{ label: 'Check for updates…', onClick: () => void checkNow(ed) }] : []),
   ];
 
   const hasSel = useEd((s) => s.selection.length > 0);

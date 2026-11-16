@@ -109,3 +109,9 @@ minimum price and the suggested price. The suggestion is a $0 to $1 minimum with
 builds are free on GitHub; it is only a suggestion.
 
 When the pages exist, replace the two TODO links in the README's "Desktop app" section.
+
+## Update notice: the "Get it" link
+
+The desktop app shows a small notice when a newer GitHub release exists (it never downloads or installs anything). "Get it" opens
+the GitHub release page until the store pages exist. When they do, set `DOWNLOAD_URL` (https only) in
+`src/io/update-links.ts`; that is the only place to change.
