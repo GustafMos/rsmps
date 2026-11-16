@@ -6,7 +6,7 @@ describe('large values stay safe (owner froze the app typing 1515 art pixels)', 
   it('1515 art pixels on a 1080p source: every node is fast, including error diffusion', async () => {
     const t = await harness();
     const img = t.scene(1920, 1080);
-    for (const [mode, algorithm, extract] of [['fixed-height', 'bayer-4', false], ['fixed-height', 'floyd-steinberg', false], ['short-side', 'riemersma', true], ['fixed-width', 'atkinson', true]] as const) {
+    for (const [mode, algorithm, extract] of [['fixed-height', 'bayer-4', false], ['fixed-height', 'floyd-steinberg', false], ['short-side', 'jarvis', true], ['fixed-width', 'atkinson', true]] as const) {
       let g = createGraph('x');
       const s = addNode(g, t.registry, t.source(img));
       const pix = addNode(s.graph, t.registry, 'pixelate', { x: 0, y: 0 }, { mode, value: 1515 });
@@ -27,4 +27,10 @@ describe('large values stay safe (owner froze the app typing 1515 art pixels)', 
       for (const ms of r.timings.values()) expect(ms).toBeLessThan(3000);
     }
   }, 60000);
+
+  it('sequential modes (Riemersma, serpentine) refuse big images with a readable error', async () => {
+    const t = await harness();
+    await expect(t.run('dither', { algorithm: 'riemersma' }, { image: t.solid(800, 600, [1, 2, 3, 255]) })).rejects.toThrow(/limited to/);
+    await expect(t.run('dither', { algorithm: 'floyd-steinberg', serpentine: true }, { image: t.solid(800, 600, [1, 2, 3, 255]) })).rejects.toThrow(/limited to/);
+  });
 });

@@ -24,8 +24,8 @@ describe('dither: GPU error diffusion matches the CPU reference', () => {
     const pal: [number, number, number][] = [...GREYS4, [0.9, 0.3, 0.2], [0.2, 0.4, 0.9]];
     const problems: string[] = [];
     for (const algorithm of ['floyd-steinberg', 'riemersma']) {
-      const gpu = await t.pixels(await runWithPalettes(t, 'dither', { algorithm, colorSpace: 'srgb' }, img, { palette: pal }));
-      const cpu = diffuseImage(rgba, W, H, { algorithm, strength: 1, space: 'srgb', serpentine: true, palette: pal });
+      const gpu = await t.pixels(await runWithPalettes(t, 'dither', { algorithm, colorSpace: 'srgb', serpentine: algorithm === 'riemersma' }, img, { palette: pal }));
+      const cpu = diffuseImage(rgba, W, H, { algorithm, strength: 1, space: 'srgb', serpentine: false, palette: pal });
       let same = 0;
       for (let p = 0; p < W * H; p++) {
         if (Math.abs(gpu.data[p * 4] - cpu[p * 4]) <= 1 && Math.abs(gpu.data[p * 4 + 1] - cpu[p * 4 + 1]) <= 1 && Math.abs(gpu.data[p * 4 + 2] - cpu[p * 4 + 2]) <= 1) same++;

@@ -1,6 +1,7 @@
 import { defineNode } from '../../define';
 import type { DitherSpace } from '../../lib/pixel-color';
 import { diffuseGpu } from '../../lib/pixel-diffuse-gpu';
+import { diffuseWavefront } from '../../lib/pixel-wavefront-gpu';
 import { DITHER_ALGORITHMS, algorithmFamily, thresholdMatrix } from '../../lib/pixel-dither-data';
 import { PALETTE_WGSL, SPACE_INDEX, SPACE_OPTIONS, clampPalette, matrixTexture, paletteTexture } from '../../lib/pixel-gpu';
 import { FALLBACK_PARAM, paletteSummary, resolvePalette } from '../../lib/pixel-palettes';
@@ -38,8 +39,9 @@ import { FALLBACK_PARAM, paletteSummary, resolvePalette } from '../../lib/pixel-
  *    colour is now clamped to the gamut.
  */
 
-/** Error diffusion walks pixels one at a time (~2.4 s per megapixel measured); above this it uses ordered dithering instead. */
-const DIFFUSION_BUDGET = 350_000;
+/** Serpentine and Riemersma walk pixels one at a time (~2.4 s per megapixel): refused above this size, with an error. */
+const SEQUENTIAL_BUDGET = 350_000;
+const isSequential = (p: { algorithm: string; serpentine: boolean }): boolean => p.algorithm === 'riemersma' || p.serpentine;
 
 const WGSL = /* wgsl */ `
 ${PALETTE_WGSL}
@@ -173,7 +175,11 @@ export default defineNode({
       label: 'Algorithm',
       options: DITHER_ALGORITHMS.map((a) => ({ value: a.id, label: a.label })),
     },
-    strength: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Strength', hint: '0 = plain nearest colour, 1 = full dithering. Error-diffusion algorithms fall back to Bayer 8x8 on images over 0.35 megapixels (too slow otherwise); Pixelate first.' },
+    strength: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Strength', hint: '0 = plain nearest colour, 1 = full dithering.' },
+    errorAmount: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Error amount', group: 'Error diffusion', hint: 'Share of the quantisation error that is passed on. Below 1 reduces worm artefacts at the cost of tone accuracy.', visibleIf: (p) => algorithmFamily(p.algorithm as string) === 'diffusion' },
+    jitter: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Jitter', group: 'Error diffusion', hint: 'Blue-noise threshold modulation. Breaks up worms and structured patterns in flat areas. Position-only, so it does not shimmer in video. Not used by serpentine / Riemersma.', visibleIf: (p) => algorithmFamily(p.algorithm as string) === 'diffusion' },
+    edgeKeep: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Edge keep', group: 'Error diffusion', hint: 'Stops error from spreading across strong edges of the source, keeping outlines crisp. Not used by serpentine / Riemersma.', visibleIf: (p) => algorithmFamily(p.algorithm as string) === 'diffusion' },
+    stable: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Video stability', group: 'Error diffusion', hint: 'Snaps source values to a coarse step (up to 15/255) before diffusing, so small frame-to-frame changes (noise, compression) give identical output instead of shimmering. All noise terms already depend on position only. Not used by serpentine / Riemersma.', visibleIf: (p) => algorithmFamily(p.algorithm as string) === 'diffusion' },
     scale: {
       type: 'number',
       default: 1,
@@ -189,13 +195,15 @@ export default defineNode({
     colorSpace: { type: 'enum', default: 'oklab', options: SPACE_OPTIONS, label: 'Colour space' },
     serpentine: {
       type: 'bool',
-      default: true,
+      default: false,
       label: 'Serpentine scan',
+      group: 'Error diffusion',
+      hint: 'Alternate the scan direction each row. Exact but strictly sequential, so it is limited to 0.35 megapixels (Pixelate first); the default left-to-right scan runs in parallel at any size.',
       visibleIf: (p) => algorithmFamily(p.algorithm as string) === 'diffusion' && p.algorithm !== 'riemersma',
     },
     seed: { type: 'number', default: 0, min: 0, max: 9999, step: 1, integer: true, label: 'Seed', visibleIf: (p) => p.algorithm === 'white-noise' },
   },
-  summary: (p, wired) => `${DITHER_ALGORITHMS.find((a) => a.id === p.algorithm)?.label ?? p.algorithm} · ${paletteSummary(!!wired?.has('palette'), p.fallback)}`,
+  summary: (p, wired) => `${DITHER_ALGORITHMS.find((a) => a.id === p.algorithm)?.label ?? p.algorithm}${algorithmFamily(p.algorithm) === 'diffusion' ? (isSequential(p) ? ' · sequential (max 0.35 MP)' : ' · exact parallel') : ''} · ${paletteSummary(!!wired?.has('palette'), p.fallback)}`,
   async render(ctx) {
     const src = ctx.in.image;
     const p = ctx.params;
@@ -204,12 +212,19 @@ export default defineNode({
     const space = p.colorSpace as DitherSpace;
     const family = algorithmFamily(p.algorithm);
 
-    if (family === 'diffusion' && src.width * src.height <= DIFFUSION_BUDGET) {
-      return { image: diffuseGpu(ctx.gpu, src, colors, { algorithm: p.algorithm, strength: p.strength, space, serpentine: p.serpentine }) };
+    if (family === 'diffusion') {
+      if (isSequential(p)) {
+        if (src.width * src.height > SEQUENTIAL_BUDGET) {
+          throw new Error(`Dither: ${p.algorithm === 'riemersma' ? 'Riemersma' : 'Serpentine scan'} walks pixels one by one and is limited to ${SEQUENTIAL_BUDGET / 1000}k pixels (this image is ${src.width}x${src.height}). Turn off Serpentine / choose another algorithm, or Pixelate first.`);
+        }
+        return { image: diffuseGpu(ctx.gpu, src, colors, { algorithm: p.algorithm, strength: p.strength * p.errorAmount, space, serpentine: p.serpentine }) };
+      }
+      return {
+        image: diffuseWavefront(ctx.gpu, src, colors, { algorithm: p.algorithm, space, amount: p.strength * p.errorAmount, jitter: p.jitter, edgeKeep: p.edgeKeep, snap: p.stable * 0.06 }),
+      };
     }
 
-    // Error diffusion is sequential and gets slow on big images; above the budget it falls back to ordered Bayer 8x8.
-    const algorithm = family === 'diffusion' ? 'bayer-8' : p.algorithm;
+    const algorithm = p.algorithm;
     const matrix = thresholdMatrix(algorithm);
     const kind = family === 'none' ? 2 : algorithm === 'white-noise' ? 1 : algorithm === 'yliluoma' ? 3 : 0;
     const mat = matrix ? matrixTexture(ctx.gpu, matrix.width, matrix.height, matrix.data) : matrixTexture(ctx.gpu, 1, 1, new Float32Array([0.5]));

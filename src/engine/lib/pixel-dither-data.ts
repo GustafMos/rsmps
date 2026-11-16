@@ -46,6 +46,7 @@ export const DITHER_ALGORITHMS: DitherAlgorithm[] = [
   A('crosshatch', 'Crosshatch', 'pattern'),
   A('yliluoma', 'Yliluoma (two-colour mix)', 'blend'),
   A('floyd-steinberg', 'Floyd–Steinberg', 'diffusion'),
+  A('false-floyd-steinberg', 'False Floyd–Steinberg', 'diffusion'),
   A('atkinson', 'Atkinson', 'diffusion'),
   A('jarvis', 'Jarvis–Judice–Ninke', 'diffusion'),
   A('stucki', 'Stucki', 'diffusion'),
@@ -54,6 +55,7 @@ export const DITHER_ALGORITHMS: DitherAlgorithm[] = [
   A('two-row-sierra', 'Two-row Sierra', 'diffusion'),
   A('sierra-lite', 'Sierra Lite', 'diffusion'),
   A('shiau-fan', 'Shiau–Fan', 'diffusion'),
+  A('stevenson-arce', 'Stevenson–Arce', 'diffusion'),
   A('simple-2d', 'Simple 2D', 'diffusion'),
   A('riemersma', 'Riemersma (Hilbert curve)', 'diffusion'),
 ];
@@ -220,7 +222,20 @@ export const DIFFUSION_KERNELS: Record<string, Kernel> = {
   // Shiau-Fan (1993): half of the error goes right, the rest below-left.
   'shiau-fan': { divisor: 16, taps: [[1, 0, 8], [-3, 1, 1], [-2, 1, 1], [-1, 1, 2], [0, 1, 4]] },
   'simple-2d': { divisor: 2, taps: [[1, 0, 1], [0, 1, 1]] },
+  'false-floyd-steinberg': { divisor: 8, taps: [[1, 0, 3], [0, 1, 3], [1, 1, 2]] },
+  // Stevenson-Arce (1985), hexagonal-grid kernel with reach 3.
+  'stevenson-arce': { divisor: 200, taps: [[2, 0, 32], [-3, 1, 12], [-1, 1, 26], [1, 1, 30], [3, 1, 16], [-2, 2, 12], [0, 2, 26], [2, 2, 12], [-3, 3, 5], [-1, 3, 12], [1, 3, 12], [3, 3, 5]] },
 };
+
+/**
+ * Wavefront skew for left-to-right diffusion: the smallest k such that every tap lands strictly later in
+ * time t = x + k*y than its source (dx + k*dy >= 1). Pixels with equal t never feed each other.
+ */
+export function wavefrontSkew(kernel: { taps: [number, number, number][] }): number {
+  let k = 1;
+  for (const [dx, dy] of kernel.taps) if (dy > 0) k = Math.max(k, Math.ceil((1 - dx) / dy));
+  return k;
+}
 
 /** Hilbert curve: cell (x, y) of the curve step `d` on an n×n grid (n a power of two). */
 export function hilbertD2xy(n: number, d: number): [number, number] {
