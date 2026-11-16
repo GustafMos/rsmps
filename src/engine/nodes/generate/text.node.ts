@@ -11,7 +11,7 @@ export default defineNode({
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     text: { type: 'string', multiline: true, default: 'Hello', label: 'Text' },
-    font: { type: 'string', default: 'sans-serif', label: 'Font family', hint: 'Any font installed on this computer, e.g. Georgia, Courier New, Impact.' },
+    font: { type: 'string', kind: 'font', default: 'sans-serif', label: 'Font', hint: 'Pick a font, or type the name of any font installed on this computer.' },
     fontSize: { type: 'number', default: 96, min: 1, max: 2000, unit: 'px', label: 'Size' },
     weight: { type: 'number', default: 700, min: 100, max: 900, step: 100, integer: true, label: 'Weight', hint: '400 = regular, 700 = bold.' },
     italic: { type: 'bool', default: false, label: 'Italic' },

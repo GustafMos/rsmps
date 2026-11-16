@@ -182,6 +182,11 @@ export interface ColorParam extends ParamBase {
 export interface StringParam extends ParamBase {
   type: 'string';
   default: string;
+  /**
+   * What the text is, so the UI can offer the right picker instead of a bare text box.
+   *  - 'font': a font family name: shown as a dropdown of available fonts, each previewed in itself, still typeable.
+   */
+  kind?: 'font';
   multiline?: boolean;
 }
 export interface Vec2Param extends ParamBase {
