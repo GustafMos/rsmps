@@ -48,7 +48,9 @@
     "desktop:dist:mac": "node desktop/scripts/pack.mjs --mac",
     "desktop:dist:linux": "node desktop/scripts/pack.mjs --linux",
     "desktop:smoke": "node desktop/scripts/smoke.mjs",
-    "gen": "node scripts/build-cli.mjs gen"
+    "gen": "node scripts/build-cli.mjs gen",
+    "desktop:smoke:phone": "node desktop/scripts/smoke.mjs --smoke-phone",
+    "desktop:smoke:addons": "node desktop/scripts/smoke.mjs --smoke-addons"
   },
   "dependencies": {
     "fflate": "^0.8.2",
@@ -71,6 +73,7 @@
     "electron": "^45.3.2",
     "electron-builder": "^26.18.0",
     "jsqr": "^1.4.0",
+    "selfsigned": "^5.5.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vite": "^7.1.0",

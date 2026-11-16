@@ -13,9 +13,11 @@ if (!existsSync(join(root, 'dist', 'index.html'))) throw new Error('dist/index.h
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 
-// web build, minus source maps, minus the phone page (the phone link needs a server and is off in the desktop app)
-cpSync(join(root, 'dist'), join(stage, 'web'), { recursive: true, filter: (p) => !p.endsWith('.map') && !/[\\/]phone\.html$/.test(p) });
+// web build minus source maps (phone.html and its assets stay: the on-demand phone server serves them)
+cpSync(join(root, 'dist'), join(stage, 'web'), { recursive: true, filter: (p) => !p.endsWith('.map') });
 cpSync(join(root, 'desktop', 'main.mjs'), join(stage, 'main.mjs'));
+cpSync(join(root, 'desktop', 'build', 'phone-server.mjs'), join(stage, 'phone-server.mjs'));
+cpSync(join(root, 'desktop', 'build', 'addons.mjs'), join(stage, 'addons.mjs'));
 cpSync(join(root, 'desktop', 'build', 'icon-256.png'), join(stage, 'icon.png')); // window icon (Windows/Linux)
 
 writeFileSync(
@@ -56,13 +58,14 @@ function visit(name, from) {
   seen.set(real, { dir, p });
   for (const dep of Object.keys(p.dependencies ?? {})) visit(dep, dir);
 }
-for (const dep of Object.keys(pkg.dependencies ?? {})) if (!NODE_ONLY.has(dep)) visit(dep, root);
+for (const dep of [...Object.keys(pkg.dependencies ?? {}), 'ws', 'selfsigned']) if (!NODE_ONLY.has(dep)) visit(dep, root); // ws + selfsigned are bundled into phone-server.mjs
 
 const parts = [
   `RSMPS ${pkg.version}: third-party software notices`,
   '',
   'RSMPS itself is MIT licensed (see LICENSE). The application also contains the software below.',
   'Electron and Chromium licences ship next to this file (LICENSE.electron.txt, LICENSES.chromium.html).',
+  'FFmpeg is NOT distributed with RSMPS. The optional FFmpeg add-on is downloaded by the user on request from its upstream source; its licence is shown before the download.',
   '',
 ];
 const list = [...seen.values()].sort((a, b) => a.p.name.localeCompare(b.p.name));

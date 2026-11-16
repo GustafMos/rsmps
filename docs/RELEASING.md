@@ -88,3 +88,35 @@ How signing plugs in (the workflow already handles it; add the secrets and the n
 - `npm run desktop:smoke` prints the failing reason (`uiState`, `webgpu`, `consoleErrors`).
 - The smoke test uses a throwaway profile and never touches your real RSMPS data.
 - Packaged app data (graphs, plugins) lives in the Electron profile folder (`%APPDATA%/RSMPS` on Windows).
+
+## Phone link and firewall (what users see)
+
+"Link a phone" starts an https server inside the app (desktop/phone/, the pairing logic is `vite-plugins/phone-session.ts`,
+bundled in at build time). On the first start Windows Defender Firewall shows "Allow RSMPS to communicate on these networks":
+tell users to tick **Private networks** and Allow. RSMPS does not add firewall rules itself. macOS may ask "accept incoming
+network connections"; Linux firewalls (ufw) may need `sudo ufw allow 47831/tcp`. The port is stable (47831, else a random one saved
+in the profile) so an allowed rule stays valid. Build step: `desktop/scripts/bundle-modules.mjs` (esbuild) runs inside
+`desktop:build`; `ws` and `selfsigned` are dev dependencies that get bundled, not shipped as node_modules.
+
+Test it: `node desktop/scripts/pack.mjs --dir` then `npm run desktop:smoke:phone` (32 checks incl. renderer certificate trust).
+
+## Add-ons (FFmpeg): how to bump the pinned version
+
+The catalogue is `desktop/addons/catalogue.json`. RSMPS never ships or hosts FFmpeg; the app downloads it on request and refuses
+any file whose SHA-256 differs from the pin. To update the Windows build:
+
+1. Pick the new version on <https://www.gyan.dev/ffmpeg/builds/> (linked from ffmpeg.org). The immutable asset is
+   `https://github.com/GyanD/codexffmpeg/releases/download/<version>/ffmpeg-<version>-essentials_build.zip`.
+2. Download it yourself and compute the hash: `sha256sum ffmpeg-<version>-essentials_build.zip` (compare with gyan.dev's
+   published `.sha256`). Put the hash, exact byte size, version, and the `extract.binary` / `extra` paths (folder name inside
+   the zip, `ffmpeg-<version>-essentials_build/bin/ffmpeg.exe`) in the catalogue, set `"verified": true`.
+3. `npx vitest run desktop`, build, and run `npm run desktop:smoke:addons` (a local fake-archive test of the whole flow). Then
+   do one real install from the Plugins dialog on a Windows machine.
+4. The current pin (9.0.2) was taken from the hash gyan.dev publishes; it was **not** recomputed from a download in the
+   environment that wrote it, so do step 2 once and set `verified: true`. A wrong pin fails safe (install refused).
+5. macOS and Linux have no pinned download (rolling or non-immutable upstreams): users bring their own FFmpeg. To add one, add a
+   `builds["darwin-arm64"]` entry the same way (zip needs nothing extra; `tar.xz` uses the system `tar`).
+
+Windows installer: `desktop/installer.nsh` adds an unticked "Download FFmpeg after install" page (compiled in the build, not
+click-tested). Ticking only writes `%APPDATA%\RSMPS\addon-requests.json`; the app reads and deletes it on first launch and runs
+the in-app install. Test it: `npm run desktop:smoke:addons` after `node desktop/scripts/pack.mjs --dir`.

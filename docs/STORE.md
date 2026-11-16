@@ -34,29 +34,49 @@ Also state: price is for the build and support, no licence key, no DRM, refunds 
 
 - **Unsigned builds** (SmartScreen / Gatekeeper warnings, see `docs/RELEASING.md`). Linux: AppArmor may need `--no-sandbox`
   on Ubuntu 24.04+.
-- **No ProRes / ffmpeg in the app.** ffmpeg is not bundled (its LGPL/GPL terms would add obligations to the package).
-  ProRes 4444 with alpha, and other ffmpeg-only formats, stay a feature of the command-line renderer (`docs/CLI.md`),
-  which needs the user's own ffmpeg (on PATH or `$FFMPEG_PATH`). Everything the browser can encode works in the app.
-- **No phone link.** The phone-as-camera feature needs a local https server and is off in the desktop app
-  (`Io.phone.available` is false). It is planned as a later feature. The web app's dev server LAN mode still has it.
+- **FFmpeg is not included.** Its licence terms (GPL builds) would add obligations to the package, so RSMPS never bundles or
+  hosts it. ProRes-compatible export and the other FFmpeg codecs are an **optional add-on** (see "Official add-ons" below):
+  downloaded only when you ask, or use an FFmpeg you already have. The command-line renderer (`docs/CLI.md`) uses your own
+  ffmpeg as before. Everything the browser can encode works without the add-on.
+- **Phone link on demand.** "Link a phone" starts a local https server inside the app only while it is in use (Windows asks
+  once for firewall permission; allow Private networks). The phone shows a certificate warning once (self-signed); an
+  optional Tailscale certificate removes it. See `docs/LIVE_INPUT.md`. Untested on a real phone against the packaged build.
 - **No auto-update** yet: download the new version.
 - Linux and macOS builds are produced by CI and have had less testing than Windows.
 - The app needs a working WebGPU adapter; on machines without one it shows the "Cannot start" screen.
 
 ## Security and privacy notes (for the store page, if wanted)
 
-The app has no server and makes no network requests of its own; media never leaves the machine. Live-input nodes can
+The app has no server until you ask for a phone link (then a local https server on your network, closed automatically) and
+makes no network requests of its own except the add-on download you start; media never leaves the machine. Live-input nodes can
 fetch IP-camera URLs the user types in. The window runs sandboxed with context isolation, no Node.js access, and only
 https links are opened (in the system browser). Camera, microphone and MIDI are the only permissions granted.
 
 ## Third-party notices
 
-Every build contains `resources/THIRD_PARTY_LICENSES.txt` (generated at build time by `desktop/scripts/stage.mjs` from the
+FFmpeg is not part of any build (see above). Every build contains `resources/THIRD_PARTY_LICENSES.txt` (generated at build time by `desktop/scripts/stage.mjs` from the
 production dependencies that end up in the web bundle: React, Mediabunny (MPL-2.0), fflate and their dependencies, plus
 `THIRD_PARTY_NOTICES.md`), `resources/LICENSE.rsmps.txt` (MIT), and Electron's `LICENSE.electron.txt` and
 `LICENSES.chromium.html`. Electron ships Chromium's own `ffmpeg.dll`/`libffmpeg` for browser media codecs (LGPL);
 that is part of Chromium, covered by `LICENSES.chromium.html`, and unrelated to the CLI's ffmpeg. Help > About in the
 app menu shows the version and MIT licence. Keep these files in any repackaged build.
+
+## Official add-ons (FFmpeg)
+
+An add-on is optional software RSMPS can fetch for you. **FFmpeg is NOT distributed with RSMPS**: not in the installer, not in
+the zip, not on the store pages. Rules the app follows (`desktop/addons/`, catalogue in `desktop/addons/catalogue.json`):
+
+- Only on request: the "Official add-ons" section of the Plugins dialog (Install / Remove / Locate), or the unticked
+  "Download FFmpeg after install" box in the Windows installer (the installer downloads nothing: it leaves a request that the app
+  turns into the same in-app flow on first launch).
+- A dialog shows name, version, licence, source host and size before anything is downloaded. The file comes from the upstream
+  distributor (Windows x64: Gyan Doshi's builds, GitHub release asset, GPL-3.0-or-later build; linked from ffmpeg.org).
+- The download is verified against a pinned SHA-256 before it is unpacked or run; a mismatch deletes it. The unpacked program is
+  re-checked before use. Remove deletes the folder. No automatic updates.
+- "Use an FFmpeg already on this computer" (found on PATH, or chosen with a file dialog and checked by running `-version`)
+  needs no download at all. macOS and Linux have no pinned download yet: install FFmpeg with Homebrew / your package manager.
+- Wording on store pages: "ProRes-compatible export (via FFmpeg)". Never use Apple's trademarks as a product name or logo.
+- If you redistribute FFmpeg yourself (do not), the GPL applies to that file and its source must be offered.
 
 ## What the desktop shell sets (for reviewers)
 
@@ -65,6 +85,9 @@ app menu shows the version and MIT licence. Keep these files in any repackaged b
 - Linux only: `--enable-unsafe-webgpu` and `--enable-features=Vulkan`, because Chromium keeps WebGPU-on-Vulkan behind
   flags on Linux. Windows and macOS need no flags.
 - Single instance lock, window size/position saved in the user profile, menu (File, Edit, View, Window, Help, About).
+- Internal endpoints on `app://rsmps/__rsmps/` (phone link, add-ons, export) are only reachable from the app's own pages; the
+  renderer has no Node access and no preload script. A `certificate-error` handler trusts only the phone server's own
+  certificate (by fingerprint, our host names and port) for the app window; certificate checking stays on everywhere else.
 - File association for `.rsmps.json` is not set up yet (optional).
 
 ## Page copy, images and prices

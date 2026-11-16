@@ -107,3 +107,30 @@ Tailscale. If no phone reaches the computer within 20 seconds the app shows this
 - **Safari says the certificate is invalid and will not connect the WebSocket:** use the Tailscale route above (a real certificate).
 - **Picture stutters:** you are probably in the JPEG fallback (the phone page says "fallback mode"); lower the resolution on the phone
   page or use a network without client isolation.
+
+### The phone's microphone
+
+The phone page asks for the camera and the microphone together. If one is refused the other still works (camera only, or sound
+only: a wireless microphone). The sound travels in the same direct WebRTC link as the picture and appears on the **Phone Camera**
+node's `Sound` and `tap` outputs, for example into Sound to Numbers, a Timeline's `recordAudio`, or a MIDI-from-audio chain. It is
+raw (no echo cancellation, noise suppression or automatic gain; mono) and is **never played** on the computer or the phone, so there
+is no feedback. The phone page has a Microphone on/off button and a level meter. In the JPEG fallback there is no sound; the app
+says "Video only: ... Sound needs a direct connection". Starting the audio engine (the Enable audio prompt) is still a click.
+
+### In the desktop app
+
+The packaged desktop app (RSMPS for Windows, macOS, Linux) needs no command line: **Link a phone** starts a small https server
+inside the app, only for as long as you use it.
+
+- The first time, a native dialog asks "Allow phones on your network to connect to RSMPS?" (Allow / Not now, with "Don't ask
+  again"). The **Phone** menu shows "Phone link: Off / On", the addresses a phone can use (click to copy) and two settings.
+- On Windows the system firewall then asks whether RSMPS may talk on the network: allow it on **private** networks. RSMPS never
+  changes firewall rules itself. If you press Cancel, phones cannot connect; open Windows Security, Firewall, "Allow an app through
+  firewall" and tick RSMPS for Private.
+- The server serves only the phone page, `/__rsmps/ping` and the pairing WebSocket; everything else is 404. It listens on a stable
+  port (47831 unless that is taken), uses a self-signed certificate made on first use in the app's data folder (the phone shows the
+  usual warning once: Advanced, Proceed), and stops by itself when the last Phone Camera link is closed or after 10 minutes
+  without use, and when you quit.
+- Tailscale: in **Phone > Use Tailscale certificate when available**, RSMPS runs `tailscale cert` and phones that open the
+  Tailscale name get a trusted certificate (no warning). It needs the `tailscale` command and HTTPS enabled for your tailnet.
+- Everything else (QR code, camera, microphone, troubleshooting) works as described above.

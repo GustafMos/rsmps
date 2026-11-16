@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "note": "Official add-ons. RSMPS never bundles or hosts these files: they are fetched from the upstream source below only when the user asks, and are verified against the pinned SHA-256 before anything is run. To update a pin, see docs/RELEASING.md (Add-ons).",
+  "addons": [
+    {
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "title": "ProRes-compatible export (via FFmpeg)",
+      "description": "Encodes video with alpha and professional codecs (ProRes-compatible 422 HQ and 4444, QuickTime Animation, PNG in MOV, WebM with alpha, H.264, H.265). RSMPS does not include FFmpeg; you can download it here or point RSMPS at an FFmpeg you already have.",
+      "homepage": "https://ffmpeg.org",
+      "binary": { "win32": "ffmpeg.exe", "default": "ffmpeg" },
+      "bringYourOwn": {
+        "win32": "Install FFmpeg yourself (for example: winget install Gyan.FFmpeg) and press Locate, or put ffmpeg.exe on your PATH.",
+        "darwin": "Install FFmpeg yourself (for example: brew install ffmpeg) and press Locate, or put ffmpeg on your PATH.",
+        "linux": "Install FFmpeg with your package manager (for example: sudo apt install ffmpeg) and press Locate, or put ffmpeg on your PATH."
+      },
+      "builds": {
+        "win32-x64": {
+          "version": "9.0.2",
+          "format": "zip",
+          "url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+          "sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+          "size": 114768076,
+          "extract": { "binary": "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe", "extra": ["ffmpeg-9.0.2-essentials_build/LICENSE", "ffmpeg-9.0.2-essentials_build/README.txt"] },
+          "license": { "name": "GPL-3.0-or-later (this build includes GPL libraries such as x264 and x265)", "url": "https://www.gnu.org/licenses/gpl-3.0.html" },
+          "source": { "name": "Gyan Doshi's FFmpeg builds (linked from ffmpeg.org/download.html)", "url": "https://www.gyan.dev/ffmpeg/builds/", "host": "github.com" },
+          "hashSource": "SHA-256 published by gyan.dev (ffmpeg-release-essentials.zip.sha256, release 9.0.2). The archive size matches the GitHub asset (114768076 bytes). Not recomputed by a download in the build environment: the app refuses a file that does not match, so a wrong pin fails safe.",
+          "verified": false
+        }
+      }
+    }
+  ]
+}

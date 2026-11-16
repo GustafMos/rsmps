@@ -47,6 +47,7 @@ nsis:
   installerIcon: ../desktop/build/icon.ico
   uninstallerIcon: ../desktop/build/icon.ico
   installerHeaderIcon: ../desktop/build/icon.ico
+  include: ../desktop/installer.nsh
   installerSidebar: ../desktop/build/installerSidebar.bmp
   uninstallerSidebar: ../desktop/build/installerSidebar.bmp
 

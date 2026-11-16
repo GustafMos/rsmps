@@ -1,5 +1,5 @@
 // npm run desktop:dev: starts the Vite dev server (or reuses one on :5173) and opens the desktop shell against it.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const url = 'http://localhost:5173';
 const up = () => fetch(url).then((r) => r.ok, () => false);
+
+spawnSync(process.execPath, [join(root, 'desktop', 'scripts', 'bundle-modules.mjs')], { cwd: root, stdio: 'inherit' });
 
 let vite = null;
 if (!(await up())) {

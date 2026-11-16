@@ -17,5 +17,6 @@ function run(a) {
 }
 if (!skipWeb) run([join(root, 'node_modules', 'vite', 'bin', 'vite.js'), 'build']);
 run([join(root, 'desktop', 'scripts', 'make-icons.mjs')]);
+run([join(root, 'desktop', 'scripts', 'bundle-modules.mjs')]);
 run([join(root, 'desktop', 'scripts', 'stage.mjs')]);
 run([join(root, 'node_modules', 'electron-builder', 'cli.js'), '--projectDir', '.desktop-stage', '--config', join(root, 'desktop', 'electron-builder.yml'), `-c.electronVersion=${electronVersion}`, '--publish', 'never', ...passthrough]);
