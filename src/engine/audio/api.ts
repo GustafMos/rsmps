@@ -136,6 +136,14 @@ export interface AudioEngine {
   stopRecording(): Promise<RecordedTake | null>;
   /** Poll (or after each message) for record meters and the count-in. Updated ~30 Hz while armed. */
   recordingState(): RecordingState;
+  /**
+   * Use a MediaStream's audio (for example the remote WebRTC stream of a linked phone) as the live input of the node with
+   * this id (a Phone Camera node). Pass null to release it. Safe to call before start(), with a stream that has no audio
+   * track yet (silence until one is added) and again whenever the stream object changes; it is detached automatically when the
+   * node disappears from the graph and on stop(), and re-attached on start(). Microphone nodes and live streams share
+   * 8 worklet input slots (`MAX_MICS`); sources beyond that are silent with a console warning.
+   */
+  setLiveStream(nodeId: string, stream: MediaStream | null): void;
   /** Peak level 0..1 per channel at a node's first audio output, or null when unknown. */
   meter(nodeId: string): [number, number] | null;
   /** Send a note from the UI (on-screen keyboard) into a MIDI-producing node. */

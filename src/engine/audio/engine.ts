@@ -9,6 +9,7 @@ import type { AudioAssetProvider, AudioDevice, AudioEngine, CreateAudioEngine, R
 import { toAudioAsset } from './pcm';
 import type { FromWorklet, ToWorklet } from './protocol';
 import { MAX_MICS, WORKLET_NAME } from './protocol';
+import { SlotAllocator } from './slots';
 import { audioAssetIds, hasAudioOutput, hasSignalTap } from './runner';
 import type { MidiEvent } from './types';
 // Vite bundles the worklet (and everything it imports) as its own module and returns its URL.
@@ -28,7 +29,11 @@ class WebAudioEngine implements AudioEngine {
    * told which node reads which input ('micSlots'). Each node has its own MediaStream, so nodes can use different
    * devices. A stream is reopened whenever its device or browser-processing options change.
    */
-  private mics = new Map<string, { slot: number; key: string; stream: MediaStream; source: MediaStreamAudioSourceNode }>();
+  private mics = new Map<string, { key: string; stream: MediaStream; source: MediaStreamAudioSourceNode }>();
+  /** Worklet input slots shared by microphones AND live streams (phone audio): MAX_MICS in total. */
+  private slots = new SlotAllocator(MAX_MICS);
+  /** Streams handed in through setLiveStream, by node id. `source` exists only while the stream has an audio track and the engine runs. */
+  private liveStreams = new Map<string, { stream: MediaStream; source: MediaStreamAudioSourceNode | null; resync: () => void }>();
   private micBusy = false;
   private micAgain = false;
   private deviceListeners = new Set<() => void>();
@@ -108,6 +113,7 @@ class WebAudioEngine implements AudioEngine {
     this.node = node;
     this.master = master;
     this.post({ type: 'transport', ...this.transport });
+    this.attachAllStreams();
     if (this.graph) {
       this.post({ type: 'graph', doc: this.graph });
       this.loadAssets();
@@ -117,6 +123,7 @@ class WebAudioEngine implements AudioEngine {
   stop(): void {
     void this.ctx?.suspend();
     this.releaseAllMics();
+    this.detachAllStreams(); // streams stay registered and re-attach on start
   }
 
   setTransport(state: TransportState): void {
@@ -183,6 +190,7 @@ class WebAudioEngine implements AudioEngine {
   dispose(): void {
     this.disposed = true;
     this.releaseAllMics();
+    for (const id of [...this.liveStreams.keys()]) this.setLiveStream(id, null);
     this.deviceListeners.clear();
     if (this.midi) for (const input of this.midi.inputs.values()) input.onmidimessage = null;
     this.node?.disconnect();
@@ -221,6 +229,8 @@ class WebAudioEngine implements AudioEngine {
   private async ensureLiveInputs(): Promise<void> {
     const { graph, registry, ctx, node } = this;
     if (!graph || !registry || !ctx || !node) return;
+    for (const id of [...this.liveStreams.keys()]) if (!graph.nodes.some((n) => n.id === id)) this.setLiveStream(id, null); // node removed
+    this.attachAllStreams();
     if (graphUses(graph, registry, 'microphone') || this.mics.size) await this.acquireMic(); // also closes streams of removed nodes
     if (graphUses(graph, registry, 'midi-device')) await this.acquireMidi();
   }
@@ -245,10 +255,10 @@ class WebAudioEngine implements AudioEngine {
   private async reconcileMics(): Promise<void> {
     const { graph, registry, ctx, node } = this;
     if (!graph || !registry || !ctx || !node || !navigator.mediaDevices?.getUserMedia) return;
-    const wanted = graph.nodes.filter((n) => n.type === 'microphone' && registry.get(n.type)?.audio).slice(0, MAX_MICS);
+    const wanted = graph.nodes.filter((n) => n.type === 'microphone' && registry.get(n.type)?.audio);
     // close streams of removed nodes or whose settings changed
-    const want = new Map<string, { slot: number; key: string; device: string; opts: MediaTrackConstraints }>();
-    wanted.forEach((n, slot) => {
+    const want = new Map<string, { key: string; device: string; opts: MediaTrackConstraints }>();
+    for (const n of wanted) {
       const p = n.params as Record<string, unknown>;
       const device = typeof p.device === 'string' ? p.device : '';
       const opts = {
@@ -256,32 +266,108 @@ class WebAudioEngine implements AudioEngine {
         noiseSuppression: p.noiseSuppression === true,
         autoGainControl: p.autoGainControl === true,
       };
-      want.set(n.id, { slot, key: JSON.stringify([device, opts]), device, opts });
-    });
+      want.set(n.id, { key: JSON.stringify([device, opts]), device, opts });
+    }
     for (const [id, m] of [...this.mics]) {
       const w = want.get(id);
-      if (!w || w.key !== m.key || w.slot !== m.slot) {
+      if (!w || w.key !== m.key) {
         m.source.disconnect();
         m.stream.getTracks().forEach((t) => t.stop());
         this.mics.delete(id);
+        this.slots.free(id);
       }
     }
     for (const [id, w] of want) {
       if (this.mics.has(id)) continue;
+      const slot = this.slots.alloc(id);
+      if (slot < 0) {
+        console.warn(`No free live-input slot for microphone "${id}" (at most ${MAX_MICS} live sources at once).`);
+        continue;
+      }
       const stream = await this.openMic(w.device, w.opts);
-      if (!stream) continue;
-      if (this.disposed || !this.ctx || !this.node) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
+      if (!stream || this.disposed || !this.ctx || !this.node) {
+        stream?.getTracks().forEach((t) => t.stop());
+        this.slots.free(id);
+        if (this.disposed) return;
+        continue;
       }
       const source = this.ctx.createMediaStreamSource(stream);
-      source.connect(this.node, 0, w.slot);
-      this.mics.set(id, { slot: w.slot, key: w.key, stream, source });
+      source.connect(this.node, 0, slot);
+      this.mics.set(id, { key: w.key, stream, source });
       void this.refreshDeviceLabels();
     }
-    const slots: Record<string, number> = {};
-    for (const [id, m] of this.mics) slots[id] = m.slot;
-    this.post({ type: 'micSlots', slots });
+    this.publishSlots();
+  }
+
+  private publishSlots(): void {
+    this.post({ type: 'micSlots', slots: this.slots.toRecord() });
+  }
+
+  /* ------------------------- live streams (phone audio) ------------------------- */
+
+  setLiveStream(nodeId: string, stream: MediaStream | null): void {
+    const prev = this.liveStreams.get(nodeId);
+    if (prev && prev.stream === stream) return;
+    if (prev) {
+      this.detachStream(nodeId);
+      prev.stream.removeEventListener?.('addtrack', prev.resync);
+      prev.stream.removeEventListener?.('removetrack', prev.resync);
+      this.liveStreams.delete(nodeId);
+    }
+    if (stream) {
+      const entry = { stream, source: null as MediaStreamAudioSourceNode | null, resync: () => this.resyncStream(nodeId) };
+      this.liveStreams.set(nodeId, entry);
+      stream.addEventListener?.('addtrack', entry.resync); // the audio track may arrive after the video track
+      stream.addEventListener?.('removetrack', entry.resync);
+      this.attachStream(nodeId);
+    }
+    this.publishSlots();
+  }
+
+  private attachAllStreams(): void {
+    for (const id of this.liveStreams.keys()) this.attachStream(id);
+    this.publishSlots();
+  }
+
+  private detachAllStreams(): void {
+    for (const id of this.liveStreams.keys()) this.detachStream(id);
+    this.publishSlots();
+  }
+
+  /** Connect the stream's audio to a free worklet input. No audio track (yet) means silence, not an error. */
+  private attachStream(nodeId: string): void {
+    const e = this.liveStreams.get(nodeId);
+    if (!e || e.source || !this.ctx || !this.node || this.disposed) return;
+    if (e.stream.getAudioTracks().length === 0) return;
+    const slot = this.slots.alloc(nodeId);
+    if (slot < 0) {
+      console.warn(`No free live-input slot for "${nodeId}" (at most ${MAX_MICS} live sources at once).`);
+      return;
+    }
+    try {
+      e.source = this.ctx.createMediaStreamSource(e.stream);
+      e.source.connect(this.node, 0, slot);
+    } catch (err) {
+      e.source = null;
+      this.slots.free(nodeId);
+      console.warn('Could not use the live audio stream:', err);
+    }
+  }
+
+  private detachStream(nodeId: string): void {
+    const e = this.liveStreams.get(nodeId);
+    if (e?.source) {
+      e.source.disconnect();
+      e.source = null;
+    }
+    this.slots.free(nodeId);
+  }
+
+  /** A track was added or removed: reconnect so the current audio tracks are what the worklet hears. */
+  private resyncStream(nodeId: string): void {
+    this.detachStream(nodeId);
+    this.attachStream(nodeId);
+    this.publishSlots();
   }
 
   /** getUserMedia with an exact device; falls back to the system default (with a warning) if that device is gone. */
@@ -304,9 +390,10 @@ class WebAudioEngine implements AudioEngine {
   }
 
   private releaseAllMics(): void {
-    for (const m of this.mics.values()) {
+    for (const [id, m] of this.mics) {
       m.source.disconnect();
       m.stream.getTracks().forEach((t) => t.stop());
+      this.slots.free(id);
     }
     this.mics.clear();
   }

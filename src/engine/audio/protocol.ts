@@ -25,5 +25,5 @@ export type FromWorklet =
 
 export const WORKLET_NAME = 'rsmps-audio';
 
-/** Number of microphone nodes that can be live at once (one worklet input each). */
-export const MAX_MICS = 4;
+/** Number of live audio sources (microphones + phone streams) at once: one worklet input each. */
+export const MAX_MICS = 8;

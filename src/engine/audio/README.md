@@ -287,6 +287,27 @@ Media In.Sound ─► (Volume, Compressor, Reverb ...) ─► Audio Out
   a Timeline's `recordAudio` or the Sound to Numbers node.
 * **Audio File** stays for standalone audio assets (music, recordings) that follow the transport from time 0.
 
+## Phone as a microphone
+
+A linked phone's microphone can feed the audio graph. The **Phone Camera** node has a **Sound** output (audible only with "Hear
+the phone" on: a phone near the speakers feeds back) and a **Silent tap** output (always live), like the Microphone node.
+
+```
+Phone Camera.Silent tap ─► Audio to MIDI ─► Synth ─► Audio Out        (sing into the phone, hear a synth)
+Phone Camera.Silent tap ─► Sound to Numbers.Loudness ─► (wire) ─► any picture setting
+```
+
+* Params (group "Sound"): `gain` (dB), `monitor` (default off), `gate` and `gateThreshold` (dB), `latencyMs` (link delay).
+* The app hands the phone's remote WebRTC stream to the engine with `AudioEngine.setLiveStream(nodeId, stream)`; the node reads
+  it through one of the shared live-input slots (microphones and phone streams share 8, `MAX_MICS`; the lowest free slot is
+  used and kept). A stream with no audio track is silence, a track added later is picked up, and the source is released when
+  the stream is set to null, the node disappears, or on `stop()` (it re-attaches on `start()`).
+* **Latency**: WebRTC adds roughly 100-300 ms. `latencyMs` (default 150) is added to the recording latency compensation when a
+  Timeline records this node's sound, so a take recorded from the phone lines up (like device latency, it moves the take
+  earlier). Live monitoring through the phone cannot be made tighter than the link allows.
+* **Live only.** Silent in an export. To export an animation or a performance made with the phone: record the take into a
+  Timeline (`Phone Camera.Silent tap` into `Timeline.recordAudio`), then export that.
+
 ## Not in v1
 
 * **Plugins cannot add audio nodes.** The worklet only knows the built-in nodes (functions cannot be sent to it).

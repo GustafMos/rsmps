@@ -1,4 +1,5 @@
 import { defineNode } from '../../define';
+import { liveInputKernel } from '../../audio/live-input';
 
 /**
  * A phone's camera, streamed to this computer through the QR-code phone link (needs the dev server in LAN mode:
@@ -14,7 +15,11 @@ export default defineNode({
   description: 'Live picture from a phone camera, linked by scanning a QR code. Needs the app started with "npm run dev:lan" and both devices on the same Wi-Fi. Live preview only.',
   keywords: ['phone', 'mobile', 'camera', 'qr', 'live', 'webcam', 'stream'],
   inputs: {},
-  outputs: { image: { type: 'image', label: 'Image' } },
+  outputs: {
+    image: { type: 'image', label: 'Image' },
+    audio: { type: 'audio', label: 'Sound' },
+    tap: { type: 'audio', label: 'Silent tap (always live)' },
+  },
   params: {
     session: { type: 'string', default: '', label: 'Session', visibleIf: () => false },
     mirror: { type: 'bool', default: false, label: 'Mirror', hint: 'Flip horizontally.' },
@@ -32,6 +37,11 @@ export default defineNode({
         { value: '270', label: '270° clockwise' },
       ],
     },
+    gain: { type: 'number', default: 0, min: -40, max: 40, step: 0.1, unit: 'db', label: 'Input gain', group: 'Sound' },
+    monitor: { type: 'bool', default: false, label: 'Hear the phone', group: 'Sound', hint: 'Off by default: a phone near the speakers feeds back. Use headphones.' },
+    gate: { type: 'bool', default: false, label: 'Noise gate', group: 'Sound' },
+    gateThreshold: { type: 'number', default: -50, min: -90, max: -10, step: 0.5, unit: 'db', label: 'Gate level', group: 'Sound', visibleIf: (p) => !!p.gate },
+    latencyMs: { type: 'number', default: 150, min: 0, max: 1000, step: 1, label: 'Link delay (ms)', group: 'Sound', hint: 'How late the phone sound arrives (WiFi + WebRTC, typically 100-300 ms). A Timeline recording this sound moves the take earlier by this much so it lines up.' },
     liveTick: { type: 'string', default: '', label: 'Live tick', visibleIf: () => false },
   },
   summary: (p) => (p.session ? 'linked' : 'not linked'),
@@ -67,4 +77,6 @@ export default defineNode({
     });
     return { image };
   },
+  // The phone's microphone (set up by the app through AudioEngine.setLiveStream). Live only: silent in exports.
+  audio: liveInputKernel,
 });

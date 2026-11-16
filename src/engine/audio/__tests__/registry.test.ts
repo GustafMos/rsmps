@@ -9,7 +9,7 @@ import { snapToScale, stepInScale } from '../scales';
 import { SR, audioRegistry, rms, sine, toneAmp } from '../testing';
 
 const EXPECTED = {
-  input: ['media-in'],
+  input: ['media-in', 'phone-camera'],
   'audio-source': ['audio-file', 'audio-timeline', 'microphone', 'oscillator'],
   output: ['audio-out'],
   'audio-fx': ['chorus', 'compressor', 'delay', 'distortion', 'eq', 'filter', 'flanger', 'gain', 'gate', 'limiter', 'mixer', 'pitch-shift', 'reverb', 'stereo-width', 'tremolo'],

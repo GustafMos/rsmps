@@ -217,9 +217,27 @@ export class AudioGraphRunner {
     this.recNode = target ? nodeId : null;
   }
 
-  /** Begin capturing on the armed node. `latency` = seconds of device latency to compensate (baseLatency + outputLatency). */
+  /**
+   * Begin capturing on the armed node. `latency` = seconds of device latency to compensate (baseLatency + outputLatency).
+   * Added to it: the largest `latencyMs` param among the nodes feeding the recording (a Phone Camera's link delay).
+   */
   startRecording(latency = 0): void {
-    if (this.recNode) this.control(this.recNode, { type: 'start', latency });
+    if (this.recNode) this.control(this.recNode, { type: 'start', latency: latency + this.upstreamLatency(this.recNode) });
+  }
+
+  /** Largest `latencyMs` (as seconds) of any node upstream of `nodeId`: delay the signal picked up on its way in. */
+  private upstreamLatency(nodeId: string): number {
+    const seen = new Set<string>();
+    let best = 0;
+    const visit = (pn: PlanNode | undefined) => {
+      if (!pn || seen.has(pn.id)) return;
+      seen.add(pn.id);
+      const ms = pn.params.latencyMs;
+      if (typeof ms === 'number' && Number.isFinite(ms) && pn.id !== nodeId) best = Math.max(best, ms / 1000);
+      for (const list of [...Object.values(pn.audioSrcs), ...Object.values(pn.midiSrcs)]) for (const src of list) visit(src.node);
+    };
+    visit(this.nodes.get(nodeId));
+    return best;
   }
 
   /** Stop and return the take (null if nothing was captured). The node stays armed. */
