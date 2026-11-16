@@ -93,33 +93,33 @@ export function NumberField(p: NumberFieldProps) {
   const move = (e: PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
     if (!g) return;
-    if (!g.moved) {
-      if (Math.abs(e.clientX - g.x0) < 3) return; // dead zone: a click never changes the value
-      g.moved = true;
-      g.lastX = e.clientX;
-      // keep scrubbing past the screen edge: lock the pointer where the browser allows it (falls back to clientX deltas)
-      try {
-        void (root.current as (HTMLElement & { requestPointerLock?: () => Promise<void> | void }) | null)?.requestPointerLock?.();
-      } catch {
-        /* not allowed here */
-      }
+    if (e.buttons === 0) {
+      // the button was released somewhere we did not see (lost capture): the drag is over, never scrub on a plain hover
+      gesture.current = null;
+      setMode(null);
       return;
     }
-    const locked = document.pointerLockElement === root.current;
-    let d = locked ? e.movementX : e.clientX - g.lastX;
+    if (!g.moved) {
+      // Dead zone: a click (even a slightly shaky one) never changes the value. No pointer lock: locking on a click made some
+      // browsers report large bogus movement, which sent the value flying.
+      if (Math.abs(e.clientX - g.x0) < 6) return;
+      g.moved = true;
+      g.lastX = e.clientX;
+      return;
+    }
+    let d = e.clientX - g.lastX;
     g.lastX = e.clientX;
-    if (Math.abs(d) > 80) d = 0; // outlier jump (lost capture, cursor warp): ignore it
+    if (Math.abs(d) > 60) d = 0; // outlier jump (lost capture, cursor warp): ignore it
     const mult = e.shiftKey ? 0.1 : e.ctrlKey || e.metaKey ? 10 : 1;
     const m = e.shiftKey ? 'fine' : e.ctrlKey || e.metaKey ? 'coarse' : null;
     setMode((cur) => (cur === m ? cur : m));
-    g.vf += d * rate(g.vf) * mult; // accumulates sub-pixel / sub-step movement; integers round only on output
+    g.vf += d * rate(g.v0) * mult; // rate from the value at the START of the drag: linear, never runaway growth // accumulates sub-pixel / sub-step movement; integers round only on output
     p.onChange(fix(g.vf, true));
   };
   const up = (e: PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
     gesture.current = null;
     setMode(null);
-    if (document.pointerLockElement === root.current) document.exitPointerLock();
     if (!g) return;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (!g.moved) {
@@ -145,7 +145,6 @@ export function NumberField(p: NumberFieldProps) {
       const g = gesture.current;
       gesture.current = null;
       setMode(null);
-      if (document.pointerLockElement === root.current) document.exitPointerLock();
       if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
       if (g.moved) p.onChange(fix(g.v0));
       e.stopPropagation();
@@ -205,6 +204,8 @@ export function NumberField(p: NumberFieldProps) {
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
+      onPointerCancel={() => { gesture.current = null; setMode(null); }}
+      onLostPointerCapture={() => { if (gesture.current?.moved) { gesture.current = null; setMode(null); } }}
       onDoubleClick={reset}
       onKeyDown={keys}
     >
