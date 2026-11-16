@@ -24,8 +24,8 @@
           "extract": { "binary": "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe", "extra": ["ffmpeg-9.0.2-essentials_build/LICENSE", "ffmpeg-9.0.2-essentials_build/README.txt"] },
           "license": { "name": "GPL-3.0-or-later (this build includes GPL libraries such as x264 and x265)", "url": "https://www.gnu.org/licenses/gpl-3.0.html" },
           "source": { "name": "Gyan Doshi's FFmpeg builds (linked from ffmpeg.org/download.html)", "url": "https://www.gyan.dev/ffmpeg/builds/", "host": "github.com" },
-          "hashSource": "SHA-256 published by gyan.dev (ffmpeg-release-essentials.zip.sha256, release 9.0.2). The archive size matches the GitHub asset (114768076 bytes). Not recomputed by a download in the build environment: the app refuses a file that does not match, so a wrong pin fails safe.",
-          "verified": false
+          "hashSource": "SHA-256 published by gyan.dev (ffmpeg-release-essentials.zip.sha256, release 9.0.2). The archive size matches the GitHub asset (114768076 bytes). Recomputed from a download of the URL above on 2026-11-16: the hash and the size match, and the archive contains the three listed files.",
+          "verified": true
         }
       }
     }
