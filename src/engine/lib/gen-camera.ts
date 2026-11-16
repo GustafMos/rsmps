@@ -48,3 +48,24 @@ export function cameraBasis(cam: Pick<CameraValue, 'position' | 'target' | 'roll
     up: add(scale(right0, -s), scale(up0, c)),
   };
 }
+
+/**
+ * The simple built-in camera of the 3D generators, expressed as a CameraValue: an object about 2 units wide
+ * at the origin fills `frameSize` of the frame's shorter side and sits at (x, y) of the frame.
+ */
+export function simpleCamera(o: { ortho: boolean; fovDeg: number; frameSize: number; x: number; y: number; width: number; height: number }): CameraValue {
+  const scale = Math.max(0.001, o.frameSize);
+  const short = Math.min(o.width, o.height);
+  const D = 1 / Math.sin((Math.min(90, Math.max(5, o.fovDeg)) * Math.PI) / 360);
+  const tanH = 1 / Math.sqrt(D * D - 1);
+  return {
+    kind: 'camera',
+    projection: o.ortho ? 'orthographic' : 'perspective',
+    fov: (2 * Math.atan(tanH / scale) * 180) / Math.PI,
+    orthoSize: 2 / scale,
+    position: [0, 0, o.ortho ? -6 : -D],
+    target: [0, 0, 0],
+    roll: 0,
+    shift: [((o.x - 0.5) * o.width) / short, (-(o.y - 0.5) * o.height) / short],
+  };
+}

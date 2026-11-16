@@ -1,5 +1,5 @@
 import { defineNode } from '../../define';
-import { cameraBasis, PROJECTION_ID } from '../../lib/gen-camera';
+import { cameraBasis, PROJECTION_ID, simpleCamera } from '../../lib/gen-camera';
 import { rgba, rotationZYX } from '../../lib/gen-common';
 import type { CameraValue } from '../../types';
 
@@ -54,6 +54,7 @@ export default defineNode({
     spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z (turns per loop)', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
+    bevel: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Edge bevel', group: 'Object', hint: '0 = perfectly sharp edges and corners. About 0.07 gives the slightly soft edge older versions had; 1 rounds the shape right off. Applies to cube, cylinder, cone, pyramid and octahedron.' },
     lightAzimuth: { type: 'number', default: -35, min: -180, max: 180, step: 1, unit: 'deg', label: 'Light from (left/right)', group: 'Lighting' },
     lightElevation: { type: 'number', default: 40, min: -90, max: 90, step: 1, unit: 'deg', label: 'Light height', group: 'Lighting' },
     ambient: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Ambient light', group: 'Lighting' },
@@ -75,24 +76,7 @@ export default defineNode({
 
     // The wired camera wins; otherwise build the equivalent of the simple built-in camera.
     let cam: CameraValue | null = ctx.in.camera;
-    if (!cam) {
-      const scale = Math.max(0.001, p.scale);
-      const short = Math.min(size.width, size.height);
-      const ortho = p.cameraType === 'orthographic';
-      const D = 1 / Math.sin((Math.min(90, Math.max(5, p.fov)) * Math.PI) / 360);
-      const tanH = 1 / Math.sqrt(D * D - 1);
-      cam = {
-        kind: 'camera',
-        projection: ortho ? 'orthographic' : 'perspective',
-        fov: (2 * Math.atan(tanH / scale) * 180) / Math.PI,
-        orthoSize: 2 / scale,
-        position: [0, 0, ortho ? -6 : -D],
-        target: [0, 0, 0],
-        roll: 0,
-        // place the object at (x, y) of the frame
-        shift: [((p.x - 0.5) * size.width) / short, (-(p.y - 0.5) * size.height) / short],
-      };
-    }
+    if (!cam) cam = simpleCamera({ ortho: p.cameraType === 'orthographic', fovDeg: p.fov, frameSize: p.scale, x: p.x, y: p.y, width: size.width, height: size.height });
     const basis = cameraBasis(cam);
     const image = ctx.gpu.pass({
       label: 'object-3d',
@@ -118,6 +102,7 @@ export default defineNode({
         ambient: p.ambient,
         spec: p.specular,
         gloss: p.gloss,
+        bevel: p.bevel * 0.55,
         cel: p.cel,
         steps: Math.max(2, Math.round(p.celSteps)),
       },
@@ -136,10 +121,12 @@ fn sdCone(p: vec3f, c: vec2f, h: f32) -> f32 {
   let s = max(k * (w.x * q.y - w.y * q.x), k * (w.y - q.y));
   return sqrt(d) * sign(s);
 }
-// square pyramid as an intersection of 5 planes (base at y=-0.55, apex at y=0.65): exact inside, a safe lower bound outside
-fn sdPyramid(p: vec3f) -> f32 {
+// square pyramid (base at y=-0.55, apex at y=0.65) from 3 plane distances; with r > 0 the planes are inset by r and the
+// positive parts are combined with a length(), which rounds edges and corners (exact for the base edges, close elsewhere)
+fn sdPyramid(p: vec3f, r: f32) -> f32 {
   let side = vec2f(0.8944272, 0.4472136);
-  return max(-p.y - 0.55, max(side.x * abs(p.x) + side.y * p.y - 0.2906841, side.x * abs(p.z) + side.y * p.y - 0.2906841));
+  let v = vec3f(-p.y - 0.55, side.x * abs(p.x) + side.y * p.y - 0.2906841, side.x * abs(p.z) + side.y * p.y - 0.2906841) + vec3f(r);
+  return length(max(v, vec3f(0.0))) + min(max(v.x, max(v.y, v.z)), 0.0) - r;
 }
 fn sdOcta(pin: vec3f, s: f32) -> f32 {
   let p = abs(pin);
@@ -155,17 +142,23 @@ fn sdOcta(pin: vec3f, s: f32) -> f32 {
 
 fn mapObj(p: vec3f) -> f32 {
   let k = i32(u.shape);
-  if (k == 0) { return sdBox(p, vec3f(0.55), 0.04); }
+  if (k == 0) { return sdBox(p, vec3f(0.55), min(u.bevel, 0.55)); }
   if (k == 1) { return length(p) - 0.95; }
   if (k == 2) {
-    let d = vec2f(length(p.xz) - 0.7, abs(p.y) - 0.7) + vec2f(0.04);
-    return min(max(d.x, d.y), 0.0) + length(max(d, vec2f(0.0))) - 0.04;
+    let r = min(u.bevel, 0.69);
+    let d = vec2f(length(p.xz) - 0.7, abs(p.y) - 0.7) + vec2f(r);
+    return min(max(d.x, d.y), 0.0) + length(max(d, vec2f(0.0))) - r;
   }
-  if (k == 3) { return sdCone(p - vec3f(0.0, 0.8, 0.0), vec2f(0.4472136, 0.8944272), 1.6); }
+  if (k == 3) {
+    // rounding = the cone inset by r, then offset by r (tip drops 2.236 r, base rises r)
+    let r = min(u.bevel, 0.45);
+    return sdCone(p - vec3f(0.0, 0.8 - 2.236 * r, 0.0), vec2f(0.4472136, 0.8944272), 1.6 - 3.236 * r) - r;
+  }
   if (k == 4) { return length(vec2f(length(p.xz) - 0.68, p.y)) - 0.28; }
-  if (k == 5) { return sdPyramid(p); }
+  if (k == 5) { return sdPyramid(p, min(u.bevel, 0.3)); }
   if (k == 6) { return length(vec3f(p.x, p.y - clamp(p.y, -0.45, 0.45), p.z)) - 0.5; }
-  return sdOcta(p, 1.0);
+  let r = min(u.bevel, 0.5);
+  return sdOcta(p, 1.0 - 1.7320508 * r) - r;
 }
 fn map(pw: vec3f) -> f32 {
   let q = pw - u.objPos;

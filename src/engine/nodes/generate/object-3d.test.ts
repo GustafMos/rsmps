@@ -86,3 +86,25 @@ it('spinning loops exactly (whole turns) and moves', async () => {
   const still = await t.loopCheck('object-3d', { spinY: 0 }, size);
   expect(still.motion).toBe(0);
 });
+
+it('bevel: default is a perfectly sharp cube corner; a bevel rounds it', async () => {
+  // orthographic front view: the square spans 32 +- 8.8; the pixel at (40, 40) holds the corner
+  const sharp = await draw({ shape: 'cube', scale: 0.5 });
+  const soft = await draw({ shape: 'cube', scale: 0.5, bevel: 0.4 });
+  expect(alphaAt(sharp, 40, 40)).toBeGreaterThan(130); // ~0.8 x 0.8 of the pixel is inside
+  expect(alphaAt(soft, 40, 40)).toBeLessThan(50);
+  expect(alphaAt(sharp, 40, 32)).toBe(255); // straight edge pixels are full
+  expect(alphaAt(sharp, 32, 41)).toBe(0);
+  // the face stays flat up to the edge: no shading ramp near the silhouette
+  const i = (32 * 64 + 39) * 4;
+  expect(Math.abs(sharp.data[i] - sharp.data[(32 * 64 + 32) * 4])).toBeLessThan(3);
+});
+
+it('every bevelled shape still renders, and bevel 0 differs from bevel 0.3', async () => {
+  for (const shape of ['cube', 'cylinder', 'cone', 'pyramid', 'octahedron']) {
+    const a = await draw({ shape, rotX: 20, rotY: 30 });
+    const b = await draw({ shape, rotX: 20, rotY: 30, bevel: 0.3 });
+    expect(alphaAt(b, 32, 32), shape).toBeGreaterThan(200);
+    expect(Buffer.from(a.data).equals(Buffer.from(b.data)), shape).toBe(false);
+  }
+});
