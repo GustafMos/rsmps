@@ -3,6 +3,7 @@ import type { OpenProject } from '../../io/api';
 import { Icon } from '../components/Icon';
 import { MenuButton, MenuPopup, type MenuItem } from '../components/Menu';
 import { useApp, useEd } from '../store/context';
+import { openPresetInNewTab, usePresetList } from '../components/PresetRow';
 import './tabs.css';
 
 function ago(t: number): string {
@@ -15,7 +16,9 @@ function ago(t: number): string {
 
 /** One tab per open project. Only the active project is in memory; background tabs are just this metadata. */
 export function ProjectTabs() {
-  const { ed, io } = useApp();
+  const app = useApp();
+  const { ed, io } = app;
+  const presets = usePresetList().filter((p) => p.builtin);
   const projects = useEd((s) => s.projects);
   const active = useEd((s) => s.activeProject);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -108,7 +111,7 @@ export function ProjectTabs() {
       <button className="rs-btn rs-btn--icon rs-btn--ghost rs-tabs__new" onClick={() => void ed.newProjectTab()} title="New project in a new tab (Ctrl+Alt+T)" aria-label="New tab">
         <Icon name="plus" />
       </button>
-      <MenuButton className="rs-btn rs-btn--icon rs-btn--ghost rs-tabs__new" title="New project or scan" items={[{ label: 'New project', onClick: () => void ed.newProjectTab(), shortcut: 'Ctrl+Alt+T' }, { label: 'New scan', onClick: () => void ed.newScanTab() }]}><Icon name="chevronDown" size={12} /></MenuButton>
+      <MenuButton className="rs-btn rs-btn--icon rs-btn--ghost rs-tabs__new" title="New project or scan" items={[{ label: 'New project', onClick: () => void ed.newProjectTab(), shortcut: 'Ctrl+Alt+T' }, { label: 'New scan', onClick: () => void ed.newScanTab() }, ...(presets.length ? [{ sep: true } as MenuItem, { head: 'Start from a preset' } as MenuItem, ...presets.slice(0, 5).map((p) => ({ label: p.name, onClick: () => void openPresetInNewTab(app, p.id, p.name) })), { label: 'More presets…', onClick: () => ed.openDialog('presets') }] : [])]}><Icon name="chevronDown" size={12} /></MenuButton>
       <span className="rs-tabs__mem" title="Only the active tab is loaded. Background tabs keep just their name and a thumbnail; undo history is cleared when you switch tabs.">
         1 live
       </span>

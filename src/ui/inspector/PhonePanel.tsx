@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AnyNodeDef, NodeInstance, ParamDef } from '../../engine/types';
-import type { PhoneSessionInfo, PhoneState } from '../../io/api';
+import type { PhoneAddress, PhoneSessionInfo, PhoneState } from '../../io/api';
 import { Icon } from '../components/Icon';
 import { useApp } from '../store/context';
 
@@ -33,6 +33,20 @@ export function usePhoneState(token: string): PhoneState | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [io, token]);
   return state;
+}
+
+/** Help line for a token (what the phone reported, or the firewall checklist after a while). */
+function usePhoneDetail(token: string): string {
+  const { io } = useApp();
+  const [detail, setDetail] = useState(() => (token ? io.phone.detail(token) : ''));
+  useEffect(() => {
+    setDetail(token ? io.phone.detail(token) : '');
+    if (!token) return;
+    return io.phone.onState((t, _s, d) => {
+      if (t === token) setDetail(d);
+    });
+  }, [io, token]);
+  return detail;
 }
 
 function useCountdown(until: number | null, on: boolean): number {
@@ -85,17 +99,29 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
   const token = String(node.params.session ?? '');
   const state = usePhoneState(token);
   const [info, setInfo] = useState<PhoneSessionInfo | null>(null);
+  const [addrs, setAddrs] = useState<PhoneAddress[]>([]);
+  const [address, setAddress] = useState('');
+  const detail = usePhoneDetail(token);
+  useEffect(() => {
+    let live = true;
+    if (io.phone.available) void io.phone.addresses().then((a) => { if (live) { setAddrs(a); setAddress((cur) => cur || a[0]?.url || ''); } }).catch(() => undefined);
+    return () => { live = false; };
+  }, [io]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const mine = info && info.token === token ? info : null;
-  const left = useCountdown(mine?.expiresAt ?? null, state === 'waiting');
+  const expires = token && state === 'waiting' ? io.phone.expiresAt(token) ?? mine?.expiresAt ?? null : null;
+  const left = useCountdown(expires, state === 'waiting');
 
-  const create = async () => {
+  const create = async (addr: string = address) => {
     setBusy(true);
     setErr('');
     try {
       if (token) io.phone.close(token);
-      const s = await io.phone.createSession();
+      // a packaged app may start its phone server on demand: call it first when it exists
+      const on = io.phone as unknown as { startServer?: () => Promise<unknown> };
+      if (on.startServer) await on.startServer();
+      const s = await io.phone.createSession(addr ? { address: addr } : undefined);
       madeHere.add(s.token);
       setInfo(s);
       ed.setParam(node.id, 'session', s.token);
@@ -127,13 +153,29 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
     <div className="rs-insp__sec rs-phone">
       <div className="rs-caps">Link a phone</div>
       <div className="rs-insp__actions">
-        <button className="rs-btn rs-btn--primary" disabled={busy} onClick={create}>{token && state ? 'New code' : 'Link a phone'}</button>
+        <button className="rs-btn rs-btn--primary" disabled={busy} onClick={() => void create()}>{token && state ? 'New code' : 'Link a phone'}</button>
         {token && <button className="rs-btn" onClick={disconnect}>Disconnect</button>}
       </div>
+      {addrs.length > 1 && (
+        <label className="rs-phone__addr">
+          <span className="rs-insp__hint">Address the phone will use</span>
+          <select className="rs-select" value={address} aria-label="Address the phone will use" onChange={(e) => { setAddress(e.target.value); if (token && state) void create(e.target.value); }}>
+            {addrs.map((a) => <option key={a.url} value={a.url}>{a.label}</option>)}
+          </select>
+        </label>
+      )}
       {err && <p className="rs-insp__warn">{err}</p>}
       {token && state && (
         <div className={`rs-phone__status${state === 'connected' ? ' is-ok' : ''}`} role="status">{status}</div>
       )}
+      {token && state && state !== 'expired' && (
+        <ol className="rs-phone__steps" aria-label="Progress">
+          {[['Reached your computer', state === 'connected' || /reached|accepted|connect/i.test(detail)], ['Code accepted', state === 'connected' || /accepted|Connecting the video/i.test(detail)], ['Video connected', state === 'connected']].map(([label, ok]) => (
+            <li key={String(label)} className={ok ? 'is-done' : ''}><Icon name={ok ? 'check' : 'more'} size={16} />{String(label)}</li>
+          ))}
+        </ol>
+      )}
+      {token && state && detail && state !== 'connected' && <p className="rs-insp__hint rs-phone__detail">{detail}</p>}
       {mine && state !== 'expired' && (
         <>
           <div className="rs-phone__qr" aria-label="QR code to scan with the phone" dangerouslySetInnerHTML={{ __html: mine.qrSvg }} />

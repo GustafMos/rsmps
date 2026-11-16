@@ -6,6 +6,7 @@ import { NodeView } from './NodeView';
 import { Wires } from './Wires';
 import { Frames } from './Frames';
 import { SelectionToolbar } from './SelectionToolbar';
+import { PresetRow } from '../components/PresetRow';
 import './graph.css';
 
 export function GraphView() {
@@ -145,6 +146,7 @@ export function GraphView() {
             Empty graph.
             <br />
             Press <span className="rs-kbd">Shift+A</span> to add a node, or drag media here from the library.
+            <PresetRow />
           </div>
         </div>
       )}

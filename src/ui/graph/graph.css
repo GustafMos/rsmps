@@ -69,3 +69,5 @@
 .rs-seltb__btn:focus-visible { box-shadow: var(--focus); }
 .rs-seltb__btn.is-on { color: var(--accent-hi); }
 @media (pointer: coarse) { .rs-seltb__btn { width: 36px; height: 36px; } }
+.rs-presetrow { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); margin-top: var(--s-3); pointer-events: auto; }
+.rs-presetrow__btns { display: flex; flex-wrap: wrap; gap: var(--s-1); justify-content: center; max-width: 520px; }

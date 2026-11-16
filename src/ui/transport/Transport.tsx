@@ -1,5 +1,6 @@
 import type { InputSchema, OutputSchema } from '../../engine/types';
 import { useEffect, useRef, useState } from 'react';
+import { MemoryMeter } from './MemoryMeter';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { formatTime } from '../lib/drag';
@@ -75,6 +76,7 @@ export function Transport() {
           </>
         )}
       </div>
+      <MemoryMeter />
     </footer>
   );
 }

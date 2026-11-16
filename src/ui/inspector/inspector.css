@@ -85,3 +85,8 @@
 .rs-insp__req { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-2); background: #f5c5421a; border: 1px solid #f5c54266; border-radius: var(--r); }
 .rs-insp__req p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--text); }
 .rs-insp__reqhead { display: flex; align-items: center; gap: var(--s-2); color: var(--yellow); }
+.rs-phone__addr { display: flex; flex-direction: column; gap: var(--s-1); }
+.rs-phone__steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-sm); color: var(--text-faint); }
+.rs-phone__steps li { display: flex; align-items: center; gap: var(--s-2); }
+.rs-phone__steps li.is-done { color: var(--ok); }
+.rs-phone__detail { color: var(--text-dim); }

@@ -2,22 +2,21 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../components/Icon';
 import { useApp } from '../store/context';
 import { Dialog } from './Dialog';
+import { openPresetInNewTab } from '../components/PresetRow';
 
 type Preset = Awaited<ReturnType<ReturnType<typeof useApp>['io']['projects']['listPresets']>>[number];
 
 export function PresetsDialog() {
-  const { io, ed } = useApp();
+  const app = useApp();
+  const { io, ed } = app;
   const [list, setList] = useState<Preset[] | null>(null);
   const refresh = () => io.projects.listPresets().then(setList).catch((e) => ed.toast(`Could not list presets: ${e instanceof Error ? e.message : String(e)}`, 'error'));
   useEffect(() => void refresh(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const load = async (id: string) => {
-    const g = await io.projects.loadPreset(id);
-    if (!g) return ed.toast('Could not load that preset.', 'error');
-    // keep the current project's media assets out of it: presets are graphs without media
-    ed.loadGraph(g, true);
+  // a preset always opens as a new project tab; the current project is never overwritten
+  const load = async (id: string, name: string) => {
     ed.openDialog(null);
-    ed.toast('Preset loaded (Ctrl+Z to go back)', 'ok');
+    await openPresetInNewTab(app, id, name);
   };
 
   return (
@@ -33,7 +32,7 @@ export function PresetsDialog() {
               <div className="rs-preset__img">{p.thumbnail ? <img src={p.thumbnail} alt="" /> : <Icon name="image" size={24} />}</div>
               <div className="rs-preset__name" title={p.name}>{p.name}</div>
               <div className="rs-preset__btns">
-                <button className="rs-btn rs-btn--primary" onClick={() => void load(p.id)}>Load</button>
+                <button className="rs-btn rs-btn--primary" onClick={() => void load(p.id, p.name)}>Load</button>
                 {p.builtin ? <span className="rs-caps">built-in</span> : (
                   <button className="rs-btn rs-btn--icon rs-btn--ghost rs-btn--danger" title="Delete preset" onClick={() => void io.projects.deletePreset(p.id).then(refresh)}><Icon name="trash" /></button>
                 )}
