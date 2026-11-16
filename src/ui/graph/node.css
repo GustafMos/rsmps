@@ -126,3 +126,4 @@
 /* inputs: filled = a wire is connected, hollow = free */
 .rs-sock--in:not(.is-wired) { background: var(--bg-2); }
 .rs-node__req { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 var(--s-1); margin-right: 2px; font-size: var(--fs-xs); color: var(--yellow); background: #f5c5421f; border: 1px solid #f5c54266; border-radius: var(--r); white-space: nowrap; cursor: default; }
+.rs-slide .rs-node { transition: transform 120ms ease-out; }

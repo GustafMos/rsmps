@@ -93,9 +93,16 @@ export function NumberField(p: NumberFieldProps) {
       if (Math.abs(e.clientX - g.x0) < 3) return; // dead zone: a click never changes the value
       g.moved = true;
       g.lastX = e.clientX;
+      // keep scrubbing past the screen edge: lock the pointer where the browser allows it (falls back to clientX deltas)
+      try {
+        void (root.current as (HTMLElement & { requestPointerLock?: () => Promise<void> | void }) | null)?.requestPointerLock?.();
+      } catch {
+        /* not allowed here */
+      }
       return;
     }
-    let d = e.clientX - g.lastX;
+    const locked = document.pointerLockElement === root.current;
+    let d = locked ? e.movementX : e.clientX - g.lastX;
     g.lastX = e.clientX;
     if (Math.abs(d) > 80) d = 0; // outlier jump (lost capture, cursor warp): ignore it
     const mult = e.shiftKey ? 0.1 : e.ctrlKey || e.metaKey ? 10 : 1;
@@ -108,6 +115,7 @@ export function NumberField(p: NumberFieldProps) {
     const g = gesture.current;
     gesture.current = null;
     setMode(null);
+    if (document.pointerLockElement === root.current) document.exitPointerLock();
     if (!g) return;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (!g.moved) {
@@ -133,6 +141,7 @@ export function NumberField(p: NumberFieldProps) {
       const g = gesture.current;
       gesture.current = null;
       setMode(null);
+      if (document.pointerLockElement === root.current) document.exitPointerLock();
       if (root.current?.hasPointerCapture(g.id)) root.current.releasePointerCapture(g.id);
       if (g.moved) p.onChange(fix(g.v0));
       e.stopPropagation();

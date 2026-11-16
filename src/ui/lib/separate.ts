@@ -49,34 +49,31 @@ export function separateMoved(prev: GraphDoc, next: GraphDoc, registry: Registry
 }
 
 /**
- * A node whose body grew (a param got wired, a layer list got longer, a hidden param became visible) pushes the nodes below it
- * down by just enough to keep a gap, cascading. Nothing moves back when it shrinks again.
+ * `id` just got taller: push the nodes below it down by just enough to keep a gap, cascading. Returns the new graph and how far
+ * each node moved, so the editor can pull exactly that back when the node shrinks again.
  */
-export function pushForGrowth(prev: GraphDoc, next: GraphDoc, registry: Registry): GraphDoc {
-  const prevH = new Map<string, number>();
-  for (const n of prev.nodes) prevH.set(n.id, layoutFor(prev, n, registry.get(n.type)).height);
-  const grown: string[] = [];
-  for (const n of next.nodes) {
-    const h = prevH.get(n.id);
-    if (h !== undefined && layoutFor(next, n, registry.get(n.type)).height > h + 0.5) grown.push(n.id);
-  }
-  if (!grown.length) return next;
-  let g = next;
-  const queue = [...grown];
+export function pushBelow(graph: GraphDoc, registry: Registry, id: string): { graph: GraphDoc; moved: Map<string, number> } {
+  let g = graph;
+  const moved = new Map<string, number>();
+  const queue = [id];
   let guard = 0;
-  while (queue.length && guard++ < 60) {
-    const id = queue.shift()!;
+  while (queue.length && guard++ < 80) {
+    const cur = queue.shift()!;
     const rects = nodeRects(g, registry);
-    const r = rects.get(id)!;
-    const below = [...rects].filter(([oid, o]) => oid !== id && o.y >= r.y + 4 && o.x < r.x + r.w && r.x < o.x + o.w && o.y < r.y + r.h + MARGIN).sort((a, b) => a[1].y - b[1].y);
+    const r = rects.get(cur);
+    if (!r) continue;
     const shifts = new Map<string, number>();
-    for (const [oid, o] of below) {
+    for (const [oid, o] of rects) {
+      if (oid === cur || o.y < r.y + 4 || o.x >= r.x + r.w || r.x >= o.x + o.w) continue;
       const d = r.y + r.h + MARGIN - o.y;
       if (d > 0) shifts.set(oid, d);
     }
     if (!shifts.size) continue;
     g = { ...g, nodes: g.nodes.map((n) => (shifts.has(n.id) ? { ...n, y: Math.round(n.y + shifts.get(n.id)!) } : n)) };
-    queue.push(...shifts.keys());
+    for (const [k, d] of shifts) {
+      moved.set(k, (moved.get(k) ?? 0) + d);
+      queue.push(k);
+    }
   }
-  return g;
+  return { graph: g, moved };
 }

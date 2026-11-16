@@ -22,7 +22,7 @@ import type { Registry } from '../../engine/define';
 import type { AssetInfo, Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
 import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
-import { pushForGrowth, separateMoved } from '../lib/separate';
+import { pushBelow, separateMoved } from '../lib/separate';
 import { outputType } from '../../engine/graph';
 import { createScanProject } from '../scan/session';
 import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/audio/timeline';
@@ -228,6 +228,7 @@ export class Editor {
       canRedo: false,
       docRev: this.state.docRev + 1,
     });
+    this.syncHeights();
   }
 
   /** First-run / "New": Source → Output, viewed at the output. Found through the registry, no ids hard-coded. */
@@ -263,7 +264,6 @@ export class Editor {
   commit(next: GraphDoc, key?: string): void {
     const s = this.state;
     if (next === s.graph) return;
-    next = pushForGrowth(s.graph, next, this.registry);
     const now = performance.now();
     const coalesce = key && key === this.lastKey && (this.holds > 0 ? this.holdPushed : now - this.lastTime < 900) && this.past.length > 0;
     if (!coalesce) {
@@ -275,6 +275,66 @@ export class Editor {
     this.lastKey = key ?? '';
     this.lastTime = now;
     this.applyGraph(next);
+    this.reflow();
+  }
+
+  /** Heights the layout had when last looked at (to see which nodes grew or shrank), and what each growth pushed. */
+  private heights = new Map<string, number>();
+  private pushed = new Map<string, Map<string, number>>();
+
+  /** Start over from the current graph without moving anything (after load / undo / redo). */
+  syncHeights(): void {
+    const g = this.state.graph;
+    this.heights = new Map(g.nodes.map((n) => [n.id, layoutFor(g, n, this.registry.get(n.type)).height]));
+    this.pushed.clear();
+  }
+
+  /** Briefly animate node moves that the app made (not the user): see `.rs-slide` in node.css. */
+  private slide(): void {
+    if (typeof document === 'undefined') return;
+    document.body.classList.add('rs-slide');
+    window.setTimeout(() => document.body.classList.remove('rs-slide'), 220);
+  }
+
+  /**
+   * A node got taller (a param wired, "N more…" expanded, a layer list grew): push the nodes below it down. It got shorter:
+   * pull back only what its own growth pushed. Positions change without a history entry of their own.
+   */
+  reflow(): void {
+    const g0 = this.state.graph;
+    let g = g0;
+    const cur = new Map(g0.nodes.map((n) => [n.id, layoutFor(g0, n, this.registry.get(n.type)).height]));
+    for (const [id, h] of cur) {
+      const prev = this.heights.get(id);
+      if (prev === undefined) continue;
+      const d = h - prev;
+      if (d > 0.5) {
+        const res = pushBelow(g, this.registry, id);
+        g = res.graph;
+        const rec = this.pushed.get(id) ?? new Map<string, number>();
+        for (const [k, v] of res.moved) rec.set(k, (rec.get(k) ?? 0) + v);
+        this.pushed.set(id, rec);
+      } else if (d < -0.5) {
+        const rec = this.pushed.get(id);
+        if (rec) {
+          let left = -d;
+          const up = new Map<string, number>();
+          for (const [k, v] of rec) {
+            const take = Math.min(v, left);
+            if (take > 0) {
+              up.set(k, take);
+              rec.set(k, v - take);
+            }
+          }
+          if (up.size) g = { ...g, nodes: g.nodes.map((n) => (up.has(n.id) ? { ...n, y: Math.round(n.y - up.get(n.id)!) } : n)) };
+        }
+      }
+    }
+    this.heights = cur;
+    if (g !== g0) {
+      this.slide();
+      this.applyGraph(g);
+    }
   }
 
   /** While held, edits sharing a key form ONE undo step (a whole drag or popover session). */
@@ -301,7 +361,10 @@ export class Editor {
     try {
       const g0 = this.state.graph;
       // nothing may end up on top of another node: slide added / moved nodes to free space, push neighbours down for growth
-      this.commit(separateMoved(g0, fn(g0), this.registry), key);
+      const made = fn(g0);
+      const separated = separateMoved(g0, made, this.registry);
+      if (separated !== made) this.slide();
+      this.commit(separated, key);
     } catch (err) {
       this.toast(err instanceof Error ? err.message : String(err), 'error');
     }
@@ -331,6 +394,7 @@ export class Editor {
     this.future.push(this.state.graph);
     this.lastKey = '';
     this.applyGraph(prev);
+    this.syncHeights();
   }
   redo(): void {
     const next = this.future.pop();
@@ -338,6 +402,7 @@ export class Editor {
     this.past.push(this.state.graph);
     this.lastKey = '';
     this.applyGraph(next);
+    this.syncHeights();
   }
 
   /* ------------------------------ selection -------------------------------- */

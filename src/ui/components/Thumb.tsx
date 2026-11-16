@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { AssetInfo } from '../../engine/types';
+import type { AssetInfo, AssetsParam } from '../../engine/types';
 import { useIo } from '../store/context';
 import { Icon } from './Icon';
 
-const KIND_ICON = { image: 'image', video: 'video', audio: 'audio', midi: 'midi' } as const;
+import type { IconName } from './Icon';
+
+/** Icon per asset kind; a kind this table does not know yet falls back to a neutral file icon. */
+const KIND_ICON: Partial<Record<AssetInfo['kind'], IconName>> = { image: 'image', video: 'video', audio: 'audio', midi: 'midi', model: 'cube' };
 
 /** Library thumbnail with a kind icon fallback (audio/midi have no picture). */
 export function Thumb({ asset, size = 56 }: { asset: AssetInfo | undefined; size?: number }) {
@@ -32,7 +35,7 @@ export function Thumb({ asset, size = 56 }: { asset: AssetInfo | undefined; size
   }
   return (
     <div className="rs-thumb" style={{ width: size, height: size }} title={asset.name}>
-      {url ? <img src={url} alt={asset.name} draggable={false} /> : <Icon name={KIND_ICON[asset.kind]} size={20} />}
+      {url ? <img src={url} alt={asset.name} draggable={false} /> : <Icon name={KIND_ICON[asset.kind] ?? 'file'} size={20} />}
       {asset.kind === 'video' && (
         <span className="rs-thumb__badge">
           <Icon name="video" size={11} />
@@ -42,13 +45,18 @@ export function Thumb({ asset, size = 56 }: { asset: AssetInfo | undefined; size
   );
 }
 
-export function fileMatches(file: File, accept: 'image-video' | 'audio' | 'midi' | 'any'): boolean {
+type Accept = AssetsParam['accept'];
+
+export function fileMatches(file: File, accept: Accept): boolean {
   const t = file.type;
   const n = file.name.toLowerCase();
   if (accept === 'any') return true;
   if (accept === 'image-video') return t.startsWith('image/') || t.startsWith('video/');
   if (accept === 'audio') return t.startsWith('audio/');
-  return n.endsWith('.mid') || n.endsWith('.midi');
+  if (accept === 'model') return /.(glb|gltf|obj)$/.test(n);
+  if (accept === 'midi') return n.endsWith('.mid') || n.endsWith('.midi');
+  return true; // an accept kind this build does not know: let the node decide
 }
 
-export const ACCEPT_ATTR = { 'image-video': 'image/*,video/*', audio: 'audio/*', midi: '.mid,.midi', any: '' } as const;
+export const ACCEPT_ATTR: Record<string, string> = { 'image-video': 'image/*,video/*', audio: 'audio/*', midi: '.mid,.midi', model: '.glb,.gltf,.obj', any: '' };
+export const ACCEPT_LABEL: Record<string, string> = { 'image-video': 'images and videos', audio: 'audio', midi: 'MIDI files', model: '3D models', any: 'files' };

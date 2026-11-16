@@ -6,6 +6,7 @@ import { NodeView } from './NodeView';
 import { Wires } from './Wires';
 import { Frames } from './Frames';
 import { SelectionToolbar } from './SelectionToolbar';
+import { nodeViewStore } from '../store/nodeView';
 import { PresetRow } from '../components/PresetRow';
 import './graph.css';
 
@@ -54,6 +55,9 @@ export function GraphView() {
       ctl.root = ctl.layer = null;
     };
   }, [ctl, app]);
+
+  // expanding "N more…" or pinning a param changes a node's height: reflow the nodes below it
+  useEffect(() => nodeViewStore.subscribe(() => ed.reflow()), [ed]);
 
   // Native drag-and-drop, focus loss and tab switches swallow pointerup / keyup: drop back to idle on each of them
   useEffect(() => {
