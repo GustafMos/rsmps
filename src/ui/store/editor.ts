@@ -517,6 +517,24 @@ export class Editor {
     if (!inPort) return move(g, newId, src.x, src.y + layoutFor(g, src, sdef).height + 40); // a generator: just sits next to the selection
     const downstream = g.edges.filter((e) => e.from.node === srcId && e.from.port === outPort);
     let next = connect(g, this.registry, from, { node: newId, port: inPort });
+    return this.takeOver(next, from, newId, downstream).graph;
+  }
+
+  /**
+   * The new node `newId` takes over the downstream wires of output `from` (those in `downstream`) when its first output can
+   * feed them, keeping their position among a multi input's wires; wires that do not fit stay. The node is then placed between
+   * `from`'s node and its former consumers, pushing everything downstream right if there is no room.
+   */
+  private takeOver(g: GraphDoc, from: Edge['from'], newId: string, downstream: Edge[]): { graph: GraphDoc; rerouted: number } {
+    const srcId = from.node;
+    const src = g.nodes.find((n) => n.id === srcId)!;
+    const nn = g.nodes.find((n) => n.id === newId)!;
+    const ndef = this.registry.get(nn.type)!;
+    const srcW = layoutFor(g, src, this.registry.get(src.type)).width;
+    const newW = layoutFor(g, nn, ndef).width;
+    const GAP = 60;
+    const move = (gr: GraphDoc, id: string, x: number, y: number): GraphDoc => ({ ...gr, nodes: gr.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)) });
+    let next = g;
     const newOut = Object.keys(ndef.outputs)[0];
     const rerouted: Edge[] = [];
     if (newOut) {
@@ -554,7 +572,7 @@ export class Editor {
       }
     }
     x = Math.round(x);
-    return move(next, newId, x, Math.round(y));
+    return { graph: move(next, newId, x, Math.round(y)), rerouted: rerouted.length };
   }
 
   /**
@@ -641,14 +659,12 @@ export class Editor {
         next = connect(next, this.registry, base, to(multi));
         next = connect(next, this.registry, held, to(multi));
       }
-      const out = { node: newId, port: Object.keys(def.outputs)[0] };
       if (viewed === base.node) viewMerge = true;
-      else if (viewed) {
-        const feeding = next.edges.filter((e) => e.from.node === base.node && e.from.port === base.port && e.to.node === viewed);
-        if (feeding.length === 1 && next.edges.filter((e) => e.to.node === viewed && e.from.node === base.node).length === 1) {
-          next = connect(disconnect(next, feeding[0].id), this.registry, out, feeding[0].to);
-        }
-      }
+      // like chain insertion: the Merge takes over every downstream wire of the dropped-on output that it can feed
+      const downstream = g.edges.filter((e) => e.from.node === base.node && e.from.port === base.port);
+      const res = this.takeOver(next, base, newId, downstream);
+      next = res.graph;
+      if (!res.rerouted) next = { ...next, nodes: next.nodes.map((n) => (n.id === newId ? { ...n, x: at.x, y: at.y } : n)) };
       return next;
     });
     if (!newId) return false;
