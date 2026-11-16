@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Icon } from '../components/Icon';
 import { useApp } from '../store/context';
+import { AddonsSection } from './AddonsSection';
 import { Dialog } from './Dialog';
 
 export function PluginsDialog() {
@@ -33,6 +34,8 @@ export function PluginsDialog() {
     <Dialog title="Plugins" onClose={() => ed.openDialog(null)} width={560}
       footer={<><button className="rs-btn" onClick={() => ed.openDialog(null)}>Close</button><button className="rs-btn rs-btn--primary" disabled={busy} onClick={() => file.current?.click()}><Icon name="plus" /> Install plugin (.js)…</button></>}>
       <input ref={file} type="file" accept=".js,.mjs,text/javascript" hidden onChange={(e) => { void install(e.target.files?.[0]); e.target.value = ''; }} />
+      <AddonsSection />
+      <div className="rs-dlg__sec"><span className="rs-caps">Your plugins</span></div>
       <div className="rs-dlg__warn">
         <Icon name="warn" />
         <span>Plugins are code. They run inside this page with the same access as the app itself. Only install plugins from people you trust.</span>

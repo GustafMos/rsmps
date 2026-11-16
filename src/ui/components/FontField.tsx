@@ -87,9 +87,13 @@ function FontMenu({ x, y, w, value, anchor, onPick, onClose }: { x: number; y: n
   const [q, setQ] = useState('');
   const [local, setLocal] = useState<string[] | null>(localCache);
   const [active, setActive] = useState(0);
+  /** The browser refused to list installed fonts (permission denied / no gesture): show the common-font probe instead. */
+  const [denied, setDenied] = useState(false);
   const [pos, setPos] = useState({ x, y });
   const ref = useRef<HTMLDivElement>(null);
-  const canLocal = typeof (window as LocalFontsWindow).queryLocalFonts === 'function';
+  // dev-only switch to exercise the fallback probe in a browser that has queryLocalFonts (localStorage 'rsmps.dev.probeFonts' = '1'; off by default)
+  const forceProbe = import.meta.env.DEV && (() => { try { return localStorage.getItem('rsmps.dev.probeFonts') === '1'; } catch { return false; } })();
+  const canLocal = !forceProbe && typeof (window as LocalFontsWindow).queryLocalFonts === 'function';
 
   const groups = useMemo(() => {
     const seen = new Set<string>();
@@ -100,11 +104,11 @@ function FontMenu({ x, y, w, value, anchor, onPick, onClose }: { x: number; y: n
     if (rec.length) out.push({ title: 'Recent', items: rec });
     out.push({ title: 'Bundled', items: f(take(BUNDLED)) });
     out.push({ title: 'Generic', items: f(take(GENERIC)) });
-    if (canLocal) {
+    if (canLocal && !denied) {
       if (local) out.push({ title: 'On this computer', items: f(take(local)) });
     } else out.push({ title: 'On this computer', items: f(take(probeFonts())) });
     return out.filter((g) => g.items.length);
-  }, [q, local, canLocal]);
+  }, [q, local, canLocal, denied]);
   const flat = groups.flatMap((g) => g.items);
   const typed = q.trim() && !flat.some((n) => n.toLowerCase() === q.trim().toLowerCase()) ? q.trim() : null;
   const all = typed ? [...flat, typed] : flat;
@@ -135,10 +139,12 @@ function FontMenu({ x, y, w, value, anchor, onPick, onClose }: { x: number; y: n
   const askLocal = async () => {
     try {
       const fonts = await (window as LocalFontsWindow).queryLocalFonts!();
-      localCache = [...new Set(fonts.map((f) => f.family))].sort((a, b) => a.localeCompare(b));
-      setLocal(localCache);
+      const list = [...new Set(fonts.map((f) => f.family))].sort((a, b) => a.localeCompare(b));
+      if (!list.length) return setDenied(true); // some embedded browsers answer with an empty list instead of an error
+      localCache = list;
+      setLocal(list);
     } catch {
-      /* permission denied: the list stays as it is */
+      setDenied(true);
     }
   };
 
@@ -184,9 +190,10 @@ function FontMenu({ x, y, w, value, anchor, onPick, onClose }: { x: number; y: n
           </button>
         )}
       </div>
-      {canLocal && !local && (
+      {canLocal && !local && !denied && (
         <button className="rs-btn rs-fontmenu__local" onClick={() => void askLocal()}>Show fonts on this computer</button>
       )}
+      {canLocal && denied && <div className="rs-fontmenu__note">The browser did not allow listing your fonts, so common ones are shown. Any font name can still be typed.</div>}
     </div>,
     document.body,
   );

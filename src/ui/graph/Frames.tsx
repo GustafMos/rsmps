@@ -1,6 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { FrameBox } from '../../engine/types';
 import { frameRects, FRAME_HEAD } from '../lib/geometry';
+import { useSelector } from '../store/createStore';
+import { nodeViewStore } from '../store/nodeView';
 import { useApp, useDefs, useEd } from '../store/context';
 
 export const Frames = memo(function Frames() {
@@ -8,7 +10,9 @@ export const Frames = memo(function Frames() {
   const nodes = useEd((s) => s.graph.nodes);
   const frames = useEd((s) => s.graph.frames);
   useDefs();
-  const rects = useMemo(() => frameRects({ nodes, edges: [], frames } as never, io.registry), [nodes, frames, io]);
+  // node height depends on pinned / expanded params: recompute the outline when either changes, not only when nodes move
+  const view = useSelector(nodeViewStore, (s) => s);
+  const rects = useMemo(() => frameRects({ nodes, edges: [], frames } as never, io.registry), [nodes, frames, io, view]);
   return (
     <>
       {(frames ?? []).map((f) => {

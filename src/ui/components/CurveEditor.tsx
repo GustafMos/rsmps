@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { FloatingPanel } from './FloatingPanel';
 import type { CurveKey, CurveValue } from '../../engine/types';
 import {
   CURVE_PRESETS,
@@ -224,6 +224,7 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
   }, [c, view, ghost, selIdx, loop, frames, extra]);
 
   useLayoutEffect(() => draw(), [draw]);
+  useEffect(() => box.current?.focus({ preventScroll: true }), []); // so Del / I / Esc work at once
   useEffect(() => {
     const ro = new ResizeObserver(() => draw());
     if (box.current) ro.observe(box.current);
@@ -424,7 +425,7 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
         e.preventDefault();
         e.stopPropagation();
         insertAtPlayhead();
-      } else if (e.key === 'Escape') onClose();
+      }
     };
     const el = box.current!;
     el.addEventListener('keydown', key);
@@ -473,26 +474,10 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
     { label: 'Paste curve', onClick: () => void paste() },
   ];
 
-  // drag the panel by its header
-  const move = (e: React.PointerEvent) => {
-    const el = box.current!;
-    const r = el.getBoundingClientRect();
-    const dx = e.clientX - r.left;
-    const dy = e.clientY - r.top;
-    const mv = (ev: PointerEvent) => { el.style.left = `${ev.clientX - dx}px`; el.style.top = `${ev.clientY - dy}px`; el.style.bottom = 'auto'; el.style.transform = 'none'; };
-    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', mv);
-    window.addEventListener('pointerup', up);
-  };
-
   const k = c.keys[selIdx];
-  return createPortal(
-    <div ref={box} className="rs-ce" tabIndex={-1} role="dialog" aria-label={`Curve editor: ${title}`}>
-      <div className="rs-ce__head" onPointerDown={move}>
-        <span className="rs-caps">Curve{title && title.toLowerCase() !== 'curve' ? ` · ${title}` : ''}</span>
-        <span className="rs-ce__hint">click add · drag move · Shift snaps frames · Ctrl snaps value · Alt breaks handles · Del removes · I inserts at playhead</span>
-        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onClose} onPointerDown={(e) => e.stopPropagation()} aria-label="Close"><Icon name="close" /></button>
-      </div>
+  return (
+    <FloatingPanel id="curve-editor" title={`Curve${title && title.toLowerCase() !== 'curve' ? ` · ${title}` : ''}`} onClose={onClose} defaultSize={{ w: 680, h: 420 }} minSize={{ w: 420, h: 260 }}>
+    <div ref={box} className="rs-ce" tabIndex={-1} role="group" aria-label={`Curve editor: ${title}`}>
       <div className="rs-ce__bar">
         <div className="rs-ce__seg">
           {INTERPS.map((i) => (
@@ -516,9 +501,10 @@ export function CurveEditor({ title, curve, min, max, onChange, onClose }: {
         {boxRect && <div className="rs-ce__box" style={{ left: boxRect.x, top: boxRect.y, width: boxRect.w, height: boxRect.h }} />}
         <div ref={head} className="rs-ce__head-line" />
       </div>
+      <div className="rs-ce__hint">click add · drag move · Shift snaps frames · Ctrl snaps value · Alt breaks handles · Del removes · I inserts at playhead</div>
       {menu && <MenuPopup x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
-    </div>,
-    document.body,
+    </div>
+    </FloatingPanel>
   );
 }
 

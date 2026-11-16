@@ -4,12 +4,13 @@ import { watchStore } from '../watchdog';
 import { batchCount } from '../../engine/graph';
 import { CATEGORIES } from '../../engine/types';
 import { Icon } from '../components/Icon';
+import { MenuPopup, type MenuItem } from '../components/Menu';
 import { missingCapabilities } from '../lib/requirements';
 import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { PaintOverlay } from './PaintOverlay';
 import { PointsOverlay } from './PointsOverlay';
-import { FrameControl } from './FrameControl';
+import { FrameControl, useFrameMenuItems } from './FrameControl';
 import { Loupe } from './Loupe';
 import './viewer.css';
 
@@ -19,6 +20,7 @@ export function Viewer() {
   const { io, ed } = useApp();
   const box = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
+  const backing = useRef<HTMLDivElement>(null); // transparency checker: screen-space, so its squares keep one on-screen size at any zoom
   const canvas = useRef<HTMLCanvasElement>(null);
   const view = useRef({ zoom: 1, x: 0, y: 0, fit: true });
   const [zoomPct, setZoomPct] = useState(100);
@@ -70,6 +72,8 @@ export function Viewer() {
       v.y = (b.clientHeight - ih * v.zoom) / 2;
     }
     s.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
+    const k = backing.current;
+    if (k) Object.assign(k.style, { left: `${v.x}px`, top: `${v.y}px`, width: `${iw * v.zoom}px`, height: `${ih * v.zoom}px` });
     // nearest-neighbour only when enlarging; shrinking with it aliases fine detail into fake chunky pixels
     if (canvas.current) canvas.current.style.imageRendering = v.zoom >= 1 ? 'pixelated' : 'auto';
     const pct = Math.round(v.zoom * 100);
@@ -215,8 +219,86 @@ export function Viewer() {
       ? 'Nothing is being viewed. Click the eye on a node to see its result here.'
       : null;
 
+  /** 0 = every control inline; 1 = pixel size, snap, magnifier and background fold into the "…" menu; 2 = frame and batch fold in too. */
+  const bar = useRef<HTMLDivElement>(null);
+  const [level, setLevel] = useState<0 | 1 | 2>(0);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      setLevel(w >= 900 ? 0 : w >= 600 ? 1 : 2);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const [more, setMore] = useState<{ x: number; y: number } | null>(null);
+  const frameItems = useFrameMenuItems({ frame: level >= 2, pix: level >= 1 });
+  const moreItems: MenuItem[] = [];
+  if (level >= 2 && count > 1) moreItems.push({ head: `Batch item ${item + 1} / ${count}` }, { label: 'Previous item', onClick: () => ed.setItem(item - 1) }, { label: 'Next item', onClick: () => ed.setItem(item + 1) });
+  moreItems.push(...frameItems);
+  if (level >= 1) {
+    moreItems.push(
+      { head: 'View' },
+      { label: `${snap ? '✓ ' : ''}Snap Fit to whole pixels (1:n)`, onClick: () => { snapRef.current = !snap; setSnap(!snap); apply(); } },
+      { label: `Magnifier: ${loupe === 2 ? '2×' : loupe === 1 ? '1×' : 'off'} (click for next)`, onClick: () => setLoupe((l) => ((l + 1) % 3) as 0 | 1 | 2) },
+      { label: `Background: ${bg} (click for next)`, onClick: () => setBg((b) => (b === 'checker' ? 'dark' : b === 'dark' ? 'light' : 'checker')) },
+    );
+  }
+
   return (
-    <div ref={box} className={`rs-viewer rs-viewer--${bg}`} data-panel="viewer" onPointerDown={onPointerDown} onDoubleClick={() => setFitMode(true)}>
+    <div className="rs-viewer-wrap" data-panel="viewer">
+    <div ref={bar} className="rs-viewer__bar">
+      <div className="rs-viewer__info rs-viewer__chip" data-nodrag>
+        {nodeTitle ? (
+          <>
+            <span className="rs-viewer__dot" style={{ background: catColor }} />
+            <span className="rs-viewer__name">{nodeTitle}</span>
+            {imageSize && <span className="rs-num">{imageSize.width}×{imageSize.height}</span>}
+            <span className="rs-num" title="Measured frames per second">{playing ? `${fps} fps` : 'paused'}</span>
+            {proxy < 100 && <span className="rs-num" title="Playback proxy: the viewer renders at reduced resolution while playing" style={{ color: 'var(--yellow)' }}>proxy {proxy}%</span>}
+          </>
+        ) : (
+          <span className="rs-viewer__name">No view</span>
+        )}
+      </div>
+
+      {count > 1 && level < 2 && (
+        <div className="rs-viewer__batch rs-viewer__chip" data-nodrag title="Batch item (Ctrl+←/→)">
+          <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.setItem(item - 1)} aria-label="Previous batch item"><Icon name="chevronLeft" /></button>
+          <span className="rs-num">{item + 1} / {count}</span>
+          <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.setItem(item + 1)} aria-label="Next batch item"><Icon name="chevronRight" /></button>
+        </div>
+      )}
+
+      <FrameControl frame={level < 2} pix={level < 1} />
+      <div className="rs-viewer__tools rs-viewer__chip" data-nodrag>
+        <button className={`rs-btn rs-btn--ghost rs-viewer__fitbtn${fit ? ' is-on' : ''}`} onClick={() => setFitMode(true)} title="Fit to window (F or 0)"><Icon name="fit" /> Fit</button>
+        <button className={`rs-btn rs-viewer__actual${zoomPct === 100 && !fit ? ' is-on' : ''}`} onClick={oneToOne} title="Actual pixels, 100% (1)">100%</button>
+        {level < 1 && (
+          <>
+            <button className={`rs-btn rs-btn--ghost${snap ? ' is-on' : ''}`} onClick={() => { snapRef.current = !snap; setSnap(!snap); apply(); }} title="Snap Fit to whole-pixel zoom (1×, 2×, 3×…) when the image is smaller than the pane">1:n</button>
+            <button className={`rs-btn rs-btn--ghost${loupe || zHeld ? ' is-on' : ''}`} onClick={() => setLoupe((l) => ((l + 1) % 3) as 0 | 1 | 2)} title="Magnifier: off → 200% → 100% (or hold Z)">{loupe === 2 ? '🔍 2×' : loupe === 1 ? '🔍 1×' : '🔍'}</button>
+          </>
+        )}
+        <span className="rs-viewer__zoom rs-num" title={fit ? 'Fitted to the pane' : 'Manual zoom'}>{fit ? `Fit · ${zoomPct}%` : `${zoomPct}%`}</span>
+        {level < 1 && (
+          <button
+            className="rs-btn rs-btn--icon rs-btn--ghost"
+            onClick={() => setBg((b) => (b === 'checker' ? 'dark' : b === 'dark' ? 'light' : 'checker'))}
+            title={`Background: ${bg} (click to change)`}
+          >
+            <Icon name="grid" />
+          </button>
+        )}
+        {level > 0 && (
+          <button className="rs-btn rs-btn--icon rs-btn--ghost" title="More view controls" aria-label="More view controls" aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMore({ x: r.left, y: r.bottom + 2 }); }}>…</button>
+        )}
+      </div>
+      {more && <MenuPopup x={more.x} y={more.y} items={moreItems} onClose={() => setMore(null)} />}
+    </div>
+    <div ref={box} className={`rs-viewer rs-viewer--${bg}`} onPointerDown={onPointerDown} onDoubleClick={() => setFitMode(true)}>
+      <div ref={backing} className="rs-viewer__backing" style={{ visibility: imageSize ? 'visible' : 'hidden' }} />
       <div ref={stage} className="rs-viewer__stage" style={{ width: iw, height: ih, visibility: imageSize ? 'visible' : 'hidden' }}>
         <canvas ref={canvas} className="rs-viewer__canvas" style={{ width: iw, height: ih }} />
       </div>
@@ -256,43 +338,7 @@ export function Viewer() {
       {pointsNode && <PointsOverlay nodeId={pointsNode.id} stage={stage} />}
       {paint && <PaintOverlay nodeId={paint.id} stage={stage} />}
 
-      <div className="rs-viewer__info rs-viewer__chip" data-nodrag>
-        {nodeTitle ? (
-          <>
-            <span className="rs-viewer__dot" style={{ background: catColor }} />
-            <span className="rs-viewer__name">{nodeTitle}</span>
-            {imageSize && <span className="rs-num">{imageSize.width}×{imageSize.height}</span>}
-            <span className="rs-num" title="Measured frames per second">{playing ? `${fps} fps` : 'paused'}</span>
-            {proxy < 100 && <span className="rs-num" title="Playback proxy: the viewer renders at reduced resolution while playing" style={{ color: 'var(--yellow)' }}>proxy {proxy}%</span>}
-          </>
-        ) : (
-          <span className="rs-viewer__name">No view</span>
-        )}
-      </div>
-
-      {count > 1 && (
-        <div className="rs-viewer__batch rs-viewer__chip" data-nodrag title="Batch item (Ctrl+←/→)">
-          <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.setItem(item - 1)}><Icon name="chevronLeft" /></button>
-          <span className="rs-num">{item + 1} / {count}</span>
-          <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.setItem(item + 1)}><Icon name="chevronRight" /></button>
-        </div>
-      )}
-
-      <FrameControl />
-      <div className="rs-viewer__tools rs-viewer__chip" data-nodrag>
-        <button className={`rs-btn rs-btn--ghost rs-viewer__fitbtn${fit ? ' is-on' : ''}`} onClick={() => setFitMode(true)} title="Fit to window (F or 0)"><Icon name="fit" /> Fit</button>
-        <button className={`rs-btn rs-viewer__actual${zoomPct === 100 && !fit ? ' is-on' : ''}`} onClick={oneToOne} title="Actual pixels, 100% (1)">100%</button>
-        <button className={`rs-btn rs-btn--ghost${snap ? ' is-on' : ''}`} onClick={() => { snapRef.current = !snap; setSnap(!snap); apply(); }} title="Snap Fit to whole-pixel zoom (1×, 2×, 3×…) when the image is smaller than the pane">1:n</button>
-        <button className={`rs-btn rs-btn--ghost${loupe || zHeld ? ' is-on' : ''}`} onClick={() => setLoupe((l) => ((l + 1) % 3) as 0 | 1 | 2)} title="Magnifier: off → 200% → 100% (or hold Z)">{loupe === 2 ? '🔍 2×' : loupe === 1 ? '🔍 1×' : '🔍'}</button>
-        <span className="rs-viewer__zoom rs-num" title={fit ? 'Fitted to the pane' : 'Manual zoom'}>{fit ? `Fit · ${zoomPct}%` : `${zoomPct}%`}</span>
-        <button
-          className="rs-btn rs-btn--icon rs-btn--ghost"
-          onClick={() => setBg((b) => (b === 'checker' ? 'dark' : b === 'dark' ? 'light' : 'checker'))}
-          title={`Background: ${bg} (click to change)`}
-        >
-          <Icon name="grid" />
-        </button>
-      </div>
+    </div>
     </div>
   );
 }

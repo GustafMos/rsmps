@@ -19,6 +19,8 @@ export class GraphController {
   hovering = false;
   /** True until the graph has been framed with a real panel size. */
   needsFit = true;
+  /** The view as last set by an automatic fit; while the view still equals it, a panel resize refits. */
+  fitView: { x: number; y: number; zoom: number } | null = null;
   spaceDown = false;
   spaceUsed = false;
   /** Binding that started the current hold-to-pan (so its release can be matched). */

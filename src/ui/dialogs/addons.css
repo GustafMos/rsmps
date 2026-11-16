@@ -1,0 +1,17 @@
+.rs-addons { display: flex; flex-direction: column; gap: var(--s-2); }
+.rs-addons.is-off { opacity: 0.55; }
+.rs-addon { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3); background: var(--bg-1); border: 1px solid var(--line); }
+.rs-addon.has-error { border-color: var(--danger); }
+.rs-addon__head { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; }
+.rs-addon__title { font-weight: 600; font-size: var(--fs-md); }
+.rs-addon__state { font-size: var(--fs-xs); color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.rs-addon__state.is-ok { color: var(--ok); }
+.rs-addon__links { display: inline-flex; gap: var(--s-3); }
+.rs-addon__links a { color: var(--accent-hi); font-size: var(--fs-sm); }
+.rs-addon__meta { margin: 0; color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.5; }
+.rs-addon__btns { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rs-addon__err { margin: 0; color: var(--danger); font-size: var(--fs-sm); user-select: text; }
+.rs-ffmpeg-tag { margin-left: var(--s-1); padding: 0 4px; font-size: var(--fs-xs); color: var(--text-dim); border: 1px solid var(--line-strong); white-space: nowrap; }
+.rs-exp__ffmpeg { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-2) var(--s-3); background: #2a2208; border: 1px solid var(--yellow); font-size: var(--fs-sm); line-height: 1.5; }
+.rs-exp__ffmpeg span { flex: 1; min-width: 200px; }
+.rs-phone__err { display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-start; }

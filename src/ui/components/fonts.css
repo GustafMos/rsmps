@@ -10,3 +10,5 @@
 .rs-fontmenu__name { font-size: var(--fs-xs); color: inherit; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rs-fontmenu__sample { font-size: 18px; white-space: nowrap; }
 .rs-fontmenu__local { margin: var(--s-1); flex: none; }
+
+.rs-fontmenu__note { padding: var(--s-2) var(--s-3); border-top: 1px solid var(--line); color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.4; }

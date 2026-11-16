@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   addAudioClip,
   addMidiClip,
@@ -33,6 +32,16 @@ import './timeline.css';
 
 const TRACK_H = 52;
 const HEAD_W = 210;
+const H_KEY = 'rsmps.ui.timeline.h';
+const C_KEY = 'rsmps.ui.timeline.collapsed';
+const readNum = (k: string, d: number) => {
+  try {
+    const v = Number(localStorage.getItem(k));
+    return v >= 120 ? v : d;
+  } catch {
+    return d;
+  }
+};
 
 /** Shape detection (never a node id): a json `clips` param plus recordAudio / recordMidi inputs. */
 export function isTimelineDef(def: { params: object; inputs: object } | undefined): boolean {
@@ -49,6 +58,46 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
   const project = useEd((s) => s.graph.project);
   const armed = useEd((s) => s.armed);
   const [pps, setPps] = useState(60); // pixels per second
+  const [h, setH] = useState(() => readNum(H_KEY, 240));
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(C_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () => {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(C_KEY, c ? '0' : '1');
+      } catch {
+        /* storage unavailable */
+      }
+      return !c;
+    });
+  };
+  /** Drag the top edge: the strip grows upward, the graph above shrinks. Height is remembered. */
+  const grip = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const y0 = e.clientY;
+    const h0 = h;
+    let cur = h0;
+    const mv = (ev: PointerEvent) => {
+      cur = Math.round(Math.min(window.innerHeight * 0.7, Math.max(120, h0 + (y0 - ev.clientY))));
+      setH(cur);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', mv);
+      window.removeEventListener('pointerup', up);
+      try {
+        localStorage.setItem(H_KEY, String(cur));
+      } catch {
+        /* storage unavailable */
+      }
+    };
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+  };
   const [sel, setSel] = useState<string | null>(null);
   const [roll, setRoll] = useState<string | null>(null);
   const [pop, setPop] = useState<string | null>(null);
@@ -183,18 +232,22 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
   for (let t = 0; t <= total; t += step) ticks.push(t);
 
   if (!node) return null;
-  return createPortal(
-    <div className="rs-tl" tabIndex={-1} role="dialog" aria-label="Timeline">
+  return (
+    <div className={`rs-tl${collapsed ? ' is-collapsed' : ''}`} style={collapsed ? undefined : { height: h }} tabIndex={-1} role="region" aria-label="Timeline">
+      {!collapsed && <div className="rs-tl__grip" onPointerDown={grip} role="separator" aria-orientation="horizontal" title="Drag to resize the timeline" />}
       <div className="rs-tl__head">
+        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={toggle} aria-expanded={!collapsed} title={collapsed ? 'Expand the timeline' : 'Collapse the timeline'}><span style={{ display: 'inline-flex', transform: collapsed ? 'rotate(180deg)' : undefined }}><Icon name="chevronDown" /></span></button>
         <span className="rs-caps">Timeline{node.label ? ` · ${node.label}` : ''}</span>
         <RecordButton nodeId={nodeId} />
         <span className="rs-tl__sp" />
+        {!collapsed && <>
         <button className="rs-btn" onClick={() => write(addTrack(tl, 'audio').timeline)}><Icon name="plus" /> Audio track</button>
         <button className="rs-btn" onClick={() => write(addTrack(tl, 'midi').timeline)}><Icon name="plus" /> MIDI track</button>
         <div style={{ width: 120 }}><NumberField label="Zoom" min={10} max={400} integer value={pps} defaultValue={60} onChange={setPps} /></div>
+        </>}
         <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
       </div>
-      <div className="rs-tl__body">
+      {!collapsed && <div className="rs-tl__body">
         <div className="rs-tl__heads" style={{ width: HEAD_W }}>
           <div className="rs-tl__corner" />
           {tl.tracks.map((t) => (
@@ -274,8 +327,8 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
             <div ref={head} className="rs-tl__playhead" />
           </div>
         </div>
-      </div>
-      {pop && tl.clips.find((c) => c.id === pop) && (() => {
+      </div>}
+      {!collapsed && pop && tl.clips.find((c) => c.id === pop) && (() => {
         const c = tl.clips.find((x) => x.id === pop)!;
         return (
           <div className="rs-tl__pop" style={{ right: 12, top: 36 }} onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
@@ -290,9 +343,8 @@ export function TimelineEditor({ nodeId, onClose }: { nodeId: string; onClose: (
           </div>
         );
       })()}
-      {roll && <PianoRoll clipId={roll} tl={tl} bpm={bpm} grid={grid} write={write} onClose={() => setRoll(null)} />}
-      <div className="rs-tl__foot rs-insp__hint">Grid {gridSeconds(bpm, grid) > 0 ? `1/${String(grid).split('/')[1]} note` : 'off'} · {bpm} BPM · shaded area = project loop · click the ruler to seek</div>
-    </div>,
-    document.body,
+      {!collapsed && roll && <PianoRoll clipId={roll} tl={tl} bpm={bpm} grid={grid} write={write} onClose={() => setRoll(null)} />}
+      {!collapsed && <div className="rs-tl__foot rs-insp__hint">Grid {gridSeconds(bpm, grid) > 0 ? `1/${String(grid).split('/')[1]} note` : 'off'} · {bpm} BPM · shaded area = project loop · click the ruler to seek</div>}
+    </div>
   );
 }

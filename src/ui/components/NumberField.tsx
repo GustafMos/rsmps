@@ -64,17 +64,21 @@ export function NumberField(p: NumberFieldProps) {
   };
 
   /**
-   * Units per pixel for scrubbing, from the param's own scale (not its hard range): one step per pixel when there are 60-400 steps
-   * in the soft range, slower for short ranges (6 px per step), and never more than the soft range over ~400 px.
+   * Units per pixel for scrubbing, from the param's own scale (not its hard range): the whole soft range takes ~400 px, so a
+   * 100 px drag moves at most a quarter of it. Short ranges (few steps) get at most 12 px per step. Without a range the rate follows
+   * the value itself (0.5% per px, never below half a step).
    */
   const rate = (v: number) => {
-    const top = p.softMax ?? max;
+    let top = p.softMax ?? max;
+    // a very wide hard range with no soft max (blur radius 0..400, default 8): scale by the default instead, so a drag stays usable
+    const dv = p.defaultValue;
+    if (p.softMax === undefined && top !== undefined && dv !== undefined && dv > 0 && top > dv * 25) top = Math.max(dv * 16, (min ?? 0) + step * 400);
     if (min !== undefined && top !== undefined && Number.isFinite(min) && Number.isFinite(top) && top > min) {
       const n = (top - min) / step;
-      const pxPerStep = n >= 400 ? 400 / n : n >= 60 ? 1 : 6;
+      const pxPerStep = Math.min(12, 400 / n);
       return step / pxPerStep;
     }
-    return Math.max(step, Math.abs(v) * 0.01, 0.01);
+    return Math.max(step * 0.5, Math.abs(v) * 0.005, 0.005);
   };
 
   const down = (e: PointerEvent<HTMLDivElement>) => {

@@ -42,11 +42,19 @@ export function GraphView() {
     };
     el.addEventListener('wheel', wheel, { passive: false });
     // frame the graph as soon as the panel has a real size (it may be 0x0 when first mounted)
+    const fitNow = () => {
+      frameGraph(app);
+      ctl.fitView = { ...ctl.view };
+    };
     const ro = new ResizeObserver(() => {
-      if (ctl.needsFit && el.clientWidth > 50 && el.clientHeight > 50) {
+      const ok = el.clientWidth > 50 && el.clientHeight > 50;
+      const v = ctl.view;
+      const f = ctl.fitView;
+      if (ctl.needsFit && ok) {
         ctl.needsFit = false;
-        frameGraph(app);
-      } else ctl.applyView();
+        fitNow();
+      } else if (ok && f && f.x === v.x && f.y === v.y && f.zoom === v.zoom) fitNow(); // still showing the last automatic fit: keep it fitted when the panel is resized (docked timeline, window)
+      else ctl.applyView();
     });
     ro.observe(el);
     return () => {
@@ -84,6 +92,7 @@ export function GraphView() {
       if (root.current && root.current.clientWidth > 50) {
         ctl.needsFit = false;
         frameGraph(app);
+        ctl.fitView = { ...ctl.view };
       }
     });
     return () => cancelAnimationFrame(id);

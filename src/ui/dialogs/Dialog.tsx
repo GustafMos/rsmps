@@ -1,19 +1,11 @@
-import { useEffect, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '../components/Icon';
+import { useOverlay } from '../lib/overlay';
 import './dialogs.css';
 
 export function Dialog({ title, onClose, children, footer, width = 520 }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; width?: number }) {
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
-  }, [onClose]);
+  useOverlay(onClose, true);
   return createPortal(
     <div className="rs-dlg__scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="rs-dlg" style={{ width }} role="dialog" aria-modal="true" aria-label={title}>

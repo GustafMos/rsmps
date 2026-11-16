@@ -109,6 +109,7 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
   }, [io]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [server, setServer] = useState<'ok' | 'declined' | 'error'>('ok');
   const mine = info && info.token === token ? info : null;
   const expires = token && state === 'waiting' ? io.phone.expiresAt(token) ?? mine?.expiresAt ?? null : null;
   const left = useCountdown(expires, state === 'waiting');
@@ -116,11 +117,17 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
   const create = async (addr: string = address) => {
     setBusy(true);
     setErr('');
+    setServer('ok');
     try {
       if (token) io.phone.close(token);
-      // a packaged app may start its phone server on demand: call it first when it exists
-      const on = io.phone as unknown as { startServer?: () => Promise<unknown> };
-      if (on.startServer) await on.startServer();
+      // the packaged app starts its phone server on demand (it asks the user the first time)
+      const started = await io.phone.startServer?.();
+      if (started && !started.ok) {
+        setServer(started.declined ? 'declined' : 'error');
+        setErr(started.declined ? 'Phone connections were not allowed, so a phone cannot link. Allow them to continue.' : started.error || 'The phone link could not start.');
+        return;
+      }
+      setServer('ok');
       const s = await io.phone.createSession(addr ? { address: addr } : undefined);
       madeHere.add(s.token);
       setInfo(s);
@@ -142,8 +149,14 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
       <div className="rs-insp__sec rs-phone">
         <div className="rs-caps">Link a phone</div>
         <p className="rs-insp__hint">Phones only share their camera over a secure connection, and this app must be reachable from your network.</p>
-        <p className="rs-insp__hint">Stop the app and start it again with:</p>
-        <CopyCode text="npm run dev:lan" />
+        {location.protocol === 'app:' ? (
+          <p className="rs-insp__hint">The phone link is not available in this build of the app. Restart the app; if it is still missing, please report it.</p>
+        ) : (
+          <>
+            <p className="rs-insp__hint">The desktop app starts the phone link for you when you ask. In the web version, run a local copy: stop the app and start it again with:</p>
+            <CopyCode text="npm run dev:lan" />
+          </>
+        )}
       </div>
     );
   }
@@ -164,7 +177,12 @@ export function PhonePanel({ node }: { node: NodeInstance }) {
           </select>
         </label>
       )}
-      {err && <p className="rs-insp__warn">{err}</p>}
+      {err && (
+        <div className="rs-phone__err" role="alert">
+          <p className="rs-insp__warn">{err}</p>
+          {server !== 'ok' && <button className="rs-btn" disabled={busy} onClick={() => void create()}>{server === 'declined' ? 'Allow and try again' : 'Try again'}</button>}
+        </div>
+      )}
       {token && state && (
         <div className={`rs-phone__status${state === 'connected' ? ' is-ok' : ''}`} role="status">{status}</div>
       )}

@@ -79,7 +79,7 @@ export function Toasts() {
       {toasts.map((t) => (
         <div key={t.id} className={`rs-toast rs-toast--${t.kind}`} role={t.kind === 'error' ? 'alert' : 'status'}>
           <Icon name={t.kind === 'error' ? 'warn' : t.kind === 'ok' ? 'check' : 'help'} size={14} />
-          <span>{t.text}</span>
+          <span>{t.text}{t.count && t.count > 1 ? <b className="rs-toast__n"> ×{t.count}</b> : null}</span>
           {t.actions?.map((a) => (
             <button key={a.label} className="rs-btn" onClick={() => { a.run(); ed.dismissToast(t.id); }}>{a.label}</button>
           ))}

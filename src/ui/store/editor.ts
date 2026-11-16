@@ -61,6 +61,8 @@ export interface Toast {
   kind: 'info' | 'error' | 'ok';
   text: string;
   actions?: { label: string; run: () => void }[];
+  /** How many times the same message arrived while it was still on screen (shown as ×N). */
+  count?: number;
 }
 
 export interface UiPrefs {
@@ -1341,7 +1343,8 @@ export class Editor {
       });
       if (ac.signal.aborted) throw new DOMException('Aborted', 'AbortError');
       this.io.exporter.download(files);
-      this.toast(`Exported ${files.length} file${files.length === 1 ? '' : 's'}`, 'ok');
+      const saved = files.filter((f) => f.savedPath).map((f) => f.savedPath as string); // FFmpeg formats are saved by the desktop app's Save dialog
+      this.toast(saved.length === 1 && files.length === 1 ? `Saved ${saved[0]}` : `Exported ${files.length} file${files.length === 1 ? '' : 's'}${saved.length ? ` (${saved.length} saved to the places you chose)` : ''}`, 'ok');
       setTimeout(() => this.maybeSupport('export'), 1200);
       return true;
     } catch (err) {
@@ -1381,7 +1384,10 @@ export class Editor {
   }
   toast(text: string, kind: Toast['kind'] = 'info', actions?: Toast['actions']): void {
     const id = ++this.toastId;
-    this.patch({ toasts: [...this.state.toasts.slice(-3), { id, kind, text, actions }] });
+    // the same message never stacks: it replaces the one on screen with a ×N counter (and a fresh timer)
+    const dup = actions ? undefined : this.state.toasts.find((t) => t.text === text && t.kind === kind && !t.actions);
+    const rest = this.state.toasts.filter((t) => t !== dup);
+    this.patch({ toasts: [...rest.slice(-3), { id, kind, text, actions, count: dup ? (dup.count ?? 1) + 1 : undefined }] });
     setTimeout(() => this.dismissToast(id), actions ? 20000 : kind === 'error' ? 7000 : 3000);
   }
   dismissToast(id: number): void {

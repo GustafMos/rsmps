@@ -64,3 +64,4 @@
 .rs-support__body p { margin: 0 0 var(--s-2); font-size: var(--fs-sm); line-height: 1.5; }
 .rs-support__btns { display: flex; gap: var(--s-2); }
 .rs-support__x { flex: none; width: 24px; min-width: 24px; height: 24px; }
+.rs-toast__n { color: var(--text-dim); font-weight: 600; }

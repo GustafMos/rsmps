@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useOverlay } from '../lib/overlay';
 import { Icon, type IconName } from './Icon';
 import '../menus/menus.css';
 
@@ -25,14 +26,10 @@ export function MenuPopup({ x, y, items, onClose }: { x: number; y: number; item
     const down = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('pointerdown', down, true);
-    window.addEventListener('keydown', key);
-    return () => {
-      window.removeEventListener('pointerdown', down, true);
-      window.removeEventListener('keydown', key);
-    };
+    return () => window.removeEventListener('pointerdown', down, true);
   }, [onClose]);
+  useOverlay(onClose);
   return createPortal(
     <div ref={ref} className="rs-menu" style={{ left: pos.x, top: pos.y }} role="menu">
       {items.map((it, i) =>

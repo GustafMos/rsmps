@@ -4,11 +4,12 @@ import type { Io } from '../../io/api';
 /** Plain-words copy for every host capability a node can require (`NodeDef.requires`). One place to edit. */
 const COPY: Record<Capability, { label: string; command: string; explain: (where: 'web' | 'packaged' | 'local') => string }> = {
   'local-server': {
-    label: 'Local build only',
+    label: 'Desktop app or local build',
     command: 'npm run dev:lan',
     explain: (where) => {
-      const first = where === 'web' ? 'This is the web version.' : where === 'packaged' ? 'This is the packaged app.' : 'The app is running without its local server.';
-      return `${first} This node needs the app running on your own computer with its local server. It does not work in the web version or the packaged app. Start it with npm run dev:lan.`;
+      if (where === 'packaged') return 'The phone link is not available in this build of the app. Restart the app; if it is still missing, please report it.';
+      if (where === 'web') return 'This is the web version. This node needs the desktop app (which starts its phone link when you ask) or a copy running on your own computer with its local server: npm run dev:lan.';
+      return 'The app is running without its local server. This node needs it: start the app with npm run dev:lan, or use the desktop app.';
     },
   },
 };

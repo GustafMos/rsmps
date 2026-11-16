@@ -1,4 +1,7 @@
-.rs-tl { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); width: min(1100px, 96vw); height: 360px; min-height: 220px; z-index: 1080; display: flex; flex-direction: column; resize: vertical; overflow: hidden; background: var(--bg-2); border: 1px solid var(--accent-hi); box-shadow: var(--shadow-hard); outline: none; }
+.rs-tl { position: relative; flex: none; min-height: 0; max-height: calc(100% - 150px); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-2); border-top: 1px solid var(--line-strong); outline: none; }
+.rs-tl.is-collapsed { height: auto; }
+.rs-tl__grip { position: absolute; left: 0; right: 0; top: 0; height: 6px; z-index: 40; cursor: row-resize; touch-action: none; }
+.rs-tl__grip:hover { background: var(--accent-lo); }
 .rs-tl__head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2); background: var(--bg-3); border-bottom: 1px solid var(--line); flex: none; }
 .rs-tl__sp { flex: 1; }
 .rs-tl__body { flex: 1; display: flex; min-height: 0; }

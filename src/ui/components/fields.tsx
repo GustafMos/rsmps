@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { ColorValue } from '../../engine/types';
 import { hexOf } from '../lib/drag';
 import { ColorPopover } from './ColorPicker';
+import { useOverlay } from '../lib/overlay';
 import { Icon } from './Icon';
 import { NumberField } from './NumberField';
 import './fields.css';
@@ -26,14 +27,10 @@ export function Popover({ anchor, onClose, children, width = 240 }: { anchor: HT
     const down = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node) && !anchor?.contains(e.target as Node)) onClose();
     };
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('pointerdown', down, true);
-    window.addEventListener('keydown', key);
-    return () => {
-      window.removeEventListener('pointerdown', down, true);
-      window.removeEventListener('keydown', key);
-    };
+    return () => window.removeEventListener('pointerdown', down, true);
   }, [anchor, onClose]);
+  useOverlay(onClose);
   return createPortal(
     <div ref={ref} className="rs-pop" style={{ left: pos.x, top: pos.y, width }} data-nodrag>
       {children}

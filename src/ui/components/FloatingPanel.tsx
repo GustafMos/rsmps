@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { isTopOverlay, useOverlay } from '../lib/overlay';
 import { Icon } from './Icon';
 import './floating.css';
 
@@ -14,9 +15,11 @@ interface Rect {
 
 const KEY = (id: string) => `rsmps.ui.panel.${id}`;
 
-function load(id: string): Partial<Rect> | null {
+const store = (session?: boolean) => (session ? sessionStorage : localStorage);
+
+function load(id: string, session?: boolean): Partial<Rect> | null {
   try {
-    return JSON.parse(localStorage.getItem(KEY(id)) ?? 'null');
+    return JSON.parse(store(session).getItem(KEY(id)) ?? 'null');
   } catch {
     return null;
   }
@@ -44,6 +47,10 @@ export function FloatingPanel({
   footer,
   defaultSize = { w: 640, h: 520 },
   minSize = { w: 280, h: 160 },
+  anchor,
+  session,
+  compact,
+  onEscape,
 }: {
   id: string;
   title: string;
@@ -52,14 +59,31 @@ export function FloatingPanel({
   footer?: ReactNode;
   defaultSize?: { w: number; h: number };
   minSize?: { w: number; h: number };
+  /** Element to open beside (below it, else above) until the user moves this panel; never covers it. */
+  anchor?: HTMLElement | null;
+  /** Remember the position for this browser session only. */
+  session?: boolean;
+  /** Fixed-size small panel: no dock button, no resize handles. */
+  compact?: boolean;
+  /** Esc handler (defaults to onClose). */
+  onEscape?: () => void;
 }) {
   const [rect, setRect] = useState<Rect>(() => {
-    const saved = load(id);
-    const w = saved?.w ?? defaultSize.w;
-    const h = saved?.h ?? defaultSize.h;
-    return clampRect({ x: saved?.x ?? window.innerWidth - w - 24, y: saved?.y ?? 64, w, h, min: !!saved?.min, dock: !!saved?.dock }, minSize.w, minSize.h);
+    const saved = load(id, session);
+    const w = compact ? defaultSize.w : saved?.w ?? defaultSize.w;
+    const h = compact ? defaultSize.h : saved?.h ?? defaultSize.h;
+    let ax = window.innerWidth - w - 24;
+    let ay = 64;
+    if (anchor) {
+      const a = anchor.getBoundingClientRect();
+      ax = a.left;
+      ay = a.bottom + 6;
+      if (ay + h > window.innerHeight - 8) ay = Math.max(8, a.top - h - 6);
+    }
+    return clampRect({ x: saved?.x ?? ax, y: saved?.y ?? ay, w, h, min: !!saved?.min, dock: compact ? false : !!saved?.dock }, minSize.w, minSize.h);
   });
   const ref = useRef<HTMLDivElement>(null);
+  const token = useOverlay();
   const rectRef = useRef(rect);
   rectRef.current = rect;
 
@@ -70,13 +94,13 @@ export function FloatingPanel({
       setRect(next);
       if (persist) {
         try {
-          localStorage.setItem(KEY(id), JSON.stringify(next));
+          store(session).setItem(KEY(id), JSON.stringify(next));
         } catch {
           /* storage unavailable */
         }
       }
     },
-    [id, minSize.w, minSize.h],
+    [id, session, minSize.w, minSize.h],
   );
 
   useEffect(() => {
@@ -84,7 +108,18 @@ export function FloatingPanel({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, [update]);
-  useLayoutEffect(() => ref.current?.focus({ preventScroll: true }), []);
+  useLayoutEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+    // anchored and never moved by the user: place by the REAL height (auto-height panels), below the anchor else above, never over it
+    if (anchor && ref.current && load(id, session)?.x === undefined) {
+      const a = anchor.getBoundingClientRect();
+      const h = ref.current.getBoundingClientRect().height;
+      let y = a.bottom + 6;
+      if (y + h > window.innerHeight - 8) y = a.top - h - 6 >= 8 ? a.top - h - 6 : Math.max(8, window.innerHeight - h - 8);
+      update({ y }, false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const grab = (e: React.PointerEvent, mode: 'move' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw') => {
     if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
@@ -93,9 +128,11 @@ export function FloatingPanel({
     const r0 = { ...rectRef.current };
     const x0 = e.clientX;
     const y0 = e.clientY;
+    let moved = false;
     const mv = (ev: PointerEvent) => {
       const dx = ev.clientX - x0;
       const dy = ev.clientY - y0;
+      moved = true;
       if (mode === 'move') return update({ x: r0.x + dx, y: r0.y + dy, dock: false }, false);
       let { x, y, w, h } = r0;
       if (mode.includes('e')) w = r0.w + dx;
@@ -122,7 +159,7 @@ export function FloatingPanel({
       window.removeEventListener('pointermove', mv);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
-      update({}); // persist
+      if (moved) update({}); // persist only a real drag: a plain header click must not pin the position
     };
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', up);
@@ -132,7 +169,7 @@ export function FloatingPanel({
   const docked = rect.dock && !rect.min;
   const style = docked
     ? { right: 0, top: 'var(--bar-h)', bottom: 0, width: Math.min(rect.w, window.innerWidth - 8), height: 'auto' }
-    : { left: rect.x, top: rect.y, width: rect.w, height: rect.min ? 'auto' : rect.h };
+    : { left: rect.x, top: rect.y, width: rect.w, height: rect.min || compact ? 'auto' : rect.h };
 
   return createPortal(
     <div
@@ -143,18 +180,20 @@ export function FloatingPanel({
       aria-label={title}
       tabIndex={-1}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && isTopOverlay(token.current)) {
           e.stopPropagation();
-          onClose();
+          (onEscape ?? onClose)();
         }
       }}
     >
       <header className="rs-fp__head" onPointerDown={(e) => grab(e, 'move')} onDoubleClick={() => update({ min: !rect.min })}>
         <span className="rs-fp__title">{title}</span>
         <span className="rs-fp__sp" />
-        <button className={`rs-btn rs-btn--icon rs-btn--ghost${rect.dock ? ' is-on' : ''}`} title={rect.dock ? 'Float' : 'Dock to the right side'} aria-label="Dock" onClick={() => update({ dock: !rect.dock, min: false })}>
-          <Icon name="restore" size={16} />
-        </button>
+        {!compact && (
+          <button className={`rs-btn rs-btn--icon rs-btn--ghost${rect.dock ? ' is-on' : ''}`} title={rect.dock ? 'Float' : 'Dock to the right side'} aria-label="Dock" onClick={() => update({ dock: !rect.dock, min: false })}>
+            <Icon name="restore" size={16} />
+          </button>
+        )}
         <button className="rs-btn rs-btn--icon rs-btn--ghost" title={rect.min ? 'Restore' : 'Minimise to a bar'} aria-label="Minimise" onClick={() => update({ min: !rect.min })}>
           <Icon name="minus" size={16} />
         </button>
@@ -166,7 +205,7 @@ export function FloatingPanel({
         <>
           <div className="rs-fp__body">{children}</div>
           {footer && <footer className="rs-fp__foot">{footer}</footer>}
-          {!docked && (['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const).map((m) => <span key={m} className={`rs-fp__h rs-fp__h--${m}`} onPointerDown={(e) => grab(e, m)} />)}
+          {!docked && !compact && (['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const).map((m) => <span key={m} className={`rs-fp__h rs-fp__h--${m}`} onPointerDown={(e) => grab(e, m)} />)}
         </>
       )}
     </div>,

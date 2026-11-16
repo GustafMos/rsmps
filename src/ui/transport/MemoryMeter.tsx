@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../store/context';
+import { useOverlay } from '../lib/overlay';
 
 const MB = 1048576;
 const mb = (b: number) => (b >= 1024 * MB ? `${(b / (1024 * MB)).toFixed(1)} GB` : `${Math.round(b / MB)} MB`);
@@ -52,17 +53,15 @@ function MemoryPopover({ x, y, onClose, anchor }: { x: number; y: number; onClos
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const [, tick] = useState(0);
+  useOverlay(onClose);
   useEffect(() => {
     const down = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node) && !anchor.current?.contains(e.target as Node)) onClose();
     };
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('pointerdown', down, true);
-    window.addEventListener('keydown', key);
     const off = io.player.subscribe(() => tick((n) => n + 1));
     return () => {
       window.removeEventListener('pointerdown', down, true);
-      window.removeEventListener('keydown', key);
       off();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

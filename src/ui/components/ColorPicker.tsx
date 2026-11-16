@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type { ColorValue } from '../../engine/types';
 import { hexOf } from '../lib/drag';
 import {
@@ -16,6 +15,7 @@ import {
 import { pickFromViewer } from '../lib/eyedrop';
 import { getRecentColors, pushRecentColor } from '../lib/recentColors';
 import { useApp } from '../store/context';
+import { FloatingPanel } from './FloatingPanel';
 import { Icon } from './Icon';
 import { NumberField } from './NumberField';
 import './colorpicker.css';
@@ -340,7 +340,11 @@ function Swatches({ title, colors, onPick }: { title: string; colors: RGB[]; onP
   );
 }
 
-/** The picker in a document-level portal, anchored to a swatch. Esc reverts, Enter / click outside commits. */
+/**
+ * The picker in a shared FloatingPanel opened beside its swatch: non-modal (the app stays live and the value updates as you
+ * drag), movable by the header, remembers where you put it for the session. Enter / the close button keeps the colour,
+ * Esc (while the picker has focus) puts the original back. No long-lived undo hold: the store coalesces same-param edits.
+ */
 export function ColorPopover({ anchor, value, onChange, onClose, alpha = true, extra }: {
   anchor: HTMLElement | null;
   value: ColorValue;
@@ -349,63 +353,27 @@ export function ColorPopover({ anchor, value, onChange, onClose, alpha = true, e
   alpha?: boolean;
   extra?: RGB[];
 }) {
-  const { ed } = useApp();
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x: -999, y: -999 });
   const initial = useRef(value);
   const latest = useRef(value);
   const done = useRef(false);
-
-  useEffect(() => {
-    ed.beginHold();
-    return () => {
-      if (!done.current) ed.endHold();
-    };
-  }, [ed]);
 
   const wrapped = useCallback((v: ColorValue) => { latest.current = v; onChange(v); }, [onChange]);
   const commit = useCallback(() => {
     if (done.current) return;
     done.current = true;
-    ed.endHold();
     pushRecentColor([latest.current[0], latest.current[1], latest.current[2]]);
     onClose();
-  }, [ed, onClose]);
+  }, [onClose]);
   const cancel = useCallback(() => {
     if (done.current) return;
     done.current = true;
     onChange(initial.current);
-    ed.endHold(true);
     onClose();
-  }, [ed, onChange, onClose]);
+  }, [onChange, onClose]);
 
-  useLayoutEffect(() => {
-    if (!anchor || !ref.current) return;
-    const a = anchor.getBoundingClientRect();
-    const r = ref.current.getBoundingClientRect();
-    let x = a.left;
-    let y = a.bottom + 4;
-    if (x + r.width > window.innerWidth - 8) x = window.innerWidth - r.width - 8;
-    if (y + r.height > window.innerHeight - 8) y = Math.max(8, Math.min(a.top - r.height - 4, window.innerHeight - r.height - 8));
-    setPos({ x: Math.max(8, x), y });
-  }, [anchor]);
-
-  useEffect(() => {
-    const down = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (ref.current?.contains(t) || anchor?.contains(t)) return;
-      if ((t as HTMLElement).closest?.('.rs-pop, .rs-cp')) return;
-      commit();
-    };
-    window.addEventListener('pointerdown', down, true);
-    ref.current?.querySelector<HTMLElement>('canvas')?.focus({ preventScroll: true });
-    return () => window.removeEventListener('pointerdown', down, true);
-  }, [anchor, commit]);
-
-  return createPortal(
-    <div ref={ref} className="rs-pop rs-cp-pop" style={{ left: pos.x, top: pos.y }} data-nodrag role="dialog" aria-label="Colour picker">
+  return (
+    <FloatingPanel id="colour-picker" title="Colour" onClose={commit} onEscape={cancel} anchor={anchor} session compact defaultSize={{ w: 240, h: 372 }} minSize={{ w: 240, h: 100 }}>
       <ColorPicker value={value} onChange={wrapped} alpha={alpha} extra={extra} onCommit={commit} onCancel={cancel} />
-    </div>,
-    document.body,
+    </FloatingPanel>
   );
 }

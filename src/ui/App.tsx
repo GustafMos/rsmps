@@ -38,10 +38,15 @@ export function App() {
   const max = prefs.maximized;
 
   useEffect(() => {
-    document.title = `${ed.state.graph.name || 'Untitled'} · RSMPS`;
-    return ed.store.subscribe(() => {
-      document.title = `${ed.state.graph.name || 'Untitled'} · RSMPS`;
-    });
+    // the open tab's own name (a scan tab has no graph name of its own, so the graph's "Untitled" must not leak into the title)
+    const set = () => {
+      const st = ed.state;
+      const tab = st.projects.find((p) => p.id === st.activeProject);
+      const name = st.mode === 'scan' ? tab?.name : st.graph.name || tab?.name;
+      document.title = `${name || 'Untitled'} · RSMPS`;
+    };
+    set();
+    return ed.store.subscribe(set);
   }, [ed]);
 
   const dragDivider = (e: React.PointerEvent) => {
@@ -113,6 +118,7 @@ export function App() {
             <div className="rs-panel" style={{ flex: 1 }}>
               <div className="rs-panel__head"><span className="rs-caps">Node graph</span><span className="rs-panel__spacer" /><span className="rs-panel__tip">Shift+A add · Space+drag pan · wheel zoom</span>{maxBtn('graph')}</div>
               <div className="rs-panel__body"><GraphView /></div>
+              {timelineNode && <TimelineEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} />}
             </div>
           )}
         </section>
@@ -128,7 +134,6 @@ export function App() {
       <AddMenu />
       <NodeContextMenu />
       <DialogHost />
-      {timelineNode && <TimelineEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} />}
       <SocketPicker />
       <ExportBar />
       <SupportCard />

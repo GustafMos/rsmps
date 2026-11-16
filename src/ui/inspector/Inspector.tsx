@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORIES, type AnyNodeDef, type InputSchema, type NodeInstance, type ParamDef } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
@@ -36,6 +36,25 @@ export function Inspector() {
   return (
     <div className="rs-insp" data-panel="inspector">
       {selection.length === 1 ? <NodePanel id={selection[0]} /> : selection.length > 1 ? <MultiPanel count={selection.length} /> : frame ? <FramePanel id={frame} /> : <ProjectSettingsPanel />}
+    </div>
+  );
+}
+
+/** Long node descriptions: two lines, with a "more" toggle only when the text really is longer. */
+function Description({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  const el = useRef<HTMLParagraphElement>(null);
+  useLayoutEffect(() => {
+    const e = el.current;
+    if (e && !open) setLong(e.scrollHeight > e.clientHeight + 1);
+  }, [text, open]);
+  return (
+    <div className="rs-insp__descwrap">
+      <p ref={el} className={`rs-insp__desc${open ? '' : ' is-clamped'}`}>{text}</p>
+      {(long || open) && (
+        <button className="rs-insp__more" onClick={() => setOpen((o) => !o)} aria-expanded={open}>{open ? 'less' : 'more'}</button>
+      )}
     </div>
   );
 }
@@ -129,7 +148,7 @@ function NodePanel({ id }: { id: string }) {
           </div>
         )}
         <TextField large value={node.label ?? ''} placeholder={def.title} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
-        <p className="rs-insp__desc">{def.description}</p>
+        <Description key={id} text={def.description} />
         <div className="rs-insp__actions">
           <button className={`rs-btn${viewed ? ' is-on' : ''}`} onClick={() => ed.setViewed(id)} title="Show this node in the viewer">
             <Icon name={viewed ? 'eye' : 'eyeOff'} /> View
