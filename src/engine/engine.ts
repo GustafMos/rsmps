@@ -51,6 +51,10 @@ export interface EvalResult {
 
 interface Entry {
   key: string;
+  /** Node that produced it. */
+  node: string;
+  /** Time-varying: the node (or something upstream) read the clock, so the entry belongs to one frame. */
+  tv: boolean;
   outputs: Record<string, Value | null>;
   bytes: number;
   lastUsed: number;
@@ -58,6 +62,8 @@ interface Entry {
 
 interface NodeResult {
   key: string;
+  /** Time-varying (see Entry.tv). */
+  tv?: boolean;
   outputs: Record<string, Value | null>;
 }
 
@@ -152,6 +158,12 @@ export class Engine {
   /** What a node read last time under a given static signature: decides whether time/item enter its key. */
   private reads = new Map<string, { time: boolean; item: boolean }>();
   private tick = 0;
+  /** How many time-varying entries a node may keep (default 2). Raised for nodes whose output a downstream node `pull`s at other times. */
+  private pullAllow = new Map<string, { n: number; tick: number }>();
+  /** Time-varying entries kept per node by default: the current frame and the one before (playback rarely revisits a frame). */
+  static readonly TIMED_KEEP = 2;
+  /** Upper bound for a node that is pulled over a span of frames (echo, trails, retime). */
+  static readonly TIMED_KEEP_MAX = 16;
 
   constructor(gpu: Gpu, registry: Registry, host: Host) {
     this.gpu = gpu;
@@ -170,6 +182,9 @@ export class Engine {
 
   private async evaluateNow(req: EvalRequest): Promise<EvalResult> {
     this.tick++;
+    this.gpu.advance();
+    this.gpu.sweep();
+    this.evictTimed();
     this.evict();
     const { graph } = req;
     const project = graph.project;
@@ -271,6 +286,7 @@ export class Engine {
       const inputs: Record<string, Value | Value[] | null> = {};
       const sigs: string[] = [];
       const wiredParams: Record<string, Value> = {};
+      let tvIn = false;
       const lazyWired = new Set<string>();
       for (const [name, idef] of Object.entries(def.inputs as Record<string, { type: string; multi?: boolean }>)) {
         inputs[name] = idef.multi ? [] : null;
@@ -284,6 +300,7 @@ export class Engine {
           continue;
         }
         const up = await this.evalNode(edge.from.node, scope);
+        if (up?.tv) tvIn = true;
         const value = up?.outputs[edge.from.port] ?? null;
         const upDef = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '');
         const fromType = upDef?.outputs[edge.from.port]?.type;
@@ -311,14 +328,14 @@ export class Engine {
           const v = inputs[name];
           if (out) outputs[out] = Array.isArray(v) ? (v[0] ?? null) : v;
         }
-        return { key: hash(`bypass|${sortByPort(sigs).join('|')}`), outputs };
+        return { key: hash(`bypass|${sortByPort(sigs).join('|')}`), outputs, tv: tvIn };
       }
 
       // 3. Required inputs missing → the node produces nothing.
       for (const [name, idef] of Object.entries(def.inputs as Record<string, { required?: boolean; multi?: boolean }>)) {
         const v = inputs[name];
         if (lazyWired.has(name)) continue;
-        if (idef.required && (v === null || (Array.isArray(v) && v.length === 0))) return { key: `empty:${id}`, outputs: {} };
+        if (idef.required && (v === null || (Array.isArray(v) && v.length === 0))) return { key: `empty:${id}`, outputs: {}, tv: tvIn };
       }
 
       // 4. Resolve params. 'px' lengths become texels of the reference image (first image/mask input, else the canvas).
@@ -357,7 +374,7 @@ export class Engine {
         const hit = this.cache.get(fullKey(known));
         if (hit) {
           hit.lastUsed = this.tick;
-          return { key: hit.key, outputs: hit.outputs };
+          return { key: hit.key, outputs: hit.outputs, tv: hit.tv };
         }
       }
 
@@ -398,6 +415,7 @@ export class Engine {
           // No `at` = current frame, which makes the node time-dependent (through the clock getter).
           const frame = Math.max(0, Math.round((at ? at.seconds : time.seconds) * project.fps));
           const sub: Scope = { ...scope, frame, seconds: frame / project.fps };
+          if (frame !== scope.frame) this.widenAllowance(edge.from.node, Math.abs(scope.frame - frame) + 1);
           const up = await this.evalNode(edge.from.node, sub);
           const v = up?.outputs[edge.from.port] ?? null;
           if (isTextured(v)) {
@@ -437,9 +455,10 @@ export class Engine {
         this.releaseEntry(old);
         this.cacheBytes -= old.bytes;
       }
-      this.cache.set(key, { key, outputs, bytes, lastUsed: this.tick });
+      const tv = used.time || tvIn;
+      this.cache.set(key, { key, node: id, tv, outputs, bytes, lastUsed: this.tick });
       this.cacheBytes += bytes;
-      return { key, outputs };
+      return { key, outputs, tv };
     } finally {
       scope.stack.delete(stackKey);
     }
@@ -503,6 +522,57 @@ export class Engine {
         this.gpu.release(v.texture);
       }
     }
+  }
+
+  /**
+   * Time-varying entries are keyed by frame and rarely used twice during playback (the player keeps the final frames itself).
+   * Keep only the newest few per node, evicting the older ones at the start of the next evaluation (never mid-evaluation).
+   */
+  private evictTimed(): void {
+    const groups = new Map<string, Entry[]>();
+    for (const e of this.cache.values()) {
+      if (!e.tv) continue;
+      const list = groups.get(e.node);
+      if (list) list.push(e);
+      else groups.set(e.node, [e]);
+    }
+    for (const [node, list] of groups) {
+      const allow = this.timedAllowance(node);
+      if (list.length <= allow) continue;
+      list.sort((a, b) => b.lastUsed - a.lastUsed);
+      for (const e of list.slice(allow)) {
+        this.cache.delete(e.key);
+        this.cacheBytes -= e.bytes;
+        this.releaseEntry(e);
+      }
+    }
+  }
+
+  private timedAllowance(node: string): number {
+    const a = this.pullAllow.get(node);
+    if (a && this.tick - a.tick <= 60) return a.n;
+    return Engine.TIMED_KEEP;
+  }
+
+  /** A downstream node pulled `node` over `span` frames: keep that many of its recent frames. */
+  private widenAllowance(node: string, span: number): void {
+    const want = Math.min(Engine.TIMED_KEEP_MAX, Math.max(Engine.TIMED_KEEP, span + 1));
+    const cur = this.pullAllow.get(node);
+    const keep = cur && this.tick - cur.tick <= 60 ? Math.max(cur.n, want) : want;
+    this.pullAllow.set(node, { n: keep, tick: this.tick });
+  }
+
+  /** Drop every cached result without touching the GPU: used after a device loss, when all textures are already invalid. */
+  forgetAll(): void {
+    this.cache.clear();
+    this.cacheBytes = 0;
+    this.reads.clear();
+    this.pullAllow.clear();
+  }
+
+  /** Bytes of texture memory held by cached node results. */
+  get cachedBytes(): number {
+    return this.cacheBytes;
   }
 
   /** LRU eviction. Runs only between evaluations, so nothing in use is ever freed. */

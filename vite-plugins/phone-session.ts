@@ -7,7 +7,8 @@
  */
 
 export const TOKEN_RE = /^[0-9a-f]{32}$/;
-export const SESSION_TTL_MS = 5 * 60 * 1000;
+/** An unused token lives this long; the first sign of the phone (a ping or the join) restarts the clock once. */
+export const SESSION_TTL_MS = 15 * 60 * 1000;
 
 export interface Peer {
   send(data: string | Uint8Array, binary?: boolean): void;
@@ -33,6 +34,8 @@ interface Session {
   phone: Peer | null;
   /** True once a phone has joined: the unused-expiry no longer applies. */
   used: boolean;
+  /** The unused clock was already restarted by `reached`. */
+  refreshed?: boolean;
 }
 
 export class PhoneSessions {
@@ -51,6 +54,27 @@ export class PhoneSessions {
     if (this.sessions.has(token)) return { ok: false, reason: 'token-exists' };
     this.sessions.set(token, { token, created: now, desktop, phone: null, used: false });
     return { ok: true };
+  }
+
+  /** When an unused session expires (ms), or null once a phone has joined / unknown. */
+  expiresAt(token: string): number | null {
+    const s = this.sessions.get(token);
+    return s && !s.used ? s.created + this.ttlMs : null;
+  }
+
+  /**
+   * The phone's first sign of life (its page loaded and pinged this server): restart the unused-expiry clock, so the time spent
+   * on a certificate warning is not lost, and tell the desktop. Returns false for an unknown token.
+   */
+  reached(token: string, now: number, from: string): boolean {
+    const s = this.sessions.get(token);
+    if (!s) return false;
+    if (!s.used && !s.refreshed) {
+      s.created = now;
+      s.refreshed = true;
+    }
+    s.desktop.send(JSON.stringify({ type: 'reached', from, expiresAt: this.expiresAt(token) }));
+    return true;
   }
 
   /** A phone joins. Exactly one phone per token; after it leaves, a phone may rejoin (network hiccups). */

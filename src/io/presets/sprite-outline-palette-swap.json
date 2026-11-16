@@ -1,0 +1,211 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Sprite outline + palette swap",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop your media here"
+    },
+    {
+      "id": "pix",
+      "type": "pixelate",
+      "x": 260,
+      "y": 0,
+      "params": {
+        "mode": "fixed-height",
+        "value": 120
+      }
+    },
+    {
+      "id": "mask",
+      "type": "subject-mask",
+      "x": 520,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "cut",
+      "type": "cutout",
+      "x": 780,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "line",
+      "type": "outline",
+      "x": 1040,
+      "y": 0,
+      "params": {
+        "thickness": 1,
+        "color": [
+          0.05,
+          0.04,
+          0.1,
+          1
+        ],
+        "position": "outside"
+      }
+    },
+    {
+      "id": "from",
+      "type": "palette",
+      "x": 1040,
+      "y": 160,
+      "params": {
+        "source": "extract",
+        "count": 8
+      }
+    },
+    {
+      "id": "to",
+      "type": "palette",
+      "x": 1040,
+      "y": 300,
+      "params": {
+        "source": "builtin",
+        "builtin": "pico-8"
+      }
+    },
+    {
+      "id": "swap",
+      "type": "palette-swap",
+      "x": 1300,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1560,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "pix",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "pix",
+        "port": "image"
+      },
+      "to": {
+        "node": "mask",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "pix",
+        "port": "image"
+      },
+      "to": {
+        "node": "cut",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "mask",
+        "port": "mask"
+      },
+      "to": {
+        "node": "cut",
+        "port": "mask"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "cut",
+        "port": "image"
+      },
+      "to": {
+        "node": "line",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "cut",
+        "port": "image"
+      },
+      "to": {
+        "node": "from",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "line",
+        "port": "image"
+      },
+      "to": {
+        "node": "swap",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "from",
+        "port": "palette"
+      },
+      "to": {
+        "node": "swap",
+        "port": "from"
+      }
+    },
+    {
+      "id": "e9",
+      "from": {
+        "node": "to",
+        "port": "palette"
+      },
+      "to": {
+        "node": "swap",
+        "port": "to"
+      }
+    },
+    {
+      "id": "e10",
+      "from": {
+        "node": "swap",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

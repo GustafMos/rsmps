@@ -20,6 +20,7 @@ import { RenderedFrameCache } from './frame-cache';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { feedsFromLive, liveNodeIds, stampLive } from './live-stamp';
+import type { MemoryState } from './memory';
 import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
 import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, readFrameParams, resolveFrame, scaleSize, type ConformAnchor, type Size } from './frame';
@@ -32,6 +33,7 @@ export interface PlayerDeps {
   audio: AudioBridge;
   library: Library;
   router: SignalRouter;
+  memory?: { snapshot(): MemoryState; relieve(): void };
 }
 
 interface FrameSpec {
@@ -67,6 +69,8 @@ interface Job {
 type Shown = { texture: GPUTexture; width: number; height: number };
 
 const CACHE_BYTES = 512 * 1024 * 1024;
+/** Out-of-memory errors tolerated per frame before the error is shown. */
+const OOM_RETRIES = 3;
 const FPS_RING = 256;
 const EMPTY_ERRORS: ReadonlyMap<string, string> = new Map();
 
@@ -148,7 +152,6 @@ export class PlayerImpl implements Player {
     this.gpu = deps.gpu;
     this.cache = new RenderedFrameCache<Shown>(CACHE_BYTES, (img) => this.gpu.release(img.texture));
     deps.audio.setAssets((id) => deps.library.assetAudio(id));
-    deps.gpu.device.lost.then((info) => this.onDeviceLost(info.message || info.reason)).catch(() => undefined);
   }
 
   /* ------------------------------ public API ------------------------------ */
@@ -430,8 +433,66 @@ export class PlayerImpl implements Player {
 
   /** Show a GPU error (out of memory, invalid texture) in the state: a silently failed pass would otherwise look like a wrong picture. */
   reportGpuError(message: string): void {
+    if (/out of memory/i.test(message) && this.oomStreak < OOM_RETRIES) {
+      // Free what can be rebuilt and retry: the same frame first, then (while playing) at a lower resolution.
+      this.oomStreak++;
+      this.deps.memory?.relieve();
+      if (this.oomStreak >= 2) {
+        if (this.playing && this.proxyMode === 'auto') this.ctl.forceLower();
+        else this.proxyCap = Math.max(0.25, Math.min(this.proxyCap, this.currentProxy() * 0.7));
+      }
+      this.dirty = true;
+      this.kick();
+      return;
+    }
     this.errors = new Map([...this.errors, ['gpu', message]]);
     this.markChanged();
+  }
+
+  private oomStreak = 0;
+  /** Upper bound for the render resolution after repeated out-of-memory errors. */
+  private proxyCap = 1;
+
+  get isPlaying(): boolean {
+    return this.playing;
+  }
+
+  /** Byte budget of the RAM frame cache (set by the memory governor). */
+  setCacheBudget(bytes: number): void {
+    this.cache.setMaxBytes(bytes);
+  }
+
+  /** Drop the RAM frame cache (the shown picture stays). */
+  dropFrameCache(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * After a device loss was recovered (`Gpu.replaceDevice`): every texture handle here is invalid. Forget them, reconnect the
+   * canvas to the new device and render the current view again.
+   */
+  onDeviceReset(): void {
+    this.lostMessage = null;
+    this.errors = new Map();
+    this.cache.clear(); // releases are no-ops: the Gpu forgot the old textures
+    this.shown = null;
+    this.size = null;
+    this.rendered = null;
+    this.shownFrame = -1;
+    this.snapshotPresenter = null;
+    this.oomStreak = 0;
+    this.proxyCap = 1;
+    const canvas = this.canvas;
+    if (canvas) this.setCanvas(canvas); // configure the context with the new device
+    this.keyDirty = true;
+    this.dirty = true;
+    this.kick();
+    this.markChanged();
+  }
+
+  /** Device loss that could not be recovered: tell the user. */
+  deviceLost(message: string): void {
+    this.onDeviceLost(message);
   }
 
   private liveSignals(): boolean {
@@ -467,7 +528,7 @@ export class PlayerImpl implements Player {
   private syncTransport(): void {
     const p = this.view?.graph.project;
     if (!p) return;
-    this.deps.audio.setTransport({ playing: this.playing, seconds: this.frame / p.fps, duration: p.duration, loop: p.loop });
+    this.deps.audio.setTransport({ playing: this.playing, seconds: this.frame / p.fps, duration: p.duration, loop: p.loop, item: this.view?.item ?? 0 });
   }
 
   private tick = (now: number): void => {
@@ -534,8 +595,8 @@ export class PlayerImpl implements Player {
   }
 
   private currentProxy(): number {
-    if (this.proxyMode !== 'auto') return this.proxyMode;
-    return this.playing ? this.ctl.proxy : 1;
+    if (this.proxyMode !== 'auto') return Math.min(this.proxyMode, this.proxyCap);
+    return Math.min(this.playing ? this.ctl.proxy : 1, this.proxyCap);
   }
 
   private nextJob(): Job | null {
@@ -641,6 +702,7 @@ export class PlayerImpl implements Player {
   /** Put `image` on screen and remember what is showing. */
   /** `proxy`: what the cache/settle logic compares; `sizeProxy`: scale of the image relative to the full frame. */
   private show(image: Shown, job: Job, proxy: number, sizeProxy: number = proxy): void {
+    this.oomStreak = 0;
     this.rendered = { width: image.width, height: image.height };
     if (sizeProxy >= 0.999) this.fullReal = this.rendered;
     const full = this.fullReal ?? { width: Math.max(1, Math.round(image.width / sizeProxy)), height: Math.max(1, Math.round(image.height / sizeProxy)) };
@@ -749,6 +811,7 @@ export class PlayerImpl implements Player {
       imageSize: this.size,
       renderedSize: this.rendered,
       pixelSize: this.curPixel,
+      memory: this.deps.memory?.snapshot() ?? { allocatedBytes: this.gpu.allocatedBytes, budgetBytes: 0, pressure: 'ok' },
       audio: { needed: this.audioNeeded, running: this.deps.audio.running, micNodes: this.micNodes },
     };
   }

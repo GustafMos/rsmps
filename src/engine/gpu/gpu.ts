@@ -51,7 +51,8 @@ function layoutUniforms(uniforms: Record<string, UniformValue>): UniformLayout {
 const ROOT_SCOPE_WARN = 48;
 
 export class Gpu {
-  readonly device: GPUDevice;
+  /** The current device. Replaced (never the Gpu object) by `replaceDevice` after a device loss. */
+  device: GPUDevice;
   private pool = new Map<string, GPUTexture[]>();
   private pooled = new Set<GPUTexture>();
   private refs = new Map<GPUTexture, number>();
@@ -80,6 +81,26 @@ export class Gpu {
     this.nearest = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
   }
 
+  /**
+   * After a device loss: adopt a new device. Every texture, pipeline and sampler of the old one is invalid and is forgotten
+   * (nothing is destroyed or recycled); holders must drop their texture handles. The Gpu object itself stays the same, so engine,
+   * library and player keep working with it.
+   */
+  replaceDevice(device: GPUDevice): void {
+    this.device = device;
+    this.pool.clear();
+    this.pooled.clear();
+    this.refs.clear();
+    this.fresh = [new Set()];
+    this.pipelines.clear();
+    this.blitPipelines.clear();
+    this.pendingErrors = [];
+    this.keyUse.clear();
+    this.allocatedBytes = 0;
+    this.linear = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+    this.nearest = device.createSampler({ magFilter: 'nearest', minFilter: 'nearest', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+  }
+
   /* ---------------------------- texture lifetime ------------------------ */
 
   acquire(width: number, height: number, format: Format = 'rgba8unorm'): GPUTexture {
@@ -101,6 +122,7 @@ export class Gpu {
       this.pooled.add(tex);
       this.allocatedBytes += w * h * (format === 'rgba8unorm' ? 4 : 8);
     }
+    this.keyUse.set(key, this.useTick);
     const scope = this.fresh[this.fresh.length - 1];
     scope.add(tex);
     if (this.fresh.length === 1 && scope.size === ROOT_SCOPE_WARN && !this.warnedRoot && import.meta.env?.DEV) {
@@ -111,6 +133,9 @@ export class Gpu {
   }
 
   private warnedRoot = false;
+  /** Pool key -> `useTick` of its last acquire (for idle sweeping). */
+  private keyUse = new Map<string, number>();
+  private useTick = 0;
 
   retain(tex: GPUTexture): void {
     if (!this.pooled.has(tex)) return;
@@ -192,17 +217,49 @@ export class Gpu {
     this.pool.set(key, list);
   }
 
-  /** Destroy idle pooled textures (call when memory is tight or sizes changed a lot). */
+/** Destroy idle pooled textures (call when memory is tight or sizes changed a lot). Never during an evaluation. */
   trim(): void {
-    for (const list of this.pool.values()) {
-      for (const tex of list) {
-        this.allocatedBytes -= tex.width * tex.height * (tex.format === 'rgba8unorm' ? 4 : 8);
-        this.pooled.delete(tex);
-        this.fresh[0].delete(tex);
-        tex.destroy();
-      }
-    }
+    for (const list of this.pool.values()) for (const tex of list) this.destroyIdle(tex);
     this.pool.clear();
+  }
+
+  private destroyIdle(tex: GPUTexture): void {
+    this.allocatedBytes -= tex.width * tex.height * (tex.format === 'rgba8unorm' ? 4 : 8);
+    this.pooled.delete(tex);
+    this.fresh[0].delete(tex);
+    tex.destroy();
+  }
+
+  /** Called once per evaluation: ages the pool. */
+  advance(): void {
+    this.useTick++;
+  }
+
+  /** Destroy idle textures of sizes not acquired for `maxAge` evaluations (a resolution that is no longer in use). Safe between evaluations. */
+  sweep(maxAge = 90): void {
+    for (const [key, list] of [...this.pool]) {
+      if (list.length === 0 || this.useTick - (this.keyUse.get(key) ?? 0) <= maxAge) continue;
+      for (const tex of list) this.destroyIdle(tex);
+      this.pool.delete(key);
+    }
+  }
+
+  /** Destroy idle textures, least recently used sizes first, until the idle pool holds at most `maxBytes`. Safe between evaluations. */
+  trimIdleTo(maxBytes: number): void {
+    let idle = 0;
+    for (const list of this.pool.values()) for (const t of list) idle += t.width * t.height * (t.format === 'rgba8unorm' ? 4 : 8);
+    if (idle <= maxBytes) return;
+    const keys = [...this.pool.keys()].sort((a, b) => (this.keyUse.get(a) ?? 0) - (this.keyUse.get(b) ?? 0));
+    for (const key of keys) {
+      const list = this.pool.get(key)!;
+      while (list.length && idle > maxBytes) {
+        const tex = list.pop()!;
+        idle -= tex.width * tex.height * (tex.format === 'rgba8unorm' ? 4 : 8);
+        this.destroyIdle(tex);
+      }
+      if (list.length === 0) this.pool.delete(key);
+      if (idle <= maxBytes) break;
+    }
   }
 
   /* ------------------------------- passes ------------------------------- */

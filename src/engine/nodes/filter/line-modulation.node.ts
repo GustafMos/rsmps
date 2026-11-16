@@ -24,6 +24,7 @@ export default defineNode({
     invert: { type: 'bool', default: false, label: 'Dark pushes up', group: 'Lines' },
     modulate: { type: 'number', default: 0.7, min: 0, max: 1, step: 0.01, label: 'Brightness lights the lines', group: 'Lines', hint: 'Lines glow where the picture is bright and fade where it is dark, so the subject emerges from the lines.' },
     occlusion: { type: 'bool', default: false, label: 'Lines hide the ones behind', group: 'Lines', hint: 'Classic ridge-line plot: a raised line blocks the lines above it.' },
+    weight: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Thicker where bright', group: 'Lines', hint: 'Line thickness follows the picture: fat lines in bright areas, hairlines in dark ones, so shading appears as line density.' },
     colorMode: {
       type: 'enum',
       default: 'fixed',
@@ -87,6 +88,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
         amount: p.amount,
         half: p.thickness / 2,
         modul: p.modulate,
+        weight: p.weight,
         glow: p.glow,
         gr: p.glowRadius,
         occlude: p.occlusion,
@@ -113,11 +115,12 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     let dv = b - yi;
     if (u.occlude > 0.5 && dv > 0.0) { acc = bgp; }
     let dist = abs(dv) / sqrt(1.0 + slope * slope);
-    var cover = 1.0 - smoothstep(u.half - 0.5, u.half + 0.5, dist);
+    let hnow = u.half * mix(1.0, clamp(h * 2.2, 0.0, 1.4), u.weight);
+    var cover = 1.0 - smoothstep(hnow - 0.5, hnow + 0.5, dist);
     cover = max(cover, 0.0);
     var light = cover;
     if (u.glow > 0.0) { light = light + u.glow * 0.55 * exp(-(dist * dist) / (2.0 * u.gr * u.gr)); }
-    light = clamp(light * mix(1.0, clamp(h * 2.2 + 0.06, 0.0, 1.0), u.modul), 0.0, 1.0);
+    light = clamp(light * mix(1.0, clamp(h * 2.2, 0.0, 1.0), u.modul), 0.0, 1.0);
     if (light <= 0.002) { continue; }
     ${fromSource ? 'let sc = unpremul(textureSampleLevel(pic, smp, uvAt(a, bi), 0.0)); let col = sc.rgb * (0.35 + 0.65 * h * 1.0 + 0.2); let la = light * sc.a;' : 'let col = u.color.rgb; let la = light * u.color.a;'}
     acc = vec4f(col * la + acc.rgb * (1.0 - la), la + acc.a * (1.0 - la));

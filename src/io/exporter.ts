@@ -55,6 +55,7 @@ export interface ExporterDeps {
   /** Pausing the player for the duration of an export keeps it from evaluating (and recycling textures) between frames. */
   player?: { hold(): () => void };
   watch?: GpuWatch;
+  governor?: { enter(mode: 'export'): () => void };
 }
 
 type Img = ImageValue | MaskValue;
@@ -120,14 +121,19 @@ export class ExporterImpl implements Exporter {
     this.d.watch?.take();
     // An export touches every frame once: the engine / frame caches are not worth hundreds of MB then, and the memory is what keeps
     // large frames (1080x1920 with 20+ intermediate textures) from running the GPU out of memory.
-    const engineBudget = this.d.gate.setCacheBudget(EXPORT_ENGINE_CACHE);
-    const mediaBudget = this.d.library.setFrameBudget(EXPORT_MEDIA_CACHE);
+    // With the memory governor the export mode of the shared budget applies; without it fixed budgets are used.
+    const leaveMode = this.d.governor?.enter('export');
+    const engineBudget = leaveMode ? 0 : this.d.gate.setCacheBudget(EXPORT_ENGINE_CACHE);
+    const mediaBudget = leaveMode ? 0 : this.d.library.setFrameBudget(EXPORT_MEDIA_CACHE);
     await this.d.gate.exclusive(() => this.d.gpu.trim()); // never while an evaluation is mid-render
     try {
       return await this.runExact(req);
     } finally {
-      this.d.gate.setCacheBudget(engineBudget);
-      this.d.library.setFrameBudget(mediaBudget);
+      if (leaveMode) leaveMode();
+      else {
+        this.d.gate.setCacheBudget(engineBudget);
+        this.d.library.setFrameBudget(mediaBudget);
+      }
       await this.d.gate.exclusive(() => this.d.gpu.trim());
       this.d.library.exact = false;
       this.releaseConformed();
@@ -193,7 +199,7 @@ export class ExporterImpl implements Exporter {
       run.progress(0, job.label);
       if (sigs && job.item !== sigItem) {
         sigItem = job.item;
-        await this.prepareSignals(sigs, run, frames);
+        await this.prepareSignals(sigs, run, frames, job.item);
       }
       try {
         files.push(...(await this.exportJob(job, run)));
@@ -227,13 +233,13 @@ export class ExporterImpl implements Exporter {
    * Deterministic bridge values for one batch item: analyse the audio offline once, route Host.signal to the
    * per-frame tracks and drop engine results cached with other (live or previous-item) values.
    */
-  private async prepareSignals(router: SignalRouter, run: Run, frames: number): Promise<void> {
+  private async prepareSignals(router: SignalRouter, run: Run, frames: number, item: number): Promise<void> {
     const { audio, registry, library } = this.d;
     const graph = run.req.graph;
     const fps = graph.project.fps;
     router.beginExport(SILENT_TRACKS(fps)); // from now on no live value can leak in
     try {
-      const tracks = await audio.analyzeSignals(graph, registry, (id) => library.assetAudio(id), { duration: frames / fps, fps, loop: graph.project.loop });
+      const tracks = await audio.analyzeSignals(graph, registry, (id) => library.assetAudio(id), { duration: frames / fps, fps, loop: graph.project.loop, item });
       if (tracks) router.beginExport(tracks);
       else run.warnings.push('Sound analysis is unavailable; sound-driven values export as 0.');
     } catch (err) {
@@ -324,7 +330,7 @@ export class ExporterImpl implements Exporter {
     const { audio, registry, library } = this.d;
     const graph = run.req.graph;
     const duration = totalFramesOf(graph.project) / graph.project.fps;
-    const rendered = await audio.renderOffline(graph, registry, (id) => library.assetAudio(id), { duration, loop: graph.project.loop });
+    const rendered = await audio.renderOffline(graph, registry, (id) => library.assetAudio(id), { duration, loop: graph.project.loop, item: job.item });
     if (!rendered || !rendered.channels.length || !rendered.channels[0].length) throw new Error('There is no enabled Audio Out with sound wired to it.');
     const pcm = fitAudio(rendered, 0, duration, false);
     const base = sanitizeFileName(graph.name || 'audio');
@@ -441,6 +447,12 @@ export class ExporterImpl implements Exporter {
   private releaseConformed(): void {
     if (this.conformed) this.d.gpu.release(this.conformed);
     this.conformed = null;
+  }
+
+  /** After a device loss was recovered: every GPU handle held here is invalid. */
+  onDeviceReset(): void {
+    this.conformed = null;
+    this.presenters.clear();
   }
 
   private async renderFrame(job: Job, run: Run, frame: number): Promise<Img> {
@@ -823,7 +835,7 @@ export class ExporterImpl implements Exporter {
       const audioNodes = graph.nodes.filter((n) => this.hasInput(n, 'audio') && registry.get(n.type)?.category === 'output');
       if (audioNodes.length > 0 && audioNodes.every((n) => n.bypass || n.params.enabled === false)) return null;
       if (audio.hasExportAudio(graph, registry)) {
-        const rendered = await audio.renderOffline(graph, registry, (id) => library.assetAudio(id), { duration, loop: graph.project.loop });
+        const rendered = await audio.renderOffline(graph, registry, (id) => library.assetAudio(id), { duration, loop: graph.project.loop, item: job.item });
         // The offline renderer works in whole blocks: cut/pad to exactly the video's duration.
         if (rendered && rendered.channels.length && rendered.channels[0].length) return fitAudio(rendered, 0, duration, false);
       }

@@ -1,0 +1,73 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Echo trails",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop your media here"
+    },
+    {
+      "id": "echo",
+      "type": "feedback-trail",
+      "x": 260,
+      "y": 0,
+      "params": {
+        "mode": "time",
+        "echoes": 10,
+        "spacing": 2,
+        "decay": 0.82,
+        "offsetX": 12,
+        "scale": 0.985,
+        "hueShift": 14,
+        "darken": 0.08,
+        "blend": "max"
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 520,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "echo",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "echo",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

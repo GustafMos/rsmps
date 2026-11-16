@@ -26,3 +26,6 @@ src/cli/generated-nodes.ts
 release/
 .desktop-stage/
 desktop/build/
+
+# local TLS certificates (never commit)
+.certs/

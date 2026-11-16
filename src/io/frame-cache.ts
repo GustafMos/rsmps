@@ -25,6 +25,10 @@ export class RenderedFrameCache<I> {
     });
   }
 
+  setMaxBytes(bytes: number): void {
+    this.lru.resize(bytes);
+  }
+
   get bytes(): number {
     return this.lru.bytes;
   }

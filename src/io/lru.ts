@@ -20,6 +20,12 @@ export class ByteLru<K, V> {
     return this.map.size;
   }
 
+  /** Change the budget and evict down to it now. */
+  resize(maxBytes: number): void {
+    this.maxBytes = maxBytes;
+    this.trim();
+  }
+
   has(key: K): boolean {
     return this.map.has(key);
   }
@@ -103,7 +109,7 @@ export class TimedFrameStore<V> {
     return this.lru.size;
   }
   set maxBytes(n: number) {
-    this.lru.maxBytes = n;
+    this.lru.resize(n);
   }
 
   private static key(group: string, start: number): string {

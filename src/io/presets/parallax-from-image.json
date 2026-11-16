@@ -1,0 +1,125 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Parallax from one image",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop your media here"
+    },
+    {
+      "id": "mask",
+      "type": "subject-mask",
+      "x": 260,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "split",
+      "type": "split-layers",
+      "x": 520,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "par",
+      "type": "parallax",
+      "x": 780,
+      "y": 0,
+      "params": {
+        "motion": "sway-h",
+        "amount": 28,
+        "cycles": 1
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1040,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "mask",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "split",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "mask",
+        "port": "mask"
+      },
+      "to": {
+        "node": "split",
+        "port": "mask"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "split",
+        "port": "background"
+      },
+      "to": {
+        "node": "par",
+        "port": "background"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "split",
+        "port": "foreground"
+      },
+      "to": {
+        "node": "par",
+        "port": "layers"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "par",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

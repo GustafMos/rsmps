@@ -81,6 +81,10 @@ const FRAME_BUDGET_BYTES = 512 * 1024 * 1024;
 /** Forward distance (s) over which the decoder keeps decoding instead of re-seeking. */
 const SEEK_AHEAD_SECONDS = 1;
 const THUMB_SIDE = 160;
+/** Decoded sound kept in memory (bytes); older tracks are decoded again when needed. */
+const AUDIO_CACHE_BYTES = 256 * 1024 * 1024;
+/** Longest sound track decoded (seconds): longer ones are cut with a warning, so one huge file cannot exhaust memory. */
+const MAX_AUDIO_SECONDS = 20 * 60;
 
 /** Dev-only switch: serve every video through an HTMLVideoElement (localStorage.rsmpsForceVideoElement = '1' or ?forceVideoElement). Read once. */
 function forceVideoElement(): boolean {
@@ -690,7 +694,9 @@ export class Library implements MediaLibrary {
     if (!pool) {
       const blob = this.blobs.get(info.id);
       if (!blob) return null;
-      pool = new ElementPool(() => new ElementVideo(blob, info.fps || 24, info.duration));
+      // Several elements of a 4K video are heavy: cap the pool by pixels (about 20 megapixels in total).
+      const cap = Math.max(1, Math.min(3, Math.floor(20_000_000 / Math.max(1, info.width * info.height))));
+      pool = new ElementPool(() => new ElementVideo(blob, info.fps || 24, info.duration), cap);
       this.pools.set(info.id, pool);
       this.poolSweeper ??= setInterval(() => {
         const now = performance.now();
@@ -781,10 +787,28 @@ export class Library implements MediaLibrary {
       });
       this.audio.set(assetId, p);
       void p.then((pcm) => {
-        if (pcm && this.audio.get(assetId) === p) this.audioBytes.set(assetId, pcm.channels.reduce((s, c) => s + c.byteLength, 0));
+        if (pcm && this.audio.get(assetId) === p) {
+          this.audioBytes.set(assetId, pcm.channels.reduce((s, c) => s + c.byteLength, 0));
+          this.evictAudio(assetId);
+        }
       });
     }
-    return p;
+    // A video's sound track carries the clip's duration and frame rate: Media In needs them to map trim and speed.
+    if (info.kind !== 'video') return p;
+    return p.then((pcm) => (pcm ? { ...pcm, video: { duration: info.duration, fps: info.fps || 24 } } : null));
+  }
+
+  /** Decoded PCM is CPU memory: keep at most AUDIO_CACHE_BYTES, dropping the least recently decoded (never `keep`). */
+  private evictAudio(keep: string): void {
+    let total = 0;
+    for (const n of this.audioBytes.values()) total += n;
+    for (const id of [...this.audio.keys()]) {
+      if (total <= AUDIO_CACHE_BYTES) break;
+      if (id === keep) continue;
+      total -= this.audioBytes.get(id) ?? 0;
+      this.audio.delete(id);
+      this.audioBytes.delete(id);
+    }
   }
 
   private async decodeAudio(info: AssetInfo): Promise<PcmAudio | null> {
@@ -931,6 +955,21 @@ export class Library implements MediaLibrary {
     return this.frames.bytes + pcm;
   }
 
+  /** Drop every decoded frame (they are decoded again on demand). */
+  dropFrames(): void {
+    this.frames.clear();
+  }
+
+  /**
+   * After a device loss every texture handle here is invalid: forget them without releasing, and drop the live sources.
+   * Call after `Gpu.replaceDevice`.
+   */
+  onDeviceReset(): void {
+    this.frames.clear();
+    this.live.closeAll();
+    this.pending.clear();
+  }
+
   /** Set the byte budget of the decoded-frame store (evicts down to it); returns the previous one. */
   setFrameBudget(bytes: number): number {
     const prev = this.frameBudget;
@@ -988,7 +1027,10 @@ async function decodeTrackPcm(blob: Blob): Promise<PcmAudio | null> {
     if (!track) return null;
     const sink = new AudioBufferSink(track);
     const parts: { buffer: AudioBuffer; timestamp: number }[] = [];
-    for await (const wrapped of sink.buffers()) parts.push(wrapped);
+    for await (const wrapped of sink.buffers(0, MAX_AUDIO_SECONDS)) parts.push(wrapped);
+    if (parts.length && parts[parts.length - 1].timestamp + parts[parts.length - 1].buffer.duration >= MAX_AUDIO_SECONDS - 1) {
+      console.warn(`The sound track is longer than ${MAX_AUDIO_SECONDS / 60} minutes: only the first part is used.`);
+    }
     if (parts.length === 0) return null;
     const rate = parts[0].buffer.sampleRate;
     const nch = Math.min(2, Math.max(1, parts[0].buffer.numberOfChannels));

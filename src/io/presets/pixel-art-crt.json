@@ -1,0 +1,140 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Pixel art + CRT",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop your media here"
+    },
+    {
+      "id": "pix",
+      "type": "pixelate",
+      "x": 260,
+      "y": 0,
+      "params": {
+        "mode": "fixed-height",
+        "value": 180
+      }
+    },
+    {
+      "id": "pal",
+      "type": "palette",
+      "x": 520,
+      "y": 160,
+      "params": {
+        "source": "extract",
+        "count": 16
+      }
+    },
+    {
+      "id": "dith",
+      "type": "dither",
+      "x": 520,
+      "y": 0,
+      "params": {
+        "algorithm": "bayer-4",
+        "scale": 1,
+        "strength": 0.7
+      }
+    },
+    {
+      "id": "crt",
+      "type": "crt-display",
+      "x": 780,
+      "y": 0,
+      "params": {
+        "preset": "arcade"
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1040,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "pix",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "pix",
+        "port": "image"
+      },
+      "to": {
+        "node": "dith",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "dith",
+        "port": "image"
+      },
+      "to": {
+        "node": "crt",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "crt",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "pix",
+        "port": "image"
+      },
+      "to": {
+        "node": "pal",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "pal",
+        "port": "palette"
+      },
+      "to": {
+        "node": "dith",
+        "port": "palette"
+      }
+    }
+  ],
+  "frames": []
+}

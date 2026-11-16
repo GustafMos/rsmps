@@ -45,50 +45,65 @@ feeds the viewed node. The RAM frame cache is bypassed for such graphs.
 
 ## Phone as a camera (QR)
 
-Use a phone as a live camera without any app: scan a QR code, allow the camera, and the picture appears in the
-**Phone Camera** node (`phone-camera`). It only works when you run the suite locally in LAN mode; it does not work on the
-hosted (GitHub Pages) build.
+Use a phone as a live camera without any app: scan a QR code, allow the camera, and the picture appears in the **Phone Camera**
+node (`phone-camera`). It only works when you run the suite locally in LAN mode; it does not work on the hosted (GitHub Pages) build.
 
-### Steps
+### Easiest: Tailscale (no certificate warning)
 
-1. Stop the normal dev server and start the LAN one: `npm run dev:lan`. It prints the addresses (for example
-   `https://192.168.0.5:5173/`). Open that address on the computer (not `localhost`, so the phone can reach the same origin).
-2. Add a **Phone Camera** node, open its inspector and press **Link a phone**. A QR code appears.
-3. Scan it with the phone's camera app and open the link. The phone shows a warning that the connection is not private:
-   choose **Advanced**, then **Proceed**. This is your own computer's self-signed certificate.
-4. Allow the camera. The phone shows a big status line; when it says "Sending your camera" the picture is in the node.
-   The phone page can switch camera (rear by default), change resolution and toggle the torch where supported, and keeps the
-   screen awake. It reconnects by itself after a network hiccup.
-5. **Disconnect** in the inspector (or close the phone page) ends the session. Sessions live in memory: after reloading the app
-   make a new QR code.
+If Tailscale is on the computer and the phone (same account / tailnet):
 
-### Requirements and limits
+1. One time, in the Tailscale admin console (https://login.tailscale.com/admin/dns) turn on **MagicDNS** and press **Enable HTTPS**.
+2. Start the app with `npm run dev:lan -- --tailscale`. It asks Tailscale for a real certificate for this computer's name
+   (`machine.tailnet.ts.net`, saved in the git-ignored `.certs/` folder) and prints the addresses. The phone then trusts the
+   page: **no "not private" warning**, and camera access works.
+3. Open the app on the computer, add a **Phone Camera** node, press **Link a phone**, choose the address "Tailscale name ... (trusted
+   https)" and scan the QR code with the phone.
 
-- **Same Wi-Fi / network.** Both devices must be on the same network. Guest Wi-Fi often has "client isolation" (AP isolation)
-  which blocks phone-to-computer traffic: use the normal network or a phone hotspot the computer joins.
-- **https is required by phones** for camera access, which is why LAN mode uses a self-signed certificate.
-- **Video travels with WebRTC** (peer to peer on the LAN, host candidates only: no STUN/TURN server is configured and nothing
-  leaves your network). If WebRTC does not connect within about 4 seconds the phone sends JPEG frames through the dev server
-  instead (lower frame rate and quality, but it works through more networks).
+If `tailscale cert` fails, the message says why (usually step 1). You can also bring your own certificate:
+`RSMPS_CERT=cert.pem RSMPS_KEY=key.pem npm run dev:lan`.
+
+### Plain Wi-Fi (self-signed certificate, one warning)
+
+1. `npm run dev:lan`. It prints the addresses best-first: the Wi-Fi/Ethernet address first, then Tailscale, then virtual adapters
+   (Hyper-V/WSL/VirtualBox) which a phone cannot reach.
+2. In the app press **Link a phone**; the dropdown lists the same addresses. Pick the one on the phone's network and scan the code.
+3. The phone warns that the connection is not private: choose **Advanced**, then **Proceed**. This is your own computer.
+4. Allow the camera. The phone shows what worked: "Reached your computer", "Code accepted", "Video connected".
+
+**Windows firewall:** Windows Security > Firewall & network protection > Allow an app through firewall > **Node.js JavaScript
+Runtime** > tick **Private**. The Wi-Fi network profile must be **Private** (Settings > Network > Wi-Fi > the network > Private).
+**Guest Wi-Fi / "AP isolation"** blocks phone-to-computer traffic: use the normal network, a phone hotspot the computer joins, or
+Tailscale. If no phone reaches the computer within 20 seconds the app shows this checklist next to the QR code.
+
+### How it works and what it needs
+
+- **Open the app from the same server the QR code points at.** The code always uses the address and port of the page you have open,
+  so it reaches the server that knows the code. If another server is running on a different port (for example plain `npm run dev`),
+  a phone using its address gets "This code is not known to the computer": scan the code shown by the app you are using. The
+  Phone Camera link is only offered when the page comes from the `dev:lan` server.
+- **The code lives 15 minutes** and the clock restarts when the phone's page first reaches the computer (time spent on the
+  certificate warning is not lost). It is single use: one phone per code. A countdown is shown in the app.
+- **Video travels with WebRTC** (peer to peer, host candidates only: no STUN/TURN server, nothing leaves your network; over Tailscale
+  the 100.x address is used). If WebRTC does not connect within about 4 seconds the phone sends JPEG frames through the dev server
+  instead (lower quality, still works through the same secure WebSocket).
 - Live preview only, like the other live inputs: record it before you export.
 
 ### Security notes
 
 - It is **opt-in**: plain `npm run dev` is unchanged (http, localhost only).
-- While `npm run dev:lan` runs, **the dev server (and your project's source) is reachable by every device on the network.**
-  Only use it on a network you trust, and stop it when you are done.
-- A pairing token is 128 bits of randomness made on the computer and embedded in the QR code. It is single use: one phone per
-  token, it expires 5 minutes after it was made if nobody joined, it ends when the computer page closes, and a wrong token
-  is rejected. The server only relays messages between the two sides; it stores nothing and writes nothing to disk.
-- Anyone who sees the QR code while it is valid (a screenshot, a shoulder surfer) could join first. Disconnect when finished.
+- While `npm run dev:lan` runs, **the dev server (and your project's source) is reachable by every device on the network** (and
+  accepts any host name, so `machine.tailnet.ts.net` works). Only use it on a network you trust and stop it when you are done.
+- A pairing token is 128 bits of randomness made on the computer. The server only relays messages between the two sides; it stores
+  nothing and writes nothing to disk. Anyone who sees the QR code while it is valid could join first: disconnect when finished.
+- Certificates are never committed (`.certs/` is git-ignored).
 
 ### Troubleshooting
 
-- **Windows firewall prompt:** when Node asks for network access, allow it on **private networks**. Without that the phone
-  cannot reach the computer.
-- **The phone cannot open the address:** check it is on the same Wi-Fi, that the address in the QR code is the computer's
-  LAN address, and that no VPN is taking over the route. If the computer has several addresses, the app puts the one of the
-  page you opened into the code (open the app via the LAN address you want).
-- **"Waiting for the phone" never ends:** the certificate warning page may still be open on the phone; proceed past it.
-- **Picture stutters:** you are probably in the JPEG fallback (the phone page says "fallback mode"); lower the resolution on
-  the phone page or use a network without client isolation.
+- **The phone cannot open the address:** the first address may be a virtual adapter or a network the phone is not on. Pick another
+  in the dropdown; check the firewall and the "Private" network profile above.
+- **"This code is not known to the computer":** the code belongs to a different server process or an older session. Scan the QR code
+  that is currently shown in the app; make sure the app tab and the phone use the same `dev:lan` server.
+- **"Another phone is already connected" / "This code expired":** make a new QR code.
+- **Safari says the certificate is invalid and will not connect the WebSocket:** use the Tailscale route above (a real certificate).
+- **Picture stutters:** you are probably in the JPEG fallback (the phone page says "fallback mode"); lower the resolution on the phone
+  page or use a network without client isolation.

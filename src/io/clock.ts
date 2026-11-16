@@ -85,6 +85,15 @@ export class ProxyController {
     this.warmup();
   }
 
+  /** Out of memory: drop one resolution level now. */
+  forceLower(): void {
+    if (this.idx < PROXY_LEVELS.length - 1) {
+      this.abandonedUntil[this.idx] = performance.now() + this.t.retryAfterMs * 3;
+      this.idx++;
+      this.settle();
+    }
+  }
+
   /** Playback started, or the graph changed: keep the level, but ignore the next frames and restart timers. */
   warmup(): void {
     this.warm = this.t.warmupFrames;

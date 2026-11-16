@@ -85,3 +85,26 @@ describe('PhoneSessions', () => {
     expect(s.joinPhone(T, peer().p, 5).ok).toBe(false); // the token cannot be reused
   });
 });
+
+describe('token lifetime', () => {
+  it('lives 15 minutes unused; the first sign of the phone restarts the clock once and tells the desktop', () => {
+    expect(SESSION_TTL_MS).toBe(15 * 60 * 1000);
+    const s = new PhoneSessions();
+    const d = peer();
+    s.registerDesktop(T, d.p, 0);
+    expect(s.expiresAt(T)).toBe(SESSION_TTL_MS);
+    // 14 minutes spent on a certificate warning, then the page loads and pings.
+    expect(s.reached(T, 14 * 60_000, '192.168.0.9')).toBe(true);
+    expect(JSON.parse(d.sent.at(-1) as string)).toMatchObject({ type: 'reached', from: '192.168.0.9' });
+    expect(s.expiresAt(T)).toBe(14 * 60_000 + SESSION_TTL_MS);
+    s.reached(T, 20 * 60_000, '192.168.0.9'); // a second ping does not keep extending it
+    expect(s.expiresAt(T)).toBe(14 * 60_000 + SESSION_TTL_MS);
+    expect(s.reached('f'.repeat(32), 0, 'x')).toBe(false);
+  });
+  it('a joined session has no expiry', () => {
+    const s = new PhoneSessions();
+    s.registerDesktop(T, peer().p, 0);
+    s.joinPhone(T, peer().p, 5);
+    expect(s.expiresAt(T)).toBeNull();
+  });
+});

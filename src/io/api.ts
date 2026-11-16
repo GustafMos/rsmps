@@ -56,6 +56,11 @@ export interface PlayerState {
   timings: ReadonlyMap<string, number>;
   /** Size of the image currently shown, or null. */
   /**
+   * GPU memory: bytes allocated, the budget the app keeps itself under, and how close it is (ok below 75 %, high, critical at or
+   * over the budget). Show it as a meter with a "Free memory" button (`Io.freeMemory()`).
+   */
+  memory: { allocatedBytes: number; budgetBytes: number; pressure: 'ok' | 'high' | 'critical' };
+  /**
    * Size of the image at FULL resolution (proxy 1), independent of the playback proxy. Show this to the user and
    * lay the canvas out at exactly this size (the player also sets the canvas CSS width/height to it); the browser
    * scales the lower-resolution backing store, so the picture never changes size on screen when the proxy changes.
@@ -315,6 +320,14 @@ export interface DeviceApi {
 /** State of a phone link session (QR code). */
 export type PhoneState = 'waiting' | 'connected' | 'disconnected' | 'expired';
 
+export interface PhoneAddress {
+  /** Origin to put in the QR code, e.g. https://192.168.0.5:5173 */
+  url: string;
+  /** For a dropdown: "Wi-Fi 192.168.0.5", "Tailscale 100.x.y.z", "Tailscale name machine.tailnet.ts.net (trusted https)". */
+  label: string;
+  kind: 'lan' | 'tailscale' | 'other';
+}
+
 export interface PhoneSessionInfo {
   /** 128-bit random pairing token (32 hex digits). Store it in the Phone Camera node's `session` param. */
   token: string;
@@ -335,9 +348,16 @@ export interface PhoneSessionInfo {
 export interface PhoneApi {
   /** True when the dev server runs in LAN mode (https, reachable from the network). Decided once at start-up. */
   available: boolean;
-  createSession(): Promise<PhoneSessionInfo>;
+  /** Addresses a phone could use to reach this computer, best first (physical Wi-Fi, then Tailscale, then others). Offer them in a dropdown. */
+  addresses(): Promise<PhoneAddress[]>;
+  /** `address` = the `url` of one of `addresses()` (default: the first). The QR code always uses the protocol and port of THIS page's server. */
+  createSession(opts?: { address?: string }): Promise<PhoneSessionInfo>;
   state(token: string): PhoneState;
-  onState(listener: (token: string, state: PhoneState) => void): () => void;
+  /** One plain sentence about what is happening or what to try ("Your phone reached this computer...", the firewall checklist, why it closed). */
+  detail(token: string): string;
+  /** When an unused code expires (ms since epoch), null once a phone joined. Show a countdown. */
+  expiresAt(token: string): number | null;
+  onState(listener: (token: string, state: PhoneState, detail: string) => void): () => void;
   close(token: string): void;
 }
 
@@ -382,6 +402,10 @@ export interface Io {
   switchProject(id: string): Promise<GraphDoc | null>;
   /** Best-effort memory readout in bytes. */
   memory(): MemoryInfo;
+  /** Total GPU memory the app may use (bytes). `set` is remembered across sessions; `auto` goes back to the detected default. */
+  memoryBudget: { get(): number; set(bytes: number): void; auto(): void };
+  /** Release everything that can be rebuilt (frame caches, engine cache, idle textures). The picture on screen stays. */
+  freeMemory(): Promise<void>;
   /** Evaluate once, outside the player (thumbnails, node previews). */
   evaluate(graph: GraphDoc, node: string, opts?: { port?: string; seconds?: number; item?: number; proxy?: number }): Promise<Value | null>;
 }

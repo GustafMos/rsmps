@@ -1,0 +1,132 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Game Boy handheld",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop your media here"
+    },
+    {
+      "id": "grey",
+      "type": "color-adjust",
+      "x": 260,
+      "y": 0,
+      "params": {
+        "contrast": 1.25,
+        "saturation": 0
+      }
+    },
+    {
+      "id": "pix",
+      "type": "pixelate",
+      "x": 520,
+      "y": 0,
+      "params": {
+        "mode": "fixed-height",
+        "value": 144
+      }
+    },
+    {
+      "id": "dith",
+      "type": "dither",
+      "x": 780,
+      "y": 0,
+      "params": {
+        "fallback": "gameboy-dmg",
+        "algorithm": "bayer-4",
+        "scale": 1,
+        "strength": 0.85
+      }
+    },
+    {
+      "id": "lcd",
+      "type": "crt-display",
+      "x": 1040,
+      "y": 0,
+      "params": {
+        "preset": "lcd",
+        "persistence": 2,
+        "persistDecay": 0.45
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1300,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "grey",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "grey",
+        "port": "image"
+      },
+      "to": {
+        "node": "pix",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "pix",
+        "port": "image"
+      },
+      "to": {
+        "node": "dith",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "dith",
+        "port": "image"
+      },
+      "to": {
+        "node": "lcd",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "lcd",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

@@ -5,6 +5,8 @@
  * the WebSocket instead. `?fake=1` streams a generated animation instead of the camera (for testing without a phone).
  */
 
+import { closeMessage } from './messages';
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusEl = $('status');
 const detailEl = $('detail');
@@ -28,6 +30,19 @@ let closedForGood = false;
 let wake: { release(): Promise<void> } | null = null;
 let torchOn = false;
 let chain: Promise<void> = Promise.resolve(); // incoming messages are handled in order
+
+const stepsEl = document.getElementById('steps') as HTMLElement;
+const steps: Record<string, 'ok' | 'bad' | 'wait'> = { reached: 'wait', accepted: 'wait', video: 'wait' };
+const STEP_TEXT: Record<string, string> = { reached: 'Reached your computer', accepted: 'Code accepted', video: 'Video connected' };
+
+/** "Reached your computer / Code accepted / Video connected": which of the steps worked, so a failure says where it stopped. */
+function setStep(name: keyof typeof steps, value: 'ok' | 'bad' | 'wait'): void {
+  steps[name] = value;
+  stepsEl.innerHTML = Object.keys(steps)
+    .map((k) => `${steps[k] === 'ok' ? '✓' : steps[k] === 'bad' ? '✗' : '…'} ${STEP_TEXT[k]}`)
+    .join('<br>');
+}
+setStep('reached', 'wait');
 
 function status(text: string, kind: 'ok' | 'bad' | 'wait', detail = ''): void {
   statusEl.textContent = text;
@@ -117,6 +132,7 @@ function startJpeg(): void {
     if (canvas instanceof OffscreenCanvas) void canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 }).then(done, () => (busy = false));
     else canvas.toBlob((b) => void done(b), 'image/jpeg', 0.7);
   }, 100); // about 10 frames per second
+  setStep('video', 'ok');
   status('Sending (fallback mode)', 'ok', 'Your picture goes through the computer as still frames. Keep this page open.');
 }
 
@@ -126,7 +142,10 @@ async function onOffer(sdp: string): Promise<void> {
   const peer = pc;
   peer.onicecandidate = (e) => e.candidate && send({ type: 'ice', candidate: e.candidate.toJSON() });
   peer.onconnectionstatechange = () => {
-    if (peer.connectionState === 'connected') status('Sending your camera', 'ok', 'Keep this page open. The screen stays on.');
+    if (peer.connectionState === 'connected') {
+      setStep('video', 'ok');
+      status('Sending your camera', 'ok', 'Keep this page open. The screen stays on.');
+    }
   };
   for (const track of stream?.getVideoTracks() ?? []) peer.addTrack(track, stream!);
   await peer.setRemoteDescription({ type: 'offer', sdp });
@@ -150,7 +169,11 @@ function connect(): void {
     const msg = JSON.parse(ev.data) as { type: string; sdp?: string; candidate?: RTCIceCandidateInit };
     chain = chain
       .then(async () => {
-        if (msg.type === 'ready') status('Connected. Waiting for the computer…', 'wait');
+        if (msg.type === 'ready') {
+          setStep('reached', 'ok');
+          setStep('accepted', 'ok');
+          status('Code accepted. Waiting for the computer…', 'wait');
+        }
         else if (msg.type === 'offer' && msg.sdp) await onOffer(msg.sdp);
         else if (msg.type === 'ice' && msg.candidate) await pc?.addIceCandidate(msg.candidate).catch(() => undefined);
         else if (msg.type === 'use-jpeg') {
@@ -164,18 +187,11 @@ function connect(): void {
   sock.onclose = (ev) => {
     stopJpeg();
     if (sock !== ws) return;
-    if (ev.code === 4404 || ev.code === 4400) {
+    const why = closeMessage(ev.code);
+    if (why?.final) {
       closedForGood = true;
-      status('This link is not valid', 'bad', 'Make a new QR code on the computer and scan it again.');
-    } else if (ev.code === 4408) {
-      closedForGood = true;
-      status('This link expired', 'bad', 'Make a new QR code on the computer and scan it again.');
-    } else if (ev.code === 4409) {
-      closedForGood = true;
-      status('Another phone is already connected', 'bad', 'One phone per QR code.');
-    } else if (ev.code === 4000) {
-      closedForGood = true;
-      status('The computer ended the session', 'bad', 'Make a new QR code to connect again.');
+      setStep('accepted', 'bad');
+      status('Not connected', 'bad', why.text);
     } else {
       const wait = Math.min(8000, 1000 * 2 ** retry++);
       status('Connection lost. Trying again…', 'bad', `Retrying in ${Math.round(wait / 1000)} s`);
@@ -200,7 +216,21 @@ async function start(): Promise<void> {
     return;
   }
   void keepAwake();
+  await ping();
   connect();
+}
+
+/** First contact: tells the computer this phone reached it (before pairing), and shows whether the code is known. */
+async function ping(): Promise<void> {
+  try {
+    const res = await fetch(`/__rsmps/ping?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
+    const body = (await res.json()) as { known?: boolean };
+    setStep('reached', 'ok');
+    if (body.known === false) detailEl.textContent = 'This code is not known to the computer. Scan the QR code currently shown in the app again.';
+  } catch {
+    setStep('reached', 'bad');
+    detailEl.textContent = 'Could not reach the computer. Check the Wi-Fi and the certificate warning.';
+  }
 }
 
 switchBtn.onclick = async () => {

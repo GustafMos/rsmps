@@ -12,20 +12,20 @@ import type { Duplex } from 'node:stream';
 import type { Plugin } from 'vite';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { CLOSE_CODES, PhoneSessions, type Peer } from './phone-session';
+import { rankAddresses, type Candidate } from './phone-addresses';
 
 export const WS_PATH = '/__rsmps/phone-ws';
 export const INFO_PATH = '/__rsmps/lan-info';
 
-/** Non-loopback IPv4 addresses of this machine. */
-export function lanAddresses(): string[] {
-  const out: string[] = [];
-  for (const list of Object.values(networkInterfaces())) {
-    for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) out.push(a.address);
-  }
-  return out;
+/** Ranked addresses of this machine (see phone-addresses.ts). */
+export function lanCandidates(): Candidate[] {
+  const flat = Object.entries(networkInterfaces()).flatMap(([name, list]) => (list ?? []).map((a) => ({ name, address: a.address, family: a.family, internal: a.internal })));
+  return rankAddresses(flat);
 }
 
-export function phoneLink(opts: { lan: boolean; https?: boolean }): Plugin {
+export const PING_PATH = '/__rsmps/ping';
+
+export function phoneLink(opts: { lan: boolean; https?: boolean; /** machine.tailnet.ts.net when a Tailscale certificate is in use. */ tailnetName?: string }): Plugin {
   return {
     name: 'rsmps-phone-link',
     configureServer(server) {
@@ -35,19 +35,35 @@ export function phoneLink(opts: { lan: boolean; https?: boolean }): Plugin {
       });
       if (!opts.lan) return;
 
-      const origins = (): string[] => {
+      const sessions = new PhoneSessions();
+      const proto = opts.https === false ? 'http' : 'https';
+      const port = (): number => {
         const addr = server.httpServer?.address();
-        const port = typeof addr === 'object' && addr ? addr.port : (server.config.server.port ?? 5173);
-        return lanAddresses().map((ip) => `${opts.https === false ? 'http' : 'https'}://${ip}:${port}`);
+        return typeof addr === 'object' && addr ? addr.port : (server.config.server.port ?? 5173);
       };
+      const candidates = () => {
+        const list = lanCandidates().map((c) => ({ ...c, url: `${proto}://${c.address}:${port()}` }));
+        // The Tailscale HTTPS name (browser-trusted certificate, no warning on the phone) is the preferred address when there is one.
+        if (opts.tailnetName) list.unshift({ address: opts.tailnetName, adapter: 'Tailscale', kind: 'tailscale' as const, label: `Tailscale name ${opts.tailnetName} (trusted https)`, url: `${proto}://${opts.tailnetName}:${port()}` });
+        return list;
+      };
+      const origins = (): string[] => candidates().map((c) => c.url);
 
       server.middlewares.use(INFO_PATH, (_req, res) => {
         res.setHeader('content-type', 'application/json');
         res.setHeader('cache-control', 'no-store');
-        res.end(JSON.stringify({ lan: true, origins: origins() }));
+        res.end(JSON.stringify({ lan: true, origins: origins(), candidates: candidates(), port: port(), protocol: proto }));
       });
 
-      const sessions = new PhoneSessions();
+      // "Your phone reached this computer": the phone page calls this first, with its token, before it opens the WebSocket.
+      server.middlewares.use(PING_PATH, (req, res) => {
+        const token = new URL(req.url ?? '/', 'http://x').searchParams.get('token') ?? '';
+        const known = sessions.reached(token, Date.now(), String(req.socket.remoteAddress ?? ''));
+        res.setHeader('content-type', 'application/json');
+        res.setHeader('cache-control', 'no-store');
+        res.end(JSON.stringify({ ok: true, known }));
+      });
+
       const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
       const timer = setInterval(() => sessions.sweep(Date.now()), 15_000);
       server.httpServer?.on('close', () => clearInterval(timer));
@@ -71,7 +87,7 @@ export function phoneLink(opts: { lan: boolean; https?: boolean }): Plugin {
           return;
         }
         if (role === 'phone') peer.send(JSON.stringify({ type: 'ready' }));
-        else peer.send(JSON.stringify({ type: 'registered' }));
+        else peer.send(JSON.stringify({ type: 'registered', expiresAt: sessions.expiresAt(token) }));
         ws.on('message', (data, isBinary) => {
           const payload = isBinary ? new Uint8Array(data as Buffer) : data.toString();
           sessions.relay(token, role, payload, isBinary);
@@ -87,9 +103,10 @@ export function phoneLink(opts: { lan: boolean; https?: boolean }): Plugin {
       });
 
       server.httpServer?.once('listening', () => {
-        const list = origins();
+        const list = candidates();
+        const cert = opts.tailnetName ? 'Tailscale certificate: trusted by phones, no warning' : opts.https === false ? 'plain http (test mode)' : 'https, certificate may show a warning on the phone';
         console.log(
-          `\n  RSMPS LAN mode (https, self-signed certificate)\n${list.map((o) => `    open on this computer or phone: ${o}/`).join('\n') || '    (no network address found)'}\n  The dev server is reachable by every device on this network while it runs.\n`,
+          `\n  RSMPS LAN mode (${cert})\n  Addresses, best first (the app offers these for the QR code):\n${list.map((c, i) => `   ${i === 0 ? '>' : ' '} ${c.url}/   ${c.label}`).join('\n') || '    (no network address found)'}\n  The dev server is reachable by every device on this network while it runs.\n  If a phone cannot connect: Windows Security > Firewall & network protection > Allow an app through firewall > Node.js JavaScript Runtime > Private.\n  The Wi-Fi network must be "Private", and guest / AP-isolated Wi-Fi blocks phone-to-computer traffic (try the Tailscale address).\n`,
         );
       });
     },

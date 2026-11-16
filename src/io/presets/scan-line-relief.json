@@ -1,0 +1,121 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Scan line relief",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop your media here"
+    },
+    {
+      "id": "adj",
+      "type": "color-adjust",
+      "x": 260,
+      "y": 0,
+      "params": {
+        "contrast": 1.3
+      }
+    },
+    {
+      "id": "rel",
+      "type": "line-modulation",
+      "x": 520,
+      "y": 0,
+      "params": {
+        "lineCount": 90,
+        "thickness": 2.2,
+        "amount": 24,
+        "smoothing": 4,
+        "weight": 0.8,
+        "modulate": 0.9,
+        "glow": 0.8,
+        "glowRadius": 4,
+        "colorMode": "fixed",
+        "lineColor": [
+          0.4,
+          1,
+          0.9,
+          1
+        ]
+      }
+    },
+    {
+      "id": "bloom",
+      "type": "bloom",
+      "x": 780,
+      "y": 0,
+      "params": {
+        "threshold": 0.35,
+        "radius": 14,
+        "intensity": 0.9
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1040,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "adj",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "adj",
+        "port": "image"
+      },
+      "to": {
+        "node": "rel",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "rel",
+        "port": "image"
+      },
+      "to": {
+        "node": "bloom",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "bloom",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

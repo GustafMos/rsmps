@@ -17,7 +17,7 @@ export interface AudioBridge {
   listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]>;
   onDevicesChanged(listener: () => void): () => void;
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
-  analyzeSignals(graph: GraphDoc, registry: Registry, assets: AudioAssetProvider, options: { duration: number; fps: number; sampleRate?: number; loop: boolean }): Promise<SignalTracks | null>;
+  analyzeSignals(graph: GraphDoc, registry: Registry, assets: AudioAssetProvider, options: { duration: number; fps: number; sampleRate?: number; loop: boolean; item?: number }): Promise<SignalTracks | null>;
   hasAudio(graph: GraphDoc, registry: Registry): boolean;
   /** True when an export should render and mux graph audio (an enabled, wired Audio Out exists). */
   hasExportAudio(graph: GraphDoc, registry: Registry): boolean;
@@ -36,7 +36,7 @@ export interface AudioBridge {
     graph: GraphDoc,
     registry: Registry,
     assets: AudioAssetProvider,
-    options: { duration: number; sampleRate?: number; loop: boolean },
+    options: { duration: number; sampleRate?: number; loop: boolean; item?: number },
   ): Promise<PcmAudio | null>;
   dispose(): void;
 }

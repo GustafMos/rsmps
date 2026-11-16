@@ -10,6 +10,7 @@ import { registerBuiltins } from '../engine/nodes';
 import type { Io, CreateIo } from './api';
 import { createAudioBridge } from './audio-bridge';
 import { ExporterImpl } from './exporter';
+import { MemoryGovernor, defaultBudget } from './memory';
 import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
 import { Library } from './library';
@@ -53,11 +54,58 @@ export const createIo: CreateIo = async () => {
   router.live = (id, name) => audio.signal(id, name);
   library.signals = router;
 
-  const player = new PlayerImpl({ gpu, gate, registry, audio, library, router });
+  // Late-bound: the governor needs the player, the player reports the governor's numbers.
+  let governor!: MemoryGovernor;
+  const player = new PlayerImpl({ gpu, gate, registry, audio, library, router, memory: { snapshot: () => governor.snapshot(), relieve: () => void governor.freeMemory() } });
   router.onExportEnd = () => player.invalidate();
   library.subscribe(() => player.invalidate());
 
-  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router, player, watch });
+  const adapterInfo = (device as unknown as { adapterInfo?: { vendor?: string; architecture?: string; description?: string } }).adapterInfo;
+  const deviceMemoryGB = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
+  governor = new MemoryGovernor(
+    {
+      gpu,
+      exclusive: (fn) => gate.exclusive(fn),
+      setEngineBudget: (b) => void gate.setCacheBudget(b),
+      clearEngine: () => gate.clearEngine(),
+      setPlayerBudget: (b) => player.setCacheBudget(b),
+      dropPlayerFrames: () => player.dropFrameCache(),
+      setMediaBudget: (b) => void library.setFrameBudget(b),
+      dropMediaFrames: () => library.dropFrames(),
+      isPlaying: () => player.isPlaying,
+    },
+    defaultBudget({ vendor: adapterInfo?.vendor, architecture: adapterInfo?.architecture, description: adapterInfo?.description, deviceMemoryGB }),
+  );
+  governor.start();
+  const exporter = new ExporterImpl({ gpu, gate, registry, library, audio, router, player, watch, governor });
+
+  // A lost GPU device is replaced in place: the Gpu object (and so engine, library, player) keeps working, all caches and texture
+  // handles are dropped, the canvas is reconnected and the current view renders again. Editor state is untouched.
+  const adopt = async () => {
+    const next = await createBrowserDevice();
+    gpu.replaceDevice(next);
+    watch.attach(next);
+    engine.forgetAll();
+    library.onDeviceReset();
+    exporter.onDeviceReset();
+    player.onDeviceReset();
+    watchLoss(next);
+  };
+  const watchLoss = (dev: GPUDevice) => {
+    void dev.lost.then(async (info) => {
+      try {
+        await adopt();
+      } catch {
+        await new Promise((r) => setTimeout(r, 1000)); // one more try; the 'device' error is shown only when recovery fails twice in a row
+        try {
+          await adopt();
+        } catch (err) {
+          player.deviceLost(info.message || info.reason || String(err));
+        }
+      }
+    });
+  };
+  watchLoss(device);
   watch.onError((m) => player.reportGpuError(m));
   const phone = new PhoneLink();
   await phone.init();
@@ -79,6 +127,8 @@ export const createIo: CreateIo = async () => {
     plugins,
     projects,
     scan: new ScanImpl(library),
+    memoryBudget: { get: () => governor.get(), set: (b) => governor.set(b), auto: () => governor.auto() },
+    freeMemory: () => governor.freeMemory(),
     async switchProject(id) {
       await projects.flush(); // (a) the old project's pending save
       player.releaseCaches(); // (b) pause + audio off, (c) player frame cache
