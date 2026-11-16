@@ -1,0 +1,91 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "ASCII terminal",
+  "project": {
+    "width": 1280,
+    "height": 720,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop your media here"
+    },
+    {
+      "id": "adj",
+      "type": "color-adjust",
+      "x": 260,
+      "y": 0,
+      "params": {
+        "contrast": 1.15
+      }
+    },
+    {
+      "id": "ascii",
+      "type": "ascii-art",
+      "x": 520,
+      "y": 0,
+      "params": {
+        "charset": "classic",
+        "cellSize": 8,
+        "match": "shape",
+        "colorMode": "terminal",
+        "terminal": "green",
+        "contrast": 1.5,
+        "glow": 0.8
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 780,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "adj",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "adj",
+        "port": "image"
+      },
+      "to": {
+        "node": "ascii",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "ascii",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

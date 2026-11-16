@@ -1,0 +1,109 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Dither morph (two clips)",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 4,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "srcA",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Clip A: drop media here"
+    },
+    {
+      "id": "srcB",
+      "type": "media-in",
+      "x": 0,
+      "y": 200,
+      "params": {},
+      "label": "Clip B: drop media here"
+    },
+    {
+      "id": "drive",
+      "type": "animate",
+      "x": 260,
+      "y": 360,
+      "params": {
+        "wave": "sine",
+        "from": 0,
+        "to": 1,
+        "cycles": 1
+      }
+    },
+    {
+      "id": "morph",
+      "type": "transition",
+      "x": 520,
+      "y": 80,
+      "params": {
+        "mode": "bayer-4",
+        "cell": 10,
+        "softness": 0.08
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 780,
+      "y": 80,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "srcA",
+        "port": "image"
+      },
+      "to": {
+        "node": "morph",
+        "port": "a"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "srcB",
+        "port": "image"
+      },
+      "to": {
+        "node": "morph",
+        "port": "b"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "drive",
+        "port": "value"
+      },
+      "to": {
+        "node": "morph",
+        "port": "progress"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "morph",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

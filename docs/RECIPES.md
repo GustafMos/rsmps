@@ -62,3 +62,34 @@ and Parallax moves the two at different speeds in a gentle loop.
 
 **Scanned drawing clean-up**: Paper Clean (flatten light, whiten paper, fade pale guides), Despeckle (remove dust), Line Art (crisp
 solid lines) and Upscale (edge-sharpened 2x). Put the **Scan** frames in through Media In.
+
+## Morph between two clips on the beat
+
+1. Add two **Media In** nodes and drop clip A on one and clip B on the other.
+2. Add **Morph / Transition** (`transition`). Wire clip A into **A** and clip B into **B**. Pick a style: for a dither look use
+   *Dither · Ordered 4×4*, *Blue-noise dissolve* or *Halftone dots grow*; *Pattern size* sets how big the dither cells are.
+3. Drive **Progress** (it is also a socket) from the music: add **Sound to Numbers** (`audio-level`) on your audio and wire its
+   *Loudness* (or *Bass*) into a **Smooth** node, then the Smooth output into Progress. Set Sound to Numbers *From* 0 and *To* 1 so a loud
+   beat pushes the picture towards B and silence falls back to A. With **Note Pulse** (`midi-trigger`) from a drum track instead, each hit
+   flicks the morph, and Smooth's attack and release shape the flick.
+4. For a morph that needs no music, wire an **Animate** node (Sine, 1 repeat per loop) into Progress: A turns into B and back, looping exactly.
+   **Morph / Transition (timed)** does the same with its own start, length, hold and ping-pong controls.
+5. B is fitted to A's frame, so clips of different sizes work. Progress 0 is exactly A and progress 1 is exactly B in every style.
+
+## ASCII video with terminal glow
+
+1. **Media In** with a clip, then optionally **Color Adjust** (contrast 1.15) so there is more range for the characters to show.
+2. **ASCII Art** (`ascii-art`): Characters *Classic ramp*, Character width 8 px, *Choose characters by* **Shape** (edges become `/ \ | _`),
+   Colour **Terminal** (green phosphor), Contrast 1.5, Glow 0.8. Raise Character width for chunkier text, or pick *Braille dots* with
+   a small width for a fine, almost photographic look.
+3. For a crisp export, set *Output size* to **Exact character grid**: the picture is exactly columns × font width pixels, so the
+   text is pixel-perfect (the second output, *Glyph mask*, is the text shapes alone, for compositing).
+4. Add **CRT Display** (Trinitron or consumer preset) after it for scan lines and a curved screen. The finished chain is the
+   **ASCII terminal** preset.
+
+## More presets
+
+**ASCII terminal**: Color Adjust, then ASCII Art in green terminal colours with glow.
+
+**Dither morph (two clips)**: two empty Media In nodes (A and B) feed Morph / Transition in an ordered-dither style; an Animate node drives
+its Progress with one smooth A to B to A cycle per loop.
