@@ -16,10 +16,10 @@ export default defineNode({
     mode: {
       type: 'enum',
       default: 'average',
-      label: 'Colour',
+      label: 'Color',
       options: [
         { value: 'average', label: 'Average of block' },
-        { value: 'center', label: 'Centre sample' },
+        { value: 'center', label: 'Center sample' },
       ],
     },
   },

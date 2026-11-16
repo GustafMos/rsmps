@@ -33,7 +33,7 @@ export default defineNode({
         { value: 'square', label: 'Choppy' },
       ],
     },
-    spread: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Stereo spread (auto-pan)' },
+    spread: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Stereo spread', hint: 'Auto-pan.' },
   },
   summary: (p) => `${p.rate.toFixed(1)} Hz · ${Math.round(p.depth * 100)}%`,
   audio: defineAudio({

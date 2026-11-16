@@ -44,7 +44,7 @@ export default defineNode({
     fullRes: {
       type: 'bool',
       default: false,
-      label: 'Full source resolution',
+      label: 'Full resolution',
       hint: 'Off: media larger than the project frame is read at project size, which saves a lot of memory and looks the same. Turn on to crop or zoom into a large source.',
     },
     loopVideo: { type: 'bool', default: true, label: 'Loop video', hint: 'Repeat the clip when the project is longer than it.' },

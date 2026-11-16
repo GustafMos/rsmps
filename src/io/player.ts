@@ -71,6 +71,8 @@ interface Job {
   proxy: number;
   key: string;
   frameSpec: FrameSpec;
+  /** A "Full-resolution frame" job: quality 'final', no frame-cache lookup or capture, no proxy measurement. */
+  final?: boolean;
 }
 
 type Shown = { texture: GPUTexture; width: number; height: number };
@@ -109,6 +111,11 @@ export class PlayerImpl implements Player {
   private totalFrames = 1;
   private proxyMode: 'auto' | number = 'auto';
   private ctl = new ProxyController();
+  /**
+   * "Full-resolution frame" request. Valid for one frame of one view (key); `key` is filled in by the next `nextJob` (after pending key
+   * changes are applied). Dropped when the frame, the key or the playing state differs, so the normal preview resumes by itself.
+   */
+  private fullReq: { frame: number; key: string | null; done: boolean } | null = null;
 
   private clockStartMs = 0;
   private clockStartFrame = 0;
@@ -250,6 +257,7 @@ export class PlayerImpl implements Player {
     this.signalEvent('play');
     if (this.audioNeeded && !this.deps.audio.running) this.deps.audio.start().then(() => this.markChanged(), () => undefined);
     this.playing = true;
+    this.fullReq = null;
     this.ctl.warmup();
     this.anchorClock();
     this.syncTransport();
@@ -305,6 +313,17 @@ export class PlayerImpl implements Player {
     this.dirty = true;
     this.kick();
     this.markChanged();
+  }
+
+  renderFullFrame(): boolean {
+    const view = this.view;
+    if (!view?.node || this.disposed || this.lostMessage || !this.ctx) return false;
+    if (this.playing) this.pause();
+    this.fullReq = { frame: this.frame, key: null, done: false };
+    this.dirty = true;
+    this.kick();
+    this.markChanged();
+    return true;
   }
 
   getState(): PlayerState {
@@ -785,11 +804,24 @@ export class PlayerImpl implements Player {
         this.dirty = true;
       }
     }
+    if (this.fullReq) {
+      const r = this.fullReq;
+      if (r.key === null && view.node) r.key = this.key;
+      if (!view.node || this.playing || r.frame !== this.frame || r.key !== this.key) {
+        this.fullReq = null;
+        this.dirty = true;
+        this.markChanged();
+      }
+    }
     if (!view.node) {
       if (this.shown || this.size) this.clearOutput();
       return null;
     }
     const spec = this.frameSpecFor(view);
+    if (this.fullReq) {
+      if (this.fullReq.done) return null;
+      return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy: spec.pixelSize ? 1 / spec.pixelSize : 1, key: this.key, frameSpec: spec, final: true };
+    }
     this.curPixel = spec.pixelSize ?? 1;
     const proxy = spec.pixelSize ? 1 / spec.pixelSize : this.currentProxy();
     const upToDate = !this.dirty && this.shown && this.shownKey === this.key && this.shownFrame === this.frame && this.shownProxy >= proxy - 1e-6;
@@ -805,7 +837,7 @@ export class PlayerImpl implements Player {
     this.settledFrame = job.frame;
     this.settledProxy = job.proxy;
     const live = this.liveSignals() || this.hasLive;
-    const cached = live ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
+    const cached = live || job.final ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
       const img = await this.restore(cached.image);
       if (img) {
@@ -830,9 +862,10 @@ export class PlayerImpl implements Player {
         itemCount: job.itemCount,
         proxy: job.proxy,
         canvas: job.frameSpec.canvas,
-        quality: 'preview',
+        quality: job.final ? 'final' : 'preview',
       });
     } catch (err) {
+      if (job.final) this.fullReq = null;
       this.errors = new Map([[job.node, errorMessage(err)]]);
       this.markChanged();
       return;
@@ -859,7 +892,9 @@ export class PlayerImpl implements Player {
       });
       try {
         this.show(image, job, job.proxy, job.frameSpec.pixelSize ? 1 : job.proxy);
-        if (!live) this.queueCapture(job.frame, image, job.proxy, job.key);
+        if (job.final) {
+          if (this.fullReq) this.fullReq.done = true;
+        } else if (!live) this.queueCapture(job.frame, image, job.proxy, job.key);
       } finally {
         this.gpu.release(image.texture);
       }
@@ -870,6 +905,7 @@ export class PlayerImpl implements Player {
         this.ctl.report(performance.now() - started, budget, performance.now());
       }
     } else if (!stale) {
+      if (job.final) this.fullReq = null;
       this.clearOutput();
     }
     this.markChanged();
@@ -984,6 +1020,7 @@ export class PlayerImpl implements Player {
       totalFrames: this.totalFrames,
       measuredFps: this.measuredFps(),
       proxy: this.shown ? this.shownProxy : this.currentProxy(),
+      fullRes: this.fullReq ? (this.fullReq.done ? 'shown' : 'rendering') : 'off',
       cachedFrames: this.cache.frames,
       errors: this.errors,
       timings: this.timings,

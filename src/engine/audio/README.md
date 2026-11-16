@@ -150,7 +150,7 @@ Goal: sing into the microphone and let the loudness (or pitch, or notes) move an
   `round((f+1)*sampleRate/fps)`). Kernels smooth their own measurements, so this is the smoothed value at that moment,
   not an average over the frame. `SignalTracks.value(nodeId, name, frameIndex)` looks it up. The host's `Host.signal` during
   export should return `tracks.value(nodeId, name, Math.round(seconds * fps))`.
-* **Export limitation: live sources are silent offline** (record a take into a Timeline to export it, see below). A graph driven by the *microphone* or a *MIDI device*
+* **Export limitation: live sources are silent offline** (record a take into a Audio Timeline to export it, see below). A graph driven by the *microphone* or a *MIDI device*
   exports as the quiet values (zeros, or `From`), because there is no live input to analyse. To export an animation
   driven by singing: record the singing, import it as an audio file, and use `audio-file` instead of `microphone`
   (and `audio-to-midi` on the file for note-driven animation). The offline analysis of an `audio-file` is exact and
@@ -193,9 +193,9 @@ For notes: Microphone.tap, Audio to MIDI, then `MIDI to Numbers` (`Note` for hei
   toggle. The kernel only applies strength, `transpose`, sustain and latch: the UI sends absolute notes.
   `synth`, `pluck` and `drum` are deliberately NOT playable: they take MIDI from a Keyboard node (one clean path).
 
-## Recording and the Timeline
+## Recording and the Audio Timeline
 
-The **Timeline** node (`audio-timeline`, "Timeline") is an Ableton-style arranger in one node: several audio and MIDI
+The **Audio Timeline** node (`audio-timeline`, "Audio Timeline") is an Ableton-style arranger in one node: several audio and MIDI
 tracks, clips you can offset, loop, fade and layer, and recording of new takes straight into it.
 
 **Data.** The node's `clips` param is a `TimelineData` (exact JSON shape and every editing helper are in
@@ -207,16 +207,16 @@ tracks, clips you can offset, loop, fade and layer, and recording of new takes s
 region and stays phase-locked to the clip start, hence to the project loop. Seek, pause and loop wrap send note-offs for
 hanging notes. `wrap` lets a clip that passes the loop end continue from the loop start. Outputs: `audio` (all audio
 tracks), `midi` (all MIDI tracks), `soloAudio` / `soloMidi` (only the track named in `outputTrack`; for separate
-instruments the simplest route is several Timeline nodes, or one Timeline plus `outputTrack`). Track `gain`/`pan` apply to
+instruments the simplest route is several Audio Timeline nodes, or one Audio Timeline plus `outputTrack`). Track `gain`/`pan` apply to
 audio tracks; `mute`/`solo` to both kinds. Export plays clips identically (same runner), so a recorded take exports.
 
 **Wiring recipe**
 
 ```
-Microphone.tap      ─► Timeline.recordAudio          (audio take)
-MIDI Keyboard       ─► Timeline.recordMidi           (MIDI take; MIDI Device and Audio to MIDI work too)
-Timeline.midi       ─► Synth (or any instrument)  ─► Mixer ─┐
-Timeline.audio      ─────────────────────────────────► Mixer ─► Audio Out
+Microphone.tap      ─► Audio Timeline.recordAudio          (audio take)
+MIDI Keyboard       ─► Audio Timeline.recordMidi           (MIDI take; MIDI Device and Audio to MIDI work too)
+Audio Timeline.midi       ─► Synth (or any instrument)  ─► Mixer ─┐
+Audio Timeline.audio      ─────────────────────────────────► Mixer ─► Audio Out
 ```
 
 **Recording API** (`AudioEngine`): `armRecording(nodeId, { track, kind })`, `startRecording()`, `stopRecording(): Promise<RecordedTake | null>`,
@@ -226,7 +226,7 @@ Capture runs inside the worklet (sample accurate, lossless float32) and the whol
 default 10 minutes, ending with a clear `error` message). Input latency (`baseLatency + outputLatency` plus the node's
 `latencyOffsetMs`) is removed so overdubs line up with what was heard. Capture only advances while the transport plays.
 **Count-in**: set `countIn` bars; `phase` is 'count-in' (clicks, if `metronome` is on) and the host should start the
-transport when it becomes 'recording'. The metronome click is added to the Timeline's `audio` output only while counting in
+transport when it becomes 'recording'. The metronome click is added to the Audio Timeline's `audio` output only while counting in
 or recording, so it is never in an export. `monitor` passes the record inputs through while armed.
 **Loop recording**: when the transport loops while recording, the take has `passes` split exactly at the loop point.
 `applyTake(timeline, take, { mode, assetIds })` puts it on the timeline: `overdub` (MIDI: all passes merged into one
@@ -234,12 +234,12 @@ looping clip as long as the loop; audio: each pass its own clip, stacked), `take
 last) or `replace` (like takes, and clips already there over that time range are removed). The caller stores each
 `pcm` (`take.pcm`, or `passes[k].pcm`, which are views: copy them) as assets and passes the ids in order.
 
-**Export and the microphone.** A live microphone or MIDI device is silent in an export. Record the take into a Timeline
-and export that: the recorded clips play back exactly, including the sound-to-picture bridge (`audio-level` fed by the Timeline).
+**Export and the microphone.** A live microphone or MIDI device is silent in an export. Record the take into a Audio Timeline
+and export that: the recorded clips play back exactly, including the sound-to-picture bridge (`audio-level` fed by the Audio Timeline).
 
 ## Instruments (MIDI in, audio out)
 
-All take MIDI from a Keyboard, MIDI Device, Arpeggiator, Audio to MIDI or a Timeline's `midi` output. A `preset` enum picks
+All take MIDI from a Keyboard, MIDI Device, Arpeggiator, Audio to MIDI or a Audio Timeline's `midi` output. A `preset` enum picks
 a patch (a bundle of parameters); choose "Custom" to use the individual settings instead. Not playable from the computer
 keyboard themselves: put a Keyboard node in front.
 
@@ -247,7 +247,7 @@ keyboard themselves: put a Keyboard node in front.
 | --- | --- | --- | --- |
 | `synth` | Synth | (settings only) | Two-oscillator subtractive poly synth, polyBLEP, unison, filter envelope |
 | `pluck` | Plucked String | | Karplus-Strong |
-| `drum` | Drum Kit | | Simple kick, snare, hats on GM notes |
+| `drum` | Basic Drums | | Simple kick, snare, hats on GM notes |
 | `chip-synth` | Chiptune | NES lead, Game Boy pulse, C64-ish arpeggio, Triangle bass, Noise hi-hat, Noise snare | Pulse 12.5/25/50/75 %, stepped triangle, LFSR noise (long/short), 16-step volume, arpeggio, pulse-width sweep, vibrato, pitch slide, bit crush |
 | `fm-synth` | FM Synth | Electric piano, Bell, FM bass, Brass, Glass pad | 4 operators, 6 algorithms, feedback, per-operator ratio/level/ADSR |
 | `organ` | Organ | Jazz, Rock, Church, Ballad | 9 drawbars, key percussion, key click, rotary speaker |
@@ -286,7 +286,7 @@ Media In.Sound ─► (Volume, Compressor, Reverb ...) ─► Audio Out
   `{ sampleRate, channels, video: { duration, fps } }`: Media In needs `video` to map trim and speed (without it the duration
   is taken from the audio and the speed setting has no effect).
 * Export: a Media In wired through any effects into an enabled Audio Out is export audio (`hasExportAudio`). It can also feed
-  a Timeline's `recordAudio` or the Sound to Numbers node.
+  a Audio Timeline's `recordAudio` or the Sound to Numbers node.
 * **Audio File** stays for standalone audio assets (music, recordings) that follow the transport from time 0.
 
 ## Phone as a microphone
@@ -305,10 +305,10 @@ Phone Camera.Silent tap ─► Sound to Numbers.Loudness ─► (wire) ─► an
   used and kept). A stream with no audio track is silence, a track added later is picked up, and the source is released when
   the stream is set to null, the node disappears, or on `stop()` (it re-attaches on `start()`).
 * **Latency**: WebRTC adds roughly 100-300 ms. `latencyMs` (default 150) is added to the recording latency compensation when a
-  Timeline records this node's sound, so a take recorded from the phone lines up (like device latency, it moves the take
+  Audio Timeline records this node's sound, so a take recorded from the phone lines up (like device latency, it moves the take
   earlier). Live monitoring through the phone cannot be made tighter than the link allows.
 * **Live only.** Silent in an export. To export an animation or a performance made with the phone: record the take into a
-  Timeline (`Phone Camera.Silent tap` into `Timeline.recordAudio`), then export that.
+  Audio Timeline (`Phone Camera.Silent tap` into `Audio Timeline.recordAudio`), then export that.
 
 ## Not in v1
 

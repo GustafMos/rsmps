@@ -1,13 +1,14 @@
 import { defineNode } from '../../define';
 import { YIQ_WGSL } from '../../lib/fx-video';
 import { loopFrame } from '../../lib/fx-util';
+import { SPECK_PARAMS, SPECKS_WGSL, speckUniforms, type SpeckParamValues } from '../../lib/specks';
 
 /** Parameter bundles for the look presets. A preset overrides the controls it lists; choose Custom to use them all as set. */
-const PRESETS: Record<string, Record<string, number>> = {
+const PRESETS: Record<string, Record<string, number | string>> = {
   console: { composite: 0.85, subcarrier: 2.4, chromaBlur: 2.5, chromaShift: 1, lumaBlur: 0.5, ringing: 0.25, ringWidth: 1.5, ghost: 0, jitter: 0, wobble: 0, noise: 0.02, colorNoise: 0, tracking: 0, headSwitch: 0, dropouts: 0, wrinkle: 0, tearing: 0 },
   rf: { composite: 0.6, subcarrier: 2.8, chromaBlur: 4, chromaShift: 2, lumaBlur: 1, ringing: 0.3, ringWidth: 2, ghost: 0.25, ghostDelay: 14, jitter: 0.5, wobble: 0.5, noise: 0.16, colorNoise: 0.25, tracking: 0, headSwitch: 0, dropouts: 0, wrinkle: 0, tearing: 0 },
-  vhs: { composite: 0.25, subcarrier: 3, chromaBlur: 7, chromaShift: 4, lumaBlur: 1.2, ringing: 0.2, ringWidth: 2, ghost: 0, jitter: 0.6, wobble: 0.6, noise: 0.08, colorNoise: 0.12, tracking: 0.25, headSwitch: 0.8, dropouts: 0.25, wrinkle: 0, tearing: 0 },
-  wornVhs: { composite: 0.35, subcarrier: 3, chromaBlur: 9, chromaShift: 6, lumaBlur: 1.8, ringing: 0.35, ringWidth: 2.5, ghost: 0.15, ghostDelay: 10, jitter: 1.2, wobble: 1.2, noise: 0.18, colorNoise: 0.25, tracking: 0.6, headSwitch: 1, dropouts: 0.7, wrinkle: 0.6, tearing: 0.3 },
+  vhs: { composite: 0.25, subcarrier: 3, chromaBlur: 7, chromaShift: 4, lumaBlur: 1.2, ringing: 0.2, ringWidth: 2, ghost: 0, jitter: 0.6, wobble: 0.6, noise: 0.08, colorNoise: 0.12, tracking: 0.25, headSwitch: 0.8, dropouts: 0.3, speckBurst: 0.55, speckBand: 'rolling', speckShape: 'streak', wrinkle: 0, tearing: 0 },
+  wornVhs: { composite: 0.35, subcarrier: 3, chromaBlur: 9, chromaShift: 6, lumaBlur: 1.8, ringing: 0.35, ringWidth: 2.5, ghost: 0.15, ghostDelay: 10, jitter: 1.2, wobble: 1.2, noise: 0.18, colorNoise: 0.25, tracking: 0.6, headSwitch: 1, dropouts: 0.55, speckBurst: 0.75, speckBand: 'rolling', speckShape: 'streak', wrinkle: 0.6, tearing: 0.3 },
   broadcast: { composite: 0.15, subcarrier: 3, chromaBlur: 1.2, chromaShift: 0.3, lumaBlur: 0, ringing: 0.1, ringWidth: 1.5, ghost: 0, jitter: 0, wobble: 0, noise: 0, colorNoise: 0, tracking: 0, headSwitch: 0, dropouts: 0, wrinkle: 0, tearing: 0 },
 };
 
@@ -28,40 +29,41 @@ export default defineNode({
       label: 'Look',
       hint: 'A preset overrides the controls it lists. Choose Custom to use every control below as set.',
       options: [
-        { value: 'custom', label: 'Custom (use the controls)' },
-        { value: 'console', label: 'Composite (console)' },
-        { value: 'rf', label: 'RF (noisy)' },
+        { value: 'custom', label: 'Custom' },
+        { value: 'console', label: 'Composite' },
+        { value: 'rf', label: 'RF' },
         { value: 'vhs', label: 'VHS' },
         { value: 'wornVhs', label: 'Worn VHS' },
         { value: 'broadcast', label: 'Broadcast clean' },
       ],
     },
-    animate: { type: 'bool', default: false, label: 'Animate (new noise every frame)', hint: 'Off = one frozen frame of noise and jitter. On = changes every frame and loops with the project.' },
-    composite: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Composite artefacts', group: 'Signal', hint: 'Rainbow fringes on fine patterns and dither, like an NTSC console.' },
+    animate: { type: 'bool', default: false, label: 'Animate', hint: 'Off = one frozen frame of noise and jitter. On = changes every frame and loops with the project.' },
+    composite: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Composite', group: 'Signal', hint: 'Rainbow fringes on fine patterns and dither, like an NTSC console.' },
     subcarrier: { type: 'number', default: 2.4, min: 1.5, max: 8, step: 0.05, unit: 'px', label: 'Subcarrier period', group: 'Signal', hint: 'Pixels per colour-carrier cycle. Closer to 2 turns a one-pixel checkerboard into solid colour.' },
     dotCrawl: { type: 'bool', default: false, label: 'Dot crawl', group: 'Signal', hint: 'The carrier pattern flips every frame (needs Animate).' },
-    chromaBlur: { type: 'number', default: 2, min: 0, max: 40, softMax: 20, step: 0.1, unit: 'px', label: 'Colour bandwidth blur', group: 'Signal' },
-    chromaShift: { type: 'number', default: 0.8, min: -30, max: 30, softMax: 12, step: 0.1, unit: 'px', label: 'Colour delay', group: 'Signal', hint: 'Colour arrives late and smears to the right.' },
+    chromaBlur: { type: 'number', default: 2, min: 0, max: 40, softMax: 20, step: 0.1, unit: 'px', label: 'Color blur', group: 'Signal' },
+    chromaShift: { type: 'number', default: 0.8, min: -30, max: 30, softMax: 12, step: 0.1, unit: 'px', label: 'Color delay', group: 'Signal', hint: 'Colour arrives late and smears to the right.' },
     lumaBlur: { type: 'number', default: 0.4, min: 0, max: 12, softMax: 6, step: 0.1, unit: 'px', label: 'Brightness blur', group: 'Signal' },
     ringing: { type: 'number', default: 0.2, min: 0, max: 1.5, step: 0.01, label: 'Ringing / halos', group: 'Signal' },
     ringWidth: { type: 'number', default: 1.5, min: 0.5, max: 8, softMax: 5, step: 0.1, unit: 'px', label: 'Ringing width', group: 'Signal' },
     ghost: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Ghosting', group: 'Reception', hint: 'A faint delayed copy of the picture.' },
     ghostDelay: { type: 'number', default: 12, min: -200, max: 200, softMax: 80, step: 0.5, unit: 'px', label: 'Ghost offset', group: 'Reception' },
     noise: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Noise', group: 'Reception' },
-    colorNoise: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Colour noise', group: 'Reception' },
+    colorNoise: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Color noise', group: 'Reception' },
     jitter: { type: 'number', default: 0, min: 0, max: 20, softMax: 8, step: 0.05, unit: 'px', label: 'Line jitter', group: 'Tape' },
     wobble: { type: 'number', default: 0, min: 0, max: 40, softMax: 12, step: 0.05, unit: 'px', label: 'Line wobble', group: 'Tape' },
-    wobbleCycles: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Wobble drift (per loop)', group: 'Tape', hint: '0 = the wobble stands still.', visibleIf: (p) => (p.wobble as number) > 0 },
-    tracking: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Tracking noise band', group: 'Tape' },
-    trackPos: { type: 'number', default: 0.8, min: 0, max: 1, step: 0.01, unit: 'norm', label: 'Tracking band position', group: 'Tape', visibleIf: (p) => (p.tracking as number) > 0 },
-    trackCycles: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Tracking band rolls (per loop)', group: 'Tape', visibleIf: (p) => (p.tracking as number) > 0 },
-    headSwitch: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Head-switching noise', group: 'Tape', hint: 'The ragged strip at the bottom of VHS pictures.' },
-    dropouts: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Tape dropouts', group: 'Tape', hint: 'Short white horizontal streaks.' },
+    wobbleCycles: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Wobble drift', group: 'Tape', hint: '0 = the wobble stands still.', visibleIf: (p) => (p.wobble as number) > 0 },
+    tracking: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Tracking noise', group: 'Tape' },
+    trackPos: { type: 'number', default: 0.8, min: 0, max: 1, step: 0.01, unit: 'norm', label: 'Band position', group: 'Tape', visibleIf: (p) => (p.tracking as number) > 0 },
+    trackCycles: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Band rolls', group: 'Tape', visibleIf: (p) => (p.tracking as number) > 0 },
+    headSwitch: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Head switch', group: 'Tape', hint: 'The ragged strip at the bottom of VHS pictures.' },
+    dropouts: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Amount', group: 'Dropouts / specks', hint: 'Density of the specks below: the bright horizontal flecks of a worn tape. All the controls in this group edit them.' },
+    ...SPECK_PARAMS,
     wrinkle: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Tape wrinkle', group: 'Tape', hint: 'The bottom edge bends sideways.' },
     tearing: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Tearing', group: 'Sync' },
     tearPos: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, unit: 'norm', label: 'Tear position', group: 'Sync', visibleIf: (p) => (p.tearing as number) > 0 },
-    rollOffset: { type: 'number', default: 0, min: 0, max: 1, step: 0.005, unit: 'norm', label: 'Vertical hold offset', group: 'Sync' },
-    rollCycles: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Vertical roll (per loop)', group: 'Sync', hint: 'Whole rolls per loop. 0 = steady picture.' },
+    rollOffset: { type: 'number', default: 0, min: 0, max: 1, step: 0.005, unit: 'norm', label: 'Hold offset', group: 'Sync' },
+    rollCycles: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Vertical roll', group: 'Sync', hint: 'Whole rolls per loop. 0 = steady picture.' },
     seed: { type: 'number', default: 1, min: 0, max: 9999, step: 1, integer: true, label: 'Seed' },
   },
   summary: (p) => (p.preset !== 'custom' ? p.preset : `composite ${Math.round(p.composite * 100)}%`),
@@ -72,7 +74,7 @@ export default defineNode({
     if (p.preset !== 'custom') {
       // preset values are authored in unit pixels; convert the length ones like the kernel does
       const lengths = ['subcarrier', 'chromaBlur', 'chromaShift', 'lumaBlur', 'ringWidth', 'ghostDelay', 'jitter', 'wobble'];
-      for (const [k, v] of Object.entries(PRESETS[p.preset] ?? {})) p[k] = lengths.includes(k) ? v * src.unit : v;
+      for (const [k, v] of Object.entries(PRESETS[p.preset] ?? {})) p[k] = typeof v === 'number' && lengths.includes(k) ? v * src.unit : v;
     }
     const unit = src.unit;
     const clean =
@@ -194,9 +196,11 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
           roll,
           frame: frame * 1.37 + (p.seed as number) * 11.1,
           unitPx: unit,
+          ...speckUniforms(p as unknown as SpeckParamValues, { amount: p.dropouts, unit, time: animate ? ctx.time : null }),
           chromaCell: Math.max(1, p.chromaBlur),
         },
         wgsl: /* wgsl */ `${YIQ_WGSL}
+${SPECKS_WGSL}
 fn sampleAt(x: f32, y: f32) -> vec4f {
   return textureSampleLevel(src, smp, vec2f(x / u.size.x, y / u.size.y), 0.0);
 }
@@ -255,15 +259,12 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let n = hash31(vec3f(px, u.frame)) - 0.5;
   yiq.x += n * (u.noise * 0.35 + noiseBoost);
   var out = clamp(yiqToRgb(yiq), vec3f(0.0), vec3f(1.0));
-  // tape dropouts: short bright streaks
-  if (u.dropouts > 0.0) {
-    let seg = floor(px.x / (48.0 * u.unitPx));
-    let h = hash31(vec3f(row, seg, u.frame + 17.0));
-    if (h < u.dropouts * 0.012) {
-      let start = hash21(vec2f(row, seg)) * 20.0 * u.unitPx;
-      let len = (10.0 + hash21(vec2f(seg, row + 5.0)) * 26.0) * u.unitPx;
-      let rel = px.x - seg * 48.0 * u.unitPx;
-      if (rel > start && rel < start + len) { out = mix(out, vec3f(1.0), 0.92); }
+  // tape dropouts / specks (shared speck generator, editable in the Dropouts / specks group)
+  if (u.spAmt > 0.0) {
+    let hit = spField(px);
+    if (hit.cov > 0.0) {
+      let held = unpremul(sampleAt(px.x - hit.d - 3.0 * u.unitPx, yy)).rgb;
+      out = spApply(out, hit, clamp(held, vec3f(0.0), vec3f(1.0)));
     }
   }
   out = out * (1.0 - rollBar * 0.9);

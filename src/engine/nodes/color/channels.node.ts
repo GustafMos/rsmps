@@ -6,8 +6,8 @@ const SOURCES = [
   { value: 'b', label: 'Blue' },
   { value: 'a', label: 'Alpha' },
   { value: 'luma', label: 'Brightness' },
-  { value: 'zero', label: 'Black (0)' },
-  { value: 'one', label: 'White (1)' },
+  { value: 'zero', label: 'Black' },
+  { value: 'one', label: 'White' },
 ] as const;
 const INDEX: Record<string, number> = { r: 0, g: 1, b: 2, a: 3, luma: 4, zero: 5, one: 6 };
 const SWAPS = ['rgb', 'rbg', 'grb', 'gbr', 'brg', 'bgr'] as const;
@@ -27,11 +27,11 @@ export default defineNode({
       default: 'extract',
       label: 'Operation',
       options: [
-        { value: 'extract', label: 'Show one channel as grey' },
-        { value: 'swap', label: 'Swap colour channels' },
+        { value: 'extract', label: 'Show one channel as gray' },
+        { value: 'swap', label: 'Swap color channels' },
         { value: 'luma-to-alpha', label: 'Brightness to alpha' },
-        { value: 'alpha-to-luma', label: 'Alpha to grey image' },
-        { value: 'pack', label: 'Custom: pick a source per channel' },
+        { value: 'alpha-to-luma', label: 'Alpha to gray image' },
+        { value: 'pack', label: 'Custom' },
       ],
     },
     channel: {

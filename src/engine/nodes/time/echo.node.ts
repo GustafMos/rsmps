@@ -4,22 +4,22 @@ import type { ImageValue } from '../../types';
 
 export default defineNode({
   id: 'echo',
-  title: 'Echo',
+  title: 'Frame Echo',
   category: 'time',
-  description: 'Leave trails: blends the current frame with earlier frames, each one fainter than the last. In a looping project the trail wraps around so the loop stays seamless.',
-  keywords: ['trail', 'ghost', 'afterimage', 'feedback', 'motion trail', 'smear', 'persistence'],
+  description: 'Plain frame echoes: blends the current frame with earlier frames, each one fainter than the last, with no movement or recoloring. In a looping project the trail wraps around so the loop stays seamless. For echoes that drift, zoom or turn, see Warped Echo; for endless recursion, see Feedback.',
+  keywords: ['trail', 'ghost', 'afterimage', 'feedback', 'motion trail', 'smear', 'persistence', 'echo', 'trails', 'onion'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     count: { type: 'number', default: 4, min: 0, max: 16, step: 1, integer: true, label: 'Number of echoes' },
-    spacing: { type: 'number', default: 0.1, min: 0.01, max: 5, step: 0.01, unit: 's', label: 'Time between echoes' },
+    spacing: { type: 'number', default: 0.1, min: 0.01, max: 5, step: 0.01, unit: 's', label: 'Echo spacing' },
     decay: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Fade per echo', hint: '0.6 = each echo is 60% as strong as the one before.' },
     style: {
       type: 'enum',
       default: 'average',
       options: [
-        { value: 'average', label: 'Smear (average)' },
-        { value: 'lighten', label: 'Glow (brightest wins)' },
+        { value: 'average', label: 'Smear' },
+        { value: 'lighten', label: 'Glow' },
       ],
       label: 'Trail style',
     },

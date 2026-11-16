@@ -2,11 +2,48 @@
 
 All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify Studio) are documented here.
 
-## [0.5.1] - 2026-11-16
+## [0.6.0] - 2026-11-16
 
 ### Added
 
-- Desktop app: an update notice. Once a day (and from File > Check for updates...) it asks GitHub whether a newer release exists and shows a small dismissible notice with What's new, Get it and Skip this version. Nothing is downloaded or installed, nothing but the request itself is sent, and it can be turned off in the About dialog.
+- **Arrays:** Array (grid, line, ring, endless tiling, per-copy steps and time offset), Infinite Zoom (fall into a picture
+  forever, recoloured per level), 3D Array (cards in a grid, tunnel, ring or helix), Scatter, Kaleidoscope.
+- **Time:** Feedback, Time Displace, Optical Flow, Motion Smear, Frame Interleave (weave several clips frame by frame),
+  Render Scale (compute everything before it at a lower resolution and enlarge it back: the look of the playback preview).
+- **3D:** Image to 3D (extrude or lathe any picture, walls from the edge pixels, depth-map relief), SDF 3D (blended shapes,
+  morph, repetition), a shared Deform group (noise, twist, bend, melt, explode, morph), a Material node with eleven looks,
+  and a depth output on the 3D nodes.
+- **Gaussian splats:** a Gaussian Splat node for .ply and .splat files, and Picture to Splats (a picture plus a depth map
+  becomes a splat cloud, on video too).
+- **Colour grading:** White Balance (linear light), Saturation / Vibrance (luminance preserving), Lift Gamma Gain with
+  ASC CDL, Curves with hue curves, Exposure, Colour Space, LUT (.cube), Qualifier (colour key to mask), Scope.
+- **Paper:** blank sheets for drawn animation, onion-skin rounds, exposure sheet, holds, rotoscope sheets (faint, outline,
+  blue) with guide removal, paper layers, flipbook and zine layouts, ink separations, SVG for pen plotters, a scanned
+  texture shelf with a Paper / Texture Overlay node.
+- **Phone:** motion sensors (orientation, shake, touch pad) as a Phone Motion node with a camera rig, recorded takes with
+  smoothing; Scan with phone (shoot sheets straight into the Scan tab and preview the result on the phone); the phone can
+  link without a camera.
+- **Process mode:** nodes can run long jobs in the background behind a stand-in; Bake and Track (Analyse clip) use it; a
+  Processes list; exports run pending jobs first.
+- **Subtitles** node: .srt and .vtt (or typed lines) as styled, animated captions with chunk, karaoke and typewriter
+  layouts, safe areas for vertical video and a built-in pixel-art look.
+- **Depth from Picture** (an instant depth guess from simple cues, with paint corrections) and Depth Convert.
+- **Media panel:** collapses to a rail, bins saved with the project, type filters, search, list view, usage badges.
+- Specks / Dropouts node; type selector to convert between Merge, Mix, Stack and Switch; full-resolution frame button and
+  preview scale readout in the viewer; desktop update notice.
+
+### Fixed
+
+- Joining two outputs: every wire of both outputs now follows the new Merge.
+- Number fields no longer jump to huge values when clicked.
+- Analog Video dropouts no longer line up in columns; they are now editable specks.
+- Digital Glitch is rebuilt around abrupt, bursty events of ten kinds; graphs that used the old node load with a different look.
+
+### Changed
+
+- Sheets are scanned in parallel and each photo scans about twice as fast.
+- No two nodes share a name (3D Camera, Webcam, Audio Echo, Frame Echo, Audio Timeline and others were renamed; old names
+  still work in search), names and labels use one spelling (Color, Gray, Center), and parameter labels are short.
 
 ## [0.5.0] - 2026-11-16
 

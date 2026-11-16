@@ -15,10 +15,16 @@ export function photoPixelsPerMm(H: Mat3, xMm: number, yMm: number): number {
 /**
  * Resample `photo` into an image of `widthMm` x `heightMm` at `pxPerMm`, where `H` maps page mm to photo pixels.
  * When the photo is much finer than the output, a small box of sub-samples averages it down.
+ * `region` (output pixels, clipped to the page) renders only that part: the result is exactly the same pixels as the
+ * matching crop of the full rectification, without paying for the rest of the page.
  */
-export function rectify(photo: RasterImage, H: Mat3, widthMm: number, heightMm: number, pxPerMm: number): RasterImage {
-  const ow = Math.round(widthMm * pxPerMm);
-  const oh = Math.round(heightMm * pxPerMm);
+export function rectify(photo: RasterImage, H: Mat3, widthMm: number, heightMm: number, pxPerMm: number, region?: { x0: number; y0: number; x1: number; y1: number }): RasterImage {
+  const fw = Math.round(widthMm * pxPerMm);
+  const fh = Math.round(heightMm * pxPerMm);
+  const rx0 = region ? Math.max(0, Math.min(fw, Math.floor(region.x0))) : 0;
+  const ry0 = region ? Math.max(0, Math.min(fh, Math.floor(region.y0))) : 0;
+  const ow = (region ? Math.max(rx0, Math.min(fw, Math.ceil(region.x1))) : fw) - rx0;
+  const oh = (region ? Math.max(ry0, Math.min(fh, Math.ceil(region.y1))) : fh) - ry0;
   const out = createRaster(ow, oh);
   const scale = photoPixelsPerMm(H, widthMm / 2, heightMm / 2) / pxPerMm;
   const ss = Math.max(1, Math.min(3, Math.round(scale)));
@@ -32,8 +38,8 @@ export function rectify(photo: RasterImage, H: Mat3, widthMm: number, heightMm: 
       let b = 0;
       for (let sj = 0; sj < ss; sj++) {
         for (let si = 0; si < ss; si++) {
-          const mx = (x + (si + 0.5) / ss) * inv;
-          const my = (y + (sj + 0.5) / ss) * inv;
+          const mx = (x + rx0 + (si + 0.5) / ss) * inv;
+          const my = (y + ry0 + (sj + 0.5) / ss) * inv;
           const wgt = H[6] * mx + H[7] * my + H[8];
           const sx = (H[0] * mx + H[1] * my + H[2]) / wgt - 0.5;
           const sy = (H[3] * mx + H[4] * my + H[5]) / wgt - 0.5;

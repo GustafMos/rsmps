@@ -14,7 +14,7 @@ export default defineNode({
   params: {
     input: { type: 'number', default: 0, min: 0, max: 24, step: 0.1, unit: 'db', label: 'Input boost' },
     ceiling: { type: 'number', default: -1, min: -24, max: 0, step: 0.1, unit: 'db', label: 'Ceiling' },
-    release: { type: 'number', default: 100, min: 10, max: 1000, step: 1, label: 'Release (ms)' },
+    release: { type: 'number', default: 100, min: 10, max: 1000, step: 1, label: 'Release ms' },
   },
   summary: (p) => `ceiling ${p.ceiling} dB`,
   audio: defineAudio({

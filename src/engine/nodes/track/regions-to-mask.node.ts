@@ -24,7 +24,7 @@ export default defineNode({
     shape: { type: 'enum', default: 'rect', options: SHAPES, label: 'Shape' },
     corner: { type: 'number', default: 24, min: 0, max: 500, step: 1, unit: 'px', label: 'Corner radius', visibleIf: (p) => p.shape === 'rounded' },
     feather: { type: 'number', default: 0, min: 0, max: 300, step: 0.5, unit: 'px', label: 'Feather', hint: 'Softens the edge, centred on the box edge.' },
-    limit: { type: 'number', default: 0, min: 0, max: MAX_REGIONS, step: 1, integer: true, label: 'Only the first N (0 = all)' },
+    limit: { type: 'number', default: 0, min: 0, max: MAX_REGIONS, step: 1, integer: true, label: 'First N', hint: '0 = all.' },
     invert: { type: 'bool', default: false, label: 'Invert' },
   },
   summary: (p) => `${p.shape}${p.feather > 0 ? ` · feather ${p.feather}` : ''}`,

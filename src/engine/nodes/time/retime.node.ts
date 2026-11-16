@@ -13,8 +13,8 @@ export default defineNode({
     speed: { type: 'number', default: 1, min: -16, max: 16, step: 0.05, label: 'Speed', hint: '1 = normal, 2 = twice as fast, 0.5 = half speed, negative plays backwards.' },
     reverse: { type: 'bool', default: false, label: 'Play backwards' },
     pingPong: { type: 'bool', default: false, label: 'Ping-pong', hint: 'Plays forward, then backward, then forward again. Use speed 2 to fit one there-and-back into the loop.' },
-    repeat: { type: 'bool', default: true, label: 'Repeat when past the end', hint: 'Off holds the last frame instead of starting over.' },
-    holdFps: { type: 'number', default: 0, min: 0, max: 120, step: 1, unit: 'hz', label: 'Stop-motion frame rate', hint: 'Show a new frame only this many times per second. 0 = off.' },
+    repeat: { type: 'bool', default: true, label: 'Repeat', hint: 'Off holds the last frame instead of starting over.' },
+    holdFps: { type: 'number', default: 0, min: 0, max: 120, step: 1, unit: 'hz', label: 'Stop-motion fps', hint: 'Show a new frame only this many times per second. 0 = off.' },
   },
   summary: (p) => {
     const bits = [`${p.speed}×`];

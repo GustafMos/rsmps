@@ -7,10 +7,10 @@ const SYNC_BEATS: Record<string, number> = { '1/4': 1, '1/8': 0.5, '1/8d': 0.75,
 /** Echo with feedback, damping (each repeat gets darker), optional ping-pong and tempo sync. */
 export default defineNode({
   id: 'delay',
-  title: 'Echo',
+  title: 'Audio Echo',
   category: 'audio-fx',
-  description: 'Repeats the sound after a short time, fading away. Can bounce between left and right.',
-  keywords: ['delay', 'repeat', 'ping pong', 'tape', 'slapback', 'tempo'],
+  description: 'Audio echo: repeats the sound after a short time, fading away. Can bounce between left and right.',
+  keywords: ['delay', 'repeat', 'ping pong', 'tape', 'slapback', 'tempo', 'echo'],
   inputs: { audio: { type: 'audio', required: true, label: 'Audio' } },
   outputs: { audio: { type: 'audio', label: 'Audio' } },
   params: {
@@ -19,7 +19,7 @@ export default defineNode({
       default: 'off',
       label: 'Time from tempo',
       options: [
-        { value: 'off', label: 'Off (use milliseconds)' },
+        { value: 'off', label: 'Milliseconds' },
         { value: '1/2', label: 'Half note' },
         { value: '1/4', label: 'Quarter note' },
         { value: '1/8d', label: 'Dotted eighth' },
@@ -27,8 +27,8 @@ export default defineNode({
         { value: '1/16', label: 'Sixteenth note' },
       ],
     },
-    time: { type: 'number', default: 350, min: 1, max: 2000, step: 1, label: 'Time (ms)', visibleIf: (p) => p.sync === 'off' },
-    bpm: { type: 'number', default: 120, min: 40, max: 240, step: 0.1, label: 'Tempo (BPM)', visibleIf: (p) => p.sync !== 'off' },
+    time: { type: 'number', default: 350, min: 1, max: 2000, step: 1, label: 'Time ms', visibleIf: (p) => p.sync === 'off' },
+    bpm: { type: 'number', default: 120, min: 40, max: 240, step: 0.1, label: 'Tempo BPM', visibleIf: (p) => p.sync !== 'off' },
     feedback: { type: 'number', default: 0.4, min: 0, max: 0.95, step: 0.01, label: 'Repeats' },
     damping: { type: 'number', default: 0.3, min: 0, max: 1, step: 0.01, label: 'Darken repeats' },
     pingPong: { type: 'bool', default: false, label: 'Ping-pong' },

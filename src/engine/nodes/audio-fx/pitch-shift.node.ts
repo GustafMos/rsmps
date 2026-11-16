@@ -13,7 +13,7 @@ export default defineNode({
   outputs: { audio: { type: 'audio', label: 'Audio' } },
   params: {
     semitones: { type: 'number', default: 7, min: -24, max: 24, step: 0.01, unit: 'st', label: 'Shift' },
-    window: { type: 'number', default: 60, min: 20, max: 150, step: 1, label: 'Grain size (ms)' },
+    window: { type: 'number', default: 60, min: 20, max: 150, step: 1, label: 'Grain ms' },
     mix: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Mix' },
   },
   summary: (p) => `${p.semitones > 0 ? '+' : ''}${p.semitones.toFixed(2)} st`,

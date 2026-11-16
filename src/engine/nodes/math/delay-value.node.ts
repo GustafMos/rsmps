@@ -20,7 +20,7 @@ export default defineNode({
       ],
       label: 'Delay in',
     },
-    loopAware: { type: 'bool', default: true, label: 'Loop with the project', hint: 'In a looping project the start borrows from the end. Turn off for live signals.' },
+    loopAware: { type: 'bool', default: true, label: 'Loop with project', hint: 'In a looping project the start borrows from the end. Turn off for live signals.' },
   },
   summary: (p) => `${p.amount} ${p.units}`,
   async render(ctx) {

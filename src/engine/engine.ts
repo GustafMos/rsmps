@@ -6,7 +6,9 @@
  */
 import { Registry, canConnect, paramSocketType } from './define';
 import { Gpu } from './gpu/gpu';
+import { clampProxy, proxySize } from './lib/proxy-size';
 import { stableStringify } from './lib/stable-json';
+import { deriveProcessStatus, isServable, placeholderCard, PLACEHOLDER_STEPS, processDataPresent, processResultOf, type ProcessStatus } from './process';
 import type {
   AnyNodeDef,
   CanvasInfo,
@@ -16,8 +18,12 @@ import type {
   Host,
   ImageValue,
   MaskValue,
+  MaterialValue,
+  NodeGpu,
   NodeInstance,
   ParamDef,
+  ProcessArray,
+  ProcessView,
   TimeInfo,
   Value,
 } from './types';
@@ -125,6 +131,15 @@ interface Scope {
   fullCanvas: { width: number; height: number };
   /** structSig results for this evaluation (the graph does not change during one), shared with the sub-scopes of `pull`. */
   sigMemo: Map<string, string>;
+  /** Same for the proxy-independent ("full") signatures process nodes compare their stored result with. */
+  fullSigMemo: Map<string, string>;
+  /** The frame at proxy 1 (unrounded; what `proxySize` scales). */
+  frame0: { width: number; height: number };
+  /** Scopes of one evaluation by proxy factor, so `ctx.pull(input, { proxy })` from two places shares one memo. Includes the root scope itself. */
+  proxies: Map<number, Scope>;
+  /** The node and output port this evaluation was asked for (feeds `ctx.wants`). */
+  rootNode?: string;
+  rootPort?: string;
 }
 
 function hash(str: string): string {
@@ -148,8 +163,20 @@ function isTextured(v: unknown): v is ImageValue | MaskValue {
 const isTextureSocket = (type: string): boolean => type === 'image' || type === 'mask';
 
 /** Signature of a value for cache keys: textures are identified by the key of the node that made them. */
+/** GPU textures a value keeps alive: an image's own, or the pictures inside a material. */
+function texturesOf(v: unknown): GPUTexture[] {
+  if (isTextured(v)) return [v.texture];
+  if (v && typeof v === 'object' && (v as { kind?: string }).kind === 'material') {
+    const out: GPUTexture[] = [];
+    for (const m of Object.values((v as MaterialValue).maps)) if (m && !out.includes(m.texture)) out.push(m.texture);
+    return out;
+  }
+  return [];
+}
+
 function valueSig(v: Value | Value[] | null, sourceKey: string): string {
   if (v === null) return 'null';
+  if (!Array.isArray(v) && (v as { kind?: string }).kind === 'material') return `m:${sourceKey}`;
   if (Array.isArray(v) && v.length && isTextured(v[0])) return sourceKey;
   if (isTextured(v)) return sourceKey;
   return stableStringify(v);
@@ -192,6 +219,13 @@ function coerceParam(p: ParamDef, raw: unknown): unknown {
   }
 }
 
+/** A node's params as `render` would see them before unit conversion: defaults applied, values clamped, unknown keys dropped. */
+export function resolveNodeParams(def: AnyNodeDef, params: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) out[key] = coerceParam(p, params[key]);
+  return out;
+}
+
 export class Engine {
   readonly gpu: Gpu;
   readonly registry: Registry;
@@ -204,6 +238,9 @@ export class Engine {
   /** What a node read last time under a given static signature: decides whether time/item enter its key. */
   private reads = new Map<string, { time: boolean; item: boolean }>();
   private lite = new Map<string, LiteEntry>();
+  /** `usesPrevious` nodes: "<structure>@<frame>" -> cache key of that frame's result (see RenderCtx.previous). Bounded. */
+  private selfIndex = new Map<string, string>();
+  static readonly SELF_INDEX_MAX = 512;
   /** Upper bound of CPU-only analysis results kept (see LiteEntry). */
   static readonly LITE_MAX = 6000;
   private tick = 0;
@@ -260,11 +297,10 @@ export class Engine {
     this.evict();
     const { graph } = req;
     const project = graph.project;
-    const proxy = Math.min(1, Math.max(0.05, req.proxy ?? 1));
+    const proxy = clampProxy(req.proxy ?? 1);
     const frame = Math.max(0, Math.round((req.seconds ?? 0) * project.fps));
     const frame0 = req.canvas ?? project;
-    const cw = Math.max(1, Math.round(frame0.width * proxy));
-    const ch = Math.max(1, Math.round(frame0.height * proxy));
+    const { width: cw, height: ch } = proxySize(frame0, proxy);
     const inbound = new Map<string, Edge[]>();
     for (const e of graph.edges) {
       const list = inbound.get(e.to.node);
@@ -288,9 +324,15 @@ export class Engine {
       timings: new Map(),
       fullCanvas: { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) },
       sigMemo: new Map(),
+      fullSigMemo: new Map(),
+      frame0: { width: frame0.width, height: frame0.height },
+      proxies: new Map(),
     };
+    scope.proxies.set(proxy, scope);
 
     const node = scope.nodes.get(req.node);
+    scope.rootNode = req.node;
+    scope.rootPort = req.port ?? (node ? Object.keys(this.registry.get(node.type)?.outputs ?? {})[0] : undefined);
     let value: Value | null = null;
     if (!node) {
       scope.errors.set(req.node, 'Node not found');
@@ -329,8 +371,151 @@ export class Engine {
     }
     const frame0 = canvas ?? graph.project;
     const fullCanvas = { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) };
-    const scope = { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas, sigMemo: new Map() } as unknown as Scope;
+    const scope = { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas, sigMemo: new Map(), fullSigMemo: new Map() } as unknown as Scope;
     return `${port}:${this.structSig(node, scope, new Set(), true)}`;
+  }
+
+  private miniScope(graph: GraphDoc, canvas?: { width: number; height: number }): Scope {
+    const inbound = new Map<string, Edge[]>();
+    for (const e of graph.edges) {
+      const list = inbound.get(e.to.node);
+      if (list) list.push(e);
+      else inbound.set(e.to.node, [e]);
+    }
+    const frame0 = canvas ?? graph.project;
+    const fullCanvas = { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) };
+    return { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas, sigMemo: new Map(), fullSigMemo: new Map() } as unknown as Scope;
+  }
+
+  /**
+   * Process mode: the state of a node's process for this graph (never evaluates anything). Null for a node without `process`.
+   * Same function the render path uses for the cache key, so the UI, the export gate and the scheduler all agree with the engine.
+   */
+  processStatus(graph: GraphDoc, nodeId: string, canvas?: { width: number; height: number }): ProcessStatus | null {
+    const scope = this.miniScope(graph, canvas);
+    const node = scope.nodes.get(nodeId);
+    const def = node && this.registry.get(node.type);
+    if (!node || !def?.process) return null;
+    return this.processStatusFor(node, def, scope);
+  }
+
+  /** The signature a finished process of this node must carry (`ProcessDef.signature`), or null for a node without `process`. */
+  processSignature(graph: GraphDoc, nodeId: string, canvas?: { width: number; height: number }): string | null {
+    return this.processStatus(graph, nodeId, canvas)?.current ?? null;
+  }
+
+  private processStatusFor(node: NodeInstance, def: AnyNodeDef, scope: Scope): ProcessStatus {
+    const pdef = def.process!;
+    const edges = scope.inbound.get(node.id) ?? [];
+    const memo = scope.fullSigMemo;
+    const sigs: Record<string, string> = {};
+    for (const name of Object.keys(def.inputs)) {
+      sigs[name] = edges
+        .filter((e) => e.to.port === name)
+        .map((e) => `${e.from.port}:${this.structSig(e.from.node, scope, new Set(), true, memo)}`)
+        .join(',');
+    }
+    const params: Record<string, unknown> = {};
+    for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) params[key] = coerceParam(p, node.params[key]);
+    const handle = processResultOf(node, def);
+    return deriveProcessStatus({
+      handle,
+      hasData: !handle || processDataPresent(handle, this.host),
+      current: pdef.signature(params as never, sigs),
+      live: this.host.processLive?.(node.id) ?? null,
+      standIn: pdef.standIn,
+    });
+  }
+
+  private processJson = new Map<string, unknown>();
+
+  /** `ctx.process` of a node render. */
+  private processView(
+    def: AnyNodeDef,
+    status: ProcessStatus,
+    scope: Scope,
+    inputs: Record<string, Value | Value[] | null>,
+    ctx: { gpu: NodeGpu; pull(input: string, at?: { seconds: number; wire?: number }): Promise<Value | null> },
+  ): ProcessView {
+    const pdef = def.process!;
+    const host = this.host;
+    const fps = scope.graph.project.fps;
+    const item = (name: string) => status.result?.items[name];
+    const bytes = async (name: string): Promise<ArrayBuffer | null> => {
+      const it = item(name);
+      return it && it.kind !== 'sequence' ? ((await host.assetBytes?.(it.id)) ?? null) : null;
+    };
+    return {
+      state: status.state,
+      result: status.result,
+      servable: isServable(status, pdef.standIn),
+      frame: async (name, index, maxSide = 0) => {
+        const it = item(name);
+        if (!it || it.kind !== 'sequence') return null;
+        return host.assetFrame(it.id, index / (it.fps || fps), maxSide);
+      },
+      bytes,
+      json: async <T,>(name: string) => {
+        const it = item(name);
+        if (!it) return null;
+        const k = `${it.id}@${status.result?.createdAt}:${it.bytes}`;
+        if (this.processJson.has(k)) return this.processJson.get(k) as T;
+        const b = await bytes(name);
+        let v: unknown = null;
+        if (b) {
+          try {
+            v = JSON.parse(new TextDecoder().decode(b));
+          } catch {
+            v = null;
+          }
+        }
+        if (this.processJson.size > 64) this.processJson.delete(this.processJson.keys().next().value as string);
+        this.processJson.set(k, v);
+        return v as T | null;
+      },
+      array: async (name) => {
+        const it = item(name);
+        const b = it && it.kind === 'array' ? await bytes(name) : null;
+        if (!it || !b) return null;
+        const ctor = { f32: Float32Array, f64: Float64Array, i32: Int32Array, u32: Uint32Array, i16: Int16Array, u16: Uint16Array, i8: Int8Array, u8: Uint8Array }[it.dtype ?? 'u8'];
+        return new ctor(b.slice(0)) as ProcessArray;
+      },
+      standIn: async () => {
+        const out: Record<string, Value | null> = {};
+        const outNames = Object.keys(def.outputs);
+        if (pdef.standIn === 'placeholder') {
+          const port = outNames.find((o) => def.outputs[o].type === 'image');
+          if (port) {
+            const fraction = status.state === 'running' ? Math.min(PLACEHOLDER_STEPS, Math.floor((status.live?.progress ?? 0) * PLACEHOLDER_STEPS)) / PLACEHOLDER_STEPS : null;
+            out[port] = placeholderCard(ctx.gpu, host, scope.canvas, pdef.title, fraction);
+          }
+          return out;
+        }
+        for (const [name, idef] of Object.entries(def.inputs as Record<string, { type: string; multi?: boolean; lazy?: boolean }>)) {
+          const o = outNames.find((n) => def.outputs[n].type === idef.type && !(n in out));
+          if (!o) continue;
+          let v = inputs[name];
+          if (idef.lazy || (v === null && !idef.multi)) v = await ctx.pull(name);
+          out[o] = Array.isArray(v) ? (v[0] ?? null) : v;
+        }
+        return out;
+      },
+    };
+  }
+
+  /**
+   * The scope of this evaluation at another proxy factor (`ctx.pull(input, { proxy })`). Own memo and signature memo (both depend on the
+   * canvas), everything else shared; one scope per factor per evaluation. Cache keys already contain canvas size and unit, so a result made at
+   * factor X is found by anyone who asks for X again, in this evaluation or a later one.
+   */
+  private scopeAt(scope: Scope, proxy: number): Scope {
+    const p = clampProxy(proxy);
+    const known = scope.proxies.get(p);
+    if (known) return known;
+    const { width, height } = proxySize(scope.frame0, p);
+    const made: Scope = { ...scope, proxy: p, canvas: { width, height, unit: this.unitFor(scope.graph, width, height, p) }, memo: new Map(), sigMemo: new Map() };
+    scope.proxies.set(p, made);
+    return made;
   }
 
   /** Texels per unit pixel for an image of this size. */
@@ -528,10 +713,14 @@ export class Engine {
     scope.stack.add(stackKey);
 
     try {
+      // Process mode: where this node's process stands is part of every key below. Nodes without `process` skip all of it.
+      const pstat = def.process && !node.bypass ? this.processStatusFor(node, def, scope) : null;
+      const psig = pstat ? `|p:${pstat.key}` : '';
+
       // 0. Analysis nodes: a weightless result for this frame may exist already; then nothing upstream needs to run.
       let liteKey = '';
       if (!node.bypass && this.liteCapable(def)) {
-        liteKey = this.liteKeyOf(id, scope);
+        liteKey = this.liteKeyOf(id, scope) + psig;
         const hit = lite ? this.lite.get(liteKey) : undefined;
         if (hit) {
           hit.lastUsed = this.tick;
@@ -545,6 +734,7 @@ export class Engine {
       const sigs: string[] = [];
       const wiredParams: Record<string, Value> = {};
       let tvIn = false;
+      const tvPorts = new Set<string>();
       const lazyWired = new Set<string>();
       for (const [name, idef] of Object.entries(def.inputs as Record<string, { type: string; multi?: boolean }>)) {
         inputs[name] = idef.multi ? [] : null;
@@ -560,7 +750,10 @@ export class Engine {
         const upDef = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '');
         const fromType = upDef?.outputs[edge.from.port]?.type;
         const up = await this.evalNode(edge.from.node, scope, !!fromType && !isTextureSocket(fromType));
-        if (up?.tv) tvIn = true;
+        if (up?.tv) {
+          tvIn = true;
+          tvPorts.add(edge.to.port);
+        }
         const value = up?.outputs[edge.from.port] ?? null;
         const port = edge.to.port;
         const idef = def.inputs[port];
@@ -621,8 +814,12 @@ export class Engine {
       }
 
       // 5. Cache lookup.
+      // Outputs that are only produced when used (depth maps): which of them are wanted is part of the identity.
+      const optional = def.optionalOutputs ?? [];
+      const wantedSet = new Set(optional.filter((o) => (scope.rootNode === id && scope.rootPort === o) || scope.graph.edges.some((e) => e.from.node === id && e.from.port === o)));
+      const wantedSig = optional.length ? `|w${[...wantedSet].sort().join(',')}` : '';
       const staticSig = hash(
-        `${def.id}|${stableStringify(raw)}|${sortByPort(sigs).join('|')}|u${ref.unit}|c${scope.canvas.width}x${scope.canvas.height}|${scope.quality}`,
+        `${def.id}|${stableStringify(raw)}|${sortByPort(sigs).join('|')}|u${ref.unit}|c${scope.canvas.width}x${scope.canvas.height}|${scope.quality}${wantedSig}${psig}`,
       );
       const readsKey = `${id}|${staticSig}`;
       const known = this.reads.get(readsKey);
@@ -659,7 +856,22 @@ export class Engine {
       };
       const started = performance.now();
       const pulled: GPUTexture[] = [];
+      let selfBase: string | null = null;
+      const selfBaseOf = () =>
+        (selfBase ??= `${this.structSig(id, scope, new Set())}|u${ref.unit}|${scope.canvas.width}x${scope.canvas.height}|${scope.quality}|${scope.item}/${scope.itemCount}`);
       const ctx = {
+        inputVaries: (input: string) => tvPorts.has(input),
+        previous: () => {
+          if (!def.usesPrevious || scope.frame < 1) return null;
+          used.time = true;
+          const hit = this.cache.get(this.selfIndex.get(`${selfBaseOf()}@${scope.frame - 1}`) ?? '');
+          const v = hit ? Object.values(hit.outputs).find(isTextured) : null;
+          if (!hit || !v || !isTextured(v) || v.kind !== 'image') return null;
+          hit.lastUsed = this.tick;
+          this.gpu.retain(v.texture);
+          pulled.push(v.texture);
+          return v;
+        },
         params,
         in: inputs,
         gpu: this.gpu.facade(),
@@ -670,23 +882,29 @@ export class Engine {
         quality: scope.quality,
         nodeId: id,
         proxy: scope.proxy,
+        wants: (output: string) => !optional.includes(output) || wantedSet.has(output),
         unitFor: (w: number, h: number) => this.unitFor(scope.graph, w, h, scope.proxy),
+        canvasAt: (proxy: number) => this.scopeAt(scope, proxy).canvas,
         px: (unitPixels: number, r?: { unit: number }) => unitPixels * (r ?? ref).unit,
         inputSignature: (input: string) => {
           const edge = edges.find((e) => e.to.port === input);
           return edge ? `${edge.from.port}:${this.structSig(edge.from.node, scope, new Set(), true)}` : '';
         },
-        pull: async (input: string, at?: { seconds: number; wire?: number }) => {
+        pull: async (input: string, at?: { seconds?: number; wire?: number; proxy?: number }) => {
           const edge = edges.filter((e) => e.to.port === input)[at?.wire ?? 0];
           if (!edge) return null;
           // No `at` = current frame. That only makes this node time-dependent when what it pulled varies with time: a static
           // upstream gives the same picture on every frame, so a pass-through node (Cache / Bake) stays cacheable.
-          const frame = Math.max(0, Math.round((at ? at.seconds : scope.seconds) * project.fps));
-          const sub: Scope = { ...scope, frame, seconds: frame / project.fps };
+          // `at.proxy` = evaluate the input at another ABSOLUTE proxy factor (docs/ENGINE.md, Pending rules): same graph, canvas / unit / sources at that factor.
+          const timed = at?.seconds !== undefined;
+          const frame = Math.max(0, Math.round((timed ? at!.seconds! : scope.seconds) * project.fps));
+          const base = at?.proxy === undefined ? scope : this.scopeAt(scope, at.proxy);
+          const sub: Scope = { ...base, frame, seconds: frame / project.fps };
           if (frame !== scope.frame) this.widenAllowance(edge.from.node, Math.abs(scope.frame - frame) + 1);
           const pulledType = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '')?.outputs[edge.from.port]?.type;
           const up = await this.evalNode(edge.from.node, sub, !!pulledType && !isTextureSocket(pulledType));
-          if (!at && up?.tv) used.time = true;
+          if (up?.tv) tvPorts.add(input);
+          if (!timed && up?.tv) used.time = true;
           const v = up?.outputs[edge.from.port] ?? null;
           if (isTextured(v)) {
             this.gpu.retain(v.texture);
@@ -695,6 +913,7 @@ export class Engine {
           return v;
         },
       };
+      if (pstat) (ctx as { process?: ProcessView }).process = this.processView(def, pstat, scope, inputs, ctx as never);
       let outputs: Record<string, Value | null>;
       const retained = new Set<GPUTexture>();
       this.gpu.begin(`${def.id}:${id}`);
@@ -704,9 +923,11 @@ export class Engine {
         if (def.maskable) this.applyMask(def, inputs, outputs, params.mix as number);
         await this.gpu.checkErrors();
         for (const v of Object.values(outputs)) {
-          if (isTextured(v) && !retained.has(v.texture)) {
-            retained.add(v.texture);
-            this.gpu.retain(v.texture);
+          for (const tex of texturesOf(v)) {
+            if (!retained.has(tex)) {
+              retained.add(tex);
+              this.gpu.retain(tex);
+            }
           }
         }
       } finally {
@@ -729,6 +950,12 @@ export class Engine {
       const tv = used.time || tvIn;
       this.cache.set(key, { key, node: id, tv, outputs, bytes, lastUsed: this.tick, renderMs });
       this.cacheBytes += bytes;
+      if (def.usesPrevious && used.time) {
+        const idx = `${selfBaseOf()}@${scope.frame}`;
+        this.selfIndex.delete(idx);
+        this.selfIndex.set(idx, key);
+        if (this.selfIndex.size > Engine.SELF_INDEX_MAX) this.selfIndex.delete(this.selfIndex.keys().next().value as string);
+      }
       if (liteKey && tv) {
         const cpuOnly: Record<string, Value | null> = {};
         for (const [port, v] of Object.entries(outputs)) if (!isTextured(v) && !(Array.isArray(v) && v.length && isTextured(v[0]))) cpuOnly[port] = v;
@@ -823,9 +1050,11 @@ export class Engine {
   private releaseEntry(entry: Entry): void {
     const seen = new Set<GPUTexture>();
     for (const v of Object.values(entry.outputs)) {
-      if (isTextured(v) && !seen.has(v.texture)) {
-        seen.add(v.texture);
-        this.gpu.release(v.texture);
+      for (const tex of texturesOf(v)) {
+        if (!seen.has(tex)) {
+          seen.add(tex);
+          this.gpu.release(tex);
+        }
       }
     }
   }
@@ -874,6 +1103,7 @@ export class Engine {
     this.cacheBytes = 0;
     this.reads.clear();
     this.lite.clear();
+    this.selfIndex.clear();
     this.pullAllow.clear();
     this.dropCold(); // the key space is gone with the cache
   }

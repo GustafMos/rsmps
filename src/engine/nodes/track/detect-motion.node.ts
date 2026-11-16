@@ -15,7 +15,7 @@ export default defineNode({
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { regions: { type: 'regions', label: 'Regions' }, mask: { type: 'mask', label: 'Moving pixels' } },
   params: {
-    frames: { type: 'number', default: 2, min: 1, max: 30, step: 1, integer: true, label: 'Compare with N frames ago', hint: 'Larger values catch slow movement but make boxes lag.' },
+    frames: { type: 'number', default: 2, min: 1, max: 30, step: 1, integer: true, label: 'Frames back', hint: 'Larger values catch slow movement but make boxes lag.' },
     threshold: { type: 'number', default: 0.1, min: 0.005, max: 1, step: 0.005, label: 'Change needed', hint: 'Smaller = more sensitive.' },
     softness: { type: 'number', default: 0.3, min: 0, max: 1, step: 0.05, label: 'Softness' },
     blur: { type: 'number', default: 3, min: 0, max: 50, step: 0.5, unit: 'px', label: 'Smooth first', hint: 'Blurs both frames before comparing to ignore noise and grain.' },

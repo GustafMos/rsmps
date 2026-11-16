@@ -16,10 +16,10 @@ const SIZES: Record<string, { width: number; height: number } | undefined> = {
  */
 export default defineNode({
   id: 'camera-in',
-  title: 'Camera',
+  title: 'Webcam',
   category: 'input',
-  description: 'Live picture from a webcam. Needs camera permission. Live preview only: to export, record it first.',
-  keywords: ['webcam', 'camera', 'live', 'video', 'phone'],
+  description: 'Live picture from a webcam or other capture device (not the 3D camera; see 3D Camera). Needs camera permission. Live preview only: to export, record it first.',
+  keywords: ['webcam', 'camera', 'live', 'video', 'phone', 'camera input', 'capture', 'usb camera'],
   inputs: {},
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {

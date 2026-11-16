@@ -3,11 +3,11 @@ import { paletteTexture } from '../../lib/fx-util';
 
 export default defineNode({
   id: 'chroma-smear',
-  title: 'Video Feedback Colour',
+  title: 'Chroma Smear',
   category: 'stylize',
   description:
-    'Smears each colour channel a different distance in a different direction, boosts saturation, recolours brightness bands through a palette and lets contours ripple outward: the look of a video mixer fed back into itself.',
-  keywords: ['smear', 'feedback', 'glitch', 'psychedelic', 'rgb shift', 'streak', 'mixer', 'ripple', 'datamosh', 'colour cycling', 'interference', 'vhs'],
+    'Color smear for a video-mixer look (not temporal feedback; for that see Feedback). Smears each colour channel a different distance in a different direction, boosts saturation, recolours brightness bands through a palette and lets contours ripple outward: the look of a video mixer fed back into itself.',
+  keywords: ['smear', 'feedback', 'glitch', 'psychedelic', 'rgb shift', 'streak', 'mixer', 'ripple', 'datamosh', 'colour cycling', 'interference', 'vhs', 'video feedback colour', 'video feedback color', 'colour smear'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
@@ -19,7 +19,7 @@ export default defineNode({
     angleR: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Red direction', group: 'Smear' },
     angleG: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Green direction', group: 'Smear' },
     angleB: { type: 'number', default: 180, min: -180, max: 180, step: 1, unit: 'deg', label: 'Blue direction', group: 'Smear' },
-    saturation: { type: 'number', default: 1.6, min: 0, max: 4, step: 0.01, label: 'Saturation boost', group: 'Colour' },
+    saturation: { type: 'number', default: 1.6, min: 0, max: 4, step: 0.01, label: 'Saturation boost', group: 'Color' },
     palette: {
       type: 'palette',
       default: [
@@ -29,14 +29,14 @@ export default defineNode({
         [0.98, 0.9, 0.15],
         [1, 1, 1],
       ],
-      label: 'Band colours',
-      group: 'Colour',
+      label: 'Band colors',
+      group: 'Color',
       hint: 'Dark to light. Brightness bands of the picture take these colours.',
     },
-    paletteMix: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Recolour by brightness', group: 'Colour', hint: '0 = keep the picture colours, 1 = fully banded through the palette.' },
-    bands: { type: 'number', default: 6, min: 2, max: 24, softMax: 16, step: 1, integer: true, label: 'Brightness bands', group: 'Colour', visibleIf: (p) => (p.paletteMix as number) > 0 },
-    hueCycles: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Colour cycling (per loop)', group: 'Colour', hint: 'Whole cycles of the palette per loop. 0 = still.', visibleIf: (p) => (p.paletteMix as number) > 0 },
-    hueOffset: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Palette offset', group: 'Colour', visibleIf: (p) => (p.paletteMix as number) > 0 },
+    paletteMix: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Palette mix', group: 'Color', hint: '0 = keep the picture colours, 1 = fully banded through the palette.' },
+    bands: { type: 'number', default: 6, min: 2, max: 24, softMax: 16, step: 1, integer: true, label: 'Brightness bands', group: 'Color', visibleIf: (p) => (p.paletteMix as number) > 0 },
+    hueCycles: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Color cycling', group: 'Color', hint: 'Whole cycles of the palette per loop. 0 = still.', visibleIf: (p) => (p.paletteMix as number) > 0 },
+    hueOffset: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Palette offset', group: 'Color', visibleIf: (p) => (p.paletteMix as number) > 0 },
     ripple: { type: 'number', default: 0, min: 0, max: 60, softMax: 30, step: 0.5, unit: 'px', label: 'Contour ripple', group: 'Ripple', hint: 'Each pass pushes the picture along its own brightness gradient.' },
     ripplePasses: { type: 'number', default: 3, min: 1, max: 8, softMax: 6, step: 1, integer: true, label: 'Ripple passes', group: 'Ripple', visibleIf: (p) => (p.ripple as number) > 0 },
     interference: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Interference lines', group: 'Interference' },
@@ -115,7 +115,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     const tex: Record<string, { texture: GPUTexture } | null> = { src: img };
     if (hasPalette) tex.pal = paletteTexture(gpu, p.palette);
     const image = gpu.pass({
-      label: 'chroma-colour',
+      label: 'chroma-color',
       size: src,
       textures: tex as never,
       uniforms: {

@@ -3,6 +3,7 @@
  * GraphDoc references (the pure helpers in engine/graph share structure, so this is cheap).
  */
 import { createStore, type Store } from './createStore';
+import { withProcessResult } from '../../engine/process';
 import {
   addNode,
   batchCount,
@@ -26,6 +27,7 @@ import { autoLayout, needsLayout } from '../lib/autolayout';
 import { pushBelow, separateMoved } from '../lib/separate';
 import { outputType } from '../../engine/graph';
 import { createScanProject } from '../scan/session';
+import { buildLayeredScanGraph, guideRemovalStep } from '../scan/scanGraph';
 import { reconcileMediaEdits, type DescribeSource } from '../../engine/lib/media-edit-graph';
 import { clipMap } from '../../engine/lib/media-time';
 import { DEFAULT_CLIP_SECONDS } from '../../engine/lib/media-edit';
@@ -33,8 +35,9 @@ import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
+import { convertNode, describeDropped } from '../lib/convert';
 
-export type DialogId = 'export' | 'backups' | 'about' | 'plugins' | 'presets' | 'savePreset' | 'shortcuts' | 'keymap' | 'palette' | null;
+export type DialogId = 'export' | 'blankSheets' | 'backups' | 'about' | 'plugins' | 'presets' | 'savePreset' | 'shortcuts' | 'keymap' | 'palette' | null;
 
 export interface AddMenuRequest {
   clientX: number;
@@ -625,7 +628,7 @@ export class Editor {
    * feed them, keeping their position among a multi input's wires; wires that do not fit stay. The node is then placed between
    * `from`'s node and its former consumers, pushing everything downstream right if there is no room.
    */
-  private takeOver(g: GraphDoc, from: Edge['from'], newId: string, downstream: Edge[]): { graph: GraphDoc; rerouted: number } {
+  private takeOver(g: GraphDoc, from: Edge['from'], newId: string, downstream: Edge[], place?: { x: number; y: number }): { graph: GraphDoc; rerouted: number } {
     const srcId = from.node;
     const src = g.nodes.find((n) => n.id === srcId)!;
     const nn = g.nodes.find((n) => n.id === newId)!;
@@ -641,6 +644,12 @@ export class Editor {
       for (const e of downstream) {
         const target = { node: newId, port: newOut };
         if (connectError(disconnect(next, e.id), this.registry, target, e.to)) continue;
+        // two outputs joined into one node that fed the same consumer socket: it now gets the new node's output once
+        if (next.edges.some((x) => x.from.node === newId && x.from.port === newOut && x.to.node === e.to.node && x.to.port === e.to.port)) {
+          next = disconnect(next, e.id);
+          rerouted.push(e);
+          continue;
+        }
         const tdef = this.registry.get(next.nodes.find((n) => n.id === e.to.node)?.type ?? '');
         const multi = !!(tdef?.inputs as Record<string, { multi?: boolean }> | undefined)?.[e.to.port]?.multi;
         const pos = wiresInto(next, e.to.node, e.to.port).findIndex((x) => x.id === e.id);
@@ -653,8 +662,8 @@ export class Editor {
       }
     }
     // place the new node between the source and its former consumers, pushing everything downstream right if needed
-    let x = src.x + srcW + GAP;
-    const y = src.y;
+    let x = place ? Math.max(place.x, src.x + srcW + GAP) : src.x + srcW + GAP;
+    const y = place ? place.y : src.y;
     if (rerouted.length) {
       const consumers = new Set(rerouted.map((e) => e.to.node));
       const minX = Math.min(...[...consumers].map((id) => next.nodes.find((n) => n.id === id)!.x));
@@ -673,6 +682,71 @@ export class Editor {
     }
     x = Math.round(x);
     return { graph: move(next, newId, x, Math.round(y)), rerouted: rerouted.length };
+  }
+
+  /**
+   * "Keep this look": put a Render Scale node (scale = `percent`, Smooth) in front of the viewed Output, or right after the viewed node when
+   * that is not an Output, so the export looks like the preview. One undo step; the new node is selected. A Render Scale that already sits
+   * there is updated instead of stacking another. Returns the Render Scale node's id (null when nothing could be done; a toast says why).
+   */
+  keepPreviewLook(percent: number): string | null {
+    const type = 'render-scale';
+    const pct = Math.min(100, Math.max(5, Math.round(percent * 10) / 10));
+    const g0 = this.state.graph;
+    const viewed = g0.nodes.find((n) => n.id === this.state.viewedNodeId);
+    const vdef = viewed && this.registry.get(viewed.type);
+    if (!viewed || !vdef) {
+      this.toast('Nothing is being viewed. Click the eye on a node first.', 'info');
+      return null;
+    }
+    if (!this.registry.get(type)) {
+      this.toast('The Render Scale node type is not available.', 'error');
+      return null;
+    }
+    const done = (id: string, verb: string) => {
+      this.patch({ selection: [id], selectedFrame: null });
+      this.toast(`Render Scale ${pct}% ${verb}`, 'ok');
+      return id;
+    };
+    const update = (id: string) => {
+      this.setParam(id, 'scale', pct);
+      return done(id, 'updated');
+    };
+    if (viewed.type === type) return update(viewed.id);
+
+    let newId = '';
+    if (vdef.category === 'output') {
+      const inPort = Object.keys(vdef.inputs).find((k) => (vdef.inputs as Record<string, { type: string }>)[k].type === 'image');
+      const wire = inPort ? g0.edges.find((e) => e.to.node === viewed.id && e.to.port === inPort) : undefined;
+      if (!wire) {
+        this.toast('Connect an image to the Output first.', 'info');
+        return null;
+      }
+      const up = g0.nodes.find((n) => n.id === wire.from.node);
+      if (up?.type === type) return update(up.id);
+      this.edit((g) => {
+        const added = addNode(g, this.registry, type, { x: 0, y: 0 }, { scale: pct, filter: 'smooth' });
+        newId = added.node.id;
+        const next = connect(added.graph, this.registry, wire.from, { node: newId, port: 'image' });
+        return this.takeOver(next, wire.from, newId, [wire]).graph;
+      });
+    } else {
+      const outPort = Object.entries(vdef.outputs as OutputSchema).find(([, o]) => o.type === 'image')?.[0];
+      if (!outPort) {
+        this.toast('Render Scale works on pictures: view a node that produces an image.', 'info');
+        return null;
+      }
+      this.edit((g) => {
+        const added = addNode(g, this.registry, type, { x: 0, y: 0 }, { scale: pct, filter: 'smooth' });
+        newId = added.node.id;
+        const from = { node: viewed.id, port: outPort };
+        const inPort = 'image';
+        let next = connect(added.graph, this.registry, from, { node: newId, port: inPort });
+        next = this.takeOver(next, from, newId, g.edges.filter((e) => e.from.node === viewed.id && e.from.port === outPort)).graph;
+        return next;
+      });
+    }
+    return newId && this.state.graph.nodes.some((n) => n.id === newId) ? done(newId, 'added') : null;
   }
 
   /**
@@ -759,16 +833,32 @@ export class Editor {
         next = connect(next, this.registry, base, to(multi));
         next = connect(next, this.registry, held, to(multi));
       }
-      if (viewed === base.node) viewMerge = true;
-      // like chain insertion: the Merge takes over every downstream wire of the dropped-on output that it can feed
-      const downstream = g.edges.filter((e) => e.from.node === base.node && e.from.port === base.port);
-      const res = this.takeOver(next, base, newId, downstream);
+      if (viewed === base.node || viewed === held.node) viewMerge = true;
+      // like chain insertion: the Merge is spliced into the chain. Every wire leaving EITHER joined output that the Merge can feed
+      // follows the Merge (dropping a fresh node onto a wired one, or the other way round, both mean "insert it there"). Wires that
+      // would make a loop stay where they are; a consumer that had both outputs on one socket gets the Merge once.
+      const leaving = (o: Edge['from']) => g.edges.filter((e) => e.from.node === o.node && e.from.port === o.port);
+      const res = this.takeOver(next, base, newId, [...leaving(base), ...leaving(held)], at);
       next = res.graph;
       if (!res.rerouted) next = { ...next, nodes: next.nodes.map((n) => (n.id === newId ? { ...n, x: at.x, y: at.y } : n)) };
       return next;
     });
     if (!newId) return false;
     this.patch({ selection: [newId], selectedFrame: null, ...(viewMerge ? { viewedNodeId: newId } : {}) });
+    return true;
+  }
+
+  /** "Type" dropdown / "Convert to…": turn a node into another member of its family in place. One undo step. */
+  convertNodeType(id: string, newType: string): boolean {
+    const res = convertNode(this.state.graph, this.registry, id, newType);
+    if (res.error) {
+      this.toast(res.error, 'error');
+      return false;
+    }
+    if (res.graph === this.state.graph) return true;
+    this.commit(res.graph);
+    const lost = describeDropped(res.dropped);
+    if (lost) this.toast(`Converted to ${this.registry.get(newType)?.title ?? newType}: ${lost}.`, 'info');
     return true;
   }
 
@@ -1147,6 +1237,12 @@ export class Editor {
     return this.io.library.list({ includeHidden: true }).find((a) => (a as { owner?: string }).owner === id);
   }
 
+  /** Every hidden working sequence of the active scan tab (one per paper layer). */
+  scanAssets(): AssetInfo[] {
+    const id = this.state.activeProject;
+    return this.io.library.list({ includeHidden: true }).filter((a) => (a as { owner?: string }).owner === id);
+  }
+
   setScanStage(stage: 1 | 2): void {
     if (stage === 2 && !this.ensureScanGraph()) return;
     this.patch({ scanStage: stage });
@@ -1163,6 +1259,15 @@ export class Editor {
       this.toast('Add photos first: the clean-up graph works on the recovered frames.', 'info');
       return false;
     }
+    const layers = this.scanAssets();
+    if (layers.length > 1) {
+      // sheets with several paper layers: one source per layer, stacked with alpha
+      const lg = buildLayeredScanGraph(this.registry, this.state.projects.find((p) => p.id === this.state.activeProject)?.name ?? 'Scan', layers);
+      if (lg) {
+        this.loadGraph(lg);
+        return true;
+      }
+    }
     const src = sourceDefFor(this.registry, asset.kind === 'image' ? 'image' : 'video');
     const out = this.registry.list().find((d) => d.category === 'output' && (d.params as Record<string, { type: string }>).kind?.type === 'enum' && 'codec' in d.params);
     if (!src || !out) {
@@ -1172,6 +1277,9 @@ export class Editor {
     let g = createGraph(this.state.projects.find((p) => p.id === this.state.activeProject)?.name ?? 'Scan');
     g = { ...g, project: { ...g.project, width: asset.width, height: asset.height, fps: asset.fps || 12, duration: asset.duration || g.project.duration, loop: false } };
     const chain: { id: string; label: string; params: Record<string, unknown> }[] = [{ id: src.def.id, label: 'Scanned frames', params: { [src.key]: [asset.id] } }];
+    // rotoscope sheets: take the printed guide out first ("Keep only what I drew")
+    const removal = guideRemovalStep(this.registry, asset);
+    if (removal) chain.push(removal);
     // newer chain: paper-clean -> levels -> upscale-smart; older registries fall back to levels -> resize
     if (this.registry.get('paper-clean')) chain.push({ id: 'paper-clean', label: 'Clean paper', params: {} });
     if (this.registry.get('levels')) chain.push({ id: 'levels', label: 'Contrast', params: {} });
@@ -1354,6 +1462,22 @@ export class Editor {
       return false;
     }
     const s = { graph, item };
+    // Process mode: an export must never silently contain a stand-in (a placeholder card, an unanalysed Track...).
+    let runProcesses = false;
+    const pending = this.io.processes.pending(graph, outputs);
+    if (pending.length) {
+      const list = pending.map((p) => `  • ${p.label} (${p.title}, ${p.state})`).join('\n');
+      const ok =
+        typeof window !== 'undefined' &&
+        window.confirm(
+          `Before exporting, ${pending.length === 1 ? 'a process has' : `${pending.length} processes have`} to run, otherwise the export would contain a stand-in instead of the real result:\n\n${list}\n\nRun ${pending.length === 1 ? 'it' : 'them'} now, then export?`,
+        );
+      if (!ok) {
+        this.toast('Export cancelled: run the processes first (Process button in the inspector).', 'info');
+        return false;
+      }
+      runProcesses = true;
+    }
     const ac = new AbortController();
     this.exportAbort = ac;
     this.patch({ exportJob: { label: 'Starting…', fraction: 0 } });
@@ -1366,6 +1490,11 @@ export class Editor {
         zip,
         ...(audioFormat ? { audioFormat } : {}),
         signal: ac.signal,
+        runProcesses,
+        // Results go into the nodes too (one undo step each), so the next export does not run them again. Throwaway graphs are not edited.
+        onProcessResult: (nodeId, result) => {
+          if (graph === this.state.graph) this.edit((g) => withProcessResult(g, this.registry, nodeId, result));
+        },
         onProgress: (p) => this.patch({ exportJob: { label: p.label, fraction: p.fraction } }),
       });
       if (ac.signal.aborted) throw new DOMException('Aborted', 'AbortError');

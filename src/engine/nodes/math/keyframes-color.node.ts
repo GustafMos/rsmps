@@ -19,7 +19,7 @@ export default defineNode({
         [0.95, 0.45, 0.25],
         [1, 0.9, 0.5],
       ],
-      label: 'Colour stops',
+      label: 'Color stops',
     },
     pace: { type: 'curve', default: presetLinear(), label: 'Pace', hint: 'Position along the stops (0 = first colour, 1 = last) over the loop. A straight line = even speed.' },
     repeat: { type: 'number', default: 1, min: 1, max: 256, softMax: 32, step: 1, integer: true, unit: 'cycles', label: 'Repeats per loop' },

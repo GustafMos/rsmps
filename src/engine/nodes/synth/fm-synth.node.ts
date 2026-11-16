@@ -7,12 +7,12 @@ const MAXV = 12;
 
 /** Modulation routing: [target, source] pairs (source index > target index), and which operators reach the output. */
 const ALGS: Record<string, { mods: [number, number][]; carriers: number[]; label: string }> = {
-  serial: { mods: [[0, 1], [1, 2], [2, 3]], carriers: [0], label: '4 > 3 > 2 > 1 (deep, bass and brass)' },
-  twin: { mods: [[0, 1], [2, 3]], carriers: [0, 2], label: '(2 > 1) + (4 > 3) (electric piano, bells)' },
-  fork: { mods: [[0, 1], [0, 2], [0, 3]], carriers: [0], label: '2, 3 and 4 all modulate 1 (bright, metallic)' },
-  'chain-plus': { mods: [[0, 1], [1, 2]], carriers: [0, 3], label: '(3 > 2 > 1) + 4 (organ-like)' },
-  parallel: { mods: [], carriers: [0, 1, 2, 3], label: 'All four side by side (additive)' },
-  y: { mods: [[0, 1], [1, 2], [1, 3]], carriers: [0], label: '(3 + 4) > 2 > 1' },
+  serial: { mods: [[0, 1], [1, 2], [2, 3]], carriers: [0], label: '4 > 3 > 2 > 1' },
+  twin: { mods: [[0, 1], [2, 3]], carriers: [0, 2], label: '2>1 + 4>3' },
+  fork: { mods: [[0, 1], [0, 2], [0, 3]], carriers: [0], label: '2, 3, 4 > 1' },
+  'chain-plus': { mods: [[0, 1], [1, 2]], carriers: [0, 3], label: '3>2>1 + 4' },
+  parallel: { mods: [], carriers: [0, 1, 2, 3], label: 'Side by side' },
+  y: { mods: [[0, 1], [1, 2], [1, 3]], carriers: [0], label: '3+4 > 2 > 1' },
 };
 const ALG_KEYS = Object.keys(ALGS);
 
@@ -39,8 +39,8 @@ for (let n = 1; n <= 4; n++) {
   const g = `Operator ${n}`;
   const d = PRESETS.epiano;
   opParams[`ratio${n}`] = { type: 'number', default: d[`ratio${n}`] as number, min: 0.25, max: 16, step: 0.01, label: 'Pitch ratio', group: g };
-  opParams[`level${n}`] = { type: 'number', default: d[`level${n}`] as number, min: 0, max: 1, step: 0.01, label: n <= 1 ? 'Level' : 'Level (strength of modulation)', group: g };
-  opParams[`attack${n}`] = { type: 'number', default: d[`attack${n}`] as number, min: 0, max: 3000, step: 1, label: 'Attack (ms)', group: g };
+  opParams[`level${n}`] = { type: 'number', default: d[`level${n}`] as number, min: 0, max: 1, step: 0.01, label: 'Level', hint: n <= 1 ? 'Output level.' : 'Strength of modulation.', group: g };
+  opParams[`attack${n}`] = { type: 'number', default: d[`attack${n}`] as number, min: 0, max: 3000, step: 1, label: 'Attack ms', group: g };
   opParams[`decay${n}`] = { type: 'number', default: d[`decay${n}`] as number, min: 0.01, max: 10, step: 0.01, unit: 's', label: 'Decay', group: g };
   opParams[`sustain${n}`] = { type: 'number', default: d[`sustain${n}`] as number, min: 0, max: 1, step: 0.01, label: 'Sustain', group: g };
   opParams[`release${n}`] = { type: 'number', default: d[`release${n}`] as number, min: 0.01, max: 10, step: 0.01, unit: 's', label: 'Release', group: g };
@@ -58,9 +58,9 @@ export default defineNode({
   params: {
     preset: { type: 'enum', default: 'epiano', label: 'Sound', options: presetOptions({ epiano: 'Electric piano', bell: 'Bell', 'fm-bass': 'FM bass', brass: 'Brass', 'glass-pad': 'Glass pad' }) },
     algorithm: { type: 'enum', default: 'twin', label: 'Algorithm', options: ALG_KEYS.map((k) => ({ value: k, label: ALGS[k].label })) },
-    feedback: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Operator 4 feedback' },
+    feedback: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Op 4 feedback' },
     ...opParams,
-    velocity: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Velocity sensitivity', group: 'Playing' },
+    velocity: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Velocity', group: 'Playing' },
     voices: { type: 'number', default: 8, min: 1, max: MAXV, softMax: 8, step: 1, integer: true, label: 'Notes at once', group: 'Playing' },
     gain: { type: 'number', default: -10, min: -60, max: 6, step: 0.1, unit: 'db', label: 'Volume', group: 'Playing' },
   },

@@ -2,16 +2,16 @@ import { defineNode } from '../../define';
 
 export default defineNode({
   id: 'color-range',
-  title: 'Color Range',
+  title: 'Similar Color',
   category: 'mask',
-  description: 'Selects pixels near a picked colour using separate hue, saturation and value tolerances.',
-  keywords: ['select', 'hue', 'saturation', 'pick', 'sample', 'similar', 'magic wand'],
+  description: 'Selects pixels similar to one picked color using separate hue, saturation and value tolerances (a magic wand). For hard green-screen removal use Chroma Key; for explicit hue/saturation/lightness ranges use HSL Qualifier.',
+  keywords: ['select', 'hue', 'saturation', 'pick', 'sample', 'similar', 'magic wand', 'color range', 'colour range'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { mask: { type: 'mask', label: 'Mask' } },
   params: {
     color: { type: 'color', default: [0.9, 0.2, 0.2, 1], label: 'Color' },
     hue: { type: 'number', default: 20, min: 0, max: 180, step: 0.5, unit: 'deg', label: 'Hue tolerance' },
-    saturation: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Saturation tolerance' },
+    saturation: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Sat tolerance' },
     value: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Value tolerance' },
     softness: { type: 'number', default: 0.3, min: 0, max: 1, step: 0.01, label: 'Softness', hint: 'Fraction of each tolerance used as a soft falloff.' },
     invert: { type: 'bool', default: false, label: 'Invert' },

@@ -46,6 +46,8 @@ import { layoutSheet, sheetMetadata } from './spritesheet';
 import { isDesktop, type FfmpegExportClient } from './desktop';
 import { ffmpegFallbackCodec, ffmpegMissingMessage, ffmpegOnlyCodec, videoRoute, type FfmpegCodec } from './export-codecs';
 import { savedEntry, streamToFfmpeg } from './export-ffmpeg';
+import type { ProcessApi } from './api';
+import { ProcessPendingError } from './processes';
 import { errorMessage, hashString, isAbort, throwIfAborted, totalFramesOf, yieldToEventLoop } from './util';
 
 export interface ExporterDeps {
@@ -61,6 +63,8 @@ export interface ExporterDeps {
   governor?: { enter(mode: 'export'): () => void };
   /** Desktop app only: FFmpeg export endpoints (ProRes-compatible, alpha formats). Absent in the web version. */
   ffmpeg?: FfmpegExportClient | null;
+  /** Process mode: the export gate. Without it exports never check processes. */
+  processes?: ProcessApi;
 }
 
 /** Thrown inside the WebCodecs path when it cannot encode H.264 / H.265 and FFmpeg can. */
@@ -124,9 +128,15 @@ export class ExporterImpl implements Exporter {
 
   constructor(private d: ExporterDeps) {}
 
+  /** Late-bound: the process runtime needs the project store, which is created after the exporter. */
+  setProcesses(p: ProcessApi | undefined): void {
+    this.d.processes = p;
+  }
+
   /* -------------------------------------------------------------------------------------------- */
 
-  async run(req: ExportRequest): Promise<ExportedFile[]> {
+  async run(req0: ExportRequest): Promise<ExportedFile[]> {
+    const req = await this.processGate(req0);
     // Video frames must be frame-exact while exporting (the browser-player fallback may not use real-time playback).
     this.d.library.exact = true;
     const unhold = this.d.player?.hold(); // no player evaluations between export frames
@@ -154,6 +164,26 @@ export class ExporterImpl implements Exporter {
       this.presenters.clear();
       unhold?.();
     }
+  }
+
+  /**
+   * Export gate for process mode: an export must not silently contain a stand-in. When a process upstream of the outputs is not done,
+   * either run it first (`req.runProcesses`, results are reported through `onProcessResult` so the app can store them in the nodes)
+   * or stop with a ProcessPendingError that lists them.
+   */
+  private async processGate(req: ExportRequest): Promise<ExportRequest> {
+    const procs = this.d.processes;
+    if (!procs) return req;
+    const pending = procs.pending(req.graph, req.outputs);
+    if (!pending.length) return req;
+    if (!req.runProcesses) throw new ProcessPendingError(pending);
+    const graph = await procs.runPending(req.graph, req.outputs, {
+      signal: req.signal,
+      item: req.item,
+      onResult: req.onProcessResult,
+      onProgress: (p) => req.onProgress?.({ fraction: 0, label: p.label }),
+    });
+    return { ...req, graph };
   }
 
   private async runExact(req: ExportRequest): Promise<ExportedFile[]> {
@@ -205,7 +235,9 @@ export class ExporterImpl implements Exporter {
 
     const files: ExportedFile[] = [];
     const errors: string[] = [];
-    const sigs = this.d.router && this.d.audio.hasSignals(graph, registry) ? this.d.router : null;
+    // Phone Motion also needs the router in export mode: live phone values answer 0 there, so the node reads its recorded take (or says so).
+    const audioSignals = this.d.audio.hasSignals(graph, registry);
+    const sigs = this.d.router && (audioSignals || graph.nodes.some((n) => n.type === 'phone-motion')) ? this.d.router : null;
     let sigItem = -1;
     try {
     for (current = 0; current < jobs.length; current++) {
@@ -214,7 +246,7 @@ export class ExporterImpl implements Exporter {
       run.progress(0, job.label);
       if (sigs && job.item !== sigItem) {
         sigItem = job.item;
-        await this.prepareSignals(sigs, run, frames, job.item);
+        await this.prepareSignals(sigs, run, frames, job.item, audioSignals);
       }
       try {
         files.push(...(await this.exportJob(job, run)));
@@ -251,11 +283,15 @@ export class ExporterImpl implements Exporter {
    * Deterministic bridge values for one batch item: analyse the audio offline once, route Host.signal to the
    * per-frame tracks and drop engine results cached with other (live or previous-item) values.
    */
-  private async prepareSignals(router: SignalRouter, run: Run, frames: number, item: number): Promise<void> {
+  private async prepareSignals(router: SignalRouter, run: Run, frames: number, item: number, analyse = true): Promise<void> {
     const { audio, registry, library } = this.d;
     const graph = run.req.graph;
     const fps = graph.project.fps;
     router.beginExport(SILENT_TRACKS(fps)); // from now on no live value can leak in
+    if (!analyse) {
+      await this.d.gate.clearEngine();
+      return;
+    }
     try {
       const tracks = await audio.analyzeSignals(graph, registry, (id) => library.assetAudio(id), { duration: frames / fps, fps, loop: graph.project.loop, item });
       if (tracks) router.beginExport(tracks);

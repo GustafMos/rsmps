@@ -10,11 +10,14 @@ import { allCommandIds, commandLabel, nodeCommandId } from '../shortcuts';
 import { useApp, useDefs, useEd } from '../store/context';
 import './menus.css';
 
+/** Lower-case and fold the UK spelling, so "colour" finds "Color" and vice versa. */
+const fold = (s: string) => s.toLowerCase().replace(/colour/g, 'color').replace(/grey/g, 'gray').replace(/centre/g, 'center');
+
 function score(def: AnyNodeDef, tokens: string[]): number {
-  const title = def.title.toLowerCase();
+  const title = fold(def.title);
   const id = def.id.toLowerCase();
-  const kw = (def.keywords ?? []).join(' ').toLowerCase();
-  const desc = def.description.toLowerCase();
+  const kw = fold((def.keywords ?? []).join(' '));
+  const desc = fold(def.description);
   let total = 0;
   for (const t of tokens) {
     let s = 0;
@@ -82,7 +85,7 @@ function AddMenuInner() {
   }, [allowed]);
 
   const results = useMemo(() => {
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const tokens = fold(query).split(/\s+/).filter(Boolean);
     if (!tokens.length) return [];
     return allowed
       .map((d) => ({ d, s: score(d, tokens) }))

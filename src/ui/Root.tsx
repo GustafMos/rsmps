@@ -9,6 +9,7 @@ import { Editor, resolveActiveOutput } from './store/editor';
 import { createPlayerStore } from './store/playerStore';
 import { PENDING_KEY, type PendingEdit } from './watchdog';
 import { beginSafety, installSafety, pushView, safetyStore } from './safety';
+import { installProcesses } from './store/processes';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { startUpdateCheck } from './updateNotice';
 
@@ -97,10 +98,12 @@ export function Root() {
 
         const app: AppCtx = { io, ed, playerStore, graphCtl };
         const uninstall = installSafety(app);
+        const uninstallProcesses = installProcesses(app);
         const cancelUpdate = startUpdateCheck(ed);
         stop = () => {
           cancelUpdate();
           uninstall();
+          uninstallProcesses();
           unsubSafety();
           unsub();
           unreg();

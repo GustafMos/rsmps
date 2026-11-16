@@ -2,7 +2,7 @@
 
 Headless batch rendering of RSMPS v2 graphs. It runs the same engine as the app (WebGPU through the
 `webgpu` npm package), so a graph looks identical in the editor and on the command line. Beyond what a
-browser can encode it writes **ProRes 4444 with alpha**, **PNG sequences with alpha**, QuickTime
+browser can encode it writes **ProRes-compatible 4444 with alpha**, **PNG sequences with alpha**, QuickTime
 Animation / PNG-in-MOV and VP9 WebM with alpha.
 
 Source: `src/cli/`. Requires Node 20+. Video, audio and GIF input and all video output need ffmpeg
@@ -28,6 +28,7 @@ and `@ffmpeg-installer/ffmpeg` external, so run it from inside the repo (or next
 rsmps render <graph.rsmps.json> [inputs...] --out <dir> [options]
 rsmps check  <graph.rsmps.json> [--plugin file.js] [--json]    validate; unknown nodes; counts
 rsmps nodes  [--json] [--plugin file.js]                       every node with category, sockets and params
+rsmps print-blank --out <dir> (--frames <n> | --seconds <s>) [options]   blank sheets for paper animation (no graph)
 ```
 
 Exit status: `0` success, `1` at least one item failed (the others still rendered), `2` bad usage or an
@@ -91,6 +92,30 @@ The Output `name` pattern supports `{name}` (source file stem), `{index}`, `{wid
 `{frame}`. Clashes get `-2`, `-3`. PNG sequences go into a sub-folder named after the pattern without
 `{frame}`: `out/hero/hero_0000.png`.
 
+### print-blank
+
+Blank sheets (frame boxes, scan markers, frame numbers, optional guides; no picture) for animation drawn entirely on paper, from the same code as the app's
+**File > Print blank sheets**. No graph is needed; the sheets scan back in the Scan tab like any printed sheet. `rsmps print-blank --help` lists everything.
+
+| Option | Meaning |
+| --- | --- |
+| `--frames <n>` or `--seconds <s>` | how many frames (seconds use `--fps`, default 12) |
+| `--aspect <a>` | `project` (with `--size WxH`), `16:9`, `9:16`, `1:1`, `4:3`, `3:4`, `4:5`, `2:3`, `21:9` or `W:H` (default 16:9) |
+| `--per-sheet <n>` or `--columns <c> --rows <r>` | frames per sheet (largest frames that fit) or an exact grid |
+| `--paper a4\|a3\|letter\|a5\|legal`, `--landscape`, `--margin <mm>`, `--gutter <mm>`, `--dpi <n>` | page |
+| `--guides cross,thirds,safe,grid,horizon,pegs` | guides inside every frame |
+| `--ghost`, `--no-numbers`, `--no-boxes` | faint onion-skin numbers inside; leave out numbers / boxes |
+| `--shoot-on <n>`, `--beats 4,9,...`, `--beats-from audio.wav`, `--exposure-sheet` | timing: holds, beat marks (1-based frames, or found in a WAV), exposure sheet page |
+| `--format pdf\|png\|both`, `--name <text>`, `--out <dir>` | output |
+
+```
+rsmps print-blank --frames 48 --per-sheet 6 --aspect 16:9 --paper a4 --guides thirds,cross --exposure-sheet --out sheets/
+rsmps print-blank --seconds 4 --fps 12 --aspect 4:3 --landscape --shoot-on 2 --format both --out sheets/
+```
+
+The Output node's Print group also controls rotoscope styles (`printStyle`: full, faint, outline, blue), paper layers (`printLayers`), layouts (`printLayout`: grid, flipbook, zine)
+and `printKind` (sheets, separations, svg-plot). They work with `render` like any Output param, e.g. `--set Out.printStyle="blue"` or `--set Out.printKind="svg-plot"`; see PRINT_AND_SCAN.md.
+
 ## Recipes
 
 **Batch a folder of sprites through a graph**
@@ -104,7 +129,7 @@ rsmps render outline.rsmps.json ./sprites --items 5-10 --out ./done     # just i
 Every file is one item; a file that fails to decode is reported (`FAILED item 3 ...`), the rest still
 render and the exit status is 1.
 
-**ProRes 4444 with alpha**
+**ProRes-compatible 4444 with alpha**
 
 ```
 rsmps render fx.rsmps.json --codec prores4444 --out ./video

@@ -5,19 +5,19 @@ import { gaussianBlur } from '../filter/blur.node';
 
 export default defineNode({
   id: 'detect-color',
-  title: 'Detect Colour',
+  title: 'Detect Color',
   category: 'track',
   description:
     'Finds areas of one picked colour, such as a tracking marker or a coloured prop, and outputs them as regions. Colours are compared the way the eye sees them (OKLab), so the tolerance feels even across hues.',
-  keywords: ['detect', 'color', 'colour', 'marker', 'track', 'prop', 'find', 'key'],
+  keywords: ['detect', 'color', 'colour', 'marker', 'track', 'prop', 'find', 'key', 'detect colour'],
   cpu: true,
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { regions: { type: 'regions', label: 'Regions' }, mask: { type: 'mask', label: 'Detected pixels' } },
   params: {
-    color: { type: 'color', default: [1, 0.15, 0.1, 1], label: 'Colour to find' },
+    color: { type: 'color', default: [1, 0.15, 0.1, 1], label: 'Color to find' },
     tolerance: { type: 'number', default: 0.15, min: 0.01, max: 1, step: 0.005, label: 'Tolerance', hint: 'How far a pixel may be from the colour (OKLab distance). 0.1 is strict, 0.3 is loose.' },
     softness: { type: 'number', default: 0.04, min: 0, max: 0.5, step: 0.005, label: 'Softness' },
-    lightness: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Care about brightness', hint: 'Lower values also match darker or lighter shades of the colour.' },
+    lightness: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Use brightness', hint: 'Lower values also match darker or lighter shades of the colour.' },
     blur: { type: 'number', default: 1, min: 0, max: 50, step: 0.5, unit: 'px', label: 'Smooth first' },
     label: { type: 'string', default: 'color', label: 'Label' },
     ...DETECT_PARAMS,

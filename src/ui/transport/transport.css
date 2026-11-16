@@ -33,3 +33,8 @@
 
 .rs-tp__renderpause { display: inline-flex; align-items: center; gap: var(--s-1); font-size: var(--fs-xs, 11px); letter-spacing: 0.06em; }
 .rs-tp__renderpause.is-on { background: #3a2d05; border-color: var(--yellow); color: var(--yellow); }
+
+/* Process jobs (Processes popover). Reuses the memory meter's look. */
+.rs-procbtn[data-state='failed'] { border-color: var(--danger); color: var(--danger); }
+.rs-procbtn[data-state='running'] .rs-mem__bar > span { background: var(--accent-hi); }
+.rs-proc__item { display: flex; flex-direction: column; gap: 2px; }

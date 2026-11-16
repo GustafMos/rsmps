@@ -41,7 +41,7 @@ export default defineNode({
     monitor: { type: 'bool', default: false, label: 'Hear the phone', group: 'Sound', hint: 'Off by default: a phone near the speakers feeds back. Use headphones.' },
     gate: { type: 'bool', default: false, label: 'Noise gate', group: 'Sound' },
     gateThreshold: { type: 'number', default: -50, min: -90, max: -10, step: 0.5, unit: 'db', label: 'Gate level', group: 'Sound', visibleIf: (p) => !!p.gate },
-    latencyMs: { type: 'number', default: 150, min: 0, max: 1000, step: 1, label: 'Link delay (ms)', group: 'Sound', hint: 'How late the phone sound arrives (WiFi + WebRTC, typically 100-300 ms). A Timeline recording this sound moves the take earlier by this much so it lines up.' },
+    latencyMs: { type: 'number', default: 150, min: 0, max: 1000, step: 1, label: 'Link delay ms', group: 'Sound', hint: 'How late the phone sound arrives (WiFi + WebRTC, typically 100-300 ms). A Timeline recording this sound moves the take earlier by this much so it lines up.' },
     liveTick: { type: 'string', default: '', label: 'Live tick', visibleIf: () => false },
   },
   summary: (p) => (p.session ? 'linked' : 'not linked'),

@@ -19,7 +19,7 @@ export default defineNode({
   params: {
     enabled: { type: 'bool', default: true, label: 'Include in export', hint: 'Untick to leave this sound out of exported files. You still hear it while working.' },
     gain: { type: 'number', default: 0, min: -60, max: 12, step: 0.1, unit: 'db', label: 'Master volume' },
-    limiter: { type: 'bool', default: true, label: 'Protect against clipping' },
+    limiter: { type: 'bool', default: true, label: 'Limiter', hint: 'Protects against clipping.' },
     ceiling: { type: 'number', default: -1, min: -12, max: 0, step: 0.1, unit: 'db', label: 'Ceiling', visibleIf: (p) => p.limiter !== false },
   },
   summary: (p) => `${p.gain >= 0 ? '+' : ''}${p.gain.toFixed(1)} dB${p.limiter ? ' · limited' : ''}`,

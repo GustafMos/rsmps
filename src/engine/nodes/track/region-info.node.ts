@@ -10,8 +10,8 @@ export default defineNode({
   keywords: ['position', 'x', 'y', 'size', 'number', 'drive', 'value', 'centre', 'center', 'info', 'count'],
   inputs: { regions: { type: 'regions', required: true, label: 'Regions' } },
   outputs: {
-    x: { type: 'number', label: 'Centre X' },
-    y: { type: 'number', label: 'Centre Y' },
+    x: { type: 'number', label: 'Center X' },
+    y: { type: 'number', label: 'Center Y' },
     width: { type: 'number', label: 'Width' },
     height: { type: 'number', label: 'Height' },
     score: { type: 'number', label: 'Score' },
@@ -21,7 +21,7 @@ export default defineNode({
   params: {
     index: { type: 'number', default: 0, min: 0, max: 63, step: 1, integer: true, label: 'Region number', hint: '0 = the first region in the list.' },
     id: { type: 'number', default: -1, min: -1, max: 100000, step: 1, integer: true, label: 'Or region with id', hint: '-1 = use the region number instead.' },
-    fallback: { type: 'number', default: 0, min: -1000, max: 1000, step: 0.01, label: 'Value when nothing is found', hint: 'Used for position, size and score when the region does not exist.' },
+    fallback: { type: 'number', default: 0, min: -1000, max: 1000, step: 0.01, label: 'Fallback value', hint: 'Used for position, size and score when the region does not exist.' },
   },
   summary: (p) => (p.id >= 0 ? `id ${p.id}` : `region #${p.index}`),
   render(ctx) {

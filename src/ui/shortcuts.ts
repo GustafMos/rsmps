@@ -9,7 +9,9 @@ import { isTypingTarget } from './lib/drag';
 import { NODE_DEFAULTS, NODE_PREFIX, bindingsOf, eventToBinding, overrideIds, setDefaultsLookup } from './keymap';
 import type { AppCtx } from './store/context';
 import { bakeSelection } from './store/bake';
-import { togglePaused } from './safety';
+import { processSelection } from './store/processes';
+import { focusMediaSearch, toggleMediaPanel } from './store/media';
+import { isPaused, togglePaused } from './safety';
 
 export interface KeyCtx {
   app: AppCtx;
@@ -79,6 +81,7 @@ export const COMMANDS: Command[] = [
   { id: 'graph.unframe', label: 'Remove selection from its frame', group: 'Graph', defaults: ['Ctrl+Alt+G'], run: (c) => c.app.ed.removeFromFrame(sel(c.app)) },
   { id: 'graph.frame', label: 'Frame all (or selection)', group: 'Graph', defaults: ['F', 'Home'], run: ({ app }) => frameGraph(app, sel(app).length > 0) },
   { id: 'graph.bake', label: 'Bake selection (Cache / Bake node after it)', group: 'Graph', defaults: ['Ctrl+Shift+B'], run: ({ app }) => void bakeSelection(app) },
+  { id: 'graph.process', label: 'Process selected nodes (run their long jobs: bake, clip analysis...)', group: 'Graph', defaults: ['Ctrl+Alt+P'], run: ({ app }) => void processSelection(app) },
   { id: 'graph.bypass', label: 'Bypass selected nodes', group: 'Graph', defaults: ['B'], run: ({ app }) => sel(app).forEach((id) => app.ed.toggleBypass(id)) },
   { id: 'graph.collapse', label: 'Collapse / expand selected nodes', group: 'Graph', defaults: ['H'], run: ({ app }) => sel(app).length && app.ed.toggleCollapse(sel(app)) },
   { id: 'graph.layout', label: 'Auto-layout', group: 'Graph', defaults: ['L'], run: (c) => c.app.ed.autoLayout(true) },
@@ -129,6 +132,18 @@ export const COMMANDS: Command[] = [
       if (panel === 'viewer' || panel === 'graph') app.ed.setPrefs({ maximized: panel });
     },
   },
+  {
+    id: 'view.fullFrame',
+    label: 'Render this frame at full resolution (final quality, until you change frame or play)',
+    group: 'View',
+    defaults: ['Shift+R'],
+    run: ({ app }) => {
+      if (isPaused()) return app.ed.toast('Rendering is paused: resume it first.', 'info');
+      if (!app.io.player.renderFullFrame()) app.ed.toast('Nothing is being viewed.', 'info');
+    },
+  },
+  { id: 'view.mediaPanel', label: 'Toggle the media panel (open / fold to the side rail)', group: 'View', defaults: ['Alt+M'], run: () => toggleMediaPanel() },
+  { id: 'view.mediaSearch', label: 'Focus the media search', group: 'View', defaults: ['Ctrl+Shift+F'], run: () => focusMediaSearch() },
   { id: 'view.shortcuts', label: 'Show the shortcut cheat-sheet', group: 'View', defaults: ['?'], run: (c) => c.app.ed.openDialog('shortcuts') },
   { id: 'view.keymap', label: 'Edit keyboard shortcuts', group: 'View', defaults: [], run: (c) => c.app.ed.openDialog('keymap') },
   { id: 'view.palette', label: 'Palette Studio', group: 'View', defaults: [], run: ({ app }) => { app.ed.studioTarget = null; app.ed.openDialog('palette'); } },

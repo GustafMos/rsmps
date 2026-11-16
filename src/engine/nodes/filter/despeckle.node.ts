@@ -14,7 +14,7 @@ export default defineNode({
   params: {
     size: { type: 'number', default: 4, min: 0.5, max: 60, softMax: 30, step: 0.5, unit: 'px', label: 'Largest speck', hint: 'Marks up to this wide are removed when nothing else is around them.' },
     threshold: { type: 'number', default: 0.3, min: 0.02, max: 0.95, step: 0.01, label: 'Ink threshold', hint: 'How dark a pixel must be to count as a mark.' },
-    lightSpecks: { type: 'bool', default: false, label: 'Also fill light pinholes', hint: 'Small paper-coloured holes inside dark areas are filled in.' },
+    lightSpecks: { type: 'bool', default: false, label: 'Light pinholes', hint: 'Small paper-coloured holes inside dark areas are filled in.' },
   },
   summary: (p) => `specks up to ${p.size} px`,
   render(ctx) {

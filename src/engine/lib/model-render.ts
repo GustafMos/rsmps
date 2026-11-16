@@ -2,6 +2,8 @@ import { cameraBasis, PROJECTION_ID, simpleCamera } from './gen-camera';
 import { rgba, rotationZYX } from './gen-common';
 import { ModelError, type ParsedModel } from './gen-model';
 import { parseModelBytes } from './gen-model-load';
+import { PRELUDE } from '../gpu/prelude';
+import { deformUniforms, type DeformFeat, type DeformP, deformFeatures } from './gen-deform';
 import type { CameraValue, Host, ImageValue, NodeGpu, TimeInfo } from '../types';
 
 /**
@@ -74,7 +76,7 @@ const MAX_MSAA_BYTES = 700 * 1024 * 1024;
 const MAX_WIRE_TRIANGLES = 300_000;
 
 const SHADER = /* wgsl */ `
-const PI: f32 = 3.14159265358979;
+${PRELUDE}
 struct Frame {
   model: mat4x4f,
   rot: mat4x4f,
@@ -89,11 +91,18 @@ struct Frame {
   tint: vec4f,      // rgb, a
   opts: vec4f,      // colour mode (0 model, 1 tint, 2 override), nearest texture, 0, 0
   wire: vec4f,
+  dfOrg: vec4f,     // deform: object position, object scale
+  dfFit: vec4f,     // deform: model centre, fit scale
+  dfA: vec4f,       // noise amount, noise scale, noise angle, picture amount
+  dfB: vec4f,       // inflate, twist (rad per unit), bend, taper
+  dfC: vec4f,       // morph, melt, explode, low-fi grid (cells across the screen, 0 = off)
+  dfFlags: vec4f,   // bit set of the compiled-in features (0 = no deform at all)
 };
 struct Mat { color: vec4f, info: vec4f };  // info: alphaMode (0 opaque, 1 cutout), cutoff, hasTexture, 0
 @group(0) @binding(0) var<uniform> fr: Frame;
 @group(0) @binding(1) var smpNearest: sampler;
 @group(0) @binding(2) var smpLinear: sampler;
+@group(0) @binding(3) var dmap: texture_2d<f32>;
 @group(1) @binding(0) var<uniform> mt: Mat;
 @group(1) @binding(1) var baseTex: texture_2d<f32>;
 
@@ -147,14 +156,75 @@ fn project(wp: vec3f) -> vec4f {
   return vec4f(lon / PI + sx * sw, ny + sy * sh, z, 1.0);
 }
 
+// ---- Deform (the shared Deform group, see lib/gen-deform.ts). Forward version of what the raymarched nodes do to the domain.
+fn hasF(bit: u32) -> bool { return (u32(fr.dfFlags.x) & bit) != 0u; }
+fn dfLocal(p0: vec3f, n: vec3f) -> vec3f {
+  var q = p0;
+  var disp = 0.0;
+  if (hasF(1u)) {
+    let s = q * fr.dfA.y;
+    let o = vec3f(cos(fr.dfA.z), sin(fr.dfA.z), 0.0) * 0.9;
+    let nz = vnoise3(s + o) * 0.65 + vnoise3(s * 2.07 + o.yxz * 1.3 + vec3f(5.2, 1.3, 9.1)) * 0.35;
+    disp += fr.dfA.x * (nz * 2.0 - 1.0) * 1.4;
+  }
+  if (hasF(2u)) {
+    var m = 0.0;
+    if (hasF(4u)) {
+      m = luma(textureSampleLevel(dmap, smpLinear, vec2f(atan2(q.x, q.z) / TAU + 0.5, 0.5 - q.y * 0.5), 0.0).rgb);
+    } else {
+      let w = pow(abs(normalize(q + vec3f(1e-5))), vec3f(4.0));
+      let ww = w / (w.x + w.y + w.z);
+      m = luma(textureSampleLevel(dmap, smpLinear, q.yz * 0.5 + 0.5, 0.0).rgb) * ww.x + luma(textureSampleLevel(dmap, smpLinear, q.xz * 0.5 + 0.5, 0.0).rgb) * ww.y + luma(textureSampleLevel(dmap, smpLinear, q.xy * 0.5 + 0.5, 0.0).rgb) * ww.z;
+    }
+    disp += fr.dfA.w * (m - 0.5) * 2.0;
+  }
+  if (hasF(8u)) { disp += fr.dfB.x; }
+  q = q + n * disp;
+  if (hasF(128u)) { q = mix(q, normalize(q + vec3f(1e-6)) * 0.9, fr.dfC.x); }
+  if (hasF(32u)) { let a = -fr.dfB.z * q.x; let c = cos(a); let s = sin(a); q = vec3f(c * q.x - s * q.y, s * q.x + c * q.y, q.z); }
+  if (hasF(16u)) { let a = -fr.dfB.y * q.y; let c = cos(a); let s = sin(a); q = vec3f(c * q.x - s * q.z, q.y, s * q.x + c * q.z); }
+  if (hasF(64u)) { let s = max(1.0 - fr.dfB.w * q.y * 0.5, 0.15); q = vec3f(q.x * s, q.y, q.z * s); }
+  if (hasF(512u)) {
+    let ctr = (floor(p0 / 0.5) + 0.5) * 0.5;
+    q = q + normalize(ctr + vec3f(0.0013, 0.0021, 0.0017)) * fr.dfC.z * 0.8;
+  }
+  if (hasF(256u)) {
+    let m = fr.dfC.y;
+    let low = smoothstep(0.4, -1.0, q.y);
+    q = vec3f(q.x * (1.0 + 0.7 * m * low), q.y - (m * 0.75 * smoothstep(-1.0, 1.0, q.y) + m * 0.2), q.z * (1.0 + 0.7 * m * low));
+  }
+  return q;
+}
+fn deformVertex(pos: vec3f, nrm: vec3f, wp: ptr<function, vec3f>, wn: ptr<function, vec3f>) {
+  let p0 = (pos - fr.dfFit.xyz) * fr.dfFit.w;
+  let n = normalize(nrm);
+  let q = dfLocal(p0, n);
+  // normals from the displaced neighbours (finite differences on the tangent plane)
+  var axis = vec3f(0.0, 1.0, 0.0);
+  if (abs(n.y) > 0.9) { axis = vec3f(1.0, 0.0, 0.0); }
+  let t1 = normalize(cross(n, axis));
+  let t2 = cross(n, t1);
+  let e = 0.02;
+  var nn = normalize(cross(dfLocal(p0 + t1 * e, n) - q, dfLocal(p0 + t2 * e, n) - q));
+  if (dot(nn, n) < 0.0) { nn = -nn; }
+  *wp = fr.dfOrg.xyz + (fr.rot * vec4f(q * fr.dfOrg.w, 0.0)).xyz;
+  *wn = normalize((fr.rot * vec4f(nn, 0.0)).xyz);
+}
+
 fn transform(i: VIn) -> VOut {
   var o: VOut;
-  let wp = (fr.model * vec4f(i.pos, 1.0)).xyz;
+  var wp = (fr.model * vec4f(i.pos, 1.0)).xyz;
+  var wn = normalize((fr.rot * vec4f(i.nrm, 0.0)).xyz);
+  if (fr.dfFlags.x > 0.5) { deformVertex(i.pos, i.nrm, &wp, &wn); }
   o.wpos = wp;
-  o.wnrm = normalize((fr.rot * vec4f(i.nrm, 0.0)).xyz);
+  o.wnrm = wn;
   o.uv = i.uv;
   o.col = i.col;
   o.clip = project(wp);
+  if (fr.dfC.w > 0.5) {
+    // low-fi: snap the projected vertex to a coarse screen grid
+    o.clip = vec4f(floor(o.clip.xy / o.clip.w * fr.dfC.w + 0.5) / fr.dfC.w * o.clip.w, o.clip.zw);
+  }
   return o;
 }
 @vertex fn vs(i: VIn) -> VOut { return transform(i); }
@@ -223,7 +293,8 @@ function getPipelines(device: GPUDevice, gpu: NodeGpu): Promise<Pipelines> {
         entries: [
           { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
           { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-          { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+          { binding: 2, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+          { binding: 3, visibility: GPUShaderStage.VERTEX, texture: { sampleType: 'float' } },
         ],
       });
       const matLayout = device.createBindGroupLayout({
@@ -384,6 +455,23 @@ export interface ModelRenderCtx {
   readonly item: { readonly index: number; readonly count: number };
 }
 
+const FLAG: Record<keyof DeformFeat, number> = { noise: 1, map: 2, cyl: 4, inflate: 8, twist: 16, bend: 32, taper: 64, morph: 128, melt: 256, explode: 512, lowfi: 1024 };
+
+/** The 24 floats appended to the frame uniform: deform state (all zero = no deform, the vertex shader takes its original path). */
+function deformFrame(deform: { p: DeformP; map: ImageValue | null } | null, p: ModelRenderParams, fit: number, c: number[], ctx: ModelRenderCtx): number[] {
+  if (!deform) return new Array(24).fill(0);
+  const f = deformFeatures(deform.p, !!deform.map);
+  let flags = 0;
+  for (const k of Object.keys(f) as (keyof DeformFeat)[]) if (f[k]) flags |= FLAG[k];
+  if (flags === 0 || (flags & ~(FLAG.lowfi | FLAG.cyl)) === 0) flags &= FLAG.lowfi; // low-fi alone only snaps the screen grid
+  const animated = (deform.p.dNoise !== 0 && deform.p.dNoiseCycles > 0) || (deform.p.dExplode !== 0 && deform.p.dExplodeCycles > 0);
+  const du = deformUniforms(deform.p, animated ? ctx.time.phase : 0) as Record<string, number[]>;
+  const geo = flags & ~FLAG.lowfi & ~FLAG.cyl ? flags : 0;
+  const dfC = [...du.dfC];
+  dfC[3] = f.lowfi ? Math.round(deform.p.dLowFi) * 4 : 0;
+  return [p.posX, p.posY, p.posZ, p.objectScale, c[0], c[1], c[2], fit, ...du.dfA, ...du.dfB, ...dfC, geo, 0, 0, 0];
+}
+
 /** One-line description of the chosen model files, for node summaries. */
 export const modelFilesSummary = (p: { model: string[] }): string => (p.model.length === 0 ? 'no model chosen' : p.model.length === 1 ? '1 model' : `${p.model.length} models`);
 
@@ -397,6 +485,7 @@ export async function renderModel(
   size: { width: number; height: number; unit?: number },
   camera: CameraValue | null,
   textureOverride: ImageValue | null,
+  deform: { p: DeformP; map: ImageValue | null } | null = null,
 ): Promise<ImageValue> {
   const out = ctx.gpu.alloc(size.width, size.height, size.unit ?? 1);
   const device = ctx.gpu.device;
@@ -475,6 +564,7 @@ export async function renderModel(
     ...rgba(p.baseColor),
     mode, p.nearestTexture ? 1 : 0, 0, 0,
     ...rgba(p.wireColor),
+    ...deformFrame(deform, p, fit, c, ctx),
   ]);
 
   // --- GPU resources ----------------------------------------------------
@@ -489,6 +579,7 @@ export async function renderModel(
       { binding: 0, resource: { buffer: frameBuf, size: frame.byteLength } },
       { binding: 1, resource: pl.nearest },
       { binding: 2, resource: pl.linear },
+      { binding: 3, resource: gpu.view(deform?.map?.texture ?? pl.white) },
     ],
   });
   const temp: GPUBuffer[] = [frameBuf];

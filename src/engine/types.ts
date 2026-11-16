@@ -13,7 +13,7 @@ import type { AudioKernel } from './audio/types';
 /* Sockets and values                                                       */
 /* ----------------------------------------------------------------------- */
 
-export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'regions' | 'camera' | 'audio' | 'midi';
+export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'regions' | 'camera' | 'material' | 'audio' | 'midi';
 
 /**
  * A GPU image. RGBA8, sRGB-encoded, PREMULTIPLIED alpha, row 0 = top.
@@ -86,6 +86,30 @@ export interface CameraValue {
   shift: [number, number];
 }
 
+/**
+ * A surface material for the 3D nodes: plain numbers plus optional pictures. Made by the Material node, read by 3D Object,
+ * Image to 3D and SDF 3D (docs/ENGINE.md, pending rules). `a`..`f` are packed uniform vectors, see lib/gen-material.ts.
+ * Its pictures are the Material node's own inputs; the kernel keeps them alive as long as the material's cache entry lives.
+ */
+export interface MaterialValue {
+  kind: 'material';
+  /** Shading model: lambert (matte, clay), pbr (plastic, metal), glass, toon, emissive, hologram, matcap, wire. */
+  model: 'lambert' | 'pbr' | 'glass' | 'toon' | 'emissive' | 'hologram' | 'matcap' | 'wire';
+  /** Structure flags that select the generated shader. */
+  flags: { clay: boolean; triplanar: boolean; emission: boolean; rim: boolean; sky: boolean; envAmbient: boolean };
+  base: [number, number, number];
+  a: [number, number, number, number];
+  b: [number, number, number, number];
+  c: [number, number, number, number];
+  d: [number, number, number, number];
+  e: [number, number, number, number];
+  f: [number, number, number, number];
+  skyTop: [number, number, number];
+  skyHorizon: [number, number, number];
+  skyBottom: [number, number, number];
+  maps: { colorMap: ImageValue | null; normalMap: ImageValue | null; roughnessMap: ImageValue | null; emissionMap: ImageValue | null; matcap: ImageValue | null; environment: ImageValue | null; background: ImageValue | null };
+}
+
 /** Straight (non-premultiplied) sRGB colour, 0..1. */
 export type ColorValue = [number, number, number, number];
 
@@ -108,6 +132,7 @@ export interface SocketValueMap {
   audio: AudioValue;
   regions: RegionsValue;
   camera: CameraValue;
+  material: MaterialValue;
   midi: MidiValue;
 }
 export type Value = SocketValueMap[SocketType];
@@ -216,7 +241,7 @@ export interface PaletteParam extends ParamBase {
 export interface AssetsParam extends ParamBase {
   type: 'assets';
   default: string[];
-  accept: 'image-video' | 'audio' | 'midi' | 'model' | 'any';
+  accept: 'image-video' | 'audio' | 'midi' | 'model' | 'lut' | 'splat' | 'subtitles' | 'any';
 }
 /** A hardware device chosen from a live list (system microphones, MIDI inputs). Value = device id; '' = system default / all. */
 export interface DeviceParam extends ParamBase {
@@ -454,6 +479,11 @@ export interface Host {
   signal?(nodeId: string, name: string, seconds: number): number;
   /** Rasterise text to straight RGBA (browser canvas). Optional: missing in headless runs. */
   rasterizeText?(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null;
+  /**
+   * Process mode (see `NodeDef.process`): what the scheduler is doing with this node right now ('queued' | 'running' | 'failed'),
+   * or null when it is idle. Optional: a host without a scheduler (tests, a plain render) answers null for every node.
+   */
+  processLive?(nodeId: string): ProcessLive | null;
 }
 
 /** A live picture source for `Host.liveFrame`. */
@@ -466,7 +496,7 @@ export type LiveSource =
 export interface AssetInfo {
   id: string;
   name: string;
-  kind: 'image' | 'video' | 'audio' | 'midi' | 'model';
+  kind: 'image' | 'video' | 'audio' | 'midi' | 'model' | 'lut' | 'splat' | 'subtitles';
   width: number;
   height: number;
   duration: number;
@@ -512,13 +542,228 @@ export interface RenderCtx<P extends ParamSchema, I extends InputSchema> {
    * `wire` picks one wire of a `multi` input (0 = the first, in wire order; default 0): a lazy multi input is how an editing
    * node evaluates only the sources it actually shows. The result is only valid during this render call.
    */
-  pull<K extends keyof I>(input: K, at?: { seconds: number; wire?: number }): Promise<SocketValueMap[I[K]['type']] | null>;
+  pull<K extends keyof I>(input: K, at?: { seconds?: number; wire?: number; proxy?: number }): Promise<SocketValueMap[I[K]['type']] | null>;
+  /**
+   * The project canvas (width, height, unit) as it is at an absolute proxy factor (1 = full resolution), using the engine's own rounding.
+   * With `pull(input, { proxy })`: `proxy` evaluates the input as if the whole evaluation ran at that factor (sources decode that small, lengths
+   * follow). It is absolute, not relative to `ctx.proxy`, and clamped to 0.05..1. Cache entries made at a factor are shared by everyone who asks for it.
+   */
+  canvasAt(proxy: number): CanvasInfo;
   /**
    * Structural signature of everything upstream of an input (node types, stored params, wiring, project settings, frame
    * size). It changes only when the graph is edited, never from frame to frame, and does not evaluate anything. Empty string when
    * the input is not wired. Used by the Cache / Bake node to tell whether its baked sequence is still fresh.
    */
   inputSignature(input: keyof I): string;
+  /**
+   * Is this output used? True when a wire leaves it or it is the output being evaluated. Only meaningful for outputs listed in
+   * `NodeDef.optionalOutputs` (the kernel then keys the cache by the answer); for any other output it is always true.
+   */
+  wants(output: string): boolean;
+  /**
+   * True when what is wired to `input` changes with time (so frames differ), false when it is the same picture on every
+   * frame (a still, a generator without motion). Valid for a normal input after evaluation and for a `lazy` input after its
+   * first `pull`. A temporal node uses it to skip work: a static input needs ONE pull, not one per slice.
+   */
+  inputVaries(input: keyof I): boolean;
+  /**
+   * This node's own first image output for the previous frame (frame - 1), when the engine still holds it and it was produced
+   * by the same node, params and upstream graph at the same size/quality; otherwise null. Only offered to nodes with
+   * `usesPrevious: true`. The node must produce identical pixels whether or not it is given (the fold is the fallback).
+   * Reading it makes the node time-dependent. The result is only valid during this render call.
+   */
+  previous(): ImageValue | null;
+  /** Process mode: only present on nodes whose definition has `process`. See `ProcessView`. */
+  readonly process?: ProcessView;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Process mode                                                             */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * Where a node's process stands. Part of the node's cache key (together with the signature of the stored result), so finishing a job
+ * invalidates exactly this node and what is downstream of it. Progress is NOT part of it.
+ *  - none     never run (or cleared)
+ *  - queued   waiting in the scheduler
+ *  - running  the job is running (a previous result, if any, may still be served per the node's rules)
+ *  - done     a result exists, its data is stored and it was made for the current params and upstream graph
+ *  - stale    a result exists but params or the graph before the node changed since: kept and served per `standIn`, never re-run by itself
+ *  - failed   the last job failed or was cancelled by an error (the message is in `ProcessLive.error`); not persisted
+ *  - missing  a result is referenced but its stored data is gone (cleared storage, another machine)
+ */
+export type ProcessState = 'none' | 'queued' | 'running' | 'done' | 'stale' | 'failed' | 'missing';
+
+/** What the node shows until its process is done. */
+export type ProcessStandIn = 'bypass' | 'preview' | 'last' | 'placeholder';
+
+/**
+ * Does an export need this process to be done?
+ *  - 'always'   yes: the stand-in is only an approximation (default)
+ *  - 'once-run' only after the user has run it once (a result is referenced): an export must then not fall back to the stand-in
+ *  - 'never'    the stand-in is exactly what the node computes anyway (Cache / Bake: live pass-through)
+ */
+export type ProcessRequired = 'always' | 'once-run' | 'never';
+
+/** One thing a process stored. `id` is the stored asset (the same store as bakes). */
+export interface ProcessItemRef {
+  kind: 'sequence' | 'blob' | 'array';
+  id: string;
+  bytes: number;
+  /** sequence */
+  frames?: number;
+  fps?: number;
+  width?: number;
+  height?: number;
+  /** blob / array */
+  mime?: string;
+  /** array: element type and count */
+  dtype?: 'f32' | 'f64' | 'i32' | 'u32' | 'i16' | 'u16' | 'i8' | 'u8';
+  length?: number;
+}
+
+/** The handle of a finished process: written into the node's params, so it is saved with the project and used by exports. */
+export interface ProcessResult {
+  /** `ProcessDef.signature(...)` at the time the job started: compared with the current one to detect `stale`. */
+  signature: string;
+  items: Record<string, ProcessItemRef>;
+  /** Small JSON the node wants back (frame size, quality, item...). */
+  meta: Record<string, unknown>;
+  bytes: number;
+  createdAt: number;
+  /** How long the job took. */
+  seconds: number;
+}
+
+/** What the scheduler reports to the engine for a node that is not idle. */
+export interface ProcessLive {
+  state: 'queued' | 'running' | 'failed';
+  /** 0..1. Never part of a cache key. */
+  progress: number;
+  note?: string;
+  error?: string;
+}
+
+export type ProcessArray = Float32Array | Float64Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array;
+
+/** What `render` sees as `ctx.process` (only on nodes that declare `process`). */
+export interface ProcessView {
+  state: ProcessState;
+  /** The stored result, also when it is stale (so a `last` stand-in can serve it); null when there is none or its data is missing. */
+  result: ProcessResult | null;
+  /** The stored data may be served: state 'done', or 'stale'/'running' with a result when `standIn` is 'last'. */
+  servable: boolean;
+  /** Decoded frame `index` of a stored sequence (`maxSide` as in `Host.assetFrame`; 0 = full). */
+  frame(name: string, index: number, maxSide?: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
+  /** Stored bytes of a blob or array item. */
+  bytes(name: string): Promise<ArrayBuffer | null>;
+  /** A stored blob parsed as JSON (null when absent or not JSON). Memoised per result. */
+  json<T = unknown>(name: string): Promise<T | null>;
+  /** A stored typed array. */
+  array(name: string): Promise<ProcessArray | null>;
+  /**
+   * The kernel's stand-in outputs: 'placeholder' = a striped "processing" card (one pass, canvas-sized, cached with the node);
+   * every other mode = the first image / mask input passed through (a lazy input is pulled). `preview` and `last` nodes call it as
+   * their fallback and normally do something better first.
+   */
+  standIn(): Promise<Record<string, Value | null>>;
+}
+
+/** GPU services of a job: read pictures back. Pulled pictures stay valid until `release()`. */
+export interface ProcessGpu {
+  readonly device: GPUDevice;
+  read(image: ImageValue | MaskValue, straight?: boolean): Promise<Uint8ClampedArray>;
+}
+
+export interface ProcessPull {
+  value: Value | null;
+  errors: Map<string, string>;
+  /** Give the picture back. Always call it (the scheduler also does when the job ends). */
+  release(): void;
+}
+
+/** Everything a process job gets. Pure data and functions: no DOM, no UI. */
+export interface ProcessCtx<P extends ParamSchema = ParamSchema> {
+  /** Resolved params (defaults applied; 'px' lengths in unit pixels, NOT texels: a job has no reference image). */
+  readonly params: ParamsOf<P>;
+  /** Options of this run (the Bake quality...), chosen by whoever started it. */
+  readonly options: Record<string, unknown>;
+  readonly nodeId: string;
+  /** Project clock. */
+  readonly fps: number;
+  readonly frames: number;
+  readonly duration: number;
+  readonly loop: boolean;
+  /** Frame size at full resolution. */
+  readonly canvas: { width: number; height: number };
+  /** Batch item this run is for. */
+  readonly item: { index: number; count: number; /** The picture feeding the node can differ between batch items (a Media In with several files, an Item node). */ dependent: boolean };
+  /** `ProcessDef.signature(...)` for the graph as it is now. Stored in the result by the scheduler. */
+  readonly signature: string;
+  readonly host: Host;
+  readonly gpu: ProcessGpu;
+  readonly signal: AbortSignal;
+  /** Report progress (0..1). UI only: never invalidates a cache. `detail` is free-form numbers for panels (frame, frames, bytes). */
+  progress(fraction: number, note?: string, detail?: Record<string, number>): void;
+  /** Call between units of work: lets the UI breathe and waits while the user plays back or drags (the scheduler decides). Throws AbortError when cancelled. */
+  yield(): Promise<void>;
+  /**
+   * Evaluate what is wired to input `input` of this node at any time, at a chosen size and quality (defaults: frame 0, full size, 'final').
+   * `frame` or `seconds` picks the time; `wire` picks one wire of a multi input.
+   */
+  pull(input: string, at?: { frame?: number; seconds?: number; wire?: number; proxy?: number; quality?: 'preview' | 'final' }): Promise<ProcessPull>;
+  /** Encode a pulled picture ('lossless' = PNG, 'compressed' = high-quality WebP). */
+  encodeImage(image: { texture: GPUTexture; width: number; height: number }, quality: 'lossless' | 'compressed'): Promise<Blob>;
+  /**
+   * Write results. Everything is STAGED and only becomes visible when `run` resolves, so a cancelled or failed job changes nothing and
+   * the previous result stays. Same store as bakes.
+   */
+  readonly store: {
+    sequence(name: string, frames: Blob[], opts: { fps: number; width: number; height: number; unit?: number }): void;
+    blob(name: string, data: Blob | Uint8Array | ArrayBuffer | string, mime?: string): void;
+    json(name: string, value: unknown): void;
+    array(name: string, data: ProcessArray): void;
+    /** Bytes staged so far. */
+    readonly bytes: number;
+  };
+}
+
+/** What `run` hands back: the scheduler builds the `ProcessResult` (signature, refs, size, time) from it and the staged items. */
+export interface ProcessOutput {
+  meta?: Record<string, unknown>;
+}
+
+export interface ProcessDef<P extends ParamSchema = ParamSchema> {
+  /** Button / badge title: "Bake", "Analyse clip". */
+  title: string;
+  /** Verb phrase for the inspector, e.g. "Analyse the whole clip once". */
+  description?: string;
+  standIn: ProcessStandIn;
+  /** Does an export need it? Default 'always'. */
+  required?: ProcessRequired;
+  /** Start by itself when the node becomes stale or is new. Default false: the user presses Process. */
+  auto?: boolean;
+  /** One GPU-heavy job runs at a time (default true). Set false for jobs that only do CPU work. */
+  gpu?: boolean;
+  /** The long job. Must be deterministic in what it stores. */
+  run(job: ProcessCtx<P>): Promise<ProcessOutput | void>;
+  /**
+   * Identity of what the result depends on: a string from the node's params and the structural signature of everything wired to each
+   * input (`inputSignatures[inputName]`, the same string `ctx.inputSignature` gives; '' when unwired). Params that do not change the
+   * result (display options) must be left out. Pure; called every frame the node renders, keep it cheap.
+   */
+  signature(params: ParamsOf<P>, inputSignatures: Record<string, string>): string;
+  /** Cheap estimate for the panel before the user commits. */
+  estimate?(params: ParamsOf<P>, project: ProjectSettings): { frames?: number; bytes?: number; note?: string };
+  /**
+   * Where the result handle lives in the node's params. Default: the reserved param `__process` (JSON). A node that stored its handle
+   * in its own params before process mode (Cache / Bake: `baked*`) maps them here, so old projects keep working.
+   */
+  handle?: {
+    read(params: Record<string, unknown>): ProcessResult | null;
+    write(result: ProcessResult): Record<string, unknown>;
+    clear(): Record<string, unknown>;
+  };
 }
 
 export interface NodeDef<
@@ -554,6 +799,11 @@ export interface NodeDef<
    *  - 'local-server': needs the app started locally with its own server (`npm run dev:lan`), e.g. the phone link.
    */
   requires?: readonly Capability[];
+  /**
+   * Outputs that cost extra work (a depth pass) and are only produced when something uses them: ask `ctx.wants(name)`.
+   * The cache key includes which of them are wanted, so wiring one later re-renders the node once.
+   */
+  optionalOutputs?: readonly string[];
   /** Set when `render` does heavy CPU work, so the UI can warn. */
   cpu?: boolean;
   /**
@@ -562,14 +812,29 @@ export interface NodeDef<
    * Only valid when output and input have the same size.
    */
   maskable?: boolean;
+  /**
+   * The node may call `ctx.previous()` (its own output for frame - 1). The engine then indexes this node's results by frame.
+   * Not combinable with `maskable` (the cached output would already be mixed).
+   */
+  usesPrevious?: boolean;
   /** Keep the node working in saved graphs but leave it out of the add menu (it was folded into another node). */
   hidden?: boolean;
+  /**
+   * Nodes of one family can be converted into each other in place (the UI shows a "Type" dropdown listing the family).
+   * The ids of the families and how their inputs map are described in `src/ui/lib/convert.ts`. e.g. 'combine' = Merge, Mix, Stack, Switch.
+   */
+  family?: string;
   /**
    * Project length contributed by this node, in seconds, or null when it does not set one. When it returns a number the
    * whole project (playback and export) is exactly that long: `projectLength` is read ONLY by `effectiveDuration` in graph.ts,
    * which the editor store and the CLI apply to `project.duration`. Receives the node's resolved params. Must be pure.
    */
   projectLength?: (params: ParamsOf<P>) => number | null;
+  /**
+   * Process mode: the node has a long job (analysis, bake, a model) that runs OUTSIDE the per-frame render path. Until it is done
+   * `render` shows a stand-in (`ctx.process`). See docs/ENGINE.md (Pending rules, "Process mode") and src/io/processes.ts.
+   */
+  process?: ProcessDef<P>;
 }
 
 /** Type-erased definition as stored in the registry. */
@@ -624,6 +889,20 @@ export interface FrameBox {
   collapsed?: boolean;
 }
 
+/** A user-made folder in the media panel. `color` indexes the panel's small accent palette (0 = grey). */
+export interface MediaBin {
+  id: string;
+  name: string;
+  color: number;
+}
+
+/** How a project sorts its media into bins (UI only; the engine never reads it). Assets are referenced by id and may be gone. */
+export interface MediaOrg {
+  bins: MediaBin[];
+  /** asset id -> bin id; an asset that is not listed is "Unsorted". */
+  assign: Record<string, string>;
+}
+
 export interface GraphDoc {
   schema: 'rsmps/graph';
   version: 2;
@@ -632,6 +911,8 @@ export interface GraphDoc {
   nodes: NodeInstance[];
   edges: Edge[];
   frames?: FrameBox[];
+  /** Media panel bins of this project. */
+  media?: MediaOrg;
 }
 
 export const DEFAULT_PROJECT: ProjectSettings = {

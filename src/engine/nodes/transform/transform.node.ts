@@ -6,14 +6,14 @@ export default defineNode({
   title: 'Transform',
   category: 'transform',
   description: 'Move, rotate and scale an image around a pivot point. The image keeps its size.',
-  keywords: ['move', 'translate', 'rotate', 'scale', 'zoom', 'pivot', 'position'],
+  keywords: ['move', 'translate', 'rotate', 'scale', 'zoom', 'pivot', 'position', 'tile', 'wrap', 'repeat', 'mirror repeat', 'clamp', 'offset', 'wrap around'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     translate: { type: 'vec2', default: [0, 0], unit: 'norm', min: -2, max: 2, step: 0.005, label: 'Move', hint: 'Fraction of the image size. Positive moves right and down.' },
     rotate: { type: 'number', default: 0, min: -3600, max: 3600, step: 0.5, unit: 'deg', label: 'Rotate', hint: 'Degrees, clockwise.' },
     scale: { type: 'number', default: 1, min: 0.01, max: 50, step: 0.01, label: 'Scale' },
-    stretch: { type: 'vec2', default: [1, 1], min: 0.01, max: 50, step: 0.01, label: 'Stretch (x, y)', hint: 'Extra width / height multiplier on top of Scale.' },
+    stretch: { type: 'vec2', default: [1, 1], min: 0.01, max: 50, step: 0.01, label: 'Stretch', hint: 'Extra width / height multiplier on top of Scale.' },
     pivot: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: -1, max: 2, step: 0.005, label: 'Pivot', hint: 'Centre of rotation and scaling. 0.5, 0.5 is the middle.' },
     edge: { type: 'enum', default: 'transparent', options: EDGE_MODES, label: 'Outside the image' },
     filter: {
@@ -21,7 +21,7 @@ export default defineNode({
       default: 'linear',
       options: [
         { value: 'linear', label: 'Smooth' },
-        { value: 'nearest', label: 'Sharp (pixel art)' },
+        { value: 'nearest', label: 'Sharp' },
       ],
       label: 'Filter',
     },

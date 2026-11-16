@@ -26,7 +26,7 @@ export function KeymapDialog() {
 
   const ids = allCommandIds().filter((id) => {
     const t = nodeTypeOf(id);
-    return !t || defs.some((d) => d.id === t);
+    return !t || defs.some((d) => d.id === t && !d.hidden);
   });
   const groups = ['Add nodes', 'Edit', 'Graph', 'Playback', 'View', 'File'];
   const match = (id: string) => !q || label(id).toLowerCase().includes(q.toLowerCase()) || bindingsOf(id).some((b) => b.toLowerCase().includes(q.toLowerCase()));
@@ -68,7 +68,7 @@ export function KeymapDialog() {
   }, [cap]);
 
   const rows = useMemo(() => groups.map((g) => ({ g, ids: ids.filter((id) => commandGroup(id) === g && match(id)) })).filter((x) => x.ids.length), [ids, q, defs]); // eslint-disable-line react-hooks/exhaustive-deps
-  const addableNodes = defs.filter((d) => !ids.includes(nodeCommandId(d.id))).sort((a, b) => a.title.localeCompare(b.title));
+  const addableNodes = defs.filter((d) => !d.hidden && !ids.includes(nodeCommandId(d.id))).sort((a, b) => a.title.localeCompare(b.title));
 
   return (
     <Dialog

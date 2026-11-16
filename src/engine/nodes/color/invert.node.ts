@@ -15,8 +15,8 @@ export default defineNode({
       default: 'rgb',
       label: 'Mode',
       options: [
-        { value: 'rgb', label: 'Negative (colours)' },
-        { value: 'lightness', label: 'Lightness only (keep hues)' },
+        { value: 'rgb', label: 'Negative' },
+        { value: 'lightness', label: 'Lightness only' },
       ],
     },
     amount: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Amount' },

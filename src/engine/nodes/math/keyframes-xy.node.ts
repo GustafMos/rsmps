@@ -51,7 +51,7 @@ export default defineNode({
       default: 'path',
       options: [
         { value: 'path', label: 'Spline through points' },
-        { value: 'curves', label: 'Two curves (X and Y)' },
+        { value: 'curves', label: 'Two curves' },
       ],
       label: 'Path from',
     },

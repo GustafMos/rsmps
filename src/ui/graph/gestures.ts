@@ -370,6 +370,7 @@ export function createGestures(app: AppCtx) {
         if (detached) ctl.edgeEls.get(detached)?.forEach((p) => (p.style.display = ''));
         if (cancelled) return;
         if (mergeTo) {
+          if (ed.state.socketPicker) ed.openSocketPicker(null);
           ed.mergeOutputs({ node: fixed.node, port: fixed.port }, { node: mergeTo.dataset.node!, port: mergeTo.dataset.port! });
           return;
         }
@@ -590,6 +591,7 @@ export function createGestures(app: AppCtx) {
       ctl.pendingOut = null;
       if (sock && pend && sock.dataset.dir === 'out' && sock.dataset.node !== pend.node) {
         e.preventDefault();
+        if (ed.state.socketPicker) ed.openSocketPicker(null);
         ed.mergeOutputs(pend, { node: sock.dataset.node!, port: sock.dataset.port! });
         return;
       }

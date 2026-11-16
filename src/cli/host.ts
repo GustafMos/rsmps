@@ -108,7 +108,15 @@ export class NodeHost implements Host {
   }
 
   assetInfo(assetId: string): AssetInfo | null {
-    return this.assets.get(assetId)?.info ?? null;
+    return this.assets.get(assetId)?.info ?? this.processStore?.assetInfo(assetId) ?? null;
+  }
+
+  /** Process mode (`--process`): results of processes run in this run live in RAM; the host answers for them. */
+  private processStore: { assetInfo(id: string): AssetInfo | null } | null = null;
+  assetBytes?: (assetId: string) => Promise<ArrayBuffer | null>;
+  attachProcessStore(store: { assetInfo(id: string): AssetInfo | null; assetBytes(id: string): Promise<ArrayBuffer | null> }): void {
+    this.processStore = store;
+    this.assetBytes = (id) => store.assetBytes(id);
   }
 
   private fit(info: AssetInfo, maxSide: number): { w: number; h: number } {

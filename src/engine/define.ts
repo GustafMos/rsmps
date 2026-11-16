@@ -34,6 +34,16 @@ export function validateDef(def: AnyNodeDef): string[] {
     }
   }
   if (Object.keys(def.outputs ?? {}).length === 0 && def.category !== 'output') problems.push('no outputs');
+  if (def.process) {
+    const pr = def.process;
+    if (!pr.title) problems.push('process: missing title');
+    if (!['bypass', 'preview', 'last', 'placeholder'].includes(pr.standIn)) problems.push(`process: standIn must be bypass, preview, last or placeholder (got "${pr.standIn}")`);
+    if (typeof pr.run !== 'function') problems.push('process: run() is required');
+    if (typeof pr.signature !== 'function') problems.push('process: signature() is required');
+    if (pr.required !== undefined && !['always', 'once-run', 'never'].includes(pr.required)) problems.push('process: required must be always, once-run or never');
+    if (!def.render) problems.push('process: the node needs render() to show its stand-in and its result');
+    if (pr.standIn === 'placeholder' && !Object.values((def.outputs ?? {}) as Record<string, { type: string }>).some((o) => o.type === 'image')) problems.push('process: a placeholder stand-in needs an image output');
+  }
   return problems;
 }
 

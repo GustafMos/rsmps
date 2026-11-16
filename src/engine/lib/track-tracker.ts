@@ -45,6 +45,20 @@ function labelHash(label: string): number {
  * regions for the LAST frame. Ids are `hash(birth frame, quantised birth position, label)` folded into 1..9999.
  */
 export function runTracker(seq: Region[][], startFrame: number, o: TrackerOptions): Region[] {
+  const all = trackerCore(seq, startFrame, o, false);
+  return all[all.length - 1] ?? [];
+}
+
+/**
+ * The same tracker, returning the tracked regions of EVERY frame of `seq` in one pass. Frame k of the result is exactly what
+ * `runTracker(seq.slice(0, k + 1), startFrame, o)` returns, so a whole-clip run (Track "Analyse clip") agrees with the windowed one.
+ */
+export function runTrackerAll(seq: Region[][], startFrame: number, o: TrackerOptions): Region[][] {
+  return trackerCore(seq, startFrame, o, true);
+}
+
+function trackerCore(seq: Region[][], startFrame: number, o: TrackerOptions, every: boolean): Region[][] {
+  const frames: Region[][] = [];
   const tracks: Track[] = [];
   const used = new Set<number>();
   const last = seq.length - 1;
@@ -119,9 +133,12 @@ export function runTracker(seq: Region[][], startFrame: number, o: TrackerOption
         tracks.splice(i, 1);
       }
     }
+    if (every || k === last) frames.push(snapshot(tracks, g, o));
   }
+  return frames;
+}
 
-  const gEnd = startFrame + last;
+function snapshot(tracks: Track[], gEnd: number, o: TrackerOptions): Region[] {
   const out: Region[] = [];
   for (const t of tracks) {
     const missed = gEnd - t.lastSeen;

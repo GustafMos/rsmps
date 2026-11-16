@@ -10,6 +10,7 @@ import { KeymapDialog } from './KeymapDialog';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { BackupsDialog } from './BackupsDialog';
 import { AboutDialog } from './AboutDialog';
+import { BlankSheetsDialog } from '../scan/BlankSheetsDialog';
 
 export function DialogHost() {
   const dialog = useEd((s) => s.dialog);
@@ -32,6 +33,8 @@ export function DialogHost() {
       return <BackupsDialog />;
     case 'about':
       return <AboutDialog />;
+    case 'blankSheets':
+      return <BlankSheetsDialog />;
     default:
       return null;
   }

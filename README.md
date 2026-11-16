@@ -74,7 +74,7 @@ sorting, kuwahara and watercolour styles, outlines and more. Number, colour and 
 
 ### 3D generators, cameras and animation
 
-Primitive 3D objects with their own Camera nodes (perspective, orthographic, isometric, dimetric, fisheye, 360 degree
+Primitive 3D objects with their own 3D Camera nodes (perspective, orthographic, isometric, dimetric, fisheye, 360 degree
 panoramic and cylindrical), plus gradients, noise, patterns, shapes, particles and text. Animate and Keyframes nodes drive any
 number parameter; the curve editor edits keyframes, splines and bezier handles.
 
@@ -83,11 +83,11 @@ number parameter; the curve editor edits keyframes, splines and bezier handles.
 ### Audio and MIDI in the same graph
 
 Microphone, audio files, a MIDI keyboard, MIDI devices, pitch-to-MIDI, synths, drums, a sampler, compressor, EQ, delay, reverb
-and more, mixed by wiring and arranged on a Timeline node with audio and MIDI tracks (record into it, loop it, quantise).
+and more, mixed by wiring and arranged on an Audio Timeline node with audio and MIDI tracks (record into it, loop it, quantise).
 Sound can drive pictures: *Sound to Numbers* turns loudness, bass/mid/treble and pitch into numbers for any parameter, and
 MIDI notes and values do the same.
 
-![A synth chain with a Timeline node and its timeline panel open, plus Sound to Numbers driving the rotation of a 3D object](docs/screenshots/03-audio.png)
+![A synth chain with an Audio Timeline node and its timeline panel open, plus Sound to Numbers driving the rotation of a 3D object](docs/screenshots/03-audio.png)
 
 ### Masks, cut-outs and parallax
 
@@ -144,7 +144,7 @@ fix it, then remove `?safe`.
 
 `npm run dev:lan` serves the app over https on your local network so a phone can act as a live camera through a QR code (the
 Phone Camera node). The phone will warn that the connection is not private: choose Advanced, then Proceed. It is your own
-computer. The other live inputs (Camera, URL / Stream) are described in [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md).
+computer. The other live inputs (Webcam, URL / Stream) are described in [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md).
 
 ## Desktop app
 
@@ -160,12 +160,14 @@ SmartScreen and macOS Gatekeeper show a one-time warning ([docs/RELEASING.md](do
 
 **Update check:** the desktop app asks GitHub once a day whether a newer version exists and sends nothing else (no account, no identifiers). It only tells you; it never downloads or installs anything. Turn it off in File > About RSMPS.
 
-The desktop app does not include ffmpeg, so ProRes and other ffmpeg-only formats are available through the command line below
-only. The phone link is off in the desktop app.
+The desktop app does not include FFmpeg. ProRes-compatible export and video with transparency need the optional FFmpeg
+add-on (Plugins > Add-ons): it downloads FFmpeg from its official source only when you ask, or you can point the app at an
+FFmpeg you already have. The command line below can do the same with your own FFmpeg. The phone link runs inside the
+desktop app.
 
 ## Command line
 
-Batch rendering without a browser, including formats browsers cannot encode (ProRes 4444 with alpha):
+Batch rendering without a browser, including formats browsers cannot encode (ProRes-compatible 4444 with alpha):
 
 ```bash
 npm run cli -- render my-graph.rsmps.json sprites/ --out out/
@@ -184,7 +186,7 @@ The showcase renders above were made this way.
 | [docs/PLUGINS.md](docs/PLUGINS.md) | Writing and installing plugins |
 | [docs/CLI.md](docs/CLI.md) | Command-line rendering |
 | [docs/PRINT_AND_SCAN.md](docs/PRINT_AND_SCAN.md) | Printing frame sheets and scanning them back |
-| [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md) | Camera, URL / Stream and phone inputs |
+| [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md) | Webcam, URL / Stream and phone inputs |
 | [docs/RELEASING.md](docs/RELEASING.md) | Building and releasing the desktop app |
 | [docs/STORE.md](docs/STORE.md) | What the store builds are and how they are described |
 | [src/engine/audio/README.md](src/engine/audio/README.md) | Audio and MIDI nodes, and driving pictures with sound |
@@ -227,10 +229,10 @@ The capture uses only generated content, `test-assets/` and the author's base pi
 ## Known limitations
 
 - WebGPU is required; there is no fallback for browsers or machines without it.
-- The microphone and MIDI devices are live-only. For export, record the take (the Timeline node records audio and MIDI); a
+- The microphone and MIDI devices are live-only. For export, record the take (the Audio Timeline node records audio and MIDI); a
   recorded take exports like any other clip.
-- Camera, URL / Stream and Phone Camera pictures are live-only too: record them to a file first to render them.
-- ProRes is available from the command line only (it needs ffmpeg); the desktop app does not bundle ffmpeg.
+- Webcam, URL / Stream and Phone Camera pictures are live-only too: record them to a file first to render them.
+- ProRes-compatible export needs FFmpeg: the optional add-on in the desktop app, or your own FFmpeg on the command line. FFmpeg is never bundled.
 - Subject extraction, the detectors and the tracker are classical methods, not neural networks: expect touch-ups when subject
   and background share colours, and occasional id swaps when tracked objects cross.
 - The phone link needs `npm run dev:lan` and is not available in the desktop app.

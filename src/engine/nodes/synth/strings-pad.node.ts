@@ -25,7 +25,7 @@ export default defineNode({
   params: {
     preset: { type: 'enum', default: 'warm-pad', label: 'Sound', options: presetOptions({ 'warm-pad': 'Warm pad', 'string-machine': 'String machine', 'choir-ish': 'Choir-ish' }) },
     unison: { type: 'number', default: 7, min: 1, max: MAXU, softMax: 7, step: 1, integer: true, label: 'Layers per note', group: 'Sound' },
-    detune: { type: 'number', default: 18, min: 0, max: 50, step: 0.5, label: 'Detune (cents)', group: 'Sound' },
+    detune: { type: 'number', default: 18, min: 0, max: 50, step: 0.5, label: 'Detune', hint: 'In cents.', group: 'Sound' },
     attack: { type: 'number', default: 0.9, min: 0.005, max: 8, step: 0.005, unit: 's', label: 'Swell in', group: 'Sound' },
     release: { type: 'number', default: 1.4, min: 0.01, max: 10, step: 0.01, unit: 's', label: 'Fade out', group: 'Sound' },
     cutoff: { type: 'number', default: 1600, min: 100, max: 16000, step: 1, unit: 'hz', label: 'Brightness', group: 'Filter' },

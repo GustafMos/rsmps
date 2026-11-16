@@ -11,7 +11,7 @@ export default defineNode({
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     offset: { type: 'number', default: 0.5, min: -600, max: 600, step: 0.05, unit: 's', label: 'Offset', hint: 'Positive shows footage from later on (the animation runs ahead); negative delays it.' },
-    wrap: { type: 'bool', default: true, label: 'Wrap around the loop' },
+    wrap: { type: 'bool', default: true, label: 'Wrap loop' },
   },
   summary: (p) => `${p.offset > 0 ? '+' : ''}${p.offset}s${p.wrap ? ' · wrap' : ''}`,
   async render(ctx) {

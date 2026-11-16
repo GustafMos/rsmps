@@ -37,6 +37,12 @@ export const STRIP_ROWS = 9;
 export const STRIP_BITS = (STRIP_COLS - 1) * (STRIP_ROWS - 1);
 
 export const FORMAT_VERSION = 1;
+/**
+ * Version 2 is version 1 plus an extension block (layer, layer count, round, blue guide tone). It is written ONLY when
+ * one of those is non-default, so every ordinary sheet is still a byte-identical version 1 sheet (readable by older
+ * builds). Version 1 sheets keep decoding unchanged. The CRC sits after the payload of the version it announces.
+ */
+export const FORMAT_VERSION_LAYERS = 2;
 
 /**
  * Everything the strip carries. Lengths are integers in units of 0.1 mm so encoder and decoder agree
@@ -65,7 +71,20 @@ export interface SheetHeader {
   /** 0..100: percent of ink the printed guide keeps (faded mode). */
   guideOpacity: number;
   projectId: number;
+  /** Version 2 only (absent = 0 / 1 / 0 / false): paper layer number, layers in the set, onion-skin round, blue guide tone. */
+  layer?: number;
+  layerCount?: number;
+  round?: number;
+  blueGuide?: boolean;
 }
+
+/** Version 2 extension fields [field, bits], transmitted after the version 1 fields. */
+const EXT_FIELDS: [keyof SheetHeader, number][] = [
+  ['layer', 6],
+  ['layerCount', 6],
+  ['round', 6],
+  ['blueGuide', 1],
+];
 
 /** [field, bits] in transmission order. */
 const FIELDS: [keyof SheetHeader, number][] = [
@@ -93,6 +112,7 @@ const FIELDS: [keyof SheetHeader, number][] = [
 ];
 
 export const HEADER_PAYLOAD_BYTES = Math.ceil(FIELDS.reduce((s, f) => s + f[1], 0) / 8);
+export const HEADER_PAYLOAD_BYTES_V2 = Math.ceil((FIELDS.reduce((s, f) => s + f[1], 0) + EXT_FIELDS.reduce((s, f) => s + f[1], 0)) / 8);
 /** Bytes in the strip: payload, CRC-16, zero padding up to capacity. */
 export const STRIP_BYTES = STRIP_BITS / 8;
 
@@ -109,16 +129,25 @@ function numeric(h: SheetHeader, key: keyof SheetHeader): number {
   const v = h[key];
   if (key === 'paper') return Math.max(0, PAPER_CODES.indexOf(v as PaperId));
   if (key === 'guide') return Math.max(0, GUIDE_CODES.indexOf(v as GuideMode));
-  if (key === 'landscape') return v ? 1 : 0;
-  return v as number;
+  if (key === 'landscape' || key === 'blueGuide') return v ? 1 : 0;
+  if (key === 'layerCount') return (v as number | undefined) ?? 1;
+  return (v as number | undefined) ?? 0;
+}
+
+/** True when the header needs the version 2 extension block. */
+export function needsExtension(h: SheetHeader): boolean {
+  return (h.layer ?? 0) > 0 || (h.layerCount ?? 1) > 1 || (h.round ?? 0) > 0 || !!h.blueGuide;
 }
 
 /** Serialise a header into STRIP_BYTES bytes (payload + CRC-16 + padding). Throws on out-of-range fields. */
 export function encodeHeader(h: SheetHeader): Uint8Array {
   const out = new Uint8Array(STRIP_BYTES);
+  const ext = needsExtension(h);
+  const fields = ext ? [...FIELDS, ...EXT_FIELDS] : FIELDS;
+  const payload = ext ? HEADER_PAYLOAD_BYTES_V2 : HEADER_PAYLOAD_BYTES;
   let bit = 0;
-  for (const [key, bits] of FIELDS) {
-    const value = Math.round(numeric(h, key));
+  for (const [key, bits] of fields) {
+    const value = key === 'version' ? (ext ? FORMAT_VERSION_LAYERS : FORMAT_VERSION) : Math.round(numeric(h, key));
     if (!(value >= 0) || value >= 2 ** bits) throw new Error(`Print header field "${key}" is out of range (${value}, ${bits} bits).`);
     for (let b = bits - 1; b >= 0; b--) {
       const v = Math.floor(value / 2 ** b) % 2;
@@ -126,20 +155,25 @@ export function encodeHeader(h: SheetHeader): Uint8Array {
       bit++;
     }
   }
-  const crc = crc16(out, HEADER_PAYLOAD_BYTES);
-  out[HEADER_PAYLOAD_BYTES] = crc >> 8;
-  out[HEADER_PAYLOAD_BYTES + 1] = crc & 0xff;
+  const crc = crc16(out, payload);
+  out[payload] = crc >> 8;
+  out[payload + 1] = crc & 0xff;
   return out;
 }
 
-/** Parse strip bytes. Returns null when the CRC or any field is invalid. */
+/** Parse strip bytes (version 1 or 2). Returns null when the CRC or any field is invalid. */
 export function decodeHeader(bytes: ArrayLike<number>): SheetHeader | null {
   if (bytes.length < HEADER_PAYLOAD_BYTES + 2) return null;
-  const crc = (bytes[HEADER_PAYLOAD_BYTES] << 8) | bytes[HEADER_PAYLOAD_BYTES + 1];
-  if (crc16(bytes, HEADER_PAYLOAD_BYTES) !== crc) return null;
+  const version = (bytes[0] >> 4) & 15;
+  const ext = version === FORMAT_VERSION_LAYERS;
+  if (version !== FORMAT_VERSION && !ext) return null;
+  const payload = ext ? HEADER_PAYLOAD_BYTES_V2 : HEADER_PAYLOAD_BYTES;
+  if (bytes.length < payload + 2) return null;
+  const crc = (bytes[payload] << 8) | bytes[payload + 1];
+  if (crc16(bytes, payload) !== crc) return null;
   const vals: Record<string, number> = {};
   let bit = 0;
-  for (const [key, bits] of FIELDS) {
+  for (const [key, bits] of ext ? [...FIELDS, ...EXT_FIELDS] : FIELDS) {
     let v = 0;
     for (let b = 0; b < bits; b++) {
       v = v * 2 + ((bytes[bit >> 3] >> (7 - (bit & 7))) & 1);
@@ -147,10 +181,10 @@ export function decodeHeader(bytes: ArrayLike<number>): SheetHeader | null {
     }
     vals[key] = v;
   }
-  if (vals.version !== FORMAT_VERSION) return null;
   if (vals.paper >= PAPER_CODES.length) return null;
   if (vals.columns < 1 || vals.rows < 1 || vals.cellW < 1 || vals.cellH < 1 || vals.pageCount < 1 || vals.pageIndex >= vals.pageCount) return null;
-  return {
+  if (ext && (vals.layerCount < 1 || vals.layer >= vals.layerCount)) return null;
+  const h: SheetHeader = {
     version: vals.version,
     paper: PAPER_CODES[vals.paper],
     landscape: vals.landscape === 1,
@@ -173,6 +207,13 @@ export function decodeHeader(bytes: ArrayLike<number>): SheetHeader | null {
     guideOpacity: vals.guideOpacity,
     projectId: vals.projectId,
   };
+  if (ext) {
+    h.layer = vals.layer;
+    h.layerCount = vals.layerCount;
+    h.round = vals.round;
+    h.blueGuide = vals.blueGuide === 1;
+  }
+  return h;
 }
 
 /**

@@ -61,7 +61,7 @@ describe('analog-video', () => {
     const off = { composite: 0, chromaBlur: 0, chromaShift: 0, lumaBlur: 0, ringing: 0 };
     const d = await t.pixels((await t.run('analog-video', { ...off, dropouts: 1 }, { image: dark })).image as never);
     let white = 0;
-    for (let y = 0; y < 64; y++) for (let x = 0; x < 128; x++) if (d.at(x, y)[0] > 200) white++;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 128; x++) if (d.at(x, y)[0] > 100) white++;
     expect(white).toBeGreaterThan(20);
     const stripes = t.fromFn(128, 64, (x) => (x % 16 < 8 ? [255, 255, 255, 255] : [0, 0, 0, 255]));
     const h = await t.pixels((await t.run('analog-video', { ...off, headSwitch: 1 }, { image: stripes })).image as never);

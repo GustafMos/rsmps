@@ -16,6 +16,7 @@ import { createRegistry, loadPlugins } from './nodes';
 import { applyOverrides, assignInputs, loadGraph, parseItemRange } from './prepare';
 import { renderGraphBatch, selectOutputs, type Kind, type Overrides, type Reporter } from './render';
 import { batchCount, validateGraph } from '../engine/graph';
+import { cmdPrintBlank } from './print-blank';
 import type { Registry } from '../engine/define';
 import type { ParamDef } from '../engine/types';
 
@@ -25,6 +26,7 @@ Usage
   rsmps render <graph.rsmps.json> [inputs...] --out <dir> [options]
   rsmps check  <graph.rsmps.json> [--plugin file.js]
   rsmps nodes  [--json] [--plugin file.js]
+  rsmps print-blank --out <dir> (--frames <n> | --seconds <s>) [options]   blank sheets for paper animation (--help)
 
 Inputs (render)
   Files, folders and globs (quote globs on cmd.exe). By default they all go to the first Media In
@@ -51,6 +53,8 @@ Options (render)
   --quiet, -q                no progress output
   --json                     machine-readable progress, one JSON object per line
   --dry-run                  validate and list what would be written, render nothing
+  --process                  run the processes an Output needs (clip analysis...) before rendering, in memory.
+                             Without it, a render that would export a stand-in fails and lists them.
 
 Exit status: 0 success, 1 some item failed, 2 bad usage.
 `;
@@ -75,6 +79,7 @@ const RENDER_SPEC: Record<string, OptionSpec> = {
   quiet: { alias: 'q' },
   json: {},
   'dry-run': {},
+  process: {},
   recursive: { alias: 'r' },
   sequence: {},
   help: { alias: 'h' },
@@ -277,6 +282,7 @@ async function cmdRender(argv: string[]): Promise<number> {
     sequenceFps: fps ?? graph.project.fps,
     dryRun: dry,
     reporter: rep,
+    processes: p.flags.has('process') ? 'run' : 'fail',
   });
 
   if (dry) {
@@ -306,6 +312,8 @@ export async function main(argv: string[]): Promise<number> {
         return await cmdNodes(rest);
       case 'check':
         return await cmdCheck(rest);
+      case 'print-blank':
+        return await cmdPrintBlank(rest);
       case undefined:
       case 'help':
       case '--help':

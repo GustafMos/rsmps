@@ -519,10 +519,10 @@ function click(st: any, io: AudioIO): void {
 
 export default defineNode({
   id: 'audio-timeline',
-  title: 'Timeline',
+  title: 'Audio Timeline',
   category: 'audio-source',
   description: 'Arrange audio and MIDI clips on tracks like in a music app, layer and offset them, loop them, and record new takes into it.',
-  keywords: ['arranger', 'clips', 'record', 'daw', 'ableton', 'tracks', 'loop', 'midi clip', 'take', 'overdub', 'sequencer', 'multitrack'],
+  keywords: ['arranger', 'clips', 'record', 'daw', 'ableton', 'tracks', 'loop', 'midi clip', 'take', 'overdub', 'sequencer', 'multitrack', 'timeline'],
   inputs: {
     recordAudio: { type: 'audio', label: 'Record audio (e.g. Microphone tap)' },
     recordMidi: { type: 'midi', label: 'Record MIDI (e.g. Keyboard)' },
@@ -535,9 +535,9 @@ export default defineNode({
   },
   params: {
     clips: { type: 'json', default: emptyTimeline(), label: 'Tracks and clips', hint: 'Edited with the timeline editor.' },
-    outputTrack: { type: 'string', default: '', label: 'Chosen track (id or name) for the last two outputs', group: 'Outputs' },
+    outputTrack: { type: 'string', default: '', label: 'Track out', hint: 'Track id or name that feeds the last two outputs.', group: 'Outputs' },
     gain: { type: 'number', default: 0, min: -60, max: 24, step: 0.1, unit: 'db', label: 'Volume', group: 'Outputs' },
-    wrap: { type: 'bool', default: true, label: 'Clips continue past the loop end', group: 'Looping' },
+    wrap: { type: 'bool', default: true, label: 'Run past loop end', group: 'Looping' },
     loop: {
       type: 'enum',
       default: 'project',
@@ -548,8 +548,8 @@ export default defineNode({
         { value: 'custom', label: 'Own loop length' },
       ],
     },
-    loopBars: { type: 'number', default: 4, min: 1, max: 256, step: 1, integer: true, label: 'Own loop length (bars)', group: 'Looping', visibleIf: (p) => p.loop === 'custom' },
-    bpm: { type: 'number', default: 120, min: 30, max: 300, step: 0.1, label: 'Tempo (BPM)', group: 'Looping' },
+    loopBars: { type: 'number', default: 4, min: 1, max: 256, step: 1, integer: true, label: 'Loop bars', hint: 'The timeline\'s own loop length, in bars.', group: 'Looping', visibleIf: (p) => p.loop === 'custom' },
+    bpm: { type: 'number', default: 120, min: 30, max: 300, step: 0.1, label: 'Tempo BPM', group: 'Looping' },
     quantize: {
       type: 'enum',
       default: '1/16',
@@ -560,7 +560,7 @@ export default defineNode({
         { value: 'off', label: 'Off' },
         { value: '1/1', label: 'Bar' },
         { value: '1/2', label: '1/2' },
-        { value: '1/4', label: '1/4 (beat)' },
+        { value: '1/4', label: '1/4 beat' },
         { value: '1/8', label: '1/8' },
         { value: '1/16', label: '1/16' },
         { value: '1/32', label: '1/32' },
@@ -569,18 +569,18 @@ export default defineNode({
     loopRecordMode: {
       type: 'enum',
       default: 'overdub',
-      label: 'When the loop repeats while recording',
+      label: 'Loop recording', hint: 'What happens when the loop repeats while recording.',
       group: 'Recording',
       options: [
-        { value: 'overdub', label: 'Overdub (layers add up)' },
-        { value: 'takes', label: 'Keep every pass as a take (last one plays)' },
+        { value: 'overdub', label: 'Overdub' },
+        { value: 'takes', label: 'Takes' },
         { value: 'replace', label: 'Replace what was there' },
       ],
     },
-    countIn: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, label: 'Count-in (bars)', group: 'Recording' },
-    metronome: { type: 'bool', default: false, label: 'Click while recording (not in exports)', group: 'Recording' },
-    monitor: { type: 'bool', default: true, label: 'Hear what is being recorded', group: 'Recording' },
-    latencyOffsetMs: { type: 'number', default: 0, min: -250, max: 500, step: 1, label: 'Latency offset (ms)', group: 'Recording', hint: 'Added to the detected device latency. Raise it if recorded parts land late.' },
+    countIn: { type: 'number', default: 0, min: 0, max: 8, step: 1, integer: true, label: 'Count-in bars', group: 'Recording' },
+    metronome: { type: 'bool', default: false, label: 'Metronome', hint: 'Click while recording (never in exports).', group: 'Recording' },
+    monitor: { type: 'bool', default: true, label: 'Monitor', hint: 'Hear what is being recorded.', group: 'Recording' },
+    latencyOffsetMs: { type: 'number', default: 0, min: -250, max: 500, step: 1, label: 'Latency ms', group: 'Recording', hint: 'Added to the detected device latency. Raise it if recorded parts land late.' },
     maxLength: { type: 'number', default: 600, min: 5, max: 3600, step: 1, unit: 's', label: 'Longest recording', group: 'Recording' },
   },
   summary: (p) => {

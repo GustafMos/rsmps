@@ -17,11 +17,11 @@ export default defineNode({
   inputs: {},
   outputs: { midi: { type: 'midi', label: 'MIDI' } },
   params: {
-    baseOctave: { type: 'number', default: 5, min: 1, max: 9, step: 1, integer: true, label: 'Octave (keys 1-9)', hint: '5 is the normal middle range: the A key plays middle C. Z / X move the octave down / up.' },
+    baseOctave: { type: 'number', default: 5, min: 1, max: 9, step: 1, integer: true, label: 'Octave', hint: '5 is the normal middle range: the A key plays middle C. Z / X move the octave down / up.' },
     velocity: { type: 'number', default: 0.8, min: 0.05, max: 1, step: 0.01, label: 'Key strength', hint: 'Keys C / V make it softer / harder.' },
     transpose: { type: 'number', default: 0, min: -24, max: 24, step: 1, integer: true, unit: 'st', label: 'Transpose' },
     sustain: { type: 'bool', default: false, label: 'Sustain pedal', hint: 'Released keys keep sounding until this is turned off.' },
-    latch: { type: 'bool', default: false, label: 'Latch (press to start, press again to stop)' },
+    latch: { type: 'bool', default: false, label: 'Latch', hint: 'Press to start, press again to stop.' },
   },
   summary: (p) => `octave ${p.baseOctave}${p.latch ? ' · latch' : ''}${p.sustain ? ' · sustain' : ''}`,
   audio: defineAudio({

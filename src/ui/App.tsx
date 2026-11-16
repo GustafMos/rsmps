@@ -101,11 +101,7 @@ export function App() {
       {mode === 'scan' && scanStage === 2 && <ScanQuickSettings />}
       {mode === 'scan' && scanStage === 1 ? <ScanView /> : (
       <div className="rs-main">
-        {prefs.leftOpen && (
-          <aside className="rs-left">
-            <Sidebar />
-          </aside>
-        )}
+        <Sidebar />
         <section className="rs-center" ref={center}>
           {max !== 'graph' && (
             <div className="rs-panel" ref={viewerPanel} style={max === 'viewer' ? { flex: 1 } : { flex: `0 0 ${prefs.split * 100}%` }}>

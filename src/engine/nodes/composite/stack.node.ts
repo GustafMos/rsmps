@@ -2,6 +2,7 @@ import { defineNode } from '../../define';
 
 export default defineNode({
   id: 'stack',
+  family: 'combine',
   title: 'Stack Layers',
   category: 'composite',
   description: 'Layer many images on top of each other. The first wire is the bottom layer and sets the output size; each upper layer is fitted onto it.',
@@ -19,7 +20,7 @@ export default defineNode({
       ],
       label: 'Upper layer size',
     },
-    opacity: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Upper layer opacity' },
+    opacity: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Top opacity' },
   },
   summary: (p) => p.fit,
   render(ctx) {

@@ -4,9 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0d0f14" />
-    <title>RSMPS phone camera</title>
+    <title>RSMPS phone</title>
     <style>
       :root { color-scheme: dark; }
+      [hidden] { display: none !important; }
       body { margin: 0; background: #0d0f14; color: #e8ecf4; font: 16px system-ui, sans-serif; display: flex; flex-direction: column; min-height: 100dvh; }
       #status { padding: 18px 16px; font-size: 22px; font-weight: 600; line-height: 1.25; text-align: center; }
       #status.ok { background: #14532d; }
@@ -16,15 +17,95 @@
       #controls { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); }
       button, select { flex: 1 1 140px; font: inherit; padding: 14px; border-radius: 10px; border: 1px solid #334155; background: #1e293b; color: inherit; }
       button:active { background: #334155; }
+      #motion { margin: 0 16px 10px; padding: 10px 12px; border: 1px solid #334155; border-radius: 12px; }
+      #motion h2 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+      #motionDot { width: 10px; height: 10px; border-radius: 50%; background: #475569; }
+      #motionDot.live { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+      #motionDot.idle { background: #f59e0b; }
+      #motion label { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+      #motion input[type=checkbox] { width: 22px; height: 22px; }
+      #motionNote { margin: 6px 0 0; padding: 0; text-align: left; font-size: 12px; }
+      #pad { position: fixed; left: 0; right: 0; bottom: 0; height: 38dvh; background: rgba(30,41,59,.82); border-top: 2px solid #38bdf8; touch-action: none; user-select: none; -webkit-user-select: none; z-index: 5; }
+      #pad::before { content: 'Touch pad: drag, pinch, twist. Double-tap = recenter'; position: absolute; left: 0; right: 0; top: 8px; text-align: center; color: #94a3b8; font-size: 13px; pointer-events: none; }
+      #pad i { position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(56,189,248,.45); border: 2px solid #38bdf8; pointer-events: none; }
+      body.has-pad { padding-bottom: 38dvh; }
+      #modes { display: flex; gap: 6px; padding: 8px 16px 0; }
+      #modes button { flex: 1 1 0; padding: 10px 6px; font-size: 15px; }
+      #modes button[aria-pressed=true] { background: #0369a1; border-color: #38bdf8; }
+      #privacy { padding: 0 16px 10px; }
+      #scan { position: fixed; inset: 0; z-index: 20; background: #000; display: flex; flex-direction: column; }
+      #scan[hidden], #previewPane[hidden] { display: none; }
+      #scanStage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: #000; }
+      #scanVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+      #scanGuide { position: absolute; inset: 7%; pointer-events: none; border: 1px dashed rgba(255,255,255,.25); border-radius: 6px; }
+      .tick { position: absolute; width: 14%; max-width: 70px; aspect-ratio: 1; border: 0 solid #6b7280; opacity: .9; transition: border-color .15s; }
+      .tick.on { border-color: #fff; filter: drop-shadow(0 0 4px rgba(255,255,255,.9)); }
+      #scan.found #scanGuide { border-color: rgba(255,255,255,.7); border-style: solid; }
+      #tickTL { left: -2px; top: -2px; border-top-width: 5px; border-left-width: 5px; border-top-left-radius: 8px; }
+      #tickTR { right: -2px; top: -2px; border-top-width: 5px; border-right-width: 5px; border-top-right-radius: 8px; }
+      #tickBR { right: -2px; bottom: -2px; border-bottom-width: 5px; border-right-width: 5px; border-bottom-right-radius: 8px; }
+      #tickBL { left: -2px; bottom: -2px; border-bottom-width: 5px; border-left-width: 5px; border-bottom-left-radius: 8px; }
+      #scanHint { position: absolute; left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top)); text-align: center; font-weight: 600; padding: 8px 12px; border-radius: 10px; background: rgba(15,23,42,.72); }
+      #scanHint[data-tone=ready] { background: rgba(21,128,61,.85); }
+      #scanHint[data-tone=warn] { background: rgba(146,64,14,.85); }
+      #scanFlash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .12s; }
+      #scanFlash.on { opacity: .8; }
+      #scanBar { flex: 0 0 auto; background: #0d0f14; padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }
+      #scanInfo, #scanProgress { font-size: 12px; color: #94a3b8; text-align: center; }
+      #scanProgress { color: #e8ecf4; font-size: 13px; margin-top: 2px; }
+      #thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0; min-height: 92px; }
+      .thumb { position: relative; flex: 0 0 auto; width: 84px; font-size: 11px; text-align: center; }
+      .thumb img { display: block; width: 84px; height: 64px; object-fit: cover; border-radius: 6px; background: #1e293b; border: 2px solid #334155; }
+      .thumb.done img { border-color: #22c55e; }
+      .thumb.failed img, .thumb.bad img { border-color: #ef4444; }
+      .thumb.scanning img, .thumb.queued img { border-color: #f59e0b; }
+      .thumb .label { display: block; margin-top: 2px; line-height: 1.15; word-break: break-word; }
+      .thumb .bar { position: absolute; left: 2px; right: 2px; top: 52px; height: 6px; background: rgba(0,0,0,.6); border-radius: 3px; overflow: hidden; }
+      .thumb .bar i { display: block; height: 100%; background: #38bdf8; }
+      .thumb .retake { margin-top: 3px; padding: 4px 6px; font-size: 12px; flex: none; width: 100%; }
+      #scanButtons { display: flex; align-items: center; gap: 12px; }
+      #scanButtons > * { flex: 1 1 0; }
+      #shutter { flex: 0 0 74px; width: 74px; height: 74px; border-radius: 50%; padding: 0; border: 5px solid #e8ecf4; background: #fff; }
+      #shutter:active { background: #cbd5e1; }
+      #shutter:disabled { opacity: .5; }
+      #autoLabel { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+      #autoLabel input { width: 22px; height: 22px; }
+      #scanExit { position: absolute; right: 10px; bottom: 10px; z-index: 2; }
+      #previewPane { position: absolute; inset: 0; background: #0d0f14; display: flex; flex-direction: column; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); gap: 8px; overflow-y: auto; }
+      #previewCanvas { width: 100%; max-height: 52dvh; object-fit: contain; background: #111827; border-radius: 8px; }
+      #previewRow { display: flex; align-items: center; gap: 10px; }
+      #previewRow button { flex: 0 0 90px; }
+      #previewScrub { flex: 1 1 auto; }
+      #previewMissing { margin: 0; padding-left: 18px; color: #fbbf24; }
+      body.scanning { overflow: hidden; }
       small { display: block; padding: 0 16px 8px; color: #94a3b8; text-align: center; }
     </style>
   </head>
   <body>
     <div id="status" class="wait">Starting…</div>
+    <div id="modes" role="group" aria-label="What this phone does">
+      <button id="modeCamera" type="button" aria-pressed="false">Camera</button>
+      <button id="modeScan" type="button" aria-pressed="false">Scan</button>
+      <button id="modeController" type="button" aria-pressed="false">Controller only</button>
+    </div>
     <video id="preview" autoplay muted playsinline></video>
     <small id="detail"></small>
+    <small id="privacy">Pictures, photos and motion go only to your own computer over this link. Nothing is sent to any other server.</small>
     <div id="meter" hidden style="margin:0 16px 8px;height:10px;border-radius:5px;background:#1e293b;overflow:hidden"><div id="meterBar" style="height:100%;width:0;background:#22c55e"></div></div>
     <div id="steps" style="padding:0 16px 8px;text-align:center;color:#94a3b8;font-size:14px;line-height:1.6"></div>
+    <section id="motion" hidden>
+      <h2><span id="motionDot" title="Motion is off"></span> Motion</h2>
+      <button id="motionStart" type="button">Start motion</button>
+      <div id="motionOpts" hidden>
+        <label><input id="optTouch" type="checkbox" /> Touch pad</label>
+        <label><input id="optGeo" type="checkbox" /> Location (asks permission)</label>
+        <label id="optArRow" hidden><input id="optAr" type="checkbox" /> Track position (AR, experimental)</label>
+        <label>Rate <select id="motionRate" aria-label="Motion rate"><option value="60" selected>60 per second</option><option value="30">30 per second</option><option value="15">15 per second</option></select></label>
+      </div>
+      <button id="recenter" type="button" hidden style="margin-top:8px;width:100%;font-size:18px">Recenter</button>
+      <small id="motionNote"></small>
+    </section>
+    <div id="pad" hidden></div>
     <div id="controls">
       <button id="switch" type="button">Switch camera</button>
       <select id="res" aria-label="Resolution">
@@ -36,6 +117,36 @@
       <button id="torch" type="button" hidden>Torch</button>
       <button id="reconnect" type="button">Reconnect</button>
     </div>
+    <section id="scan" hidden>
+      <div id="scanStage">
+        <video id="scanVideo" autoplay muted playsinline></video>
+        <div id="scanGuide"><i class="tick" id="tickTL"></i><i class="tick" id="tickTR"></i><i class="tick" id="tickBR"></i><i class="tick" id="tickBL"></i></div>
+        <div id="scanHint">Starting the camera…</div>
+        <div id="scanFlash"></div>
+        <button id="scanExit" type="button">Close scan</button>
+      </div>
+      <div id="scanBar">
+        <div id="scanInfo"></div>
+        <div id="scanProgress"></div>
+        <div id="thumbs"></div>
+        <div id="scanButtons">
+          <label id="autoLabel"><input id="autoCap" type="checkbox" /> Auto-capture</label>
+          <button id="shutter" type="button" aria-label="Take photo"></button>
+          <button id="scanDone" type="button" disabled>Done</button>
+        </div>
+        <small style="padding:6px 0 0">Photos go only to your own computer over this link.</small>
+      </div>
+      <input id="scanFile" type="file" accept="image/*" capture="environment" hidden />
+      <div id="previewPane" hidden>
+        <strong>Preview of your animation</strong>
+        <canvas id="previewCanvas" width="16" height="9"></canvas>
+        <div id="previewRow"><button id="previewPlay" type="button">Pause</button><input id="previewScrub" type="range" min="0" max="0" value="0" aria-label="Frame" /></div>
+        <div id="previewCounter" style="text-align:center"></div>
+        <div id="previewNote" style="text-align:center;color:#fbbf24;font-size:13px;min-height:1.2em"></div>
+        <ul id="previewMissing"></ul>
+        <button id="previewBack" type="button">Back to the camera (shoot more)</button>
+      </div>
+    </section>
     <script type="module" src="/src/phone/main.ts"></script>
   </body>
 </html>

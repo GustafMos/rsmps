@@ -21,7 +21,7 @@ export default defineNode({
     min: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'Smallest' },
     max: { type: 'number', default: 1, min: -1000000, max: 1000000, step: 0.01, label: 'Largest' },
     seed: { type: 'number', default: 1, min: 0, max: 99999, integer: true, label: 'Seed', hint: 'Change it to get another value. Use different seeds on different Random nodes.' },
-    perItem: { type: 'bool', default: false, label: 'Different for each batch file' },
+    perItem: { type: 'bool', default: false, label: 'Per batch file' },
     whole: { type: 'bool', default: false, label: 'Whole numbers only' },
   },
   summary: (p) => `${p.min}..${p.max} · seed ${p.seed}${p.perItem ? ' · per file' : ''}`,

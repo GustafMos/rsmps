@@ -2,6 +2,7 @@
  * Output frame maths (pure, shared by the player, exporter, UI and CLI).
  * An Output node may choose its own frame (aspect ratio, size, orientation) instead of the project canvas.
  */
+import { proxySize } from '../engine/lib/proxy-size';
 
 export const FRAME_PRESETS = ['project', '16:9', '9:16', '1:1', '4:3', '3:4', '4:5', '2:3', '21:9', 'custom'] as const;
 export type FramePreset = (typeof FRAME_PRESETS)[number];
@@ -138,5 +139,5 @@ export function conformRect(src: Size, dst: Size, mode: Exclude<ConformMode, 'au
 
 /** The same frame at a playback proxy (what the engine renders at). */
 export function scaleSize(size: Size, proxy: number): Size {
-  return { width: Math.max(1, Math.round(size.width * proxy)), height: Math.max(1, Math.round(size.height * proxy)) };
+  return proxySize(size, proxy); // one rounding rule for engine, player and Render Scale (engine/lib/proxy-size.ts)
 }

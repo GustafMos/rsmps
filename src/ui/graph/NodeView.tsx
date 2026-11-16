@@ -13,6 +13,7 @@ import { FontField } from '../components/FontField';
 import { CurveField } from '../components/CurveField';
 import { RangeField } from '../components/RangeField';
 import { LayerList } from './LayerList';
+import { FamilySelect } from '../components/FamilySelect';
 import { missingCapabilities } from '../lib/requirements';
 import { PhoneChip, hasSessionParam } from '../inspector/PhonePanel';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
@@ -22,7 +23,9 @@ import { useApp, useDef, useEd, usePlayer } from '../store/context';
 import { useSelector } from '../store/createStore';
 import { nodeViewStore, toggleExpanded } from '../store/nodeView';
 import { bakeStatusOf } from '../lib/bake';
-import { bakeStore, frozenIds, statusDeps } from '../store/bake';
+import { frozenIds, statusDeps } from '../store/bake';
+import { isActiveJob, processBadge } from '../lib/process';
+import { jobOf, processStore } from '../store/processes';
 import './node.css';
 import './bake.css';
 import '../layers.css';
@@ -96,14 +99,24 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   // Cache / Bake: a small grey badge (baked / stale / baking N%), and a dimmed look for everything a bake has made unnecessary.
   const app = useApp();
   const isCache = node.type === 'cache';
-  const bakeFraction = useSelector(bakeStore, (s) => (isCache ? s.jobs[node.id]?.fraction : undefined));
+  const hasProcess = !!def?.process;
+  const activeProject = useEd((s) => s.activeProject) ?? 'project';
+  // Process mode: the scheduler's job for this node (null for nodes without a process: no work at all for them).
+  const job = useSelector(processStore, (s) => (hasProcess ? jobOf(s.jobs, activeProject, node.id) : null));
+  const bakeFraction = isCache && isActiveJob(job) ? job!.progress : undefined;
   const bake = useEd((s) => (isCache ? bakeStatusOf(s.graph, node, statusDeps(app, s.graph, bakeFraction === undefined ? null : { fraction: bakeFraction })) : null), (a, b) => a?.badge === b?.badge && a?.kind === b?.kind);
+  // Other process nodes: queued / % / done / stale / failed / lost.
+  const pbadge = useEd(
+    (s) => (hasProcess && !isCache ? processBadge(def!.process!.title, app.io.processes.status(s.graph, node.id)?.state ?? 'none', job) : null),
+    (a, b) => a?.text === b?.text && a?.kind === b?.kind,
+  );
+  const processing = isActiveJob(job);
   const frozen = useEd((s) => frozenIds(app, s.graph).has(node.id));
 
   return (
     <div
       ref={el}
-      className={`rs-node${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}${exportOff ? ' is-notexported' : ''}${frozen ? ' is-frozen' : ''}`}
+      className={`rs-node${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}${exportOff ? ' is-notexported' : ''}${frozen ? ' is-frozen' : ''}${processing ? ' is-processing' : ''}`}
       data-node-id={node.id}
       title={frozen ? 'Frozen: everything after this node is baked, so it is not calculated any more' : undefined}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: layout.width, height: layout.height, ['--cat' as string]: catColor(def) }}
@@ -156,6 +169,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
         {bake?.badge && (
           <span className="rs-node__bake rs-num" data-nodrag data-kind={bake.kind} style={bakeFraction !== undefined ? ({ ['--p' as string]: `${Math.round(bakeFraction * 100)}%` }) : undefined} title={bake.text}>
             {bake.badge}
+          </span>
+        )}
+        {pbadge && (
+          <span className="rs-node__bake rs-node__proc rs-num" data-nodrag data-kind={pbadge.kind} style={processing ? ({ ['--p' as string]: `${Math.round((job?.progress ?? 0) * 100)}%` }) : undefined} title={pbadge.title}>
+            {pbadge.text}
           </span>
         )}
         {debug && <NodeTiming id={node.id} />}
@@ -283,6 +301,13 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
     return (
       <div className="rs-row" style={{ top: row.y, height: ROW_H + 2 }}>
         <KindSelect node={node} />
+      </div>
+    );
+  }
+  if (row.kind === 'family') {
+    return (
+      <div className="rs-row" style={{ top: row.y, height: ROW_H + 2 }}>
+        <FamilySelect node={node} />
       </div>
     );
   }

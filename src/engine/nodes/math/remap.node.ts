@@ -14,7 +14,7 @@ export default defineNode({
     fromMax: { type: 'number', default: 1, min: -1000000, max: 1000000, step: 0.01, label: 'From max' },
     toMin: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'To min' },
     toMax: { type: 'number', default: 100, min: -1000000, max: 1000000, step: 0.01, label: 'To max' },
-    clamp: { type: 'bool', default: true, label: 'Stay inside the new range' },
+    clamp: { type: 'bool', default: true, label: 'Clamp', hint: 'Stay inside the new range.' },
   },
   summary: (p) => `${p.fromMin}..${p.fromMax} → ${p.toMin}..${p.toMax}`,
   render(ctx) {

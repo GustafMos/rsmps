@@ -1,9 +1,9 @@
 /** Easing curves shared by animate, loop and friends. All map 0..1 to roughly 0..1. */
 export const CURVE_OPTIONS = [
   { value: 'linear', label: 'Linear' },
-  { value: 'ease-in', label: 'Ease in (slow start)' },
-  { value: 'ease-out', label: 'Ease out (slow end)' },
-  { value: 'ease-in-out', label: 'Smooth (slow both ends)' },
+  { value: 'ease-in', label: 'Ease in' },
+  { value: 'ease-out', label: 'Ease out' },
+  { value: 'ease-in-out', label: 'Smooth' },
 ] as const;
 
 export const EASE_OPTIONS = [

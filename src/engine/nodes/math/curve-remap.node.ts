@@ -11,10 +11,10 @@ export default defineNode({
   outputs: { value: { type: 'number', label: 'Number' } },
   params: {
     value: { type: 'number', default: 0.5, min: -1000000, max: 1000000, step: 0.01, label: 'Number in' },
-    inMin: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'Input at curve start' },
+    inMin: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'Curve start' },
     inMax: { type: 'number', default: 1, min: -1000000, max: 1000000, step: 0.01, label: 'Input at curve end' },
     curve: { type: 'curve', default: presetLinear(), label: 'Curve' },
-    clamp: { type: 'bool', default: true, label: 'Hold the ends outside the input range' },
+    clamp: { type: 'bool', default: true, label: 'Clamp ends', hint: 'Hold the end values outside the input range.' },
   },
   summary: (p) => `${p.curve.keys.length} keys · ${p.inMin}..${p.inMax}`,
   render(ctx) {

@@ -14,7 +14,8 @@ import { AddonsImpl } from './addons';
 import { DesktopClient, isDesktop } from './desktop';
 import { MemoryGovernor, defaultBudget, defaultRamBudget } from './memory';
 import { RamColdStore } from './ram-store';
-import { BakeImpl, BAKE_OWNER } from './bake';
+import { BakeImpl } from './bake';
+import { BAKE_OWNER, ProcessRuntime } from './processes';
 import type { CacheQuality } from './pixel-codec';
 import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
@@ -141,10 +142,12 @@ export const createIo: CreateIo = async () => {
   const phone = new PhoneLink(desktop);
   await phone.init();
   library.live.phone = phone;
+  router.phone = (token, name) => phone.motion.signal(token, name);
   phone.onStream((token, stream) => phoneAudio.setStream(token, stream));
   const recording = new RecordingController(audio, player, library);
   const plugins = new PluginManagerImpl(registry);
   const purgeOwned = (id: string, kind: 'graph' | 'scan') => {
+    processes.cancelAll(id); // jobs of a project that is gone
     if (kind === 'scan') void library.removeOwned(id);
     // Baked regions of a closed project go with it.
     for (const a of library.list({ includeHidden: true }) as { owner?: string }[]) {
@@ -154,18 +157,25 @@ export const createIo: CreateIo = async () => {
   const projects = new ProjectStoreImpl(registry);
   projects.onPurge = purgeOwned;
 
-  const bake = new BakeImpl({ engine, gpu, registry, gate, library, player, governor, activeProject: () => projects.activeId() });
+  // Process mode: one scheduler for every long job (bake, clip analysis...). Bake is a thin layer over it.
+  const processes = new ProcessRuntime({ engine, gpu, registry, gate, library, player, governor, activeProject: () => projects.activeId() });
+  library.liveProcess = (id) => processes.live(id);
+  exporter.setProcesses(processes); // the export gate
+  player.subscribe(() => processes.poke()); // playback started / stopped: held jobs continue
+  void projects.activeId().then((id) => processes.setActiveProject(id)).catch(() => undefined);
+  const bake = new BakeImpl({ engine, gpu, registry, gate, library, player, governor, activeProject: () => projects.activeId() }, processes);
 
   const io: Io = {
     engine,
     bake,
+    processes,
     registry,
     library,
     player,
     exporter,
     plugins,
     projects,
-    scan: new ScanImpl(library),
+    scan: new ScanImpl(library, { memoryBudget: () => governor.getRam() }),
     memoryBudget: {
       get: () => governor.get(),
       set: (b) => governor.set(b),
@@ -193,6 +203,7 @@ export const createIo: CreateIo = async () => {
       library.releaseDecodedExcept(graph ? assetIdsOf(graph, registry) : new Set()); // (d)
       gpu.trim(); // (c) idle pooled textures of the old project
       await projects.setActive(id); // (e) works for graph and scan projects (a scan project without a graph yet returns null)
+      processes.setActiveProject(id); // (f) jobs of the project that was left pause; this project's resume
       return graph;
     },
     memory() {

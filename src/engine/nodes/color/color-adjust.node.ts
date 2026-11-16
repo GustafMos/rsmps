@@ -8,8 +8,9 @@ export default defineNode({
   id: 'color-adjust',
   title: 'Color Adjust',
   category: 'color',
-  description: 'Exposure, contrast, brightness, saturation, gamma, hue, temperature and tint.',
-  keywords: ['grade', 'correct', 'brightness', 'contrast', 'saturation', 'hue'],
+  description:
+    'Quick tweaks in one node: exposure, contrast, brightness, saturation, gamma, hue, temperature and tint, applied to the stored (display) values. For grading that behaves like the tools of a grading app use White Balance, Saturation / Vibrance, Lift Gamma Gain, Curves, Exposure, Colour Space and LUT.',
+  keywords: ['grade', 'correct', 'brightness', 'contrast', 'saturation', 'hue', 'quick', 'white balance', 'lift gamma gain', 'curves', 'lut'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,

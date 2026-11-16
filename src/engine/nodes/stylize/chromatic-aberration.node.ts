@@ -11,7 +11,7 @@ export default defineNode({
   maskable: true,
   params: {
     amount: { type: 'number', default: 4, min: 0, max: 100, step: 0.1, unit: 'px', label: 'Amount', hint: 'Shift of red and blue (at the frame edge when radial).' },
-    radial: { type: 'bool', default: true, label: 'Radial (from centre)' },
+    radial: { type: 'bool', default: true, label: 'Radial', hint: 'From the center.' },
     angle: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Direction', visibleIf: (p) => p.radial === false },
   },
   summary: (p) => `${p.amount} px ${p.radial ? 'radial' : `at ${p.angle}°`}`,

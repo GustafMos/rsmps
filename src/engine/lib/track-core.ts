@@ -45,8 +45,8 @@ export const DETECT_PARAMS = {
     max: 0.5,
     step: 0.005,
     unit: 'norm',
-    label: 'Join regions closer than',
-    hint: 'Regions whose gap is smaller than this (fraction of the frame size) become one.',
+    label: 'Join distance',
+    hint: 'Regions closer than this are joined. Regions whose gap is smaller than this (fraction of the frame size) become one.',
     group: 'What to keep',
   },
   padding: {

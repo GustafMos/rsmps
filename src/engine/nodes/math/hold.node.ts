@@ -24,8 +24,8 @@ export default defineNode({
       label: 'Update',
     },
     every: { type: 'number', default: 4, min: 1, max: 100000, softMax: 240, step: 1, integer: true, label: 'Every N frames', visibleIf: (p) => p.mode === 'frames' },
-    window: { type: 'number', default: 4, min: 0.1, max: 60, softMax: 10, step: 0.1, unit: 's', label: 'Look back for a trigger', hint: 'If no trigger happened this recently the value stays at what it was at the start of this window.', visibleIf: (p) => p.mode === 'trigger' },
-    loopAware: { type: 'bool', default: true, label: 'Loop with the project', hint: 'Steps follow the loop and triggers wrap around it. Turn off for live signals.' },
+    window: { type: 'number', default: 4, min: 0.1, max: 60, softMax: 10, step: 0.1, unit: 's', label: 'Look back', hint: 'If no trigger happened this recently the value stays at what it was at the start of this window.', visibleIf: (p) => p.mode === 'trigger' },
+    loopAware: { type: 'bool', default: true, label: 'Loop with project', hint: 'Steps follow the loop and triggers wrap around it. Turn off for live signals.' },
   },
   summary: (p) => (p.mode === 'frames' ? `every ${p.every} frames` : 'on trigger'),
   async render(ctx) {

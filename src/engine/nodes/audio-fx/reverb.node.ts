@@ -20,8 +20,8 @@ export default defineNode({
   params: {
     size: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Room size' },
     decay: { type: 'number', default: 2.5, min: 0.1, max: 20, step: 0.1, unit: 's', label: 'Decay time' },
-    damping: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Damping (darker tail)' },
-    preDelay: { type: 'number', default: 15, min: 0, max: 250, step: 1, label: 'Pre-delay (ms)' },
+    damping: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Damping', hint: 'Higher = darker tail.' },
+    preDelay: { type: 'number', default: 15, min: 0, max: 250, step: 1, label: 'Pre-delay ms' },
     width: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Stereo width' },
     mix: { type: 'number', default: 0.3, min: 0, max: 1, step: 0.01, label: 'Mix' },
   },

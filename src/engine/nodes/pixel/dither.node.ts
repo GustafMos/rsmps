@@ -196,7 +196,7 @@ export default defineNode({
       hint: 'Size of one pattern cell. 1 = one art pixel (one texel after Pixelate, or one grid cell when Pixel size is used). On other images it scales with the media. Always rounded to a whole number of texels, never below 1, so patterns stay even on coarse or fine render grids.',
       visibleIf: (p) => algorithmFamily(p.algorithm as string) !== 'diffusion',
     },
-    colorSpace: { type: 'enum', default: 'oklab', options: SPACE_OPTIONS, label: 'Colour space' },
+    colorSpace: { type: 'enum', default: 'oklab', options: SPACE_OPTIONS, label: 'Color space' },
     serpentine: {
       type: 'bool',
       default: false,

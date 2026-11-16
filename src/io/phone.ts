@@ -7,6 +7,10 @@ import type { PhoneAddress, PhoneApi, PhoneProgress, PhoneSessionInfo, PhoneStat
 import { UNREACHED_HINT, closeMessage } from '../phone/messages';
 import type { PhoneProvider } from './live';
 import { qrSvg } from './qr';
+import { MOTION_TYPES } from '../phone/motion-protocol';
+import { LINK_TYPES, parseHello, sendsVideo, type PhoneMedia, type PhoneMode } from '../phone/link-modes';
+import { PhoneMotionStore } from './phone-motion';
+import { PhoneScanStore } from './phone-scan';
 import { DesktopClient, isDesktop, phoneSocketUrl, type LanInfo } from './desktop';
 
 export const LAN_MESSAGE =
@@ -70,7 +74,7 @@ export function advanceProgress(cur: PhoneProgress, next: PhoneProgress): PhoneP
   return PROGRESS_ORDER.indexOf(next) > PROGRESS_ORDER.indexOf(cur) ? next : cur;
 }
 
-/** The three ticks of the pairing checklist: reached the computer, code accepted, video connected. */
+/** The three ticks of the pairing checklist: reached the computer, code accepted, video connected (or, with no picture, the phone linked). */
 export function phoneSteps(progress: PhoneProgress, state: PhoneState): [boolean, boolean, boolean] {
   if (state === 'connected') return [true, true, true];
   const at = PROGRESS_ORDER.indexOf(progress);
@@ -95,10 +99,25 @@ interface Session {
   audioStream: MediaStream | null;
   /** Messages are handled strictly in order (an ICE candidate must not overtake the answer). */
   chain: Promise<void>;
+  /** What the phone does: asked for in the link (`&mode=`), then whatever its `hello` says. */
+  mode: PhoneMode;
+  /** Does a camera picture flow? null until the phone's hello. */
+  media: PhoneMedia | null;
 }
 
 export class PhoneLink implements PhoneApi, PhoneProvider {
   available = false;
+  /** Sensor data from the phones (gyro, touch pad, location, AR), keyed by pairing token. See phone-motion.ts. */
+  readonly motion = new PhoneMotionStore();
+  /** Photos from phones in scan mode, and what goes back to them (statuses, preview). See phone-scan.ts. */
+  readonly scan = new PhoneScanStore({
+    sendJson: (token, msg) => this.sendTo(token, msg),
+    sendBinary: (token, bytes) => {
+      const ws = this.sessions.get(token)?.ws;
+      if (ws?.readyState === WebSocket.OPEN) ws.send(bytes);
+    },
+    buffered: (token) => this.sessions.get(token)?.ws.bufferedAmount ?? 0,
+  });
   private desktopInfo: LanInfo | null = null;
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
   private origins: string[] = [];
@@ -176,7 +195,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     return buildAddresses(this.candidates, location);
   }
 
-  async createSession(opts: { address?: string } = {}): Promise<PhoneSessionInfo> {
+  async createSession(opts: { address?: string; mode?: PhoneMode } = {}): Promise<PhoneSessionInfo> {
     if (!this.available) throw new Error(LAN_MESSAGE);
     if (this.desktop && this.desktopInfo?.state !== 'on') {
       const started = await this.startServer();
@@ -186,14 +205,15 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     const origin = opts.address ?? (await this.addresses())[0]?.url ?? pickOrigin(this.origins, location);
     if (!origin) throw new Error('No network address was found for this computer, so a phone cannot reach it. Connect to Wi-Fi or a network and restart "npm run dev:lan".');
     const token = newToken();
-    const url = `${origin}/phone?token=${token}`;
+    const mode: PhoneMode = opts.mode ?? 'camera';
+    const url = `${origin}/phone?token=${token}${mode === 'camera' ? '' : `&mode=${mode}`}`;
     const ws = new WebSocket(this.desktop && this.desktopInfo ? phoneSocketUrl(this.desktopInfo.ws, token) : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/__rsmps/phone-ws?role=desktop&token=${token}`);
     ws.binaryType = 'arraybuffer';
     const expiresAt = Date.now() + SESSION_MS;
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
-    const s: Session = { token, progress: 'waiting', ws, state: 'waiting', pc: null, video, bitmap: null, frames: 0, jpeg: false, timers: [], expiresAt, detail: 'Waiting for the phone: scan the QR code and open the link.', reached: false, audioStream: null, chain: Promise.resolve() };
+    const s: Session = { token, progress: 'waiting', ws, state: 'waiting', pc: null, video, bitmap: null, frames: 0, jpeg: false, timers: [], expiresAt, detail: 'Waiting for the phone: scan the QR code and open the link.', reached: false, audioStream: null, chain: Promise.resolve(), mode, media: null };
     this.sessions.set(token, s);
     s.timers.push(setTimeout(() => s.state === 'waiting' && this.setState(s, 'expired'), SESSION_MS));
     s.timers.push(setTimeout(() => !s.reached && s.state === 'waiting' && this.setDetail(s, UNREACHED_HINT), UNREACHED_MS));
@@ -229,6 +249,28 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     return this.sessions.get(token)?.expiresAt ?? null;
   }
 
+  /** The newest session with a phone linked right now (any mode), for reuse: a second QR code is not needed. */
+  linked(): string | null {
+    const live = [...this.sessions.values()].filter((s) => s.state === 'connected');
+    return live.length ? live[live.length - 1].token : null;
+  }
+
+  /** What the phone of this session does and whether it sends a picture (null for an unknown token). */
+  link(token: string): { mode: PhoneMode; media: PhoneMedia | null } | null {
+    const s = this.sessions.get(token);
+    return s ? { mode: s.mode, media: s.media } : null;
+  }
+
+  /** Ask a linked phone to change what it does (for example into scan mode). The phone answers with a new hello. */
+  setMode(token: string, mode: PhoneMode): void {
+    const s = this.sessions.get(token);
+    if (!s) return;
+    s.mode = mode;
+    if (mode !== 'camera') this.dropPeer(s);
+    this.send(s, { type: 'mode', mode });
+    if (mode === 'scan') this.scan.phoneIsScanning(token);
+  }
+
   onState(listener: (token: string, state: PhoneState, detail: string, progress: PhoneProgress) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -239,6 +281,8 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     if (!s) return;
     this.teardown(s);
     this.sessions.delete(token);
+    this.motion.drop(token);
+    this.scan.drop(token);
     this.setState(s, 'disconnected');
     this.stopIfIdle();
   }
@@ -307,6 +351,21 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     if (s.ws.readyState === WebSocket.OPEN) s.ws.send(JSON.stringify(msg));
   }
 
+  private sendTo(token: string, msg: unknown): void {
+    const s = this.sessions.get(token);
+    if (s) this.send(s, msg);
+  }
+
+  /** Stop receiving a camera picture (the phone no longer sends one). */
+  private dropPeer(s: Session): void {
+    s.pc?.close();
+    s.pc = null;
+    s.jpeg = false;
+    s.video.srcObject = null;
+    s.bitmap = null;
+    this.emitStream(s, null);
+  }
+
   private markFrame(s: Session): void {
     s.frames++;
     if (s.state !== 'connected') {
@@ -318,6 +377,10 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
 
   private async onMessage(s: Session, ev: MessageEvent): Promise<void> {
     if (ev.data instanceof ArrayBuffer) {
+      if (PhoneScanStore.handlesBinary(ev.data)) {
+        this.scan.ingestBinary(s.token, ev.data); // a photo chunk from scan mode (starts with the scan magic, never FF D8)
+        return;
+      }
       // A JPEG frame (WebRTC fallback).
       try {
         const bmp = await createImageBitmap(new Blob([ev.data], { type: 'image/jpeg' }));
@@ -336,6 +399,18 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     } catch {
       return;
     }
+    if (msg.type && MOTION_TYPES.has(msg.type)) {
+      this.motion.ingest(s.token, msg); // sensor frames from the phone (never touches the video state)
+      return;
+    }
+    if (PhoneScanStore.handles(msg.type)) {
+      this.scan.ingestJson(s.token, msg); // photo transfer, status and preview messages (scan mode)
+      return;
+    }
+    if (msg.type && LINK_TYPES.has(msg.type)) {
+      await this.onHello(s, msg);
+      return;
+    }
     switch (msg.type) {
       case 'registered':
         if (typeof msg.expiresAt === 'number') s.expiresAt = msg.expiresAt;
@@ -349,10 +424,13 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
       case 'phone-joined':
         s.reached = true;
         s.progress = advanceProgress(s.progress, 'accepted');
-        this.setDetail(s, 'Code accepted. Connecting the video...');
-        await this.startPeer(s);
+        if (s.mode === 'camera') {
+          this.setDetail(s, 'Code accepted. Connecting the video...');
+          await this.startPeer(s);
+        } else this.setDetail(s, 'Code accepted. Waiting for the phone to say what it does...');
         break;
       case 'phone-left':
+        if (this.scan.has(s.token)) this.scan.session(s.token).active = false;
         s.pc?.close();
         s.pc = null;
         this.emitStream(s, null);
@@ -368,6 +446,37 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
         this.setState(s, 'expired');
         break;
     }
+  }
+
+  /**
+   * The phone's typed handshake: its mode and whether a picture will flow. Without a picture (scan mode, controller only, camera refused)
+   * the handshake IS the link: the state becomes 'connected' here, not when frames arrive.
+   */
+  private async onHello(s: Session, msg: { type?: string }): Promise<void> {
+    const h = parseHello(msg);
+    if (!h) return;
+    s.reached = true;
+    s.progress = advanceProgress(s.progress, 'accepted');
+    s.mode = h.mode;
+    s.media = h.media;
+    if (sendsVideo(h)) {
+      if (!s.pc && !s.jpeg) {
+        if (s.state === 'connected') {
+          s.state = 'waiting'; // the link was complete without a picture: now wait for frames again
+          s.progress = 'accepted';
+        }
+        this.setDetail(s, 'Code accepted. Connecting the video...');
+        await this.startPeer(s);
+      }
+      this.emit(s);
+      return;
+    }
+    this.dropPeer(s);
+    s.progress = 'connected';
+    s.detail = h.mode === 'scan' ? 'Phone linked in scan mode (no camera picture).' : h.mode === 'controller' ? 'Phone linked as a controller (no camera picture).' : h.media === 'refused' ? 'Phone linked, but it did not allow its camera: no picture.' : 'Phone linked without a camera picture.';
+    if (s.state === 'connected') this.emit(s);
+    else this.setState(s, 'connected');
+    if (h.mode === 'scan') this.scan.phoneIsScanning(s.token);
   }
 
   private async startPeer(s: Session): Promise<void> {

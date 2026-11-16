@@ -11,7 +11,7 @@ export default defineNode({
   inputs: { audio: { type: 'audio', required: true, label: 'Audio' } },
   outputs: { audio: { type: 'audio', label: 'Audio' } },
   params: {
-    width: { type: 'number', default: 1.5, min: 0, max: 2, step: 0.01, label: 'Width (0 = mono, 1 = normal)' },
+    width: { type: 'number', default: 1.5, min: 0, max: 2, step: 0.01, label: 'Width', hint: '0 = mono, 1 = normal.' },
   },
   summary: (p) => (p.width === 0 ? 'mono' : `${Math.round(p.width * 100)}%`),
   audio: defineAudio({

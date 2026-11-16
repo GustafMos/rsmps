@@ -10,15 +10,15 @@ export default defineNode({
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
-    cyclesX: { type: 'number', default: 1, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Horizontal scrolls per loop', hint: 'Whole image widths travelled each loop. Positive moves right, negative left, 0 = still.' },
-    cyclesY: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Vertical scrolls per loop', hint: 'Whole image heights travelled each loop. Positive moves down, negative up.' },
+    cyclesX: { type: 'number', default: 1, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Scroll X', hint: 'Whole image widths travelled each loop. Positive moves right, negative left, 0 = still.' },
+    cyclesY: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Scroll Y', hint: 'Whole image heights travelled each loop. Positive moves down, negative up.' },
     offset: { type: 'vec2', default: [0, 0], unit: 'norm', min: -1, max: 1, step: 0.005, label: 'Static offset', hint: 'Starting position as a fraction of the image size.' },
     filter: {
       type: 'enum',
       default: 'linear',
       options: [
         { value: 'linear', label: 'Smooth' },
-        { value: 'nearest', label: 'Sharp (pixel art)' },
+        { value: 'nearest', label: 'Sharp' },
       ],
       label: 'Filter',
     },

@@ -20,6 +20,7 @@ export function parseGraph(raw: unknown): GraphDoc {
     nodes: doc.nodes,
     edges: doc.edges,
     frames: Array.isArray(doc.frames) ? doc.frames : [],
+    ...(doc.media && typeof doc.media === 'object' && Array.isArray(doc.media.bins) ? { media: doc.media } : {}),
   };
 }
 

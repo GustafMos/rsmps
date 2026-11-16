@@ -17,6 +17,7 @@ const MODES = [
  */
 export default defineNode({
   id: 'merge',
+  family: 'combine',
   title: 'Merge',
   category: 'composite',
   description: 'Put a foreground over a background with a blend mode. The background sets the output size.',

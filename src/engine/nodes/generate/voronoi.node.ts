@@ -17,7 +17,7 @@ export default defineNode({
       default: 'cells',
       label: 'Look',
       options: [
-        { value: 'cells', label: 'Coloured cells' },
+        { value: 'cells', label: 'Colored cells' },
         { value: 'crackle', label: 'Crackle lines' },
         { value: 'distance', label: 'Distance glow' },
       ],
@@ -26,7 +26,7 @@ export default defineNode({
     jitter: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Irregularity', hint: '0 = regular grid, 1 = fully random.' },
     colors: {
       type: 'palette',
-      label: 'Cell colours',
+      label: 'Cell colors',
       default: [
         [0.1, 0.2, 0.45],
         [0.2, 0.6, 0.75],
@@ -35,8 +35,8 @@ export default defineNode({
       ],
       visibleIf: (p) => p.mode === 'cells',
     },
-    colorA: { type: 'color', default: [0.96, 0.94, 0.88, 1], label: 'Cell colour', visibleIf: (p) => p.mode !== 'cells' },
-    colorB: { type: 'color', default: [0.08, 0.08, 0.14, 1], label: 'Line colour' },
+    colorA: { type: 'color', default: [0.96, 0.94, 0.88, 1], label: 'Cell color', visibleIf: (p) => p.mode !== 'cells' },
+    colorB: { type: 'color', default: [0.08, 0.08, 0.14, 1], label: 'Line color' },
     lineWidth: { type: 'number', default: 3, min: 0, max: 200, unit: 'px', label: 'Line width', visibleIf: (p) => p.mode !== 'distance' },
     motion: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Motion', group: 'Animation', hint: 'How far each cell centre wanders. 0 = still.' },
     cycles: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Cycles per loop', group: 'Animation', hint: 'Whole laps per loop so it repeats exactly.' },

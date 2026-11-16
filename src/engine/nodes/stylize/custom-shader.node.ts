@@ -103,7 +103,7 @@ export default defineNode({
     b: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'B', hint: 'u.b' },
     c: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'C', hint: 'u.c' },
     d: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'D', hint: 'u.d' },
-    color: { type: 'color', default: [0.35, 0.8, 1, 1], label: 'Colour', hint: 'u.color (straight rgba)' },
+    color: { type: 'color', default: [0.35, 0.8, 1, 1], label: 'Color', hint: 'u.color (straight rgba)' },
   },
   summary: (p, wired) => `WGSL · ${p.code.trim() ? p.code.split('\n').length : 0} lines${wired?.has('image') ? '' : ' · no input: canvas size'}`,
   async render(ctx) {

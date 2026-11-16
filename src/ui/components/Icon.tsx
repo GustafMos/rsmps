@@ -62,6 +62,13 @@ const PATHS = {
   swap: 'M2.5 5.5h10 M10 3l2.5 2.5L10 8 M13.5 10.5h-10 M6 8l-2.5 2.5L6 13',
   pin: 'M5.5 2.5h5l-.7 4 2.2 2.5h-8.4l2.2-2.5z M8 9v5',
   focus: 'M8 2v3 M8 11v3 M2 8h3 M11 8h3 M8 6.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6z',
+  chevLeft: 'M10 3L5 8l5 5',
+  chevRight: 'M6 3l5 5-5 5',
+  chevDown: 'M3 6l5 5 5-5',
+  list: 'M2.5 4h11 M2.5 8h11 M2.5 12h11',
+  folderPlus: 'M1.5 4.5v8h13v-7h-7l-1.5-2h-4.5z M8 7.5v3.5 M6.25 9.25h3.5',
+  sortUp: 'M8 13V3 M4 7l4-4 4 4',
+  sortDown: 'M8 3v10 M4 9l4 4 4-4',
 } as const;
 
 export type IconName = keyof typeof PATHS;

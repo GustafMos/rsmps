@@ -4,9 +4,9 @@ import { regionsFromStrength } from '../../lib/track-detect';
 import { gaussianBlur } from '../filter/blur.node';
 
 const MODES = [
-  { value: 'bright', label: 'Bright spots (stars, lights, highlights)' },
+  { value: 'bright', label: 'Bright spots' },
   { value: 'dark', label: 'Dark spots' },
-  { value: 'saturated', label: 'Vivid colour spots' },
+  { value: 'saturated', label: 'Vivid color spots' },
 ] as const;
 
 export default defineNode({

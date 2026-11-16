@@ -30,7 +30,7 @@ export default defineNode({
   params: {
     rate: { type: 'number', default: 0.8, min: 0.05, max: 8, step: 0.01, unit: 'hz', label: 'Speed' },
     depth: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Depth' },
-    delay: { type: 'number', default: 18, min: 5, max: 40, step: 0.1, label: 'Base delay (ms)' },
+    delay: { type: 'number', default: 18, min: 5, max: 40, step: 0.1, label: 'Base delay ms' },
     mix: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Mix' },
   },
   summary: (p) => `${p.rate.toFixed(1)} Hz · depth ${Math.round(p.depth * 100)}%`,

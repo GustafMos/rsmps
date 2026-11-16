@@ -6,7 +6,9 @@
 import type { Engine } from '../engine/engine';
 import type { AudioDevice, PcmAudio, RecordedTake, RecordingState } from '../engine/audio/api';
 import type { Registry } from '../engine/define';
-import type { AssetInfo, GraphDoc, Host, Value } from '../engine/types';
+import type { AssetInfo, GraphDoc, Host, ProcessLive, ProcessResult, Value } from '../engine/types';
+import type { PendingProcess, ProcessStatus } from '../engine/process';
+import type { BlankSheetOptions } from './print/blank';
 
 /** The user's media. Implements the engine `Host`, persists files in IndexedDB so a reload keeps them. */
 export interface MediaLibrary extends Host {
@@ -36,6 +38,14 @@ export interface MediaLibrary extends Host {
   addRecording(name: string, pcm: PcmAudio): Promise<AssetInfo>;
   /** Delete every asset owned by `owner`. */
   removeOwned(owner: string): Promise<void>;
+  /** Save a scanned texture (PNG blob) on the per-user "Textures" shelf: an ordinary image asset tagged `shelf: 'textures'`. Persisted like other assets. */
+  addTexture(name: string, blob: Blob): Promise<AssetInfo>;
+  /** The Textures shelf (empty until the user scans one; nothing is bundled). */
+  textures(): AssetInfo[];
+  /** Change the display name of an asset (persisted). Nodes refer to assets by id, so nothing else changes. */
+  rename(assetId: string, name: string): Promise<void>;
+  /** Facts the media panel sorts and groups by: image-sequence or not, stored size in bytes, the "Textures" shelf tag. */
+  assetMeta(assetId: string): { sequence: boolean; bytes: number; shelf?: string };
 }
 
 export interface PlayerState {
@@ -48,6 +58,8 @@ export interface PlayerState {
   measuredFps: number;
   /** Current proxy scale chosen by the player (1 = full resolution). */
   proxy: number;
+  /** "Full-resolution frame" (see Player.renderFullFrame): 'rendering' while it is being made, 'shown' while that picture is on screen. */
+  fullRes: 'off' | 'rendering' | 'shown';
   /** Frame indices that are RAM-cached and will play back instantly. */
   cachedFrames: ReadonlySet<number>;
   /** Node id → error message from the last evaluation. */
@@ -109,6 +121,13 @@ export interface Player {
   step(frames: number): void;
   /** Proxy policy: 'auto' lowers resolution while playing to hold the project fps; a number forces it. */
   setProxy(mode: 'auto' | number): void;
+  /**
+   * "Full-resolution frame": render the CURRENT frame once at final quality and proxy 1 (the Output's pixel-size grid when it has one),
+   * whatever the playback proxy or a forced proxy says, and keep it on screen until the frame, the graph or the view changes or playback
+   * starts (then the normal preview resumes). Pauses playback first. Nothing happens (returns false) when there is nothing to show, while
+   * rendering is paused or in safe mode (the viewed node is withheld then). `PlayerState.fullRes` says where it stands.
+   */
+  renderFullFrame(): boolean;
   getState(): PlayerState;
   /** Fires at most once per animation frame while something changes. */
   subscribe(listener: (state: PlayerState) => void): () => void;
@@ -157,6 +176,13 @@ export interface ExportRequest {
    */
   audioFormat?: 'wav' | 'm4a' | 'webm';
   signal?: AbortSignal;
+  /**
+   * Process mode export gate. Default (false): when a process upstream of the outputs is not done the export stops with a
+   * `ProcessPendingError` listing them (never exports a stand-in silently). True: run them first (progress shown as the export label).
+   */
+  runProcesses?: boolean;
+  /** Called with each finished process so the app can write the result into its node (the export itself uses it either way). */
+  onProcessResult?: (nodeId: string, result: ProcessResult) => void;
 }
 
 export interface Exporter {
@@ -379,7 +405,7 @@ export interface PhoneApi {
   /** Addresses a phone could use to reach this computer, best first (physical Wi-Fi, then Tailscale, then others). Offer them in a dropdown. */
   addresses(): Promise<PhoneAddress[]>;
   /** `address` = the `url` of one of `addresses()` (default: the first). The QR code always uses the protocol and port of THIS page's server. */
-  createSession(opts?: { address?: string }): Promise<PhoneSessionInfo>;
+  createSession(opts?: { address?: string; /** What the phone page should do: 'camera' (default), 'scan' or 'controller'. Goes into the link as `&mode=`. */ mode?: 'camera' | 'scan' | 'controller' }): Promise<PhoneSessionInfo>;
   state(token: string): PhoneState;
   /** One plain sentence about what is happening or what to try ("Your phone reached this computer...", the firewall checklist, why it closed). */
   detail(token: string): string;
@@ -389,6 +415,16 @@ export interface PhoneApi {
   expiresAt(token: string): number | null;
   onState(listener: (token: string, state: PhoneState, detail: string, progress: PhoneProgress) => void): () => void;
   close(token: string): void;
+  /** Sensor data of the linked phones (gyro, touch pad, location, AR): see phone-motion.ts. Absent on implementations without a phone link. */
+  motion?: { session(token: string): import('./phone-motion').MotionSession; has(token: string): boolean };
+  /** The newest session with a phone linked right now (reuse it instead of showing a second QR code). Absent on implementations without a phone link. */
+  linked?(): string | null;
+  /** What the phone of a session does (`mode`) and whether a camera picture flows (`media`; null before its hello). */
+  link?(token: string): { mode: 'camera' | 'scan' | 'controller'; media: 'video' | 'none' | 'refused' | null } | null;
+  /** Ask a linked phone to change what it does (the phone answers with a new hello). */
+  setMode?(token: string, mode: 'camera' | 'scan' | 'controller'): void;
+  /** Scan with phone: photos in, statuses and preview out (see phone-scan.ts). */
+  scan?: import('./phone-scan').PhoneScanStore;
 }
 
 export type { AddonInfo, AddonState } from './desktop';
@@ -515,6 +551,98 @@ export interface BakeApi {
   prune(projectId: string, graph: GraphDoc): Promise<number>;
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/* Process mode (docs/ENGINE.md, "Process mode"). Bake is one user of it.                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+export type ProcessJobState = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
+
+/** One job of the process scheduler (UI state only: nothing here is part of any cache key). */
+export interface ProcessJob {
+  id: string;
+  project: string;
+  node: string;
+  /** Process title ("Bake", "Analyse clip"). */
+  title: string;
+  /** The node's label or type title, for lists. */
+  label: string;
+  state: ProcessJobState;
+  /** 0..1 */
+  progress: number;
+  note?: string;
+  /** Free-form numbers the job reports (frame, frames, bytes). */
+  detail?: Record<string, number>;
+  error?: string;
+  gpu: boolean;
+  queuedAt: number;
+  startedAt?: number;
+  endedAt?: number;
+  /** A paused job waits for playback / dragging to stop, for its project to be open again, or for rendering to be resumed. */
+  pausedFor?: string;
+  result?: ProcessResult;
+}
+
+export interface ProcessRunOptions {
+  /** Options of this run, handed to the job as `job.options` (Bake: { quality, maxBytes }). */
+  options?: Record<string, unknown>;
+  /** Batch item (default 0). */
+  item?: number;
+  /** Project the node belongs to (default: the active project). */
+  projectId?: string;
+  /** Abort the job (same as `cancel`). */
+  signal?: AbortSignal;
+  /** Progress callback for this run only (the same data the scheduler publishes). */
+  onProgress?: (p: { fraction: number; note?: string; detail?: Record<string, number> }) => void;
+}
+
+export type ProcessEvent = { type: 'added' | 'started' | 'progress' | 'paused' | 'resumed' | 'done' | 'failed' | 'cancelled' | 'dismissed'; job: ProcessJob };
+
+export interface ProcessRunPendingHooks {
+  /** A process finished: write `result` into the node (the UI does `ed.edit(withProcessResult(...))`). */
+  onResult?: (nodeId: string, result: ProcessResult) => void;
+  onProgress?: (p: { fraction: number; label: string }) => void;
+  signal?: AbortSignal;
+  /** Run options per node (Bake quality...). */
+  options?: (nodeId: string) => Record<string, unknown> | undefined;
+  item?: number;
+}
+
+/** The process scheduler and runner (src/io/processes.ts). */
+export interface ProcessApi {
+  /**
+   * Queue the process of a node and wait for it. Resolves with the result handle; rejects on failure and with an AbortError when
+   * cancelled. Does NOT edit the graph: write the result into the node (`withProcessResult`) when it resolves. A second call for a
+   * node that already has a job returns that job's promise.
+   */
+  run(graph: GraphDoc, nodeId: string, opts?: ProcessRunOptions): Promise<ProcessResult>;
+  cancel(nodeId: string, projectId?: string): void;
+  cancelAll(projectId?: string): void;
+  /** Forget a finished / failed / cancelled job (its badge goes away). */
+  dismiss(nodeId: string, projectId?: string): void;
+  /** Delete a node's stored data. The caller then clears the handle in the node's params (`withProcessResult(..., null)`). */
+  clear(nodeId: string, projectId?: string): Promise<void>;
+  /** Every job the scheduler knows (all open projects), newest last. */
+  jobs(): ProcessJob[];
+  job(nodeId: string, projectId?: string): ProcessJob | null;
+  subscribe(listener: (e: ProcessEvent) => void): () => void;
+  /** The same state the engine uses for the node's cache key (never evaluates anything). */
+  status(graph: GraphDoc, nodeId: string): ProcessStatus | null;
+  /** Export gate: processes upstream of the outputs (empty = every enabled output) that an export needs and that are not done. */
+  pending(graph: GraphDoc, outputs?: string[]): PendingProcess[];
+  /** Run every pending process, deepest first, then return the graph with their results written in. */
+  runPending(graph: GraphDoc, outputs: string[], hooks?: ProcessRunPendingHooks): Promise<GraphDoc>;
+  /** What the engine's Host sees for a node (active project only). */
+  live(nodeId: string): ProcessLive | null;
+  /** The project whose jobs may run; other projects' jobs pause (documented in src/io/processes.ts). */
+  setActiveProject(projectId: string | null): void;
+  /** Reasons to hold jobs back: 'paused' (rendering paused / safe mode), 'interacting' (dragging). Playback is read from the player. */
+  setHint(name: 'paused' | 'interacting', on: boolean): void;
+  /** Remove stored data of a project whose process nodes no longer exist. */
+  prune(projectId: string, graph: GraphDoc): Promise<number>;
+  /** How many GPU-heavy jobs may run at once (default 1). */
+  setConcurrency(gpu: number): void;
+}
+
 export interface Io {
   engine: Engine;
   registry: Registry;
@@ -546,8 +674,10 @@ export interface Io {
    * list stays shared. Returns the new project's graph (null if unknown). The caller must then `player.setView` with it.
    */
   switchProject(id: string): Promise<GraphDoc | null>;
-  /** Baked regions (Cache / Bake nodes). */
+  /** Baked regions (Cache / Bake nodes). A thin layer over `processes`. */
   bake: BakeApi;
+  /** Process mode: long jobs outside the render path (bake, clip analysis...). */
+  processes: ProcessApi;
   /** Best-effort memory readout in bytes. */
   memory(): MemoryInfo;
   /** Total GPU memory the app may use (bytes). `set` is remembered across sessions; `auto` goes back to the detected default. */
@@ -617,6 +747,13 @@ export interface ScanLayoutInfo {
   guideOpacity: number;
   /** 8 hex digits identifying the printed project; pages of one set share it. */
   projectId: string;
+  /** Paper layer (0-based) and layers in the set. Absent on sheets printed before layers existed (= layer 0 of 1). */
+  layer?: number;
+  layerCount?: number;
+  /** Onion-skin round (0 = first print). */
+  round?: number;
+  /** The printed picture is the non-photo-blue guide (remove it by colour). */
+  blueGuide?: boolean;
 }
 
 /** Result for one "+" registration mark of a page (marks form a (columns+1) x (rows+1) grid). */
@@ -702,6 +839,10 @@ export interface ScanReport {
   frameWidthPx: number;
   frameHeightPx: number;
   recoveredFrames: number;
+  /** Paper layers found in the photos (1 when the sheets carry no layer number). */
+  layerCount?: number;
+  /** Highest onion-skin round found (0 = first print only). */
+  rounds?: number;
   /** 0-based page numbers that were never supplied (or failed). */
   missingPages: number[];
   /** Frame indices without an image. */
@@ -760,11 +901,38 @@ export interface ScanAnalyzeOptions {
   flatten?: boolean;
 }
 
+/** Where one photo is in a scan run. 'queued' = waiting for a free worker, 'scanning' = running, 'done' = its page is read (check the page report for the outcome), 'failed' = the job itself broke (the page then carries the error), 'cancelled' = stopped by the caller. */
+export type ScanPageState = 'queued' | 'scanning' | 'done' | 'failed' | 'cancelled';
+
+/** One step of a scan run (`ScanProgressHooks.onProgress`). */
+export interface ScanProgressEvent {
+  /** Position of the photo in the list given to `analyze` (same as `ScanPageReport.index`). */
+  index: number;
+  fileName: string;
+  state: ScanPageState;
+  /** Why the job failed (state 'failed'). */
+  error?: string;
+  /** Photos finished so far (done or failed) and photos in this run. */
+  completed: number;
+  total: number;
+  /** How many photos are scanned at the same time (limited by cores and memory). */
+  concurrency: number;
+}
+
+/** Optional extras of `analyze` / `restore`. Not part of the stored session options (functions do not persist). */
+export interface ScanProgressHooks {
+  onProgress?: (event: ScanProgressEvent) => void;
+  /** Abort to stop: queued photos are dropped, running ones are terminated, and the call rejects with an AbortError. */
+  signal?: AbortSignal;
+}
+
 /** Outcome of `Io.scan.analyze`. Holds object URLs: call `dispose()` when the Scan tab closes. */
 export interface ScanResult {
   report: ScanReport;
   /** Recovered frames, indexed by frame number; null where a frame is missing. */
   frames: (ScanFrame | null)[];
+  /** Frames per paper layer (index 0 = layer 0 = same as `frames`). Present only when the sheets have several layers. */
+  layerFrames?: (ScanFrame | null)[][];
   /** Object URL (PNG) of each frame, same indexing. */
   frameUrls: (string | null)[];
   /**
@@ -792,12 +960,25 @@ export interface ScanCommitOptions {
   removeGuide?: boolean;
   /** What to do with frames that could not be recovered (default 'repeat' the previous one). */
   missing?: 'repeat' | 'blank' | 'skip';
+  /** Which paper layer to build (default 0). */
+  layer?: number;
+  /** Take the printed guide (rotoscope sheets) out of the frames: by the original frames when supplied, else by colour (blue) or threshold. */
+  keepOnlyDrawing?: boolean;
+  /** Per-drawing hold counts (frames shot per drawing). With `shootOn` as default. See src/io/print/holds.ts. */
+  holds?: number[];
+  shootOn?: number;
 }
 
 /** Scan-back: turn photos of printed sheets into an animation asset. */
 export interface ScanApi {
   /** Decode photos / scans, find the page markers, align, and cut the frames. Pages may be given in any order. */
-  analyze(files: File[], options?: ScanAnalyzeOptions): Promise<ScanResult>;
+  analyze(files: File[], options?: ScanAnalyzeOptions, hooks?: ScanProgressHooks): Promise<ScanResult>;
+  /**
+   * Add photos to an existing result: only the NEW photos are scanned (in the same parallel pool), the earlier pages keep their results. The new
+   * result replaces `result` (which stays valid until disposed); `ScanPageReport.index` counts the old photos first. Used by "Scan with phone".
+   * Progress events index the new photos only. Absent on implementations that cannot keep per-photo results.
+   */
+  append?(result: ScanResult, files: File[], options?: ScanAnalyzeOptions, hooks?: ScanProgressHooks): Promise<ScanResult>;
   /** Same as `result.reanalyzePage`. */
   reanalyzePage(result: ScanResult, pageIndex: number, manual: ScanManualInput): Promise<ScanResult>;
   /** Create an image-sequence asset in the library from the recovered frames. */
@@ -809,5 +990,59 @@ export interface ScanApi {
    */
   attach(projectId: string, result: ScanResult, options: ScanCommitOptions): Promise<AssetInfo>;
   /** Rebuild a stored session: analyse the photos, then re-apply the manual corrections in photo order. */
-  restore(session: ScanSession): Promise<ScanResult>;
+  restore(session: ScanSession, hooks?: ScanProgressHooks): Promise<ScanResult>;
+
+  /** Geometry of blank sheets for these options (frames, grid, sheets, frame size in mm), without rendering. Throws a readable error when nothing fits. */
+  planBlank(options: PrintBlankOptions): BlankPlanInfo;
+  /** Blank sheets (PDF and/or PNG pages) for animation drawn entirely on paper. No graph needed. Scans back with the normal Scan tab. */
+  printBlank(options: PrintBlankOptions, progress?: (fraction: number, label: string) => void): Promise<ExportedFile[]>;
+  /** Beat frames (0-based timeline frames) found in an audio asset's sound by a simple onset detector. */
+  beatsFromAsset(assetId: string, fps: number): Promise<number[]>;
+  /**
+   * "Print next round": blank boxes continuing the scanned animation with the previous drawing faint (or non-photo blue) in each next
+   * frame's box ('replace' re-prints boxes for the same frames to ink over pencil). Scanning them adds / replaces frames in the same scan project.
+   */
+  printNextRound(result: ScanResult, options: NextRoundInput, progress?: (fraction: number, label: string) => void): Promise<ExportedFile[]>;
+  /** Crop / deskew a photo of paper, tape, scribbles... by four corners (photo pixels, tl tr br bl; omitted = inset rectangle), optionally seamless. */
+  makeTexture(photo: File, options?: TextureOptions): Promise<TexturePreview>;
+}
+
+/** Options for blank sheets: the same object the CLI builds (see `BlankSheetOptions`). */
+export type PrintBlankOptions = BlankSheetOptions;
+
+export interface BlankPlanInfo {
+  frames: number;
+  columns: number;
+  rows: number;
+  perSheet: number;
+  pages: number;
+  cellWidthMm: number;
+  cellHeightMm: number;
+  gutterMm: number;
+}
+
+export interface NextRoundInput extends Omit<BlankSheetOptions, 'frameOffset' | 'round'> {
+  /** 'faint' (grey picture) or 'blue' (non-photo blue) previous drawing inside the box. */
+  onion?: 'faint' | 'blue';
+  onionStrength?: number;
+  mode?: 'append' | 'replace';
+  /** Layer to take the previous drawings from (default 0). */
+  layer?: number;
+}
+
+export interface TextureOptions {
+  quad?: [ScanPoint, ScanPoint, ScanPoint, ScanPoint];
+  seamless?: boolean;
+  /** 0..1, how far the seam cross-fade reaches (default 1). */
+  seamlessStrength?: number;
+  maxSide?: number;
+}
+
+export interface TexturePreview {
+  blob: Blob;
+  width: number;
+  height: number;
+  /** Object URL of the result; revoke with `dispose`. */
+  url: string;
+  dispose(): void;
 }

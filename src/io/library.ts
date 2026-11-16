@@ -21,7 +21,7 @@ import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
 import type { AssetProblem, LibraryAsset, MediaLibrary } from './api';
 import { encodeWav } from './wav';
-import { idbAll, idbDelete, idbPut } from './db';
+import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import type { SignalRouter } from './signals';
 import { uploadExternal } from './upload';
 import { ElementPool, ElementVideo, codecLabel, snapTime, unsupportedHint, unsupportedMessage } from './video-element';
@@ -58,6 +58,9 @@ function extOf(name: string): string {
 }
 
 const MODEL_EXT = ['glb', 'gltf', 'obj'];
+const LUT_EXT = ['cube'];
+const SPLAT_EXT = ['ply', 'splat'];
+const SUBTITLE_EXT = ['srt', 'vtt'];
 
 /** First bytes of a file say whether it really is a 3D model of the kind its name claims. */
 export function sniffModel(ext: string, head: Uint8Array): { ok: boolean; reason?: string } {
@@ -75,6 +78,9 @@ export function isGlbMagic(head: Uint8Array): boolean {
 export function detectKind(file: { name: string; type: string }): Kind | null {
   const ext = extOf(file.name);
   const type = file.type.toLowerCase();
+  if (LUT_EXT.includes(ext)) return 'lut';
+  if (SPLAT_EXT.includes(ext)) return 'splat';
+  if (SUBTITLE_EXT.includes(ext)) return 'subtitles';
   if (MODEL_EXT.includes(ext) || type === 'model/gltf-binary' || type === 'model/gltf+json' || type === 'model/obj') return 'model';
   if (MIDI_EXT.includes(ext) || type === 'audio/midi' || type === 'audio/x-midi' || type === 'audio/mid') return 'midi';
   if (type.startsWith('image/') || IMAGE_EXT.includes(ext)) return 'image';
@@ -425,7 +431,9 @@ export class Library implements MediaLibrary {
     if (!probe) throw new Error('The first frame of the sequence could not be decoded.');
     const { width, height } = probe;
     probe.close();
-    const existing = [...this.infos.values()].find((a) => (a as LibraryAsset).owner === owner);
+    // one hidden working sequence per owner AND paper layer (meta.layer, default 0)
+    const wantLayer = typeof meta?.layer === 'number' ? meta.layer : 0;
+    const existing = [...this.infos.values()].find((a) => (a as LibraryAsset).owner === owner && a.kind === 'video' && (((a as { layer?: number }).layer ?? 0) === wantLayer));
     const id = existing?.id ?? uniqueId('a');
     const info: LibraryAsset = { id, name, kind: 'video', width, height, duration: frames.length / rate, fps: rate, hasAudio: false, owner, hidden: true, ...(meta ?? {}) };
     if (existing) {
@@ -439,7 +447,9 @@ export class Library implements MediaLibrary {
     this.blobs.set(id, frames[0]);
     const record: AssetRecord = { id, added: Date.now(), info, blob: frames[0], frames };
     idbPut('assets', id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
-    this.onInvalidate?.();
+    // A NEW sequence cannot be in any cached result yet: only replacing frames under the same id must flush the engine (a finished
+    // process then invalidates its own node and downstream through its cache key, not the whole cache).
+    if (existing) this.onInvalidate?.();
     this.notify(); // bumps `version`: the player's frame cache key changes
     return info;
   }
@@ -459,6 +469,69 @@ export class Library implements MediaLibrary {
     idbPut('assets', info.id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
     this.notify();
     return info;
+  }
+
+  async addTexture(name: string, blob: Blob): Promise<AssetInfo> {
+    const file = new File([blob], `${name.replace(/[\/:*?"<>|]+/g, '_') || 'texture'}.png`, { type: blob.type || 'image/png' });
+    const [info] = await this.add([file]);
+    if (!info) throw new Error('The texture could not be saved.');
+    const tagged = { ...info, name, shelf: 'textures' } as AssetInfo & { shelf: string };
+    this.infos.set(info.id, tagged);
+    const record: AssetRecord = { id: info.id, added: Date.now(), info: tagged, blob: file };
+    await idbPut('assets', info.id, record).catch((err) => console.warn(`The texture could not be saved for the next session: ${errorMessage(err)}`));
+    this.notify();
+    return tagged;
+  }
+
+  textures(): AssetInfo[] {
+    return [...this.infos.values()].filter((a) => (a as { shelf?: string }).shelf === 'textures' && !(a as LibraryAsset).hidden);
+  }
+
+  async rename(assetId: string, name: string): Promise<void> {
+    const info = this.infos.get(assetId);
+    const clean = name.trim();
+    if (!info || !clean || clean === info.name) return;
+    const next = { ...info, name: clean };
+    this.infos.set(assetId, next);
+    try {
+      const rec = await idbGet<AssetRecord>('assets', assetId);
+      if (rec) await idbPut('assets', assetId, { ...rec, info: next });
+    } catch (err) {
+      console.warn(`The new name of "${clean}" could not be saved for the next session: ${errorMessage(err)}`);
+    }
+    this.notify();
+  }
+
+  assetMeta(assetId: string): { sequence: boolean; bytes: number; shelf?: string } {
+    const frames = this.sequences.get(assetId);
+    const bytes = frames ? frames.reduce((s, b) => s + b.size, 0) : (this.blobs.get(assetId)?.size ?? 0);
+    const shelf = (this.infos.get(assetId) as { shelf?: string } | undefined)?.shelf;
+    return { sequence: !!frames, bytes, ...(shelf ? { shelf } : {}) };
+  }
+
+  /**
+   * Store opaque bytes (a process result: JSON, a typed array) as a hidden asset of `owner`. One asset per (owner, slot): a second call
+   * REPLACES it under the same id. Read it back with `assetBytes`. Same persistence as `attachSequence` (one store for bakes and processes).
+   */
+  async attachBlob(owner: string, slot: string, name: string, blob: Blob, meta?: Record<string, unknown>): Promise<AssetInfo> {
+    const existing = [...this.infos.values()].find((a) => (a as LibraryAsset).owner === owner && (a as { slot?: string }).slot === slot);
+    const id = existing?.id ?? uniqueId('a');
+    const info = { id, name, kind: 'model', width: 0, height: 0, duration: 0, fps: 0, hasAudio: false, owner, hidden: true, slot, ...(meta ?? {}) } as LibraryAsset;
+    this.bytes.delete(id);
+    this.bytesSize.delete(id);
+    this.infos.set(id, info);
+    this.blobs.set(id, blob);
+    const record: AssetRecord = { id, added: Date.now(), info, blob };
+    idbPut('assets', id, record).catch((err) => console.warn(`"${name}" could not be saved for the next session: ${errorMessage(err)}`));
+    // No engine flush: a process result's cache key carries its creation time, and the engine's parsed-JSON memo is keyed by it too.
+    this.notify();
+    return info;
+  }
+
+  /** Set by createIo: what the process scheduler is doing with a node (engine `Host.processLive`). */
+  liveProcess: ((nodeId: string) => import('../engine/types').ProcessLive | null) | null = null;
+  processLive(nodeId: string): import('../engine/types').ProcessLive | null {
+    return this.liveProcess?.(nodeId) ?? null;
   }
 
   async removeOwned(owner: string): Promise<void> {
@@ -512,8 +585,9 @@ export class Library implements MediaLibrary {
     if (!kind) {
       // Unknown name: a GLB is still recognised by its magic bytes.
       if (isGlbMagic(new Uint8Array(await file.slice(0, 4).arrayBuffer()))) kind = 'model';
-      else throw new Error('Unsupported file type. Images, videos, audio, MIDI and 3D models (.glb, .gltf, .obj) can be imported.');
+      else throw new Error('Unsupported file type. Images, videos, audio, MIDI, 3D models (.glb, .gltf, .obj), LUTs (.cube), subtitles (.srt, .vtt) and Gaussian splats (.ply, .splat) can be imported.');
     }
+    if (kind === 'lut' || kind === 'splat' || kind === 'subtitles') return { id: uniqueId('a'), name: file.name, kind, width: 0, height: 0, duration: 0, fps: 0, hasAudio: false };
     if (kind === 'model') {
       const verdict = sniffModel(extOf(file.name) || 'glb', new Uint8Array(await file.slice(0, 64).arrayBuffer()));
       if (!verdict.ok) throw new Error(verdict.reason);
@@ -898,7 +972,7 @@ export class Library implements MediaLibrary {
   private async makeThumbnail(info: AssetInfo): Promise<string | null> {
     const blob = this.blobs.get(info.id);
     if (!blob) return null;
-    if (info.kind === 'model') return MODEL_ICON; // a neutral placeholder: models are not rendered for thumbnails
+    if (info.kind === 'model' || info.kind === 'lut' || info.kind === 'splat' || info.kind === 'subtitles') return MODEL_ICON; // a neutral placeholder: models are not rendered for thumbnails
     if (info.kind === 'image' || this.sequences.has(info.id)) {
       const long = Math.max(info.width, info.height);
       const scale = Math.min(1, THUMB_SIDE / Math.max(1, long));

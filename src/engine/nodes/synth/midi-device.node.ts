@@ -12,7 +12,7 @@ export default defineNode({
   outputs: { midi: { type: 'midi', label: 'MIDI' } },
   params: {
     device: { type: 'device', device: 'midi-input', default: '', label: 'MIDI device', hint: 'Leave on "All devices" to listen to every connected MIDI input.' },
-    channel: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, label: 'Channel (0 = all)' },
+    channel: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, label: 'Channel', hint: '0 = all.' },
     transpose: { type: 'number', default: 0, min: -48, max: 48, step: 1, integer: true, unit: 'st', label: 'Transpose' },
   },
   summary: (p) => `${p.device ? 'one device' : 'all devices'} · ${p.channel ? 'ch ' + p.channel : 'all channels'}`,

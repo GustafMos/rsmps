@@ -218,6 +218,7 @@ so those peaks and that churn show up there as gigabytes that the memory governo
 sequence and its `lazy` input is never evaluated. `ctx.inputSignature('image')` is the structural signature of everything
 upstream (no evaluation, independent of proxy and frame); the node compares it with the one stored at bake time and reports
 `stale`. The hidden `baked*` params are written by the UI from `BakeResult.params`.
+Baking is a **process** (see "Process mode" under Pending rules): the node's `process.run` is the bake job, `Io.bake` is a thin layer over `Io.processes`, and the `baked*` params are the node's result handle.
 `groupOutputWires(graph, nodeIds)` / `groupOutputs(...)` in `graph.ts` list the wires that leave a set of nodes: that is
 where cache nodes go to bake a whole group.
 
@@ -269,3 +270,157 @@ where cache nodes go to bake a whole group.
     sources in step with the wires (new wire = new clip at the end; removed or reordered wire = clips follow their source); the editor
     store calls it on every commit. A node that has both `render` and `audio` must also be listed in the glob of `audio/nodes.ts`
     (the audio worklet only imports what is listed there).
+
+## Pending rules (to be numbered)
+
+- **`ctx.pull(input, { proxy })` evaluates an input at another resolution.** `proxy` is ABSOLUTE (a factor of the full frame, the same number as `EvalRequest.proxy`; clamped to 0.05..1),
+  not relative to `ctx.proxy`; it can be combined with `seconds`. The engine makes a sub-scope of the same evaluation with that proxy: canvas size (`proxySize` in `lib/proxy-size.ts`, the ONE
+  rounding rule shared with the player's `scaleSize`), unit, source decoding and the structural-signature memo follow it; the node memo is per proxy and shared by every pull at that factor in the
+  evaluation. Cache keys already contain the canvas size and unit, so a result made at factor X is found again by anyone who asks for X (a plain evaluation at that proxy, another Render Scale
+  node) and a static upstream stays cached across frames. `ctx.canvasAt(proxy)` gives the canvas (width, height, unit) at a factor. Render Scale (`transform/render-scale`) is the user of it:
+  it pulls its lazy input at `want` and enlarges the result to what the input would have been at `ctx.proxy` (same size by the canvas ratio, unit by the unit ratio). Composition rule:
+  `scale` is absolute; `want = match ? min(scale, ctx.proxy) : scale`. So at export / paused (`ctx.proxy` 1) the look is exactly `scale`; during a coarser playback proxy "follow the preview" never goes finer
+  than the scope (cheaper, a faithful approximation); nested Render Scale nodes do not multiply, the coarsest wins (an inner one that has nothing coarser to do passes the picture through with zero passes);
+  `want == ctx.proxy` (100 %, or already that coarse) is a pass-through of the same texture. Known limit: the output size is predicted by the canvas ratio, so an upstream whose size does not follow the proxy
+  (Pixelate's small art grid, a fixed-size source) is enlarged by that ratio rather than to its true full size; `mix` < 1 pulls the true picture too and then uses its exact size. The result of a pull
+  at another proxy is a normal retained value (valid during `render`).
+- **Playback preview = the whole graph at a proxy, enlarged by the viewer.** The player evaluates the graph with `EvalRequest.proxy` (levels 100 / 75 / 50 / 35 / 25 %), draws the small texture into a canvas of that size
+  and the browser enlarges the canvas (CSS `image-rendering: auto` = bilinear below 100 % zoom, `pixelated` = nearest at 100 % and above). `Player.renderFullFrame()` ("Full res" in the viewer, Shift+R) renders the current frame once with
+  proxy 1 (or the Output's pixel grid) and quality `'final'` and keeps it until the frame, graph or view changes or playback starts. The viewer's "Keep this look" adds a Render Scale node at the preview's factor, so the export matches.
+
+- **Temporal recursion = bounded fold + `ctx.previous()`.** A node that feeds its own output back (video feedback, datamosh) is still stateless:
+  define the result as a pure fold over a bounded window of input frames that depends only on the frame number, and set `usesPrevious: true`.
+  `ctx.previous()` then returns this node's own first image output for frame - 1 when the engine still holds it (same node, params, upstream
+  structure, size, quality, item), else null. Use it only where the fold satisfies `out[f] = step(in[f], out[f-1])` exactly, so cache and fold give
+  identical pixels (test it: play forward on one engine, compare with a cold engine per frame). Make the window restart on frame-number boundaries
+  (`start(f) = (floor(f / K) - 1) * K`), not sliding, or the identity breaks. Do not combine with `maskable` (the cached result is already mixed), and
+  skip `previous()` when any param socket varies with time (`ctx.inputVaries(param)`). Index: `Engine.selfIndex`, bounded to 512 entries.
+- **`ctx.inputVaries(input)`** says whether an input changes with time (`false` = a still: same picture every frame). Use it to skip pulls and
+  not read `ctx.time` at all for static inputs, which keeps the node's own result static and cached. Valid after evaluation (normal inputs) or
+  after the first `pull` (lazy inputs).
+- **Slices in one pass.** The GPU layer has no texture arrays: bind up to 8 slices per pass (`lib/time-slices.ts`, `SLICE_GROUP`) and accumulate in
+  rgba16float, so N slices cost ceil(N / 8) passes, and pull each distinct frame once.
+- **Optical flow encoding** (`lib/optical-flow.ts`): rg = motion from the previous to the current frame as a fraction of image width / height per frame
+  (right / down positive), b = luma of the current frame at flow resolution (reused through `ctx.previous()`), a = 1; rgba16float at the flow grid.
+
+- **Many copies are one pass, one draw.** Duplicating nodes (Array, Scatter, Infinite Zoom, Kaleidoscope) inverse-map each output pixel into the few copies that can
+  reach it (the cell it falls in plus a small neighbourhood, composited back to front) instead of drawing every copy. The neighbourhood size and every other number are uniforms,
+  never WGSL text, so cost does not grow with the copy count and dragging a slider compiles nothing. Where exact inversion is impossible the node says so (Array with per-copy
+  steps is exact up to 25 copies per axis, local beyond). Shared maths lives in `lib/copy-wgsl.ts`.
+- **A loop test must look across the wrap.** The clock wraps (`phase` of the last frame + 1 is 0), so `t.loopCheck` returns `seam = 0` for anything. Use `seamRatio`
+  from `lib/copy-testutil.ts`: it renders every frame of a short loop and compares the step across the wrap with the ordinary steps.
+- **Whole levels / cells / spacings per loop.** Infinite Zoom (levels), Array (cells), 3D Array (spacings) take integer `cycles` params. A per-copy colour that travels with the copy
+  only loops when its period divides the travel; offer a "colour follows the depth on screen" option so the loop can never break.
+- **A node that draws geometry itself** (3D Array) creates its pipeline once per device (WeakMap, like `model-render.ts`), draws with `instance_index` and no instance buffer, uses
+  the pooled scratch buffers / textures, caches its bind group per (uniform buffer, texture), and refuses counts above a stated cap with a readable error.
+- **Per-copy time offset** needs no lazy input: `ctx.pull('image', { seconds })` works on a normal required input (as in Frame Echo). Bind a fixed number of slices (8) and pull each
+  distinct moment once, never per copy.
+- **Batch items are not visible to a node** (rule: nodes never see lists of images), so "each copy shows a different item" is done with a sprite sheet (columns x rows) in the
+  input picture, not with the batch.
+
+- **Colour grading is linear-light and gamut-aware, from one maths file.** `lib/color-math.ts` holds every constant and formula of the grading nodes (white
+  balance, saturation, lift/gamma/gain/CDL, exposure, curves, colour spaces, `.cube` LUTs, the qualifier) as plain TypeScript, `lib/color-wgsl.ts` generates the
+  matching WGSL (`COLOR_WGSL`, functions prefixed `cg_`) from the same constants, and the tests compare the GPU result with the TypeScript reference. A colour
+  node says in its hint which space it works in. Saturation changes never clip: chroma is reduced toward the grey of the same lightness (`cg_gamutLC`). Curve and LUT data go
+  through `gpu.dataTexture` (cached by content) and the tables are memoised by content in `color-math.ts`, so dragging a slider that is not a curve uploads nothing.
+- **Analysis frozen at a chosen frame** (White Balance "Automatic") pulls the input at a fixed time, reads a tiny downsample back once, and memoises the estimate by
+  (node id, `ctx.inputSignature`, frame, method, batch item): a pure memo of a pure function, so the cast never flickers and playback does not stall on a readback.
+- **A new asset kind is three small edits**: the `accept` / `kind` unions in `types.ts` (`lut` was added for `.cube` files), `detectKind` + `probe` in `io/library.ts`, and
+  `fileMatches` / `ACCEPT_*` / `isSourceFor` in the UI. The node reads the bytes with `host.assetBytes` and memoises the parse in a `WeakMap` keyed by the returned buffer.
+- **Compute-based scopes** (`nodes/color/scope.node.ts`): decimate with one `gpu.pass`, count with an atomic compute pass into a pooled cleared scratch buffer, draw with a
+  second compute pass into an `alloc`ed storage texture; both passes share one command encoder. The two bind groups are created per render (not cached): acceptable for a
+  node that only renders when asked to be looked at.
+- **Specks (dropouts, dust, scratches)** live in `lib/specks.ts`: `SPECK_PARAMS` (the "Dropouts / specks" group), `speckUniforms(params, { amount, unit, time })` and the WGSL `SPECKS_WGSL` (`spField` + `spApply`). Analog Video draws them inside its tape pass, the Specks node in one pass of its own. They are laid on scan lines of 2 unit pixels (resolution independent), hashed from (seed, flicker epoch, line, slot) so they loop by whole frame indices, and every setting is a uniform (no recompiles). Reuse it for any new "particles on the picture" effect instead of writing another hash-and-rectangle loop.
+- **Boil / loop-friendly jitter**: a node that moves something by a hash of the frame (Paper / Texture Overlay) takes its pose from `frame mod poses` and reduces `poses` to a divisor of the project length (`lib/boil.ts` `wholeCyclePoses`), so the pattern repeats a whole number of times per loop and the seam is exact. Read the clock only when the effect is on (`boil > 0`), so a still texture stays cached.
+- **Optional reference image input** (Remove Printed Guide `original`): sample it with the same `uv` (it may be another size); when it is not wired, bind the main image to the second texture slot and branch on a `hasOrig` uniform, so one shader serves both cases (no recompiles, rule 24).
+
+- **The 3D family** (3D Object, Image to 3D, SDF 3D; `lib/gen-3d.ts`, `gen-deform.ts`, `gen-sdf2d.ts`, `gen-material.ts`). Raymarched members generate ONE shader per STRUCTURE
+  (which shapes, which Deform features, which pictures are wired, which Material model) and push every number through uniforms, so a slider never compiles anything (a feature
+  that is off is not in the shader at all; the first non-zero value switches it on once). They share the camera input, the lights, cel shading and spin conventions of 3D Object,
+  a bounding-volume early-out before the march, a step cap, edge anti-aliasing from the closest approach of near-miss rays (no 4x supersampling unless `quality: high`) and a `draft`
+  quality that marches at half resolution.
+- **`optionalOutputs` + `ctx.wants(output)`** (kernel seam, 6 lines in `engine.ts`): an output that costs extra work (the 3D nodes' `depth`) is only produced when a wire leaves it or
+  it is the evaluated port. The set of wanted optional outputs is part of the cache key, so wiring one later re-renders the node once; unwired it costs nothing.
+- **Depth encoding** (the `depth` output of the 3D nodes): `rgba16float`, r = g = b = distance from the camera position to the surface along the viewing ray, in scene units
+  (linear; the default camera sits about 4.5 away, objects are about 2 wide), a = 1 where a surface was hit and 0 elsewhere (rgb = 0), not premultiplied, not anti-aliased, one ray
+  per pixel. Custom 3D models are rasterised and produce no depth output.
+- **Deform group** (`DEFORM_PARAMS`, `dNoise`... `dLowFi`): shared by 3D Object (primitives: a change of the distance function; custom models: the vertex shader), Image to 3D and
+  SDF 3D. There is deliberately no standalone Displace 3D node: nodes pass pictures and cameras, not meshes, so there is nothing for it to deform. Amounts are scene units;
+  animated parts take whole `cycles`. Raymarched members shorten the march step by `deformStepScale`, because a deformed distance is no longer exact.
+- **A value type that carries pictures (`material`)**: `MaterialValue` is plain numbers plus optional `ImageValue`s. The kernel identifies it in cache keys by the key of the node
+  that made it (never by stringifying it) and keeps its pictures alive (`retain`/`release`) for as long as that node's cache entry lives, exactly like an image output.
+- **Small signed distance fields of a picture on the GPU** (`lib/gen-sdf2d.ts`): jump flooding on a grid of at most 512 cells (about 2 + log2(grid) tiny passes, recycled as they go),
+  r = signed distance in grid cells (negative inside). A blocky variant reads the occupancy grid for exact staircase edges (pixel art), a smooth variant blurs the lattice out of
+  the zero contour. Made per render of the node that needs it; static pictures hit the node cache.
+- **A lazy multi input hides its wire count from the node.** A node that picks one wire per frame (Frame Interleave) cannot see how many wires it has, so the editor keeps a hidden `count` param in step with the wires (and fills a hidden length from the first wired Media In) in `lib/interleave-graph.ts`, called from `reconcileMediaEdits`. A node built programmatically (tests, CLI graphs) must set `count` itself. The frame maths is one pure function (`lib/interleave.ts`) that the node, its summary and the tests share; the hand-written 12-frame tables in its test are also the spec in RECIPES.md.
+
+- **Phone sensors are a bridge channel, not a new mechanism.** `Host.signal('phone.<session>', channel, seconds)` (the same `Host.signal` as audio bridges; the router answers `phone.*` ids from the live
+  motion store, directly and never from the per-frame history, and answers 0 during an export; the channel `export` is 1 there and `live` is 1 only while packets arrive). Nodes that read it declare
+  `liveTick` (so the player re-renders them) and a recorded take as a JSON param (`lib/motion-take.ts`), read as a pure function of `ctx.time.seconds`: a node with a live source must fall back to its
+  take in an export and throw a plain message when there is none. Smoothing is asked of the bridge by channel name (`yaw@0.35`), never kept in the node.
+- **Rotation order of 3D Object is Rz * Ry * Rx** (`rotationZYX`). Anything that wants to drive `rotX / rotY / rotZ` from an orientation uses `objectRotation(q)` in `lib/motion-math.ts`, which is tested against that matrix.
+
+- **Process mode** (`NodeDef.process`; kernel: `engine/process.ts`, scheduler and store: `io/processes.ts`). A node may declare a long job that runs OUTSIDE the per-frame render path (a bake, a whole-clip analysis, a model).
+  Until it is done the node shows a stand-in; once done it serves what the job stored. Bake (Cache / Bake) and Track ("Analyse clip") are the two built-in users.
+  ```ts
+  process: {
+    title: 'Analyse clip',
+    standIn: 'bypass' | 'preview' | 'last' | 'placeholder',   // what shows until the result is done
+    required?: 'always' | 'once-run' | 'never',               // does an export need it? default 'always'
+    auto?: boolean,                                           // start by itself when stale (default false: the user presses Process)
+    gpu?: boolean,                                            // GPU-heavy: one such job at a time (default true); false = CPU only
+    signature(params, inputSignatures): string,               // identity of what the result depends on (leave display params out)
+    run(job: ProcessCtx): Promise<{ meta?: Record<string, unknown> } | void>,
+    estimate?(params, project): { frames?, bytes?, note? },
+    handle?: { read, write, clear },                          // where the result handle lives in params (default: the reserved param `__process`)
+  }
+  ```
+  - **`run` gets a `ProcessCtx`**: resolved `params`, `options` of this run, `fps / frames / duration / loop / canvas / item`, `host`, `gpu` (`device`, `read`), `signal`,
+    `progress(fraction, note?, detail?)` (UI only), `yield()` (call it between units of work: it lets the UI breathe and waits while the user plays back or drags),
+    `pull(input, { frame | seconds, wire, proxy, quality })` (evaluates what is wired to an input at any time and size; call `release()` on what it returns) and `encodeImage`.
+    Results are written with `store.sequence / blob / json / array` and are only STAGED: they become visible, atomically, when `run` resolves. A cancelled or failed job changes nothing and the previous result stays.
+    The store is the one the bakes always used (hidden assets owned by `bake:<project>:<node>`, persisted in IndexedDB); the scheduler turns the staged items into the `ProcessResult` handle
+    (`signature`, `items` = ids + sizes, `meta`, `bytes`, `createdAt`, `seconds`) and the UI writes it into the node's params, so it is saved with the project, survives reloads, and exports and the CLI see it.
+  - **`render` gets `ctx.process`** (only on nodes that declare `process`): `state` (`none | queued | running | done | stale | failed | missing`), `result`, `servable`, `frame(name, i)`, `bytes / json / array(name)`
+    and `standIn()`. `bypass` = the first picture input passed through (a lazy input is pulled); `placeholder` = a striped, canvas-sized "processing" card with the title and (when the host can rasterise text) a percentage;
+    `preview` = the node's own cheap approximation (render decides from `state`); `last` = the previous result is also served while stale or re-running (`servable`). `standIn()` is the fallback for all of them.
+    Make every input a process node reads from only through the store `lazy`, so a node that serves its result does not evaluate what feeds it (Track and Cache do exactly that).
+  - **Cache key**: the process state and the identity of the stored result (`state | signature | createdAt`) are part of the node's key, NEVER the progress. Finishing a job therefore re-renders exactly this node and what is downstream,
+    and a running job costs the graph nothing. The placeholder's percentage is the one exception, quantised to 10 steps, so a placeholder node re-renders at most 11 times per job.
+    A node without `process` pays nothing: the engine does one field check per node.
+  - **Staleness**: the stored signature differs from `signature(params, inputSignatures)` now -> `stale`. The result is kept, the badge says so, `standIn` rules apply, nothing restarts by itself (unless `auto`).
+    An upstream process finishing writes its handle into its params, which changes everything downstream's structural signature: a downstream process is then stale too (it depends on that result), as it should be.
+    `missing` = the handle exists but its stored data is gone (cleared storage, another machine): the stand-in shows and the panel says so.
+  - **Export rule**: an export must never silently contain a stand-in. `pendingProcesses(graph, registry, status, outputs)` lists the processes upstream of the outputs that are not done and that `required` asks for
+    (`'never'`: the stand-in is exactly what the node computes, Cache / Bake; `'once-run'`: only once a result is referenced, then losing or outdating it must not fall back, Track). A process that is done and reads only lazy inputs hides what is before it.
+    The app exporter stops with a `ProcessPendingError` (the list) unless the request says `runProcesses: true`, in which case it runs them first and reports each result through `onProcessResult`; the editor asks the user first.
+    The CLI fails with the list unless `--process` is given (it then runs them in memory for that render only; processes that store picture sequences cannot run headlessly).
+  - **Scheduler** (`ProcessScheduler`, pure): FIFO; ONE GPU-heavy job at a time (`setConcurrency`), CPU jobs (`gpu: false`) run beside it (2); one job per node. Jobs belong to a project + node. They HOLD at their next `yield()`
+    while the player plays, the user drags, rendering is paused (safe mode) or another project is open (a project switch clears the engine cache and trims the GPU, so a job running on would thrash it): the job keeps its place and
+    resumes by itself, a held job gives its slot to a runnable one. Nothing half-done is persisted and there are no checkpoints: a job restarts from zero. Cancel, retry and dismiss are scheduler operations; failures keep their message.
+  - **Writing a process**: keep `signature` cheap and free of display params; put the heavy loop in `run` with a `yield()` per unit; stage results, do not write anywhere else; have `render` serve `ctx.process` and fall back to `standIn()`.
+    A test needs the harness plus `MemoryProcessLibrary` and `ProcessRuntime` (see `io/process-mode.test.ts`, a 12-frame job served from the store with zero upstream renders).
+
+- **Gaussian splats** (`lib/splat-*.ts`; nodes Gaussian Splat `splat-3d` and Picture to Splats `image-to-splats`). `SplatCloud` (`lib/splat-cloud.ts`) is structure-of-arrays f32 in the FILE's own frame: positions, linear scales,
+  unit quaternion (w, x, y, z = `rot_0..3`), base colour (display-referred, `0.28209479177387814 * f_dc + 0.5`, not clamped), opacity (sigmoid), optional spherical-harmonics DEGREE 1 (`sh1`, 9 floats per splat; higher degrees in a file are read past
+  and discarded), exact bounds and robust "core" bounds (1..99 percentile box, 99th-percentile radius) that ignore floaters and drive the node's fit and framing. Parsers are pure functions of bytes (`lib/splat-ply.ts`: standard 3DGS binary `.ply`,
+  antimatter15's 32-byte `.splat`; compressed, ASCII, big-endian, SPZ/gzip and non-splat PLYs are refused with a readable `SplatError`) and the node memoises the parse per `ArrayBuffer` like 3D models.
+- **A splat asset is a standard 3DGS `.ply` (hand-off for reconstruction).** Asset kind `splat` (`accept: 'splat'`, extensions `.ply`, `.splat`) was added the usual three ways (types.ts unions, `detectKind` / `probe` in `io/library.ts`, `fileMatches` /
+  `ACCEPT_*` / `isSourceFor` in the UI). A later process that trains or reconstructs a cloud (from video) builds a `SplatCloud`, writes it with `writeSplatPly(cloud, '+y')` (properties x y z nx ny nz f_dc_* f_rest_0..8 opacity scale_* rot_*, binary little endian,
+  `comment up +y` so the node's automatic orientation needs no guess) into the asset library, and Gaussian Splat picks it up through its `file` param; nothing else in the engine changes. Write in the tool's frame (y up) or say so in the `comment up` line.
+- **Splat order is the cost; sort only when the view changes.** Sorted mode orders centres back to front by depth along the view direction with a 16-bit counting sort on the CPU (`sortBackToFront`; about 2 / 13 / 25 ms for 100k / 500k / 1M splats; ties keep index order,
+  so it is a pure function). The sort is keyed by the cloud id and the SNAPPED view in file space (`sortView`: position grid radius/512, direction grid 1/1024): every camera inside one cell gives the identical order, so the cache cannot change what a render
+  produces, and sliders (size, opacity, crop, colour) never sort. The order lives in a per-cloud GPU buffer remembered by its key; `Splat blending: Automatic` sorts for export and still preview and uses order-independent weighted blending (draft, no sort) only while playing
+  at a reduced proxy. No Web Worker: the engine has none, headless / export need the order synchronously, and the sort is a few milliseconds. `splatDebug` (lib/splat-render.ts) counts sorts, uploads, pipelines and depth passes for tests.
+- **Splat cloud buffers follow the model-3d recipe**: an LRU of at most 3 clouds / 640 MB in storage buffers made with `gpu.createBuffer(..., 'splat-buffer')` (64 bytes per splat + order + SH), destroyed on eviction and when the device was replaced; one pipeline per
+  structure (source x sorted/draft x with/without depth) per device, every number in a 26-slot uniform array (rule 24); bind groups cached per (uniform buffer, buffers/textures); render targets are pooled `scratchTexture`s (rgba16float) composited by `gpu.pass`.
+- **Splat camera and projection.** Perspective and orthographic are exact (EWA: 2D covariance = J W Sigma W^T J^T plus a 0.3 px low pass, optional Mip-Splatting opacity compensation, eigen axes, quad to K sigma with K = min(3.3, sqrt(2 ln(255 alpha))), maxPix clamp, frustum and
+  tiny-splat culling in the vertex shader). Fisheye, panoramic and cylindrical cameras are drawn with a perspective lens (5..120 degrees). The formulas are written out in `lib/splat-math.ts` and tested against projecting samples of the Gaussian and against rendered pixels.
+- **Picture to Splats makes the cloud in the vertex shader** (instance index -> grid cell -> unprojection through the capture camera -> covariance from the neighbouring depths, flat along the surface normal), with no readback and no sort: the draw ORDER is an
+  occlusion-compatible traversal of the grid (McMillan, `pictureOrder`: rows outer, columns inner, each from the outside towards the epipole, the new camera's centre projected into the picture, direction reversed when the camera is behind the picture plane). Exact for a single-layer
+  depth picture, so video frames and 3D-node renders work at full speed with premultiplied over-blending and no depth buffer. Depth encodings: brightness (near white / near black, between Near and Far distances) or the 3D family's Depth output (`rgba16float`, r = distance
+  along the capture ray in scene units, a = hit mask; wire the SAME 3D Camera into Capture camera). Without a Depth input the depth is a labelled guess (flat card, brightness, centre bulge).
+
+- **Depth conventions live in `lib/depth.ts`.** Picture depth (a depth map): r = g = b = d in 0..1, WHITE = NEAR, alpha 1; read by Picture to Splats (default "White = near"), Depth Slice, Lens Blur (focus depth on the same scale) and Image to 3D relief, written by Depth from Picture (`depth-estimate`, rgba16float). Scene depth (the 3D family's `depth` output, previous rule): distance in scene units + hit alpha. `pictureToScene` / `sceneToPicture` and the WGSL `DEPTH_WGSL` convert with a near and a far distance (picture 1 = near units, picture 0 = far units); the Depth Convert node (`depth-convert`) exposes them. A new depth producer or consumer uses these, it does not invent a third convention.
+- **Depth from Picture = fixed-range cues, one frozen measurement.** Every cue maps a FIXED range to 0..1 (nothing is normalised by the frame's min / max), so video cannot flicker. The only per-picture analyses are memoised pure functions keyed by (node id, `inputSignature`, moment, settings), like automatic white balance: the subject colour models (`lib/mask-subject-gpu.ts`: `analyseSubject` reads one 128 px thumbnail, `subjectScore` is pure GPU and is the same code Subject Mask runs) and, with *Stabilize*, the depth range. A still picture is analysed once and cached by the engine; a moving one is analysed at *Analyze at* and scored on the GPU every frame, with no readback in the per-frame path (a test counts `gpu.read` calls).
+- **Edge-aware work at reduced size.** The depth is computed at a quarter / half / full of the picture (`quality`), smoothed with a separable cross-bilateral filter guided by the work-size picture compared in a square-root (perceptual) space so dark edges count, and enlarged with a 3x3 joint-bilateral upsample against the full-size picture. Feature averages (`blurDown`) are made at a reduced size in rgba16float (an rgba8 intermediate would quantise small ratios). A node whose inputs share a name with a param (here `subject`) must rename the input: the registry refuses a name that is both.

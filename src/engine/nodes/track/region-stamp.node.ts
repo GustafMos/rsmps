@@ -35,7 +35,7 @@ export default defineNode({
       type: 'enum',
       default: 'center',
       options: [
-        { value: 'center', label: 'Centre of the box' },
+        { value: 'center', label: 'Center of the box' },
         { value: 'top', label: 'On top of the box' },
         { value: 'bottom', label: 'Below the box' },
       ],

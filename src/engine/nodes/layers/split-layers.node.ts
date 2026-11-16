@@ -23,7 +23,7 @@ export default defineNode({
     background: { type: 'image', label: 'Background' },
   },
   params: {
-    shrink: { type: 'number', default: 0.5, min: 0, max: 50, step: 0.25, unit: 'px', label: 'Shrink foreground edge' },
+    shrink: { type: 'number', default: 0.5, min: 0, max: 50, step: 0.25, unit: 'px', label: 'Shrink edge', hint: 'Shrinks the foreground edge.' },
     feather: { type: 'number', default: 0.75, min: 0, max: 50, step: 0.25, unit: 'px', label: 'Feather foreground' },
     decontaminate: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Decontaminate edge' },
     grow: { type: 'number', default: 4, min: 0, max: 200, step: 0.5, unit: 'px', label: 'Grow hole', hint: 'How far past the mask the background fill starts, so the subject halo is not smeared in.' },

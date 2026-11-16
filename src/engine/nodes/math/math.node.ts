@@ -4,22 +4,22 @@ import { mod } from '../../lib/util-time';
 const BINARY = ['add', 'subtract', 'multiply', 'divide', 'power', 'min', 'max', 'modulo'] as const;
 
 const OPS = [
-  { value: 'add', label: 'Add  (A + B)' },
-  { value: 'subtract', label: 'Subtract  (A - B)' },
-  { value: 'multiply', label: 'Multiply  (A × B)' },
-  { value: 'divide', label: 'Divide  (A ÷ B)' },
-  { value: 'power', label: 'Power  (A ^ B)' },
+  { value: 'add', label: 'Add A + B' },
+  { value: 'subtract', label: 'Subtract A−B' },
+  { value: 'multiply', label: 'Multiply A × B' },
+  { value: 'divide', label: 'Divide A ÷ B' },
+  { value: 'power', label: 'Power A ^ B' },
   { value: 'min', label: 'Smaller of A, B' },
   { value: 'max', label: 'Larger of A, B' },
-  { value: 'modulo', label: 'Remainder  (A mod B)' },
+  { value: 'modulo', label: 'Remainder A mod B' },
   { value: 'abs', label: 'Absolute value of A' },
   { value: 'floor', label: 'Round A down' },
   { value: 'ceil', label: 'Round A up' },
   { value: 'round', label: 'Round A to nearest' },
-  { value: 'sin', label: 'Sine of A (radians)' },
-  { value: 'cos', label: 'Cosine of A (radians)' },
+  { value: 'sin', label: 'Sine of A' },
+  { value: 'cos', label: 'Cosine of A' },
   { value: 'sqrt', label: 'Square root of A' },
-  { value: 'negate', label: 'Negate A  (-A)' },
+  { value: 'negate', label: 'Negate A' },
 ] as const;
 
 const isBinary = (op: string) => (BINARY as readonly string[]).includes(op);
@@ -93,7 +93,7 @@ export default defineNode({
     op: { type: 'enum', default: 'add', options: OPS, label: 'Operation' },
     a: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'A' },
     b: { type: 'number', default: 1, min: -1000000, max: 1000000, step: 0.01, label: 'B', visibleIf: (p) => isBinary(String(p.op)) },
-    clamp: { type: 'bool', default: false, label: 'Clamp result to 0..1' },
+    clamp: { type: 'bool', default: false, label: 'Clamp 0..1' },
   },
   summary: (p) => {
     const sym: Record<string, string> = { add: '+', subtract: '-', multiply: '×', divide: '÷', power: '^', modulo: 'mod' };

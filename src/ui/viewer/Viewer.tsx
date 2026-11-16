@@ -8,6 +8,7 @@ import { MenuPopup, type MenuItem } from '../components/Menu';
 import { missingCapabilities } from '../lib/requirements';
 import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
+import { safetyStore } from '../safety';
 import { PaintOverlay } from './PaintOverlay';
 import { PointsOverlay } from './PointsOverlay';
 import { FrameControl, useFrameMenuItems } from './FrameControl';
@@ -35,10 +36,19 @@ export function Viewer() {
   const imageSize = usePlayer((s) => s.imageSize);
   const fps = usePlayer((s) => s.fps);
   const proxy = usePlayer((s) => s.proxyPct);
+  const pixelSize = usePlayer((s) => s.pixelSize);
+  const lastProxy = usePlayer((s) => s.lastProxyPct);
+  const fullRes = usePlayer((s) => s.fullRes);
+  const renderPaused = useSelector(safetyStore, (s) => s.paused);
+  // With an Output pixel size the player renders on the art grid on purpose: that is not a playback proxy.
+  const previewPct = pixelSize > 1 ? 100 : proxy;
+  // What "Keep this look" uses: the scale the preview shows now, else the last playback proxy seen, else 25 %.
+  const keepPct = previewPct < 100 ? previewPct : (lastProxy ?? 25);
   const playing = usePlayer((s) => s.playing);
   const errors = usePlayer((s) => s.errors);
   const viewedId = useEd((s) => s.viewedNodeId);
   const viewedNode = useEd((s) => s.graph.nodes.find((n) => n.id === s.viewedNodeId));
+  const canFull = !!viewedNode && !renderPaused;
   const item = useEd((s) => s.item);
   const count = useEd((s) => batchCount(s.graph, ed.registry));
   const projW = useEd((s) => s.graph.project.width);
@@ -256,7 +266,15 @@ export function Viewer() {
             <span className="rs-viewer__name">{nodeTitle}</span>
             {imageSize && <span className="rs-num">{imageSize.width}×{imageSize.height}</span>}
             <span className="rs-num" title="Measured frames per second">{playing ? `${fps} fps` : 'paused'}</span>
-            {proxy < 100 && <span className="rs-num" title="Playback proxy: the viewer renders at reduced resolution while playing" style={{ color: 'var(--yellow)' }}>proxy {proxy}%</span>}
+            <span
+              className="rs-num"
+              title={previewPct < 100 ? 'Preview scale: the whole graph is rendered at this share of the full resolution (the playback proxy), then enlarged' : 'Preview scale: full resolution'}
+              style={previewPct < 100 ? { color: 'var(--yellow)' } : undefined}
+            >
+              Preview {previewPct}%
+            </span>
+            {fullRes === 'rendering' && <span className="rs-viewer__spin" role="status" aria-label="Rendering the full-resolution frame" title="Rendering the full-resolution frame…" />}
+            {fullRes === 'shown' && <span className="rs-viewer__badge" title="This is the current frame rendered once at final quality. It stays until you change frame, graph or view, or press play.">Full res</span>}
           </>
         ) : (
           <span className="rs-viewer__name">No view</span>
@@ -270,6 +288,25 @@ export function Viewer() {
           <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.setItem(item + 1)} aria-label="Next batch item"><Icon name="chevronRight" /></button>
         </div>
       )}
+
+      <div className="rs-viewer__look rs-viewer__chip" data-nodrag>
+        <button
+          className={`rs-btn rs-btn--ghost${fullRes !== 'off' ? ' is-on' : ''}`}
+          disabled={!canFull}
+          onClick={() => io.player.renderFullFrame()}
+          title="Render this frame once at full resolution and final quality, whatever the preview scale (shortcut: Shift+R, rebindable)"
+        >
+          <Icon name="focus" /> Full res
+        </button>
+        <button
+          className="rs-btn rs-btn--ghost"
+          disabled={!viewedNode}
+          onClick={() => ed.keepPreviewLook(keepPct)}
+          title="Adds a Render Scale node before the output so the export looks like this preview"
+        >
+          <Icon name="pin" /> Keep this look
+        </button>
+      </div>
 
       <FrameControl frame={level < 2} pix={level < 1} />
       <div className="rs-viewer__tools rs-viewer__chip" data-nodrag>

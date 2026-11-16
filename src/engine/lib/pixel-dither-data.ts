@@ -22,29 +22,29 @@ const FAMILY_LABEL: Record<DitherFamily, string> = {
   none: 'None',
   ordered: 'Ordered',
   pattern: 'Pattern',
-  blend: 'Palette blend',
+  blend: 'Palette',
   diffusion: 'Diffusion',
 };
 
 const A = (id: string, label: string, family: DitherFamily): DitherAlgorithm => ({ id, label: `${FAMILY_LABEL[family]} · ${label}`, family });
 
 export const DITHER_ALGORITHMS: DitherAlgorithm[] = [
-  A('threshold', 'Nearest colour (no dither)', 'none'),
+  A('threshold', 'Nearest color', 'none'),
   A('bayer-2', 'Bayer 2×2', 'ordered'),
   A('bayer-4', 'Bayer 4×4', 'ordered'),
   A('bayer-8', 'Bayer 8×8', 'ordered'),
   A('bayer-16', 'Bayer 16×16', 'ordered'),
   A('blue-noise', 'Blue noise', 'ordered'),
-  A('clustered-dot-4', 'Clustered dot 4×4', 'ordered'),
-  A('clustered-dot-8', 'Clustered dot 8×8', 'ordered'),
+  A('clustered-dot-4', 'Cluster 4×4', 'ordered'),
+  A('clustered-dot-8', 'Cluster 8×8', 'ordered'),
   A('white-noise', 'White noise', 'ordered'),
-  A('line-horizontal', 'Horizontal lines', 'pattern'),
-  A('line-vertical', 'Vertical lines', 'pattern'),
-  A('line-diagonal', 'Diagonal lines', 'pattern'),
+  A('line-horizontal', 'Horizontal', 'pattern'),
+  A('line-vertical', 'Vertical', 'pattern'),
+  A('line-diagonal', 'Diagonal', 'pattern'),
   A('checker', 'Checkerboard', 'pattern'),
   A('dots', 'Dot screen', 'pattern'),
   A('crosshatch', 'Crosshatch', 'pattern'),
-  A('yliluoma', 'Yliluoma (two-colour mix)', 'blend'),
+  A('yliluoma', 'Yliluoma', 'blend'),
   A('floyd-steinberg', 'Floyd–Steinberg', 'diffusion'),
   A('false-floyd-steinberg', 'False Floyd–Steinberg', 'diffusion'),
   A('atkinson', 'Atkinson', 'diffusion'),
@@ -57,7 +57,7 @@ export const DITHER_ALGORITHMS: DitherAlgorithm[] = [
   A('shiau-fan', 'Shiau–Fan', 'diffusion'),
   A('stevenson-arce', 'Stevenson–Arce', 'diffusion'),
   A('simple-2d', 'Simple 2D', 'diffusion'),
-  A('riemersma', 'Riemersma (Hilbert curve)', 'diffusion'),
+  A('riemersma', 'Riemersma', 'diffusion'),
 ];
 
 export function algorithmFamily(id: string): DitherFamily {

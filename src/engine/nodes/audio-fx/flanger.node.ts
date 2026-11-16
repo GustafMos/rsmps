@@ -14,7 +14,7 @@ export default defineNode({
   params: {
     rate: { type: 'number', default: 0.3, min: 0.02, max: 5, step: 0.01, unit: 'hz', label: 'Speed' },
     depth: { type: 'number', default: 0.7, min: 0, max: 1, step: 0.01, label: 'Depth' },
-    delay: { type: 'number', default: 2, min: 0.2, max: 8, step: 0.1, label: 'Centre delay (ms)' },
+    delay: { type: 'number', default: 2, min: 0.2, max: 8, step: 0.1, label: 'Center delay ms' },
     feedback: { type: 'number', default: 0.5, min: -0.95, max: 0.95, step: 0.01, label: 'Feedback' },
     mix: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Mix' },
   },

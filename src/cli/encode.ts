@@ -72,12 +72,12 @@ export const CODECS: Record<VideoCodec, CodecSpec> = {
     audio: AAC,
   },
   prores: {
-    id: 'prores', ext: 'mov', alpha: false, even: false, label: 'ProRes 422 HQ',
+    id: 'prores', ext: 'mov', alpha: false, even: false, label: 'ProRes-compatible 422 HQ',
     args: () => ['-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le', '-vendor', 'ap10'],
     audio: PCM,
   },
   prores4444: {
-    id: 'prores4444', ext: 'mov', alpha: true, even: false, label: 'ProRes 4444 + alpha',
+    id: 'prores4444', ext: 'mov', alpha: true, even: false, label: 'ProRes-compatible 4444 + alpha',
     args: () => ['-c:v', 'prores_ks', '-profile:v', '4', '-pix_fmt', 'yuva444p10le', '-alpha_bits', '16', '-vendor', 'ap10'],
     audio: PCM,
   },

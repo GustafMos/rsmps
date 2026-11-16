@@ -11,6 +11,11 @@ export interface PlayerSlice {
   timings: ReadonlyMap<string, number>;
   fps: number;
   proxyPct: number;
+  /** The last reduced preview scale (percent) seen while the preview was below 100 %, or null if none yet. "Keep this look" uses it when the preview is at 100 % because playback stopped. */
+  lastProxyPct: number | null;
+  fullRes: 'off' | 'rendering' | 'shown';
+  /** Output pixel size in effect (1 = off): the preview scale readout is not a playback proxy then. */
+  pixelSize: number;
   imageSize: { width: number; height: number } | null;
   totalFrames: number;
   audio: { needed: boolean; running: boolean; micNodes: number };
@@ -32,6 +37,9 @@ export function createPlayerStore(io: Io): Store<PlayerSlice> {
     timings: EMPTY,
     fps: 0,
     proxyPct: 100,
+    lastProxyPct: null,
+    fullRes: 'off',
+    pixelSize: 1,
     imageSize: null,
     totalFrames: 1,
     audio: { needed: false, running: false, micNodes: 0 },
@@ -46,6 +54,9 @@ export function createPlayerStore(io: Io): Store<PlayerSlice> {
       timings: sameMap(cur.timings, timings) ? cur.timings : timings,
       fps: Math.round(s.measuredFps),
       proxyPct: Math.round(s.proxy * 100),
+      lastProxyPct: s.proxy < 0.995 && s.pixelSize <= 1 ? Math.round(s.proxy * 1000) / 10 : cur.lastProxyPct,
+      fullRes: s.fullRes ?? 'off',
+      pixelSize: s.pixelSize,
       imageSize:
         cur.imageSize && s.imageSize && cur.imageSize.width === s.imageSize.width && cur.imageSize.height === s.imageSize.height
           ? cur.imageSize
@@ -62,6 +73,9 @@ export function createPlayerStore(io: Io): Store<PlayerSlice> {
       next.timings !== cur.timings ||
       next.fps !== cur.fps ||
       next.proxyPct !== cur.proxyPct ||
+      next.lastProxyPct !== cur.lastProxyPct ||
+      next.fullRes !== cur.fullRes ||
+      next.pixelSize !== cur.pixelSize ||
       next.imageSize !== cur.imageSize ||
       next.totalFrames !== cur.totalFrames ||
       next.audio !== cur.audio

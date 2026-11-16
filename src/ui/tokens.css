@@ -43,6 +43,7 @@
   --sock-midi: #a77dff;
   --sock-regions: #e85d75;
   --sock-camera: #7fd1ff;
+  --sock-material: #ff9ad5;
   --sock-unknown: #8b9099; /* any socket type the UI has no colour for */
 
   /* spacing (4px scale) */

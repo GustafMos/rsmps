@@ -28,6 +28,19 @@ export interface PageScanOptions {
   outputHeight?: number;
   /** Flatten uneven lighting to white using the blank paper (default true). */
   flatten?: boolean;
+  /** Optional profiling sink: milliseconds spent per stage are added under the stage name. */
+  timings?: Record<string, number>;
+}
+
+/** Adds the time since the previous lap to `sink[name]` (no-op without a sink). */
+function stopwatch(sink: Record<string, number> | undefined): (name: string) => void {
+  if (!sink) return () => undefined;
+  let t0 = performance.now();
+  return (name) => {
+    const t = performance.now();
+    sink[name] = (sink[name] ?? 0) + t - t0;
+    t0 = t;
+  };
 }
 
 export interface PageScan {
@@ -160,19 +173,34 @@ interface Aligned {
 }
 
 /** Homography from the four finder centres, refined by template matching on the rectified page, plus the rectified page. */
-export function alignToPage(photo: RasterImage, corners: Pt[], W: number, HH: number): Aligned | null {
+export function alignToPage(photo: RasterImage, corners: Pt[], W: number, HH: number, timings?: Record<string, number>): Aligned | null {
+  const lap = stopwatch(timings);
   const fidMm = finderCentersMm(W, HH);
   const H0 = fitHomography(fidMm, corners);
   if (!H0) return null;
   const ppm = clamp(photoPixelsPerMm(H0, W / 2, HH / 2), 4, 9);
-  const rect0 = rectify(photo, H0, W, HH, ppm);
-  const gray0 = toGrayF(rect0);
   const fidPhoto: Pt[] = [];
   const warnings: string[] = [];
   let fidFound = 0;
+  // Only the four search windows around the finders are rectified for the coarse match (not the whole page).
+  const pageW = Math.round(W * ppm);
+  const pageH = Math.round(HH * ppm);
+  const searchR = Math.max(1, Math.round(4 * ppm));
   for (let i = 0; i < 4; i++) {
     const tpl = finderTemplate(ppm, i === 0);
-    const m = matchTemplate(gray0, rect0.width, rect0.height, tpl, fidMm[i].x * ppm, fidMm[i].y * ppm, 4 * ppm);
+    lap('align.template');
+    const cx = fidMm[i].x * ppm;
+    const cy = fidMm[i].y * ppm;
+    const bx = Math.round(cx - tpl.width / 2);
+    const by = Math.round(cy - tpl.height / 2);
+    const px0 = Math.max(0, bx - searchR);
+    const py0 = Math.max(0, by - searchR);
+    const patch = rectify(photo, H0, W, HH, ppm, { x0: px0, y0: py0, x1: Math.min(pageW, bx + searchR + tpl.width), y1: Math.min(pageH, by + searchR + tpl.height) });
+    lap('align.rectify0');
+    const pg = toGrayF(patch);
+    lap('align.gray0');
+    const m0 = matchTemplate(pg, patch.width, patch.height, tpl, cx - px0, cy - py0, 4 * ppm);
+    const m = m0 && { x: m0.x + px0, y: m0.y + py0, score: m0.score };
     if (m && m.score >= 0.5) {
       fidPhoto.push(applyH(H0, m.x / ppm, m.y / ppm));
       fidFound++;
@@ -181,11 +209,14 @@ export function alignToPage(photo: RasterImage, corners: Pt[], W: number, HH: nu
       warnings.push(`Corner marker ${['top-left', 'top-right', 'bottom-right', 'bottom-left'][i]} could not be refined (${m ? `match ${m.score.toFixed(2)}` : 'outside the image'}); using the coarse position.`);
     }
   }
+  lap('align.finderTemplates');
   const H1 = fitHomography(fidMm, fidPhoto) ?? H0;
   const Hinv = invert3(H1);
   if (!Hinv) return null;
-  const rect = fidFound > 0 ? rectify(photo, H1, W, HH, ppm) : rect0;
-  const grayR = fidFound > 0 ? toGrayF(rect) : gray0;
+  const rect = rectify(photo, fidFound > 0 ? H1 : H0, W, HH, ppm);
+  lap('align.rectify1');
+  const grayR = toGrayF(rect);
+  lap('align.gray1');
   return { W, HH, H1, Hinv, fidPhoto, fidFound, rect, grayR, ppm, warnings, peaks: null };
 }
 
@@ -379,6 +410,7 @@ function layoutInfo(header: SheetHeader, g: SheetGeometry): ScanLayoutInfo {
     guide: header.guide,
     guideOpacity: header.guideOpacity,
     projectId: formatProjectId(header.projectId),
+    ...(header.layerCount !== undefined ? { layer: header.layer ?? 0, layerCount: header.layerCount, round: header.round ?? 0, blueGuide: !!header.blueGuide } : {}),
   };
 }
 
@@ -521,7 +553,9 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   const w = photo.width;
   const h = photo.height;
   if (w < 64 || h < 64) return fail(report, 'The image is too small to contain a printed sheet.');
+  const lap = stopwatch(opts.timings);
   const gray = toGray8(photo);
+  lap('gray');
 
   /* ---- 1. corner hypotheses ---- */
   let hyps: Pt[][];
@@ -536,7 +570,9 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
     const small = downscaleGray(gray, w, h, f);
     const radius = clamp(Math.round(Math.min(small.width, small.height) / 10), 12, 120);
     const bin = adaptiveBinarize(small.data, small.width, small.height, radius);
+    lap('finders.downscale+binarize');
     const finders = findFinders(bin, small.width, small.height).sort((a, b) => b.hits - a.hits);
+    lap('finders.search');
     report.foundCorners = finders.slice(0, 8).map((c): ScanPoint => ({ x: c.x * f, y: c.y * f }));
     const quads = rankQuads(finders, 4);
     if (quads.length === 0) {
@@ -553,6 +589,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
       ranked.forEach((r) => moduleHint.set(r.corners, avgModule));
       ranked.forEach((r, ri) => hypList.push({ corners: r.corners, quad: qi, rank: ri }));
     });
+    lap('rotations');
     hyps = hypList.map((h2) => h2.corners);
     report.cornersSource = 'auto';
   }
@@ -617,6 +654,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
       );
     }
   }
+  lap('layout.decode');
   report.corners = cornersObject(corners);
   const geo = geometryFromHeader(header);
   report.layout = layoutInfo(header, geo);
@@ -631,7 +669,8 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   /* ---- 3. homography from the four finders, refined on the rectified page ---- */
   const W = geo.pageWidthMm;
   const HH = geo.pageHeightMm;
-  const al = aligned && Math.abs(aligned.W - W) < 1e-6 && Math.abs(aligned.HH - HH) < 1e-6 ? aligned : alignToPage(photo, corners, W, HH);
+  const al = aligned && Math.abs(aligned.W - W) < 1e-6 && Math.abs(aligned.HH - HH) < 1e-6 ? aligned : alignToPage(photo, corners, W, HH, opts.timings);
+  lap('align.total');
   if (!al) return fail(report, 'The corner markers do not form a usable quadrilateral.');
   report.warnings.push(...al.warnings);
   const { H1, Hinv, fidPhoto, fidFound, rect, grayR, ppm } = al;
@@ -641,6 +680,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   const cols = geo.columns;
   const rows = geo.rows;
   const peaks = pagePeaks(al, geo.markHalfMm, geo.markThickMm);
+  lap('marks.peaks');
   const expected: { x: number; y: number }[] = [];
   for (let r = 0; r <= rows; r++) {
     for (let c = 0; c <= cols; c++) {
@@ -650,6 +690,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   }
   const maxRadius = 0.4 * Math.min(geo.pitchXMm, geo.pitchYMm) * ppm;
   const tracked = trackLattice(expected, peaks, Math.min(5 * ppm, maxRadius), 1.5 * ppm);
+  lap('marks.track');
   const grid: MarkInfo[][] = [];
   for (let r = 0; r <= rows; r++) {
     const rowInfo: MarkInfo[] = [];
@@ -709,7 +750,9 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
   }
 
   /* ---- 5. cut frames ---- */
+  lap('marks.fit');
   const field = opts.flatten === false ? null : estimateWhiteField(rect, geo, ppm);
+  lap('whiteField');
   if (opts.flatten !== false && !field) report.warnings.push('There was not enough blank paper to correct the lighting; frames were not flattened.');
   const dpiPx = Math.min(300 / 25.4, photoPixelsPerMm(H1, W / 2, HH / 2) * 1.5);
   let outW = opts.outputWidth ?? (header.frameW || Math.round(geo.cellWMm * dpiPx));
@@ -732,8 +775,10 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
       maxResidualPx: Math.round(Math.max(...corner.map((m) => m.residual)) * 100) / 100,
     });
   }
+  lap('cutFrames');
   if (frames.length === 0) return fail(report, 'This page carries no frames.');
   const small = Math.max(rect.width, rect.height) > 480 ? resizeRaster(rect, Math.round((rect.width * 480) / Math.max(rect.width, rect.height)), Math.round((rect.height * 480) / Math.max(rect.width, rect.height)), 'area') : rect;
+  lap('thumbnail');
   report.status = report.warnings.length > 0 ? 'warning' : 'ok';
   report.thumbnailKind = 'rectified';
   const missingPenalty = (report.marksExpected - report.marksFound) * 5;

@@ -12,21 +12,21 @@ import type { ImageValue } from '../../types';
  */
 export default defineNode({
   id: 'datamosh',
-  title: 'Data Mosh',
+  title: 'Datamosh Span',
   category: 'filter',
   description:
-    'The look of a video that lost its key frames: during a chosen part of the loop the picture stops updating and is only smeared by the motion of the new frames, so shapes melt and drag. Needs moving footage; a still picture comes back unchanged. Inherently temporal: set the span to 0 length to switch it off.',
-  keywords: ['datamosh', 'mosh', 'glitch', 'melt', 'smear', 'compression', 'key frame', 'i-frame', 'p-frame', 'bloom', 'motion vectors', 'video'],
+    'Datamosh over a chosen span: the look of a video that lost its key frames. During a chosen part of the loop the picture stops updating and is only smeared by the motion of the new frames, so shapes melt and drag. Needs moving footage; a still picture comes back unchanged. Inherently temporal: set the span to 0 length to switch it off. Use this to mosh one moment; for a repeating mosh with automatic key frames use Motion Smear.',
+  keywords: ['datamosh', 'mosh', 'glitch', 'melt', 'smear', 'compression', 'key frame', 'i-frame', 'p-frame', 'bloom', 'motion vectors', 'video', 'data mosh'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
   params: {
     holdStart: { type: 'number', default: 0.3, min: 0, max: 1, step: 0.005, unit: 'norm', label: 'Mosh starts at', group: 'When', hint: 'Position in the loop where the key frame is dropped. Wraps around the loop end.' },
     holdLength: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.005, unit: 'norm', label: 'Mosh lasts', group: 'When', hint: 'Share of the loop. 0 = off.' },
-    refreshEvery: { type: 'number', default: 0, min: 0, max: 240, softMax: 60, step: 1, integer: true, label: 'New key frame every (frames)', group: 'When', hint: '0 = never inside the span. Otherwise the picture snaps back to the real frame this often, then melts again.' },
-    maxFrames: { type: 'number', default: 12, min: 1, max: 96, softMax: 24, step: 1, integer: true, label: 'Frames to melt (limit)', group: 'Quality', hint: 'The most frames of motion that pile up before the picture is rebuilt. Each one re-renders the input once, so this is the cost limit.' },
+    refreshEvery: { type: 'number', default: 0, min: 0, max: 240, softMax: 60, step: 1, integer: true, label: 'Key frame every', group: 'When', hint: '0 = never inside the span. Otherwise the picture snaps back to the real frame this often, then melts again.' },
+    maxFrames: { type: 'number', default: 12, min: 1, max: 96, softMax: 24, step: 1, integer: true, label: 'Max melt frames', group: 'Quality', hint: 'The most frames of motion that pile up before the picture is rebuilt. Each one re-renders the input once, so this is the cost limit.' },
     blockSize: { type: 'number', default: 16, min: 4, max: 128, softMax: 64, step: 1, unit: 'px', label: 'Block size', group: 'Motion', hint: 'Size of the motion blocks. Larger = chunkier smear.' },
-    search: { type: 'number', default: 16, min: 2, max: 128, softMax: 48, step: 1, unit: 'px', label: 'Largest motion to follow', group: 'Motion' },
+    search: { type: 'number', default: 16, min: 2, max: 128, softMax: 48, step: 1, unit: 'px', label: 'Max motion', hint: 'The largest motion that is followed.', group: 'Motion' },
     smear: { type: 'number', default: 1, min: 0, max: 2, step: 0.01, label: 'Smear amount', group: 'Motion', hint: '0 = the held frame stays frozen, 1 = follows the motion exactly, 2 = exaggerated.' },
   },
   summary: (p) => `${Math.round(p.holdLength * 100)}% of loop from ${Math.round(p.holdStart * 100)}%`,

@@ -16,7 +16,7 @@ export default defineNode({
     mask: { type: 'number', default: 0.3, min: 0, max: 1, step: 0.01, label: 'RGB phosphor mask' },
     glow: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Glow' },
     lineSize: { type: 'number', default: 3, min: 1.5, max: 24, step: 0.5, unit: 'px', label: 'Line size', hint: 'Height of one scanline; the phosphor stripes use the same size.' },
-    blackCorners: { type: 'bool', default: true, label: 'Black outside the screen' },
+    blackCorners: { type: 'bool', default: true, label: 'Black outside' },
   },
   summary: (p) => `curve ${Math.round(p.curvature * 100)}% · lines ${Math.round(p.scanlines * 100)}%`,
   render(ctx) {

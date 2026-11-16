@@ -54,7 +54,7 @@ export default defineNode({
       type: 'enum',
       default: 'pico-8',
       label: 'Palette',
-      options: BUILTIN_PALETTES.map((p) => ({ value: p.id, label: `${p.name} (${p.colors.length})` })),
+      options: BUILTIN_PALETTES.map((p) => ({ value: p.id, label: p.name })),
       visibleIf: (p) => p.source === 'builtin',
     },
     custom: {
@@ -65,17 +65,17 @@ export default defineNode({
         [0.8, 0.45, 0.35],
         [0.98, 0.93, 0.8],
       ],
-      label: 'Colours',
+      label: 'Colors',
       visibleIf: (p) => p.source === 'custom',
     },
-    count: { type: 'number', default: 16, min: 2, max: 256, softMax: 64, step: 1, integer: true, label: 'Colours', visibleIf: (p) => p.source === 'extract' },
+    count: { type: 'number', default: 16, min: 2, max: 256, softMax: 64, step: 1, integer: true, label: 'Color count', visibleIf: (p) => p.source === 'extract' },
     method: {
       type: 'enum',
       default: 'kmeans',
       label: 'Method',
       options: [
-        { value: 'kmeans', label: 'K-means (OKLab)' },
-        { value: 'median-cut', label: 'Median cut (OKLab)' },
+        { value: 'kmeans', label: 'K-means' },
+        { value: 'median-cut', label: 'Median cut' },
       ],
       visibleIf: (p) => p.source === 'extract',
     },
@@ -93,8 +93,8 @@ export default defineNode({
     follow: {
       type: 'bool',
       default: false,
-      label: 'Re-extract every frame',
-      hint: 'Uses the CPU on every frame and the palette may flicker. Leave off for a stable, cached palette.',
+      label: 'Every frame',
+      hint: 'Re-extract the palette every frame. Uses the CPU on every frame and the palette may flicker. Leave off for a stable, cached palette.',
       visibleIf: (p) => p.source === 'extract',
     },
     sort: {

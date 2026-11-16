@@ -31,7 +31,7 @@ Image: `docs/screenshots/07a-scan-photos.png` (the photographed sheet and the re
 
 Sound to Numbers listens to the microphone (or any sound in the graph) and turns loudness, bass, treble and pitch into numbers
 that can drive any parameter: scale, rotation, colour, a blur. Sing and the picture moves. It is live only; to export, record
-the take in the Timeline node and it exports like any other clip.
+the take in the Audio Timeline node and it exports like any other clip.
 
 Image: `docs/screenshots/03-audio.png` (Sound to Numbers driving a 3D object, next to the timeline). A screen recording of the
 mic version would be better if you make one.

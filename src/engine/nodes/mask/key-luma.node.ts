@@ -2,7 +2,7 @@ import { defineNode } from '../../define';
 
 const CHANNELS = [
   { value: 'luma', label: 'Luma' },
-  { value: 'lightness', label: 'Lightness (OKLab)' },
+  { value: 'lightness', label: 'Lightness' },
   { value: 'saturation', label: 'Saturation' },
   { value: 'red', label: 'Red' },
   { value: 'green', label: 'Green' },

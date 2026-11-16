@@ -40,7 +40,7 @@ development.
 - 3D objects with their own cameras, gradients, noise, particles, text, keyframes and a curve editor.
 - Masks, subject mask, inpainting, layer splitting, looping parallax.
 - Detect and track: blobs, colour, motion, a tracker, regions to masks, HUD overlays.
-- Audio and MIDI in the same graph: microphone, synths, drums, sampler, effects, a Timeline, and Sound to Numbers to drive
+- Audio and MIDI in the same graph: microphone, synths, drums, sampler, effects, a Audio Timeline, and Sound to Numbers to drive
   pictures with sound.
 - Print and scan back: print frames as sheets, draw on them, photograph them, get the frames back as an animation.
 - Plugins: one JavaScript file adds a node. More than 160 nodes in total.
@@ -52,8 +52,8 @@ and supports the person making it. No licence key, no DRM, no extra features. Pa
 
 ### Not included
 
-- **ProRes and other ffmpeg-only formats are not in the desktop app** (ffmpeg is not bundled). They are available in the free
-  command-line renderer in the source repository, which uses your own ffmpeg.
+- **ProRes-compatible export and video with transparency need FFmpeg, which is not bundled.** The desktop app can fetch it
+  as an optional add-on from its official source when you ask, or use an FFmpeg you already have.
 - The phone-as-camera link is off in the desktop app.
 - No auto-update (new versions are new downloads) and no code signing yet (one-time warning on Windows and macOS).
 

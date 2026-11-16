@@ -21,6 +21,9 @@ import { layoutSheet, sheetMetadata } from '../io/spritesheet';
 import { errorMessage, totalFramesOf } from '../io/util';
 import { CODECS, imageExt, normalizeImageFormat, parseCodec, VideoWriter, writePcmFile, writeStill, type CodecSpec, type ImageFormat } from './encode';
 import { NodeHost } from './host';
+import { pendingProcesses } from '../engine/process';
+import { EvalGate } from '../io/gate';
+import { MemoryProcessLibrary, ProcessRuntime, pendingMessage } from '../io/processes';
 
 type Img = ImageValue | MaskValue;
 export type Kind = 'image' | 'sequence' | 'video' | 'spritesheet' | 'print';
@@ -61,6 +64,11 @@ export interface RenderOptions {
   reporter?: Reporter;
   /** Share a GPU (tests). */
   gpu?: Gpu;
+  /**
+   * Process mode (docs/ENGINE.md): what to do when an Output needs a process that is not done (a stand-in would be exported).
+   * 'fail' (default) stops with the list; 'run' runs them first, in memory, for this render only (`--process`).
+   */
+  processes?: 'fail' | 'run';
 }
 
 export interface PlannedFile {
@@ -148,7 +156,7 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
   const rep = opts.reporter ?? silentReporter;
   const { registry } = opts;
   const ov = opts.overrides ?? {};
-  const graph = opts.graph;
+  let graph = opts.graph;
   const summary: RenderSummary = { items: 0, jobs: 0, files: [], errors: [], skipped: [], plan: [], seconds: 0 };
 
   const { nodes: outs } = selectOutputs(graph, registry, opts.outputs);
@@ -171,6 +179,63 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
   const engine = dry ? null : new Engine(gpu as Gpu, registry, host);
   if (engine) engine.cacheBudget = 512 * 1024 * 1024;
 
+  /** Make one batch item's assets known to the host. Returns an error message, or null. */
+  const registerItemAssets = async (item: number): Promise<{ error: string | null; assets: Set<string> }> => {
+    const itemAssets = new Set<string>();
+    for (const n of graph.nodes) {
+      const def = registry.get(n.type);
+      if (!def || n.bypass) continue;
+      for (const [key, p] of Object.entries(def.params)) {
+        if ((p as { type: string }).type !== 'assets') continue;
+        const list = n.params[key];
+        if (!Array.isArray(list)) continue;
+        const accept = (p as { accept?: string }).accept;
+        const ids = accept === 'image-video' ? [list[item % Math.max(1, list.length)]] : list;
+        for (const id of ids) if (typeof id === 'string') itemAssets.add(id);
+      }
+    }
+    try {
+      for (const id of itemAssets) await host.register(id);
+    } catch (err) {
+      return { error: errorMessage(err), assets: itemAssets };
+    }
+    return { error: null, assets: itemAssets };
+  };
+
+  // Export gate for process mode: never export a stand-in silently.
+  if (engine) {
+    const pending = pendingProcesses(graph, registry, (id) => engine.processStatus(graph, id), usable.map((n) => n.id));
+    if (pending.length) {
+      if (opts.processes !== 'run') {
+        throw new Error(`${pendingMessage(pending)}
+Run them in the app, or pass --process to run them first (headless, results are kept in memory for this render only).`);
+      }
+      const store = new MemoryProcessLibrary();
+      store.gpu = gpu as Gpu;
+      store.onChange = () => engine.clear();
+      host.attachProcessStore(store);
+      const runtime = new ProcessRuntime({
+        engine,
+        gpu: gpu as Gpu,
+        registry,
+        gate: new EvalGate(engine),
+        library: store,
+        host,
+        activeProject: async () => 'cli',
+        encode: async () => {
+          throw new Error('A process that stores picture sequences (Cache / Bake) cannot run headlessly; bake it in the app.');
+        },
+      });
+      rep.info(`Running ${pending.length} process${pending.length === 1 ? '' : 'es'} first: ${pending.map((p) => `${p.label} (${p.title})`).join(', ')}`);
+      const prep = await registerItemAssets(items[0]);
+      if (prep.error) throw new Error(prep.error);
+      graph = await runtime.runPending(graph, usable.map((n) => n.id), {
+        item: items[0],
+        onProgress: (p) => rep.progress(p.label, Math.round(p.fraction * 100), 100),
+      });
+    }
+  }
+
   const used = new Set<string>();
   const tmp = dry ? null : mkdtempSync(join(tmpdir(), 'rsmps-'));
   const total = items.length * usable.length;
@@ -179,26 +244,8 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
   try {
     for (const item of items) {
       // 1. Make this item's assets known to the host.
-      const itemAssets = new Set<string>();
-      let prepError: string | null = null;
-      for (const n of graph.nodes) {
-        const def = registry.get(n.type);
-        if (!def || n.bypass) continue;
-        for (const [key, p] of Object.entries(def.params)) {
-          if ((p as { type: string }).type !== 'assets') continue;
-          const list = n.params[key];
-          if (!Array.isArray(list)) continue;
-          const accept = (p as { accept?: string }).accept;
-          const ids = accept === 'image-video' ? [list[item % Math.max(1, list.length)]] : list;
-          for (const id of ids) if (typeof id === 'string') itemAssets.add(id);
-        }
-      }
+      const { error: prepError, assets: itemAssets } = await registerItemAssets(item);
       let sourceAsset: AssetInfo | null = null;
-      try {
-        for (const id of itemAssets) await host.register(id);
-      } catch (err) {
-        prepError = errorMessage(err);
-      }
 
       let itemGraph = graph;
       for (const out of usable) {

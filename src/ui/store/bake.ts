@@ -1,23 +1,14 @@
 /**
- * Baking from the UI: progress of running bakes, and the actions behind the Bake / Re-bake / Clear buttons and "Bake selection".
+ * Baking from the UI. Baking is a process (src/ui/store/processes.ts): this file keeps the Bake-specific parts: the quality preference,
+ * the frozen-region helper, "Bake selection", and thin wrappers (`bakeNode`, `cancelBake`, `clearBake`) over the generic actions so the
+ * rest of the UI and the shortcuts keep working. Progress and job state live in `processStore`, not here.
  * The graph is only ever edited at the end of a bake (one undo step) and never because something upstream changed: a stale bake is
  * reported, the user decides when to bake again.
  */
-import type { Io } from '../../io/api';
 import type { GraphDoc } from '../../engine/types';
-import { applyBakeParams, bakeSource, clearBakeParams, frozenNodes, insertCacheNodes, servesBake, type BakeStatusDeps, CACHE_TYPE } from '../lib/bake';
-import { createStore } from './createStore';
-import type { Editor } from './editor';
-
-export interface BakeJob {
-  frame: number;
-  frames: number;
-  fraction: number;
-  bytes: number;
-  abort: AbortController;
-}
-
-export const bakeStore = createStore<{ jobs: Record<string, BakeJob> }>({ jobs: {} });
+import { bakeSource, frozenNodes, insertCacheNodes, servesBake, type BakeStatusDeps, CACHE_TYPE } from '../lib/bake';
+import type { AppCtx } from './context';
+import { cancelProcess, clearProcess, jobOf, processStore, runProcess } from './processes';
 
 const QUALITY_KEY = 'rsmps.ui.bakeQuality';
 export type BakeQuality = 'lossless' | 'compressed';
@@ -38,9 +29,9 @@ export function setBakeQuality(q: BakeQuality): void {
   }
 }
 
-type App = { ed: Editor; io: Io };
+type App = AppCtx;
 
-export function statusDeps(app: App, graph = app.ed.state.graph, job?: { fraction: number } | null): BakeStatusDeps {
+export function statusDeps(app: Pick<App, 'ed' | 'io'>, graph = app.ed.state.graph, job?: { fraction: number } | null): BakeStatusDeps {
   return {
     signatureOf: (node, port) => app.io.engine.signatureOf(graph, node, port),
     assetExists: (id) => !!app.io.library.assetInfo(id),
@@ -70,65 +61,31 @@ export function frozenIds(app: Pick<App, 'io'>, graph: GraphDoc): ReadonlySet<st
   return set;
 }
 
-function setJob(id: string, job: BakeJob | null): void {
-  bakeStore.set((s) => {
-    const jobs = { ...s.jobs };
-    if (job) jobs[id] = job;
-    else delete jobs[id];
-    return { jobs };
-  });
+/** The running bake job of a node, as the old `{ fraction }` shape the status helpers take. */
+export function bakeJobOf(app: Pick<App, 'ed'>, nodeId: string): { fraction: number } | null {
+  const j = jobOf(processStore.get().jobs, app.ed.state.activeProject ?? 'project', nodeId);
+  return j && (j.state === 'queued' || j.state === 'running' || j.state === 'paused') ? { fraction: j.progress } : null;
 }
 
 /** Bake (or re-bake) one Cache / Bake node. Resolves true when the frames were stored and the node now serves them. */
-export async function bakeNode(app: App, nodeId: string, quality: BakeQuality = getBakeQuality()): Promise<boolean> {
-  const { ed, io } = app;
-  const graph = ed.state.graph;
-  const node = graph.nodes.find((n) => n.id === nodeId);
+export async function bakeNode(app: App, nodeId: string, quality: BakeQuality = getBakeQuality(), quiet = false): Promise<boolean> {
+  const { ed } = app;
+  const node = ed.state.graph.nodes.find((n) => n.id === nodeId);
   if (!node || node.type !== CACHE_TYPE) return false;
-  if (!bakeSource(graph, nodeId)) {
+  if (!bakeSource(ed.state.graph, nodeId)) {
     ed.toast('Connect a picture to the Cache / Bake node first: there is nothing to bake.', 'info');
     return false;
   }
-  if (bakeStore.get().jobs[nodeId]) return false;
-  const abort = new AbortController();
-  setJob(nodeId, { frame: 0, frames: 1, fraction: 0, bytes: 0, abort });
-  try {
-    const res = await io.bake.bake(graph, nodeId, {
-      quality,
-      signal: abort.signal,
-      item: ed.state.item,
-      onProgress: (p) => setJob(nodeId, { frame: p.frame, frames: p.frames, fraction: p.fraction, bytes: p.bytes, abort }),
-    });
-    // The node may have been deleted while it baked: then there is nothing to write into, and the stored frames are orphans.
-    if (!ed.state.graph.nodes.some((n) => n.id === nodeId)) {
-      await io.bake.unbake(nodeId);
-      return false;
-    }
-    ed.edit((g) => applyBakeParams(g, nodeId, res.params));
-    if (res.itemDependent) ed.toast(`Baked batch item ${(res.item ?? 0) + 1} only: the other items still render live.`, 'info');
-    return true;
-  } catch (err) {
-    if ((err as { name?: string })?.name === 'AbortError') ed.toast('Baking cancelled.', 'info');
-    else ed.toast(err instanceof Error ? err.message : String(err), 'error');
-    return false;
-  } finally {
-    setJob(nodeId, null);
-  }
+  return runProcess(app, nodeId, { options: { quality }, quiet });
 }
 
-export function cancelBake(nodeId: string): void {
-  bakeStore.get().jobs[nodeId]?.abort.abort();
+export function cancelBake(app: App, nodeId: string): void {
+  cancelProcess(app, nodeId);
 }
 
 /** Delete the stored frames and make the node live again. */
 export async function clearBake(app: App, nodeId: string): Promise<void> {
-  cancelBake(nodeId);
-  try {
-    await app.io.bake.unbake(nodeId);
-  } catch (err) {
-    app.ed.toast(err instanceof Error ? err.message : String(err), 'error');
-  }
-  app.ed.edit((g) => clearBakeParams(g, nodeId));
+  await clearProcess(app, nodeId);
 }
 
 /** "Bake selection": a Cache / Bake node after the selected group's picture output(s), then bake them one after the other. */

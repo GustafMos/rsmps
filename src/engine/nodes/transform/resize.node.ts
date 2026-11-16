@@ -29,9 +29,9 @@ export default defineNode({
       type: 'enum',
       default: 'area',
       options: [
-        { value: 'area', label: 'Clean (area average)' },
-        { value: 'bilinear', label: 'Smooth (bilinear)' },
-        { value: 'nearest', label: 'Sharp (nearest, pixel art)' },
+        { value: 'area', label: 'Clean' },
+        { value: 'bilinear', label: 'Smooth' },
+        { value: 'nearest', label: 'Sharp' },
       ],
       label: 'Filter',
       hint: 'Clean averages every covered pixel when shrinking, so there is no aliasing. When enlarging it behaves like Smooth.',

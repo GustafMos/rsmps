@@ -146,7 +146,7 @@ export const newPresetCache = (): { name: string; view: AudioParams | null; src:
 
 /** Option list for a `preset` enum param: Custom plus the bundle names (with display labels). */
 export function presetOptions(labels: Record<string, string>): readonly { value: string; label: string }[] {
-  return [{ value: 'custom', label: 'Custom (use the settings below)' }, ...Object.entries(labels).map(([value, label]) => ({ value, label }))];
+  return [{ value: 'custom', label: 'Custom' }, ...Object.entries(labels).map(([value, label]) => ({ value, label }))];
 }
 
 /** Sine by table lookup with linear interpolation, `phase` in cycles (any real). */

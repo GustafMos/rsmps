@@ -59,7 +59,12 @@ export interface KindRow {
   kind: 'kind';
   y: number;
 }
-export type Row = IoRow | ParamRow | MoreRow | HintRow | LayersRow | KindRow;
+/** The "Type" dropdown of a node that belongs to a convertible family (def.family). */
+export interface FamilyRow {
+  kind: 'family';
+  y: number;
+}
+export type Row = IoRow | ParamRow | MoreRow | HintRow | LayersRow | KindRow | FamilyRow;
 export const HINT_H = 56;
 
 export interface NodeLayout {
@@ -128,6 +133,10 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
   const kindRow = !!def && def.category === 'output' && (def.params as Record<string, ParamDef>).kind?.type === 'enum';
   if (kindRow) {
     rows.push({ kind: 'kind', y });
+    y += ROW_H + 2;
+  }
+  if (def?.family) {
+    rows.push({ kind: 'family', y });
     y += ROW_H + 2;
   }
   const n = Math.max(inputs.length, outputs.length);

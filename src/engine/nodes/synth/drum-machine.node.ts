@@ -16,7 +16,7 @@ const METAL = [1, 1.4471, 1.617, 1.9265, 2.5028, 2.6637];
 const voiceParams: Record<string, import('../../types').ParamDef> = {};
 for (const v of DRUM_VOICES) {
   voiceParams[`${v}Tune`] = { type: 'number', default: 0, min: -12, max: 12, step: 0.1, unit: 'st', label: 'Tune', group: DRUM_LABELS[v] };
-  voiceParams[`${v}Decay`] = { type: 'number', default: 1, min: 0.2, max: 4, step: 0.01, label: 'Decay (x)', group: DRUM_LABELS[v] };
+  voiceParams[`${v}Decay`] = { type: 'number', default: 1, min: 0.2, max: 4, step: 0.01, label: 'Decay', group: DRUM_LABELS[v] };
   voiceParams[`${v}Level`] = { type: 'number', default: 0, min: -30, max: 6, step: 0.1, unit: 'db', label: 'Level', group: DRUM_LABELS[v] };
 }
 
@@ -42,11 +42,11 @@ export default defineNode({
       label: 'Timing',
       group: 'Sequencer',
       options: [
-        { value: 'tempo', label: 'Tempo (BPM)' },
-        { value: 'project', label: 'Fit the pattern to the project length (loops exactly)' },
+        { value: 'tempo', label: 'Tempo BPM' },
+        { value: 'project', label: 'Fit to project' },
       ],
     },
-    bpm: { type: 'number', default: 120, min: 30, max: 300, step: 0.1, label: 'Tempo (BPM)', group: 'Sequencer', visibleIf: (p) => p.sync === 'tempo' },
+    bpm: { type: 'number', default: 120, min: 30, max: 300, step: 0.1, label: 'Tempo BPM', group: 'Sequencer', visibleIf: (p) => p.sync === 'tempo' },
     ...voiceParams,
     gain: { type: 'number', default: -6, min: -60, max: 6, step: 0.1, unit: 'db', label: 'Volume', group: 'Kit' },
   },

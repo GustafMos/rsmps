@@ -5,6 +5,7 @@ import { FID_INSET_MM, FID_MODULE_MM, FID_SIZE_MM, FID_CENTER_MM, STRIP_COLS, ST
 import { FONT_ADVANCE, FONT_HEIGHT, glyph, textWidthPx } from './font';
 import { captionFor, cellRectMm, framesOnPage, markCenterMm, mmToPx, pageHeader, type SheetLayout } from './layout';
 import { createRaster, resizeRaster, type RasterImage } from './raster';
+import { drawFrameBox, drawFrameGuides, drawFrameLabel, drawGhostNumber } from './guides';
 
 export type PrintFrame = RasterImage;
 
@@ -75,13 +76,13 @@ export function drawStrip(img: RasterImage, dpi: number, widthMm: number, module
 }
 
 /** Draw text with the built-in 5x7 font. `px` is the edge of one font pixel in page pixels; (x, y) is the top-left. */
-export function drawText(img: RasterImage, text: string, x: number, y: number, px: number): void {
+export function drawText(img: RasterImage, text: string, x: number, y: number, px: number, color: [number, number, number] = [0, 0, 0]): void {
   let cx = x;
   for (const ch of text) {
     const cols = glyph(ch);
     for (let c = 0; c < 5; c++) {
       for (let r = 0; r < FONT_HEIGHT; r++) {
-        if ((cols[c] >> r) & 1) fillRectAA(img, cx + c * px, y + r * px, cx + (c + 1) * px, y + (r + 1) * px);
+        if ((cols[c] >> r) & 1) fillRectAA(img, cx + c * px, y + r * px, cx + (c + 1) * px, y + (r + 1) * px, color);
       }
     }
     cx += FONT_ADVANCE * px;
@@ -89,7 +90,10 @@ export function drawText(img: RasterImage, text: string, x: number, y: number, p
 }
 
 /** How a frame looks when printed as a drawing guide. Same size as the input, opaque. */
-export function guideAppearance(frame: RasterImage, mode: GuideMode, opacityPercent: number): RasterImage {
+/** Non-photo blue: bright in green and blue, so a scan drops it by colour (see `removeBlueGuide`). */
+export const NON_PHOTO_BLUE: [number, number, number] = [130, 200, 240];
+
+export function guideAppearance(frame: RasterImage, mode: GuideMode, opacityPercent: number, blue = false): RasterImage {
   const { width: w, height: h } = frame;
   const out = createRaster(w, h);
   if (mode === 'blank') return out;
@@ -103,7 +107,13 @@ export function guideAppearance(frame: RasterImage, mode: GuideMode, opacityPerc
   }
   if (mode === 'faded') {
     const k = Math.min(1, Math.max(0, opacityPercent / 100));
-    for (let i = 0; i < w * h; i++) for (let c = 0; c < 3; c++) o[i * 4 + c] = 255 - (255 - o[i * 4 + c]) * k;
+    if (blue) {
+      // the picture's darkness becomes blue ink: white where the picture is white, non-photo blue where it is black
+      for (let i = 0; i < w * h; i++) {
+        const dark = (1 - lum[i] / 255) * k;
+        for (let c = 0; c < 3; c++) o[i * 4 + c] = 255 - dark * (255 - NON_PHOTO_BLUE[c]);
+      }
+    } else for (let i = 0; i < w * h; i++) for (let c = 0; c < 3; c++) o[i * 4 + c] = 255 - (255 - o[i * 4 + c]) * k;
   } else if (mode === 'outline') {
     const at = (x: number, y: number) => lum[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
     for (let y = 0; y < h; y++) {
@@ -113,7 +123,8 @@ export function guideAppearance(frame: RasterImage, mode: GuideMode, opacityPerc
         const e = Math.min(1, Math.hypot(gx, gy) / 4 / 80);
         const v = 255 * (1 - 0.85 * e);
         const i = (y * w + x) * 4;
-        o[i] = o[i + 1] = o[i + 2] = v;
+        if (blue) for (let c = 0; c < 3; c++) o[i + c] = 255 - e * (255 - NON_PHOTO_BLUE[c]);
+        else o[i] = o[i + 1] = o[i + 2] = v;
       }
     }
   }
@@ -140,10 +151,15 @@ export function pagePixelSize(sheet: SheetLayout): { width: number; height: numb
  * Render one page. `getFrame(i)` supplies frame `i` (absolute index, 0-based); it is called only for frames on
  * this page. Frames are resampled to the cell and styled by the sheet's guide mode.
  */
-export function renderPage(sheet: SheetLayout, pageIndex: number, getFrame: (index: number) => PrintFrame): RasterImage {
+export function renderPage(sheet: SheetLayout, pageIndex: number, getFrame: (index: number) => PrintFrame, target?: RasterImage): RasterImage {
   const g = sheet.geometry;
   const { width, height } = pagePixelSize(sheet);
-  const page = createRaster(width, height);
+  // `target` lets a caller reuse one page buffer for a whole set (no 35 MB allocation per page).
+  let page: RasterImage;
+  if (target && target.width === width && target.height === height) {
+    page = target;
+    (page.data as Uint8ClampedArray).fill(255);
+  } else page = createRaster(width, height);
   const dpi = sheet.dpi;
   const count = framesOnPage(sheet, pageIndex);
 
@@ -156,7 +172,7 @@ export function renderPage(sheet: SheetLayout, pageIndex: number, getFrame: (ind
       const y0 = Math.round(mmToPx(r.y, dpi));
       const x1 = Math.round(mmToPx(r.x + r.w, dpi));
       const y1 = Math.round(mmToPx(r.y + r.h, dpi));
-      const guide = guideAppearance(getFrame(pageIndex * sheet.perPage + k), sheet.guide, sheet.guideOpacity);
+      const guide = guideAppearance(getFrame(pageIndex * sheet.perPage + k), sheet.guide, sheet.guideOpacity, sheet.blueGuide);
       const cell = resizeRaster(guide, x1 - x0, y1 - y0, 'auto');
       for (let y = 0; y < cell.height; y++) {
         const dy = y0 + y;
@@ -165,6 +181,8 @@ export function renderPage(sheet: SheetLayout, pageIndex: number, getFrame: (ind
       }
     }
   }
+
+  drawDecor(page, sheet, pageIndex, count);
 
   for (let r = 0; r <= g.rows; r++) {
     for (let c = 0; c <= g.columns; c++) {
@@ -181,4 +199,22 @@ export function renderPage(sheet: SheetLayout, pageIndex: number, getFrame: (ind
   const tw = textWidthPx(caption) * px;
   drawText(page, caption, (width - tw) / 2, mmToPx(g.pageHeightMm - FID_CENTER_MM, dpi) - (FONT_HEIGHT * px) / 2, px);
   return page;
+}
+
+/** Frame boxes, numbers, timing and drawing guides requested by `sheet.decor`. */
+function drawDecor(page: RasterImage, sheet: SheetLayout, pageIndex: number, count: number): void {
+  const d = sheet.decor;
+  if (!d.boxes && !d.numbers && !d.ghostNumbers && !(d.guides && d.guides.length)) return;
+  const g = sheet.geometry;
+  for (let k = 0; k < count; k++) {
+    const r = cellRectMm(g, k % g.columns, Math.floor(k / g.columns));
+    const frame = sheet.frameOffset + pageIndex * sheet.perPage + k;
+    if (d.ghostNumbers) drawGhostNumber(page, sheet.dpi, r, frame);
+    if (d.guides && d.guides.length) drawFrameGuides(page, sheet.dpi, r, d.guides);
+    if (d.boxes) drawFrameBox(page, sheet.dpi, r);
+    if (d.numbers) {
+      const t = d.timing;
+      drawFrameLabel(page, sheet.dpi, r, g.gutterMm, { frame, fps: sheet.fpsX100 / 100, hold: t?.holds?.[frame], beat: t?.beats?.includes(frame) }, !!t);
+    }
+  }
 }

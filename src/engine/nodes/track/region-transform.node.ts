@@ -13,7 +13,7 @@ export default defineNode({
     scale: { type: 'number', default: 1, min: 0.05, max: 10, step: 0.01, label: 'Scale', hint: '1 keeps the size, 1.5 is half again as big.' },
     grow: { type: 'number', default: 0, min: -0.5, max: 0.5, step: 0.005, unit: 'norm', label: 'Grow each side by', hint: 'Fraction of the frame width/height added to every side; negative shrinks.' },
     offset: { type: 'vec2', default: [0, 0], min: -1, max: 1, step: 0.005, unit: 'norm', label: 'Move by' },
-    aspect: { type: 'number', default: 0, min: 0, max: 10, step: 0.01, label: 'Force aspect (width ÷ height)', hint: '0 = leave. 1 = square, 1.78 = 16:9. Measured in image pixels, not frame fractions.' },
+    aspect: { type: 'number', default: 0, min: 0, max: 10, step: 0.01, label: 'Force aspect', hint: '0 = leave. 1 = square, 1.78 = 16:9. Measured in image pixels, not frame fractions.' },
     aspectMode: {
       type: 'enum',
       default: 'grow',
@@ -23,7 +23,7 @@ export default defineNode({
       ],
       label: 'Aspect by',
     },
-    clamp: { type: 'bool', default: true, label: 'Keep inside the frame' },
+    clamp: { type: 'bool', default: true, label: 'Keep in frame' },
   },
   summary: (p) => `×${p.scale}${p.grow ? ` +${p.grow}` : ''}${p.aspect ? ` · ${p.aspect}:1` : ''}`,
   render(ctx) {

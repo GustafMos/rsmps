@@ -2,9 +2,9 @@ import { defineNode } from '../../define';
 import { evalCurve, presetEaseInOut } from '../../lib/util-curve';
 
 export const LOOP_MODES = [
-  { value: 'project', label: 'Follow the project loop switch' },
-  { value: 'always', label: 'Always loop (end flows into start)' },
-  { value: 'never', label: 'Never (hold the end values)' },
+  { value: 'project', label: 'Follow project' },
+  { value: 'always', label: 'Always loop' },
+  { value: 'never', label: 'Never' },
 ] as const;
 
 export default defineNode({

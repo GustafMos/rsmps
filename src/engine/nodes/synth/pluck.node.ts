@@ -16,7 +16,7 @@ export default defineNode({
   params: {
     decay: { type: 'number', default: 2.5, min: 0.1, max: 12, step: 0.1, unit: 's', label: 'Ring time' },
     brightness: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Brightness' },
-    damp: { type: 'bool', default: true, label: 'Mute string on key release' },
+    damp: { type: 'bool', default: true, label: 'Damp on release', hint: 'Mutes the string when the key is released.' },
     gain: { type: 'number', default: -8, min: -60, max: 6, step: 0.1, unit: 'db', label: 'Volume' },
   },
   summary: (p) => `ring ${p.decay.toFixed(1)} s`,

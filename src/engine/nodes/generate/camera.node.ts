@@ -6,11 +6,11 @@ const TAU = Math.PI * 2;
 
 export default defineNode({
   id: 'camera',
-  title: 'Camera',
+  title: '3D Camera',
   category: 'generate',
   description:
-    'A virtual camera for 3D Object nodes. Pick a lens (flat, perspective, fisheye, 360° panorama, cylinder), a viewpoint and optional looping camera motion. Wire it into any number of 3D objects, or give each object its own.',
-  keywords: ['lens', 'view', 'panorama', 'panoramic', 'fisheye', 'isometric', 'orthographic', 'perspective', 'orbit', 'dolly', '360', 'equirectangular', '3d'],
+    'A virtual 3D camera for 3D Object nodes (not the live webcam; see Webcam). Pick a lens (flat, perspective, fisheye, 360° panorama, cylinder), a viewpoint and optional looping camera motion. Wire it into any number of 3D objects, or give each object its own.',
+  keywords: ['lens', 'view', 'panorama', 'panoramic', 'fisheye', 'isometric', 'orthographic', 'perspective', 'orbit', 'dolly', '360', 'equirectangular', '3d', 'virtual camera', 'camera'],
   inputs: {},
   outputs: { camera: { type: 'camera', label: 'Camera' } },
   params: {
@@ -20,9 +20,9 @@ export default defineNode({
       label: 'Lens',
       options: [
         { value: 'perspective', label: 'Perspective' },
-        { value: 'orthographic', label: 'Orthographic (flat)' },
-        { value: 'isometric', label: 'Isometric (pixel-art 3/4 view)' },
-        { value: 'dimetric', label: 'Dimetric (2:1 pixel-art view)' },
+        { value: 'orthographic', label: 'Orthographic' },
+        { value: 'isometric', label: 'Isometric' },
+        { value: 'dimetric', label: 'Dimetric' },
         { value: 'fisheye', label: 'Fisheye' },
         { value: 'panoramic', label: 'Panorama 360°' },
         { value: 'cylindrical', label: 'Cylindrical 360°' },
@@ -33,12 +33,12 @@ export default defineNode({
       default: 'orbit',
       label: 'Viewpoint',
       options: [
-        { value: 'orbit', label: 'Orbit (angle + distance)' },
+        { value: 'orbit', label: 'Orbit' },
         { value: 'threeQuarter', label: 'Three-quarter' },
         { value: 'front', label: 'Front' },
         { value: 'side', label: 'Side' },
         { value: 'top', label: 'Top' },
-        { value: 'free', label: 'Free (position + target)' },
+        { value: 'free', label: 'Free' },
       ],
     },
     motion: {
@@ -61,7 +61,7 @@ export default defineNode({
       step: 1,
       integer: true,
       unit: 'cycles',
-      label: 'Motion cycles per loop',
+      label: 'Motion cycles',
       hint: 'Whole repeats per loop so the motion loops exactly.',
       visibleIf: (p) => p.motion !== 'none',
     },

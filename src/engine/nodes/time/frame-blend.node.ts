@@ -16,7 +16,7 @@ export default defineNode({
       type: 'enum',
       default: 'triangle',
       options: [
-        { value: 'triangle', label: 'Centre-weighted' },
+        { value: 'triangle', label: 'Center-weighted' },
         { value: 'box', label: 'Even' },
       ],
       label: 'Weighting',

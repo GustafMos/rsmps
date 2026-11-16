@@ -1,14 +1,14 @@
 import { ease } from './util-ease';
 
 export const WAVES = [
-  { value: 'sine', label: 'Sine (smooth back and forth)' },
-  { value: 'triangle', label: 'Triangle (steady back and forth)' },
-  { value: 'saw-up', label: 'Ramp up (jumps back)' },
-  { value: 'saw-down', label: 'Ramp down (jumps back)' },
-  { value: 'square', label: 'Square (on / off)' },
-  { value: 'bounce', label: 'Bounce (ball hops)' },
+  { value: 'sine', label: 'Sine' },
+  { value: 'triangle', label: 'Triangle' },
+  { value: 'saw-up', label: 'Ramp up' },
+  { value: 'saw-down', label: 'Ramp down' },
+  { value: 'square', label: 'Square' },
+  { value: 'bounce', label: 'Bounce' },
   { value: 'ping-pong-ease', label: 'Eased ping-pong' },
-  { value: 'steps', label: 'Steps (stop-motion)' },
+  { value: 'steps', label: 'Steps' },
   { value: 'noise', label: 'Smooth random wobble' },
 ] as const;
 

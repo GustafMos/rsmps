@@ -29,6 +29,7 @@
 .rs-wire--midi { stroke: var(--sock-midi); }
 .rs-wire--regions { stroke: var(--sock-regions); }
 .rs-wire--camera { stroke: var(--sock-camera); }
+.rs-wire--material { stroke: var(--sock-material); }
 .rs-wire.is-insert { stroke: var(--select); stroke-width: 4; opacity: 1; }
 .rs-wire.is-pending { stroke-dasharray: 6 4; opacity: 1; }
 .rs-wire.is-cut { stroke: var(--danger); stroke-dasharray: 3 3; opacity: 0.6; }

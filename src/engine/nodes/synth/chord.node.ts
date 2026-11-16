@@ -45,7 +45,7 @@ export default defineNode({
       ],
     },
     inversion: { type: 'number', default: 0, min: 0, max: 3, step: 1, integer: true, label: 'Inversion' },
-    bass: { type: 'bool', default: false, label: 'Add bass note (one octave down)' },
+    bass: { type: 'bool', default: false, label: 'Add bass', hint: 'Adds a bass note one octave down.' },
   },
   summary: (p) => `${p.chord}${p.inversion ? ` inv ${p.inversion}` : ''}`,
   audio: defineAudio({

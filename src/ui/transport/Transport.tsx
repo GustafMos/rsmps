@@ -2,6 +2,7 @@ import type { InputSchema, OutputSchema } from '../../engine/types';
 import { effectiveDuration } from '../../engine/graph';
 import { useEffect, useRef, useState } from 'react';
 import { MemoryMeter } from './MemoryMeter';
+import { ProcessesButton } from './ProcessesButton';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { formatTime } from '../lib/drag';
@@ -80,6 +81,7 @@ export function Transport() {
           </>
         )}
       </div>
+      <ProcessesButton />
       <MemoryMeter />
     </footer>
   );

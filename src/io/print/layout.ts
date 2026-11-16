@@ -35,6 +35,35 @@ export interface PrintOptions {
   name?: string;
   /** 32-bit project id; derived from `name` when absent. */
   projectId?: number;
+  /** Absolute number of the first printed frame (0-based). Onion-skin rounds continue an existing animation. Default 0. */
+  frameOffset?: number;
+  /** Paper layer (0-based) and number of layers in the set (version 2 strip when > 1). */
+  layer?: number;
+  layerCount?: number;
+  /** Onion-skin round (0 = first). */
+  round?: number;
+  /** The printed picture uses the blue guide tone (scan-back removes it by colour). */
+  blueGuide?: boolean;
+  /** Page furniture that does not change what the scanner reads (frame boxes, numbers, drawing guides). */
+  decor?: SheetDecor;
+}
+
+/** Drawing guides printed inside every frame (never part of the strip). */
+export type FrameGuide = 'cross' | 'thirds' | 'safe' | 'grid' | 'horizon' | 'pegs';
+export const FRAME_GUIDES: FrameGuide[] = ['cross', 'thirds', 'safe', 'grid', 'horizon', 'pegs'];
+
+export interface SheetDecor {
+  /** Thin box just outside every frame (outside the area the scanner cuts). */
+  boxes?: boolean;
+  /** Frame number in the gutter above every frame. */
+  numbers?: boolean;
+  /** Very faint large frame number inside the frame (onion-skin placeholder). */
+  ghostNumbers?: boolean;
+  guides?: FrameGuide[];
+  /** Time code, hold counts and beat dots printed beside the frame number (needs `numbers`). */
+  timing?: { holds?: number[]; beats?: number[] };
+  /** Small label naming the paper layer in the caption area. */
+  layerName?: string;
 }
 
 /** What is being printed. */
@@ -81,6 +110,13 @@ export interface SheetLayout {
   pageCount: number;
   projectId: number;
   name: string;
+  /** Absolute index of the first frame of page 0. */
+  frameOffset: number;
+  layer: number;
+  layerCount: number;
+  round: number;
+  blueGuide: boolean;
+  decor: SheetDecor;
 }
 
 export function mmToPx(mm: number, dpi: number): number {
@@ -185,12 +221,16 @@ export function planSheet(opts: PrintOptions, src: SheetSource): SheetLayout {
   if (src.count > 65535) throw new Error('Too many frames to print (limit 65535).');
   const name = (opts.name ?? '').trim();
   const guideOpacity = clamp(Math.round(opts.guideOpacity ?? 35), 5, 100);
+  const frameOffset = clamp(Math.round(opts.frameOffset ?? 0), 0, 65535);
+  const layerCount = clamp(Math.round(opts.layerCount ?? 1), 1, 63);
+  const layer = clamp(Math.round(opts.layer ?? 0), 0, layerCount - 1);
+  if (frameOffset + src.count > 65535) throw new Error('Too many frames to print (limit 65535).');
   const header = headerFor(
     { paper, landscape, cols, rows, cellW10, cellH10, pitchX10, pitchY10, gridX0, gridY0 },
     0,
     pageCount,
     0,
-    src.count,
+    frameOffset + src.count,
   );
   const geometry = geometryFromHeader(header);
   return {
@@ -200,12 +240,18 @@ export function planSheet(opts: PrintOptions, src: SheetSource): SheetLayout {
     guideOpacity,
     frameWidthPx: Math.min(16383, Math.round(src.width)),
     frameHeightPx: Math.min(16383, Math.round(src.height)),
-    totalFrames: src.count,
+    totalFrames: frameOffset + src.count,
     fpsX100: clamp(Math.round(src.fps * 100), 1, 16383),
     perPage,
     pageCount,
     projectId: (opts.projectId ?? projectIdFromString(`${name}|${src.width}x${src.height}|${src.count}|${src.fps}`)) >>> 0,
     name,
+    frameOffset,
+    layer,
+    layerCount,
+    round: clamp(Math.round(opts.round ?? 0), 0, 63),
+    blueGuide: !!opts.blueGuide,
+    decor: opts.decor ?? {},
   };
 }
 
@@ -258,7 +304,7 @@ export function pageHeader(sheet: SheetLayout, pageIndex: number): SheetHeader {
     pitchY: Math.round(g.pitchYMm * 10),
     gridX0: Math.round(g.gridX0Mm * 10),
     gridY0: Math.round(g.gridY0Mm * 10),
-    firstFrame: pageIndex * sheet.perPage,
+    firstFrame: sheet.frameOffset + pageIndex * sheet.perPage,
     totalFrames: sheet.totalFrames,
     fpsX100: sheet.fpsX100,
     frameW: sheet.frameWidthPx,
@@ -266,12 +312,13 @@ export function pageHeader(sheet: SheetLayout, pageIndex: number): SheetHeader {
     guide: sheet.guide,
     guideOpacity: sheet.guide === 'faded' ? sheet.guideOpacity : 100,
     projectId: sheet.projectId,
+    ...(sheet.layerCount > 1 || sheet.round > 0 || sheet.blueGuide ? { layer: sheet.layer, layerCount: sheet.layerCount, round: sheet.round, blueGuide: sheet.blueGuide } : {}),
   };
 }
 
 /** Number of frames printed on a page. */
 export function framesOnPage(sheet: SheetLayout, pageIndex: number): number {
-  return Math.max(0, Math.min(sheet.perPage, sheet.totalFrames - pageIndex * sheet.perPage));
+  return Math.max(0, Math.min(sheet.perPage, sheet.totalFrames - sheet.frameOffset - pageIndex * sheet.perPage));
 }
 
 /** Frames on a page per decoded header. */
@@ -281,9 +328,11 @@ export function framesOnHeaderPage(h: SheetHeader): number {
 
 /** Human-readable caption printed at the foot of each page. */
 export function captionFor(sheet: SheetLayout, pageIndex: number): string {
-  const first = pageIndex * sheet.perPage;
+  const first = sheet.frameOffset + pageIndex * sheet.perPage;
   const last = first + framesOnPage(sheet, pageIndex) - 1;
   const fps = sheet.fpsX100 / 100;
   const name = sheet.name ? sheet.name.toUpperCase().replace(/[^A-Z0-9 ._()#%+/:=-]/g, '').slice(0, 28) : 'PRINT';
-  return `${name}  PAGE ${pageIndex + 1}/${sheet.pageCount}  FRAMES ${first + 1}-${last + 1} OF ${sheet.totalFrames}  ${Number.isInteger(fps) ? fps : fps.toFixed(2)} FPS  ID ${formatProjectId(sheet.projectId).slice(0, 6)}`;
+  const lay = sheet.layerCount > 1 ? `  LAYER ${sheet.layer + 1}/${sheet.layerCount}` : '';
+  const rnd = sheet.round > 0 ? `  ROUND ${sheet.round + 1}` : '';
+  return `${name}${lay}${rnd}  PAGE ${pageIndex + 1}/${sheet.pageCount}  FRAMES ${first + 1}-${last + 1} OF ${sheet.totalFrames}  ${Number.isInteger(fps) ? fps : fps.toFixed(2)} FPS  ID ${formatProjectId(sheet.projectId).slice(0, 6)}`;
 }

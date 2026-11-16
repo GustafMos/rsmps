@@ -116,11 +116,11 @@ function chain(factor: number): (2 | 3)[] {
 
 export default defineNode({
   id: 'upscale-smart',
-  title: 'Upscale',
+  title: 'Smart Upscale',
   category: 'filter',
   description:
     'Enlarges a picture with a method that suits it: crisp pixels, smooth photo-style interpolation (Lanczos or bicubic), an edge-sharpened mode for drawings and line art, or the Scale2x/Scale3x pixel-art rules. Choose a factor or an exact output height.',
-  keywords: ['enlarge', 'resize', 'scale', 'upsample', 'lanczos', 'bicubic', 'scale2x', 'scale3x', 'epx', 'pixel art', 'line art', 'nearest', 'resolution', 'sharp'],
+  keywords: ['enlarge', 'resize', 'scale', 'upsample', 'lanczos', 'bicubic', 'scale2x', 'scale3x', 'epx', 'pixel art', 'line art', 'nearest', 'resolution', 'sharp', 'upscale'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
@@ -129,11 +129,11 @@ export default defineNode({
       default: 'lanczos',
       label: 'Method',
       options: [
-        { value: 'nearest', label: 'Nearest (crisp pixels)' },
-        { value: 'bicubic', label: 'Bicubic (soft, photos)' },
-        { value: 'lanczos', label: 'Lanczos (sharp, photos and pencil)' },
-        { value: 'lineart', label: 'Edge-sharpened (drawings, line art)' },
-        { value: 'scale2x', label: 'Scale2x / Scale3x (pixel art rules)' },
+        { value: 'nearest', label: 'Nearest' },
+        { value: 'bicubic', label: 'Bicubic' },
+        { value: 'lanczos', label: 'Lanczos' },
+        { value: 'lineart', label: 'Edge-sharpened' },
+        { value: 'scale2x', label: 'Scale2x / Scale3x' },
       ],
     },
     by: {
@@ -142,7 +142,7 @@ export default defineNode({
       label: 'Size by',
       options: [
         { value: 'factor', label: 'Factor' },
-        { value: 'height', label: 'Output height (pixels)' },
+        { value: 'height', label: 'Output height' },
       ],
     },
     factor: { type: 'number', default: 2, min: 1, max: 16, softMax: 8, step: 0.25, label: 'Factor', visibleIf: (p) => p.by === 'factor', hint: 'Scale2x/Scale3x chain whole 2x and 3x steps (4x = 2x twice) and finish with nearest to the exact size.' },

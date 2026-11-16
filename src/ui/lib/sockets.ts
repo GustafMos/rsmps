@@ -33,15 +33,20 @@ export function outputsFeeding(def: AnyNodeDef, dst: SocketType): string[] {
 
 export function isSourceFor(def: AnyNodeDef, kind: AssetKind): string | null {
   if (def.category === 'output') return null;
-  if (Object.keys(def.inputs).length) return null;
+  // Subtitles has optional inputs (fill picture, palette) but is still where a dropped .srt / .vtt goes.
+  const hasInputs = Object.keys(def.inputs).length > 0;
   for (const [key, p] of Object.entries(def.params as ParamSchema)) {
     if (p.type !== 'assets') continue;
+    if (hasInputs && p.accept !== 'subtitles') continue;
     const ok =
       p.accept === 'any' ||
       (p.accept === 'image-video' && (kind === 'image' || kind === 'video')) ||
       (p.accept === 'audio' && kind === 'audio') ||
       (p.accept === 'midi' && kind === 'midi') ||
-      (p.accept === 'model' && kind === 'model');
+      (p.accept === 'model' && kind === 'model') ||
+      (p.accept === 'lut' && kind === 'lut') ||
+      (p.accept === 'splat' && kind === 'splat') ||
+      (p.accept === 'subtitles' && kind === 'subtitles');
     if (ok) return key;
   }
   return null;

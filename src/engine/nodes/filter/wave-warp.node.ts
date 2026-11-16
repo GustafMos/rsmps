@@ -15,10 +15,10 @@ export default defineNode({
   params: {
     waveX: { type: 'number', default: 12, min: 0, max: 300, softMax: 100, step: 0.5, unit: 'px', label: 'Rows slide by', group: 'Horizontal wave', hint: 'Each row is moved sideways by a sine of its height.' },
     waveXLength: { type: 'number', default: 160, min: 4, max: 4000, softMax: 1000, step: 1, unit: 'px', label: 'Wavelength', group: 'Horizontal wave', visibleIf: (p) => (p.waveX as number) > 0 },
-    waveXCycles: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Moves (waves per loop)', group: 'Horizontal wave', hint: '0 = the wave stands still.', visibleIf: (p) => (p.waveX as number) > 0 },
+    waveXCycles: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Wave drift', group: 'Horizontal wave', hint: '0 = the wave stands still.', visibleIf: (p) => (p.waveX as number) > 0 },
     waveY: { type: 'number', default: 0, min: 0, max: 300, softMax: 100, step: 0.5, unit: 'px', label: 'Columns slide by', group: 'Vertical wave' },
     waveYLength: { type: 'number', default: 160, min: 4, max: 4000, softMax: 1000, step: 1, unit: 'px', label: 'Wavelength', group: 'Vertical wave', visibleIf: (p) => (p.waveY as number) > 0 },
-    waveYCycles: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Moves (waves per loop)', group: 'Vertical wave', visibleIf: (p) => (p.waveY as number) > 0 },
+    waveYCycles: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Wave drift', hint: 'Waves per loop.', group: 'Vertical wave', visibleIf: (p) => (p.waveY as number) > 0 },
     noiseAmount: { type: 'number', default: 0, min: 0, max: 300, softMax: 100, step: 0.5, unit: 'px', label: 'Noise warp', group: 'Noise warp' },
     noiseScale: { type: 'number', default: 120, min: 4, max: 2000, softMax: 600, step: 1, unit: 'px', label: 'Feature size', group: 'Noise warp', visibleIf: (p) => (p.noiseAmount as number) > 0 },
     noiseEvolution: { type: 'number', default: 0, min: 0, max: 16, step: 0.1, label: 'Evolution per loop', group: 'Noise warp', hint: '0 = frozen warp.', visibleIf: (p) => (p.noiseAmount as number) > 0 },
@@ -29,7 +29,7 @@ export default defineNode({
     edge: {
       type: 'enum',
       default: 'mirror',
-      label: 'Outside the picture',
+      label: 'Outside', hint: 'What happens outside the picture.',
       options: [
         { value: 'clamp', label: 'Repeat the edge pixels' },
         { value: 'wrap', label: 'Wrap around' },

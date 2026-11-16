@@ -26,9 +26,9 @@ export default defineNode({
       default: 'oklab',
       label: 'Match in',
       options: [
-        { value: 'oklab', label: 'OKLab (perceptual)' },
+        { value: 'oklab', label: 'OKLab' },
         { value: 'linear', label: 'Linear RGB' },
-        { value: 'srgb', label: 'RGB (sRGB)' },
+        { value: 'srgb', label: 'RGB' },
       ],
     },
     tolerance: {

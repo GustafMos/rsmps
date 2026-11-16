@@ -86,9 +86,9 @@ export const FALLBACK_PARAM = {
   type: 'enum' as const,
   default: 'sweetie-16',
   label: 'Palette',
-  group: 'Fallback palette (when none is connected)',
-  hint: 'Used only when no palette is wired in. Wire a Palette node to use your own or an extracted one.',
-  options: BUILTIN_PALETTES.map((p) => ({ value: p.id, label: `${p.name} (${p.colors.length})` })),
+  group: 'Fallback palette',
+  hint: 'Used when none is connected. Used only when no palette is wired in. Wire a Palette node to use your own or an extracted one.',
+  options: BUILTIN_PALETTES.map((p) => ({ value: p.id, label: p.name })),
 };
 
 /** Colours to use: the wired palette, else the chosen built-in. */

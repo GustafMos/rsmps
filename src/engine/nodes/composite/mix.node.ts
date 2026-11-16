@@ -2,6 +2,7 @@ import { defineNode } from '../../define';
 
 export default defineNode({
   id: 'mix',
+  family: 'combine',
   title: 'Mix Images',
   category: 'composite',
   description: 'Cross-fade between two images. If they differ in size, image B is stretched to the size of A.',

@@ -12,7 +12,7 @@ export default defineNode({
   params: {
     inBlack: { type: 'number', default: 0, min: 0, max: 1, step: 0.005, label: 'Input black', group: 'Input' },
     inWhite: { type: 'number', default: 1, min: 0, max: 1, step: 0.005, label: 'Input white', group: 'Input' },
-    gamma: { type: 'number', default: 1, min: 0.1, max: 4, step: 0.01, label: 'Midtones (gamma)', group: 'Input', hint: 'Above 1 brightens the midtones.' },
+    gamma: { type: 'number', default: 1, min: 0.1, max: 4, step: 0.01, label: 'Midtones', group: 'Input', hint: 'Above 1 brightens the midtones.' },
     outBlack: { type: 'number', default: 0, min: 0, max: 1, step: 0.005, label: 'Output black', group: 'Output' },
     outWhite: { type: 'number', default: 1, min: 0, max: 1, step: 0.005, label: 'Output white', group: 'Output' },
   },

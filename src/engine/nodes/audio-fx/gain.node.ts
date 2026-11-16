@@ -12,7 +12,7 @@ export default defineNode({
   outputs: { audio: { type: 'audio', label: 'Audio' } },
   params: {
     gain: { type: 'number', default: 0, min: -60, max: 24, step: 0.1, unit: 'db', label: 'Volume' },
-    pan: { type: 'number', default: 0, min: -1, max: 1, step: 0.01, label: 'Pan (left ... right)' },
+    pan: { type: 'number', default: 0, min: -1, max: 1, step: 0.01, label: 'Pan', hint: 'Left to right.' },
     mute: { type: 'bool', default: false, label: 'Mute' },
   },
   summary: (p) => (p.mute ? 'muted' : `${p.gain >= 0 ? '+' : ''}${p.gain.toFixed(1)} dB${p.pan ? ` · pan ${p.pan.toFixed(2)}` : ''}`),

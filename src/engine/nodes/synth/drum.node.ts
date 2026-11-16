@@ -24,10 +24,10 @@ function trigger(st: any, kind: number, vel: number): void {
 /** Three synthesised drums triggered by note ranges: kick (notes 35-36), snare (37-40), hats (42, 44 closed; 46 open). */
 export default defineNode({
   id: 'drum',
-  title: 'Drum Kit',
+  title: 'Basic Drums',
   category: 'synth',
-  description: 'A tiny drum machine: kick, snare and hi-hats, played by MIDI notes (kick 35-36, snare 37-40, hats 42, 44, 46).',
-  keywords: ['percussion', 'beat', 'kick', 'snare', 'hihat', 'hat', '808', 'drums'],
+  description: 'A minimal drum voice set (no sequencer; see Drum Machine for that): kick, snare and hi-hats, played by MIDI notes (kick 35-36, snare 37-40, hats 42, 44, 46).',
+  keywords: ['percussion', 'beat', 'kick', 'snare', 'hihat', 'hat', '808', 'drums', 'drum kit', 'simple drums'],
   inputs: { midi: { type: 'midi', label: 'MIDI' } },
   outputs: { audio: { type: 'audio', label: 'Audio' } },
   params: {

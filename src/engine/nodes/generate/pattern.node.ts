@@ -35,8 +35,8 @@ export default defineNode({
       ],
     },
     cellSize: { type: 'number', default: 64, min: 2, max: 2000, unit: 'px', label: 'Cell size', hint: 'Square size for the checkerboard; repeat distance for the others.' },
-    colorA: { type: 'color', default: [0.12, 0.13, 0.2, 1], label: 'Background colour' },
-    colorB: { type: 'color', default: [0.95, 0.75, 0.3, 1], label: 'Pattern colour' },
+    colorA: { type: 'color', default: [0.12, 0.13, 0.2, 1], label: 'Background color' },
+    colorB: { type: 'color', default: [0.95, 0.75, 0.3, 1], label: 'Pattern color' },
     lineWidth: {
       type: 'number',
       default: 6,
@@ -48,8 +48,8 @@ export default defineNode({
       visibleIf: (p) => p.kind !== 'checker',
     },
     angle: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Angle' },
-    scrollX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Scroll sideways per loop', hint: 'Whole repeats per loop, so it loops exactly. 0 = still.' },
-    scrollY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Scroll down per loop', hint: 'Whole repeats per loop, so it loops exactly. 0 = still.' },
+    scrollX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Scroll X', hint: 'Whole repeats per loop, so it loops exactly. 0 = still.' },
+    scrollY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Scroll Y', hint: 'Whole repeats per loop, so it loops exactly. 0 = still.' },
   },
   summary: (p) => `${p.kind} · ${Math.round(p.cellSize)}px${p.scrollX || p.scrollY ? ' · scrolling' : ''}`,
   render(ctx) {

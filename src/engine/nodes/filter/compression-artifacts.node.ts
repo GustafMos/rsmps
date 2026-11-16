@@ -49,8 +49,8 @@ export default defineNode({
   params: {
     quality: { type: 'number', default: 12, min: 1, max: 100, step: 1, integer: true, label: 'Quality', hint: 'JPEG quality: 100 = almost lossless, 10 = very blocky, 1 = destroyed.' },
     generations: { type: 'number', default: 1, min: 1, max: 12, softMax: 4, step: 1, integer: true, label: 'Generations', hint: 'How many times the picture is saved again. Each one costs three passes over the picture.' },
-    shiftGrid: { type: 'bool', default: true, label: 'Shift the block grid each generation', hint: 'Like a picture cropped or resized between saves: the blocks of each generation fall in different places, so the damage piles up instead of settling.', visibleIf: (p) => (p.generations as number) > 1 },
-    chroma: { type: 'bool', default: true, label: '4:2:0 colour smear', hint: 'Colour is stored at half resolution (16 x 16 pixel blocks), which smears and bleeds colour like a real JPEG.' },
+    shiftGrid: { type: 'bool', default: true, label: 'Shift grid', hint: 'Like a picture cropped or resized between saves: the blocks of each generation fall in different places, so the damage piles up instead of settling.', visibleIf: (p) => (p.generations as number) > 1 },
+    chroma: { type: 'bool', default: true, label: 'Chroma smear', hint: 'Colour is stored at half resolution (16 x 16 pixel blocks), which smears and bleeds colour like a real JPEG.' },
   },
   summary: (p) => `quality ${p.quality}${p.generations > 1 ? ` × ${p.generations}` : ''}`,
   render(ctx) {

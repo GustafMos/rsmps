@@ -22,8 +22,8 @@ export default defineNode({
   params: {
     threshold: { type: 'number', default: -18, min: -60, max: 0, step: 0.1, unit: 'db', label: 'Threshold' },
     ratio: { type: 'number', default: 4, min: 1, max: 20, step: 0.1, label: 'Ratio' },
-    attack: { type: 'number', default: 10, min: 0.1, max: 200, step: 0.1, label: 'Attack (ms)' },
-    release: { type: 'number', default: 120, min: 5, max: 2000, step: 1, label: 'Release (ms)' },
+    attack: { type: 'number', default: 10, min: 0.1, max: 200, step: 0.1, label: 'Attack ms' },
+    release: { type: 'number', default: 120, min: 5, max: 2000, step: 1, label: 'Release ms' },
     knee: { type: 'number', default: 6, min: 0, max: 24, step: 0.1, unit: 'db', label: 'Knee' },
     makeup: { type: 'number', default: 0, min: 0, max: 24, step: 0.1, unit: 'db', label: 'Make-up gain' },
     detector: {
@@ -31,11 +31,11 @@ export default defineNode({
       default: 'rms',
       label: 'Level detection',
       options: [
-        { value: 'rms', label: 'Average (RMS)' },
+        { value: 'rms', label: 'Average RMS' },
         { value: 'peak', label: 'Peak' },
       ],
     },
-    mix: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Mix (parallel compression)' },
+    mix: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Mix', hint: 'Parallel compression: how much dry signal is blended back in.' },
   },
   summary: (p) => `${p.threshold} dB · ${p.ratio}:1`,
   audio: defineAudio({

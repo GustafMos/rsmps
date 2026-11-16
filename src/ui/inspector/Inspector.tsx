@@ -17,6 +17,7 @@ import { MEDIA_TIMELINE_ID } from '../../engine/lib/media-edit';
 import { RangeField } from '../components/RangeField';
 import { DrumGrid, looksLikeDrumPattern } from './DrumGrid';
 import { KindPicker } from '../components/KindPicker';
+import { FamilySelect } from '../components/FamilySelect';
 import { AUTO_COLLAPSED, KIND_GROUPS, describeOutput, hasKind } from '../lib/outputInfo';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
@@ -28,10 +29,12 @@ import { useApp, useDef, useEd, usePlayer } from '../store/context';
 import { bakeSelection } from '../store/bake';
 import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
+import { PhoneMotionPanel } from './PhoneMotionPanel';
 import { CodecSelect, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
 import { ProjectSettingsPanel } from './ProjectSettings';
 import { BakePanel } from './BakePanel';
+import { ProcessPanel } from './ProcessPanel';
 import './inspector.css';
 
 export function Inspector() {
@@ -153,6 +156,7 @@ function NodePanel({ id }: { id: string }) {
             <div className="rs-kind__what">{describeOutput(def, node, project)}</div>
           </div>
         )}
+        <FamilySelect node={node} large />
         <TextField large value={node.label ?? ''} placeholder={def.title} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
         <Description key={id} text={def.description} />
         <div className="rs-insp__actions">
@@ -197,8 +201,9 @@ function NodePanel({ id }: { id: string }) {
           {(!wired.has('recordAudio') || !wired.has('recordMidi')) && <p className="rs-insp__hint">Nothing is wired into the record inputs yet: these buttons add the source node and connect it. Then arm a track (the ● button) and press Record.</p>}
         </div>
       )}
-      {node.type === 'cache' && <BakePanel node={node} />}
+      {node.type === 'cache' ? <BakePanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
+      {node.type === 'phone-motion' && !missing.length && <PhoneMotionPanel node={node} />}
       {def.playable && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Keyboard</div>

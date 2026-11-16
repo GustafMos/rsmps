@@ -15,8 +15,8 @@ export default defineNode({
       type: 'enum',
       default: 'round',
       options: [
-        { value: 'round', label: 'Round (exact)' },
-        { value: 'square', label: 'Square (fast, keeps soft edges)' },
+        { value: 'round', label: 'Round' },
+        { value: 'square', label: 'Square' },
       ],
       label: 'Shape',
     },

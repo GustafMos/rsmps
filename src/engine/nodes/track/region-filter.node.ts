@@ -9,7 +9,7 @@ const ORDERS = [
   { value: 'score', label: 'Best score first' },
   { value: 'left', label: 'Left to right' },
   { value: 'top', label: 'Top to bottom' },
-  { value: 'center', label: 'Closest to centre first' },
+  { value: 'center', label: 'Closest to center first' },
 ] as const;
 
 /** Parse "1, 4, 9" into numbers. */
@@ -51,8 +51,8 @@ export default defineNode({
     ids: { type: 'string', default: '', label: 'Only these ids', hint: 'Comma-separated ids from Track. Empty = any.' },
     order: { type: 'enum', default: 'as-is', options: ORDERS, label: 'Order by' },
     first: { type: 'number', default: 0, min: 0, max: 1000, step: 1, integer: true, label: 'Start at number', hint: '0 is the first region after ordering.' },
-    count: { type: 'number', default: 0, min: 0, max: 1000, step: 1, integer: true, label: 'How many (0 = all)', hint: 'Order by Largest, start at 0, count 1 = only the largest.' },
-    invert: { type: 'bool', default: false, label: 'Remove these instead' },
+    count: { type: 'number', default: 0, min: 0, max: 1000, step: 1, integer: true, label: 'Count', hint: 'Order by Largest, start at 0, count 1 = only the largest.' },
+    invert: { type: 'bool', default: false, label: 'Remove these' },
   },
   summary: (p) => {
     const bits: string[] = [];

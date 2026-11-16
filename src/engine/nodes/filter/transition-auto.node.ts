@@ -23,7 +23,7 @@ export default defineNode({
     start: { type: 'number', default: 0.25, min: 0, max: 1, step: 0.005, unit: 'norm', label: 'Starts at', group: 'Timing', hint: 'Position in the loop where the change begins. Before this you see A.' },
     duration: { type: 'number', default: 0.25, min: 0.005, max: 1, step: 0.005, unit: 'norm', label: 'Takes', group: 'Timing', hint: 'Share of the loop the change lasts.' },
     ease: { type: 'enum', default: 'smooth', label: 'Easing', group: 'Timing', options: [{ value: 'linear', label: 'Even' }, { value: 'smooth', label: 'Smooth' }, { value: 'in', label: 'Slow start' }, { value: 'out', label: 'Slow end' }] },
-    pingPong: { type: 'bool', default: true, label: 'Come back to A (loops seamlessly)', group: 'Timing', hint: 'After holding B, the change plays again in reverse. Off: B stays until the loop restarts with a jump back to A.' },
+    pingPong: { type: 'bool', default: true, label: 'Back to A', group: 'Timing', hint: 'After holding B, the change plays again in reverse. Off: B stays until the loop restarts with a jump back to A.' },
     holdB: { type: 'number', default: 0.15, min: 0, max: 1, step: 0.005, unit: 'norm', label: 'Hold B for', group: 'Timing', visibleIf: (p) => p.pingPong === true },
   },
   summary: (p) => `${p.mode} · ${Math.round(p.start * 100)}% for ${Math.round(p.duration * 100)}%`,

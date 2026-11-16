@@ -16,16 +16,16 @@ export default defineNode({
   inputs: {},
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
-    url: { type: 'string', default: '', label: 'Address (URL)', hint: 'http(s)://…  Needs CORS headers (Access-Control-Allow-Origin).' },
+    url: { type: 'string', default: '', label: 'URL', hint: 'http(s)://…  Needs CORS headers (Access-Control-Allow-Origin).' },
     kind: {
       type: 'enum',
       default: 'auto',
       label: 'Type',
       options: [
-        { value: 'auto', label: 'Auto (by address)' },
+        { value: 'auto', label: 'Auto' },
         { value: 'image', label: 'Picture, refreshed' },
         { value: 'mjpeg', label: 'MJPEG stream' },
-        { value: 'video', label: 'Video file (loops)' },
+        { value: 'video', label: 'Video file' },
       ],
     },
     refresh: {

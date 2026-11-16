@@ -70,3 +70,15 @@
 .rs-quick__scales button.is-on { background: var(--accent); color: #fff; }
 
 .rs-sc__confirm { margin: 0; padding: var(--s-2); background: #2a2208; border: 1px solid var(--yellow); color: var(--yellow); font-size: var(--fs-sm); }
+
+/* photos of a running scan: queued / scanning / done, one row each */
+.rs-sc__queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-sm); }
+.rs-sc__queue li { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); padding: var(--s-1) var(--s-2); border: 1px solid var(--line); }
+.rs-sc__queuename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-sc__queue li.is-queued { color: var(--text-dim); }
+.rs-sc__queue li.is-scanning .rs-sc__chip { color: var(--yellow); border-color: var(--yellow); animation: rs-sc-pulse 1.2s steps(8) infinite; }
+.rs-sc__queue li.is-done .rs-sc__chip { color: var(--ok); border-color: var(--ok); }
+.rs-sc__queue li.is-failed .rs-sc__chip { color: var(--danger); border-color: var(--danger); }
+.rs-sc__phone { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3); background: var(--bg-1); border: 1px solid var(--line); align-items: flex-start; }
+.rs-sc__phoneline { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); color: var(--text-dim); }
+.rs-sc__phoneline.is-ok { color: var(--ok); }

@@ -6,10 +6,10 @@ import { defineNode } from '../../define';
  */
 export default defineNode({
   id: 'key-color',
-  title: 'Key Color',
+  title: 'Chroma Key',
   category: 'mask',
-  description: 'Chroma key: removes a chosen colour (green screen, flat sprite background). Output is a matte, 1 = keep.',
-  keywords: ['chroma', 'green screen', 'blue screen', 'matte', 'remove background', 'knockout'],
+  description: 'Chroma key: removes one chosen colour (green screen, flat sprite background). Output is a matte, 1 = keep. For picking a range of hues, see HSL Qualifier or Similar Color.',
+  keywords: ['chroma', 'green screen', 'blue screen', 'matte', 'remove background', 'knockout', 'key color', 'key colour', 'colour key'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { mask: { type: 'mask', label: 'Matte' } },
   params: {
@@ -17,7 +17,7 @@ export default defineNode({
     tolerance: { type: 'number', default: 0.16, min: 0, max: 1, step: 0.005, label: 'Tolerance', hint: 'Distance in OKLab that is fully keyed out.' },
     softness: { type: 'number', default: 0.1, min: 0, max: 1, step: 0.005, label: 'Softness', hint: 'Extra distance over which the matte fades in.' },
     lumaWeight: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Brightness weight', hint: 'Lower values key shadows and highlights of the colour too.' },
-    invert: { type: 'bool', default: false, label: 'Select key colour instead' },
+    invert: { type: 'bool', default: false, label: 'Invert key', hint: 'Select everything but the key color.' },
   },
   summary: (p) => `tol ${p.tolerance.toFixed(2)}`,
   render(ctx) {

@@ -12,7 +12,7 @@ export const SCALES: Record<string, number[]> = {
 };
 
 export const SCALE_OPTIONS = [
-  { value: 'off', label: 'Off (any note)' },
+  { value: 'off', label: 'Off' },
   { value: 'major', label: 'Major' },
   { value: 'minor', label: 'Minor' },
   { value: 'pentatonic-major', label: 'Pentatonic major' },

@@ -173,6 +173,26 @@ describe('animation exports without ffmpeg', () => {
     expect([...png.subarray(1, 4)]).toEqual([80, 78, 71]); // PNG signature
     expect(sum.files).toEqual(expect.arrayContaining(['sheet.pdf', 'sheet_page_01.png']));
   });
+
+  it('rotoscope style, paper layers, flipbook, zine, plates and plotter SVG all come out of the Output print kind', async () => {
+    const run = async (params: Record<string, unknown>) => {
+      const graph = await withAnimate({ kind: 'print', name: 'x', printDpi: 72, printOutput: 'pdf', step: 3, ...params });
+      const out = tempDir();
+      const sum = await renderGraphBatch({ graph, registry, outDir: out, sequenceFps: 12, gpu });
+      expect(sum.errors).toEqual([]);
+      return sum.files;
+    };
+    expect(await run({ printStyle: 'blue', printLayers: 2 })).toEqual(['x_layer1.pdf', 'x_layer2.pdf']);
+    expect(await run({ printStyle: 'outline', printFrameNumbers: true })).toEqual(['x.pdf']);
+    expect(await run({ printLayout: 'flipbook', printDuplex: true, printThumbIndex: true })).toEqual(['x_flipbook.pdf']);
+    expect(await run({ printLayout: 'zine' })).toEqual(['x_zine.pdf']);
+    const plates = await run({ printKind: 'separations', printInks: 2 });
+    expect(plates.length).toBe(2);
+    expect(plates.every((f) => f.startsWith('x_ink') && f.endsWith('.pdf'))).toBe(true);
+    const svgs = await run({ printKind: 'svg-plot', printInks: 1 });
+    expect(svgs.length).toBeGreaterThan(0);
+    expect(svgs.every((f) => f.endsWith('.svg'))).toBe(true);
+  });
 });
 
 describe('ffmpeg exports', () => {

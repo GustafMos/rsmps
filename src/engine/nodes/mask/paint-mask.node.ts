@@ -207,7 +207,7 @@ export default defineNode({
     strokes: { type: 'json', default: [], label: 'Strokes', hint: '[{ points: [[x,y]...] (0..1), radius (fraction of the short side), add: boolean }]' },
     softness: { type: 'number', default: 1, min: 0, max: 200, step: 0.5, unit: 'px', label: 'Brush softness' },
     grow: { type: 'bool', default: false, label: 'Grow to edges', hint: 'Needs an image. Expands the painted area over similar colours.' },
-    tolerance: { type: 'number', default: 0.1, min: 0.01, max: 0.5, step: 0.005, label: 'Colour tolerance', visibleIf: (p) => p.grow === true },
+    tolerance: { type: 'number', default: 0.1, min: 0.01, max: 0.5, step: 0.005, label: 'Color tolerance', visibleIf: (p) => p.grow === true },
     reach: { type: 'number', default: 150, min: 1, max: 1500, step: 1, unit: 'px', label: 'Max reach', visibleIf: (p) => p.grow === true },
     invert: { type: 'bool', default: false, label: 'Invert' },
   },

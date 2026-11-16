@@ -18,7 +18,7 @@ export default defineNode({
       options: [
         { value: 'on-black', label: 'Lines on black' },
         { value: 'on-image', label: 'Lines over the image' },
-        { value: 'lines-only', label: 'Lines only (transparent)' },
+        { value: 'lines-only', label: 'Lines only' },
       ],
     },
     strength: { type: 'number', default: 2, min: 0, max: 10, step: 0.05, label: 'Strength' },

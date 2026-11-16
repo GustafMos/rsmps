@@ -27,12 +27,12 @@ export default defineNode({
       group: 'Aperture',
       options: [
         { value: 'circle', label: 'Circle' },
-        { value: 'hexagon', label: 'Hexagon (6 blades)' },
-        { value: 'octagon', label: 'Octagon (8 blades)' },
+        { value: 'hexagon', label: 'Hexagon' },
+        { value: 'octagon', label: 'Octagon' },
       ],
     },
     rotation: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Blade rotation', group: 'Aperture', visibleIf: (p) => p.shape !== 'circle' },
-    highlightThreshold: { type: 'number', default: 0.75, min: 0, max: 1, step: 0.01, label: 'Highlight threshold', group: 'Highlights', hint: 'Areas brighter than this bloom into bokeh discs.' },
+    highlightThreshold: { type: 'number', default: 0.75, min: 0, max: 1, step: 0.01, label: 'Highlight cutoff', group: 'Highlights', hint: 'Areas brighter than this bloom into bokeh discs.' },
     highlightGain: { type: 'number', default: 4, min: 0, max: 12, softMax: 8, step: 0.1, label: 'Highlight boost', group: 'Highlights', hint: '0 = plain even blur.' },
     quality: {
       type: 'enum',
@@ -40,9 +40,9 @@ export default defineNode({
       label: 'Quality',
       group: 'Quality',
       options: [
-        { value: 'draft', label: 'Draft (fast)' },
+        { value: 'draft', label: 'Draft' },
         { value: 'normal', label: 'Normal' },
-        { value: 'high', label: 'High (smoothest)' },
+        { value: 'high', label: 'High' },
       ],
     },
     focus: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Focus depth', group: 'Depth map', hint: 'Depth value (0..1) that stays sharp. Only used when a depth image is wired.' },

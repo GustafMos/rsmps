@@ -3,9 +3,17 @@
  * Reads the pairing token from the URL, opens the camera, joins the session over a WebSocket and sends the camera to the
  * desktop with WebRTC (host candidates only). If the desktop asks for it (WebRTC did not connect), it sends JPEG frames over
  * the WebSocket instead. `?fake=1` streams a generated animation instead of the camera (for testing without a phone).
+ *
+ * Modes (see link-modes.ts): `camera` (default), `scan` (photograph printed sheets, scan-mode.ts) and `controller` (motion / touch only).
+ * The link completes with a typed `hello {mode, media}` message, so it does not need camera or microphone frames: a refused camera or
+ * "Controller only" still links.
  */
 
 import { closeMessage } from './messages';
+import { createMotion } from './motion';
+import { modeFromSearch, parseModeMsg, thirdStepLabel, type PhoneMedia, type PhoneMode } from './link-modes';
+import { createScanMode } from './scan-mode';
+import { isScanFrame } from './scan-protocol';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusEl = $('status');
@@ -34,9 +42,23 @@ let wake: { release(): Promise<void> } | null = null;
 let torchOn = false;
 let chain: Promise<void> = Promise.resolve(); // incoming messages are handled in order
 
+const motion = createMotion({ send: (m) => send(m), fake });
+let mode: PhoneMode = modeFromSearch(location.search);
+/** Is a camera picture going to the computer? Only camera mode with a working camera sends one. */
+let media: PhoneMedia = mode === 'camera' ? 'video' : 'none';
+const scan = createScanMode({
+  send: (m) => send(m),
+  sendBinary: (d) => {
+    if (ws?.readyState === WebSocket.OPEN) ws.send(d);
+  },
+  buffered: () => ws?.bufferedAmount ?? 0,
+  isOpen: () => ws?.readyState === WebSocket.OPEN,
+});
 const stepsEl = document.getElementById('steps') as HTMLElement;
 const steps: Record<string, 'ok' | 'bad' | 'wait'> = { reached: 'wait', accepted: 'wait', video: 'wait' };
 const STEP_TEXT: Record<string, string> = { reached: 'Reached your computer', accepted: 'Code accepted', video: 'Video connected' };
+const controlsEl = $<HTMLElement>('controls');
+const modeButtons: Record<PhoneMode, HTMLButtonElement> = { camera: $('modeCamera'), scan: $('modeScan'), controller: $('modeController') };
 
 /** "Reached your computer / Code accepted / Video connected": which of the steps worked, so a failure says where it stopped. */
 function setStep(name: keyof typeof steps, value: 'ok' | 'bad' | 'wait'): void {
@@ -187,6 +209,9 @@ async function keepAwake(): Promise<void> {
 /* ------------------------------------------- link -------------------------------------------- */
 
 function send(msg: unknown): void {
+  // sensor frames are disposable: when the socket is backed up (JPEG fallback on a slow network) the latest one matters, not the queue
+  const sensor = (msg as { type?: string }).type === 'motion' || (msg as { type?: string }).type === 'touch' || (msg as { type?: string }).type === 'ar';
+  if (sensor && ws && ws.bufferedAmount > 150_000) return;
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
@@ -245,18 +270,34 @@ function connect(): void {
   status('Connecting to your computer…', 'wait');
   sock.onopen = () => {
     retry = 0;
+    motion.onOpen(); // the computer learns which sensors this phone has
+    sendHello();
+    scan.onOpen();
   };
   sock.onmessage = (ev) => {
-    if (typeof ev.data !== 'string') return;
-    const msg = JSON.parse(ev.data) as { type: string; sdp?: string; candidate?: RTCIceCandidateInit };
+    if (typeof ev.data !== 'string') {
+      if (ev.data instanceof ArrayBuffer && isScanFrame(ev.data)) scan.onBinary(ev.data); // a preview chunk
+      return;
+    }
+    let msg: { type: string; sdp?: string; candidate?: RTCIceCandidateInit; mode?: string };
+    try {
+      msg = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    if (scan.onMessage(msg)) return;
     chain = chain
       .then(async () => {
         if (msg.type === 'ready') {
           setStep('reached', 'ok');
           setStep('accepted', 'ok');
-          status('Code accepted. Waiting for the computer…', 'wait');
+          status(mode === 'camera' && media === 'video' ? 'Code accepted. Waiting for the computer…' : mode === 'scan' ? 'Linked: scan mode' : mode === 'controller' ? 'Controller linked' : 'Linked without a picture', mode === 'camera' && media === 'video' ? 'wait' : 'ok');
+          if (media !== 'video') setStep('video', 'ok');
         }
-        else if (msg.type === 'offer' && msg.sdp) await onOffer(msg.sdp);
+        else if (msg.type === 'mode') {
+          const m = parseModeMsg(msg);
+          if (m) await setMode(m.mode);
+        } else if (msg.type === 'offer' && msg.sdp && mode === 'camera' && stream) await onOffer(msg.sdp);
         else if (msg.type === 'ice' && msg.candidate) await pc?.addIceCandidate(msg.candidate).catch(() => undefined);
         else if (msg.type === 'use-jpeg') {
           pc?.close();
@@ -268,6 +309,7 @@ function connect(): void {
   };
   sock.onclose = (ev) => {
     stopJpeg();
+    if (sock === ws) scan.onClose(); // an upload in progress waits for the reconnect and resumes
     if (sock !== ws) return;
     const why = closeMessage(ev.code);
     if (why?.final) {
@@ -284,19 +326,89 @@ function connect(): void {
 
 /* -------------------------------------------- start ------------------------------------------- */
 
+/** Say what this phone is doing, so the computer can show it as linked without waiting for a picture. */
+function sendHello(): void {
+  send({ type: 'hello', v: 1, mode, media });
+}
+
+function showMode(): void {
+  (Object.keys(modeButtons) as PhoneMode[]).forEach((m) => modeButtons[m].setAttribute('aria-pressed', String(m === mode)));
+  const cam = mode === 'camera';
+  preview.hidden = !cam;
+  controlsEl.hidden = !cam;
+  document.body.classList.toggle('has-camera', cam);
+  STEP_TEXT.video = thirdStepLabel(mode, media);
+  setStep('video', steps.video);
+}
+
+function stopCameraStream(): void {
+  stream?.getVideoTracks().forEach((t) => t.stop());
+  stream = null;
+  preview.srcObject = null;
+  pc?.close();
+  pc = null;
+  stopJpeg();
+}
+
+/** Switch what the phone does (by the user, or because the computer asked). Always ends with a new hello. */
+async function setMode(next: PhoneMode): Promise<void> {
+  const same = next === mode;
+  mode = next;
+  if (mode !== 'camera') {
+    stopCameraStream();
+    media = 'none';
+  }
+  if (mode === 'scan') {
+    status('Scan mode', 'ok', 'Photograph each printed sheet. Photos go to your computer.');
+    await scan.enter();
+  } else {
+    scan.leave();
+  }
+  if (mode === 'camera' && (!same || !stream)) {
+    status('Asking for the camera…', 'wait', 'Please allow camera access.');
+    try {
+      await openCamera(true);
+      media = 'video';
+      status('Camera on', 'wait', 'Connecting the picture to your computer…');
+    } catch (err) {
+      media = 'refused';
+      const name = (err as { name?: string }).name;
+      status('Linked without a picture', 'ok', name === 'NotAllowedError' ? 'Camera permission was denied, so no picture is sent. Motion and touch still work. Allow the camera in the browser settings and press Camera to try again.' : String((err as Error).message ?? err));
+    }
+  } else if (mode === 'controller') {
+    status('Controller linked', 'ok', 'No picture is sent. Use Start motion below for gyroscope and touch.');
+  }
+  showMode();
+  if (ws?.readyState === WebSocket.OPEN) {
+    sendHello();
+    if (media !== 'video') setStep('video', 'ok'); // the typed handshake is the link: no picture is needed
+  }
+}
+
 async function start(): Promise<void> {
   if (!/^[0-9a-f]{32}$/.test(token)) {
     status('No valid link', 'bad', 'Scan the QR code shown on the computer.');
     return;
   }
-  status('Asking for the camera…', 'wait', 'Please allow camera access.');
-  try {
-    await openCamera(true);
-  } catch (err) {
-    const name = (err as { name?: string }).name;
-    status('Camera not available', 'bad', name === 'NotAllowedError' ? 'Camera permission was denied. Allow it in the browser settings, then press Reconnect.' : String((err as Error).message ?? err));
-    return;
+  showMode();
+  if (mode === 'scan') {
+    status('Scan mode', 'wait', 'Connecting to your computer…');
+    await scan.enter();
+  } else if (mode === 'controller') {
+    status('Controller', 'wait', 'Connecting to your computer…');
+  } else {
+    status('Asking for the camera…', 'wait', 'Please allow camera access.');
+    try {
+      await openCamera(true);
+      media = 'video';
+    } catch (err) {
+      // a refused camera must not stop the link: it completes without a picture (motion, touch and the controller still work)
+      media = 'refused';
+      const name = (err as { name?: string }).name;
+      status('Camera not available', 'bad', name === 'NotAllowedError' ? 'Camera permission was denied. Linking without a picture; allow the camera in the browser settings and press Camera to send it.' : String((err as Error).message ?? err));
+    }
   }
+  showMode();
   void keepAwake();
   await ping();
   connect();
@@ -341,13 +453,16 @@ torchBtn.onclick = async () => {
 reconnectBtn.onclick = () => {
   closedForGood = false;
   retry = 0;
-  if (!stream) void start();
+  if (!stream && mode === 'camera') void start();
   else connect();
 };
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') void keepAwake();
+  void scan.visibility(document.visibilityState === 'visible');
 });
 window.addEventListener('online', () => {
   if (!closedForGood && ws?.readyState !== WebSocket.OPEN) connect();
 });
+for (const m of ['camera', 'scan', 'controller'] as PhoneMode[]) modeButtons[m].onclick = () => void setMode(m).catch((err) => status('Could not switch', 'bad', String((err as Error).message ?? err)));
+$('scanExit').onclick = () => void setMode('camera');
 void start();

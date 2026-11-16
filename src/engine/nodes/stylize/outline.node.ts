@@ -19,10 +19,10 @@ export default defineNode({
       options: [
         { value: 'outside', label: 'Outside' },
         { value: 'inside', label: 'Inside' },
-        { value: 'center', label: 'Centred on the edge' },
+        { value: 'center', label: 'Centerd on the edge' },
       ],
     },
-    sharp: { type: 'bool', default: false, label: 'Hard edge (no anti-aliasing)' },
+    sharp: { type: 'bool', default: false, label: 'Hard edge', hint: 'No anti-aliasing.' },
   },
   summary: (p) => `${p.thickness} px ${p.position}`,
   render(ctx) {

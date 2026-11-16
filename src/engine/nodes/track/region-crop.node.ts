@@ -16,10 +16,10 @@ export default defineNode({
   params: {
     index: { type: 'number', default: 0, min: 0, max: 63, step: 1, integer: true, label: 'Region number', hint: '0 = the first region in the list.' },
     id: { type: 'number', default: -1, min: -1, max: 100000, step: 1, integer: true, label: 'Or region with id', hint: '-1 = use the region number instead.' },
-    width: { type: 'number', default: 256, min: 1, max: 4096, step: 1, integer: true, label: 'Output width (pixels)' },
-    height: { type: 'number', default: 256, min: 1, max: 4096, step: 1, integer: true, label: 'Output height (pixels)' },
-    padding: { type: 'number', default: 0.15, min: 0, max: 3, step: 0.01, label: 'Space around the region', hint: 'Fraction of the region size added on each side.' },
-    keepInside: { type: 'bool', default: true, label: 'Stay inside the frame', hint: 'Slides the window back when it would leave the picture.' },
+    width: { type: 'number', default: 256, min: 1, max: 4096, step: 1, integer: true, label: 'Output width', hint: 'In pixels.' },
+    height: { type: 'number', default: 256, min: 1, max: 4096, step: 1, integer: true, label: 'Output height' },
+    padding: { type: 'number', default: 0.15, min: 0, max: 3, step: 0.01, label: 'Padding', hint: 'Fraction of the region size added on each side.' },
+    keepInside: { type: 'bool', default: true, label: 'Keep in frame', hint: 'Slides the window back when it would leave the picture.' },
     missing: {
       type: 'enum',
       default: 'full',
@@ -27,7 +27,7 @@ export default defineNode({
         { value: 'full', label: 'Show the whole frame' },
         { value: 'empty', label: 'Transparent' },
       ],
-      label: 'If the region is missing',
+      label: 'When missing', hint: 'What to do if the region is missing.',
     },
   },
   summary: (p) => `${p.width}×${p.height} · ${p.id >= 0 ? `id ${p.id}` : `#${p.index}`}`,

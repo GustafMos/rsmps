@@ -50,7 +50,7 @@ ready-made desktop builds as a convenience, and the money supports further devel
 - **Masks and layers:** keys, subject mask, paint mask, inpainting, layer splitting, looping parallax.
 - **Detect and track:** blob, colour and motion detectors, a tracker, regions to masks, HUD overlays, trails, follow-crop.
 - **Audio and MIDI in the same graph:** microphone, audio files, MIDI keyboard and devices, synths, drums, sampler, effects,
-  a Timeline with audio and MIDI tracks. Sound to Numbers turns loudness, pitch and notes into numbers that drive any picture
+  a Audio Timeline with audio and MIDI tracks. Sound to Numbers turns loudness, pitch and notes into numbers that drive any picture
   parameter.
 - **Print and scan back:** print animation frames as sheets with registration marks, draw on them, photograph them, and get
   the frames back aligned as an image sequence.
@@ -66,9 +66,9 @@ one lacks. Pay what you like.
 
 ## What is not included
 
-- **ProRes and other ffmpeg-only formats are not in the desktop app.** ffmpeg is not bundled (its licence would add
-  obligations to the package). ProRes 4444 with alpha, video input and several video formats are available through the free
-  command-line renderer in the source repository (`npm run cli`, see docs/CLI.md), which uses your own ffmpeg. Everything a
+- **ProRes-compatible export and video with transparency need FFmpeg, which is not bundled** (its licence would add
+  obligations to the package). The desktop app can fetch it as an optional add-on from its official source when you ask, or
+  use an FFmpeg you already have; the free command-line renderer (`npm run cli`, see docs/CLI.md) works with your own FFmpeg too. Everything a
   browser can encode (PNG, WebP, JPEG, MP4 in browser codecs, WebM, WAV and more) works in the app.
 - **The phone-as-camera link** is off in the desktop app. (It works when you run the web app from source with `npm run dev:lan`.)
 - **No auto-update** yet: new versions are new downloads.

@@ -9,8 +9,10 @@ import { scanPage, type PageScan, type PageScanOptions } from './page';
 
 export interface AssembledScan {
   report: ScanReport;
-  /** Frames by absolute index; null = missing. */
+  /** Frames by absolute index; null = missing. Layer 0 (the only layer of ordinary sheets). */
   frames: (RasterImage | null)[];
+  /** Frames of every paper layer (index 0 = `frames`). Length 1 for ordinary sheets. */
+  layers: (RasterImage | null)[][];
   pages: PageScan[];
 }
 
@@ -43,31 +45,37 @@ export function assembleScan(input: PageScan[]): AssembledScan {
     return false;
   });
 
-  // One photo per page index: the one with the lower registration error wins.
-  const byIndex = new Map<number, PageScan>();
+  // One photo per (layer, round, page index): the one with the lower registration error wins.
+  const keyOf = (p: PageScan) => `${p.header!.layer ?? 0}:${p.header!.round ?? 0}:${p.header!.pageIndex}`;
+  const byIndex = new Map<string, PageScan>();
   for (const p of sameProject) {
     const idx = p.header!.pageIndex;
-    const prev = byIndex.get(idx);
-    if (!prev) byIndex.set(idx, p);
+    const prev = byIndex.get(keyOf(p));
+    if (!prev) byIndex.set(keyOf(p), p);
     else if (p.quality < prev.quality) {
       R(prev).warnings.push(`Page ${idx + 1} was photographed twice; this photo was ignored in favour of "${R(p).fileName}".`);
-      byIndex.set(idx, p);
+      byIndex.set(keyOf(p), p);
     } else {
       R(p).warnings.push(`Page ${idx + 1} was photographed twice; this photo was ignored in favour of "${R(prev).fileName}".`);
     }
   }
-  const chosen = [...byIndex.values()].sort((a, b) => a.header!.pageIndex - b.header!.pageIndex);
+  // Later rounds replace earlier ones; within a round pages go by index.
+  const chosen = [...byIndex.values()].sort((a, b) => (a.header!.round ?? 0) - (b.header!.round ?? 0) || (a.header!.layer ?? 0) - (b.header!.layer ?? 0) || a.header!.pageIndex - b.header!.pageIndex);
   for (const p of chosen) R(p).used = true;
   for (const p of pages) if (R(p).status !== 'failed' && R(p).warnings.length > 0 && R(p).status === 'ok') R(p).status = 'warning';
 
   const manualOnly = chosen.length > 0 && chosen.every((p) => p.manualLayout);
   let pageCount = 0;
+  let layerCount = 1;
+  let rounds = 0;
   let totalFrames = 0;
   let fps = 0;
   let frameW = 0;
   let frameH = 0;
   for (const p of chosen) {
     const h = p.header!;
+    layerCount = Math.max(layerCount, h.layerCount ?? 1);
+    rounds = Math.max(rounds, h.round ?? 0);
     pageCount = Math.max(pageCount, h.pageCount, h.pageIndex + 1);
     totalFrames = Math.max(totalFrames, h.totalFrames, ...p.frames.map((f) => f.index + 1));
     if (!fps && h.fpsX100) fps = h.fpsX100 / 100;
@@ -78,11 +86,29 @@ export function assembleScan(input: PageScan[]): AssembledScan {
   }
   if (manualOnly) warnings.push('All pages use a manual layout; totals are estimated from the pages supplied.');
 
-  const frames: (RasterImage | null)[] = Array.from({ length: totalFrames }, () => null);
-  for (const p of chosen) for (const f of p.frames) frames[f.index] = f.image;
-  const have = new Set(chosen.map((p) => p.header!.pageIndex));
+  const layers: (RasterImage | null)[][] = Array.from({ length: layerCount }, () => Array.from({ length: totalFrames }, () => null));
+  for (const p of chosen) for (const f of p.frames) layers[Math.min(layerCount - 1, p.header!.layer ?? 0)][f.index] = f.image;
+  const frames = layers[0];
+  // Pages are checked per (layer, round) group; the report lists the missing page numbers of the first group that has gaps.
+  const groups = new Map<string, { layer: number; round: number; pageCount: number; have: Set<number> }>();
+  for (const p of chosen) {
+    const k = `${p.header!.layer ?? 0}:${p.header!.round ?? 0}`;
+    const g = groups.get(k) ?? { layer: p.header!.layer ?? 0, round: p.header!.round ?? 0, pageCount: 0, have: new Set<number>() };
+    g.pageCount = Math.max(g.pageCount, p.header!.pageCount, p.header!.pageIndex + 1);
+    g.have.add(p.header!.pageIndex);
+    groups.set(k, g);
+  }
   const missingPages: number[] = [];
-  for (let i = 0; i < pageCount; i++) if (!have.has(i)) missingPages.push(i);
+  for (const g of groups.values()) {
+    const miss: number[] = [];
+    for (let i = 0; i < g.pageCount; i++) if (!g.have.has(i)) miss.push(i);
+    if (miss.length && missingPages.length === 0) missingPages.push(...miss);
+    else if (miss.length) warnings.push(`Layer ${g.layer + 1}, round ${g.round + 1}: missing page${miss.length > 1 ? 's' : ''} ${miss.map((i) => i + 1).join(', ')}.`);
+  }
+  for (let l = 1; l < layerCount; l++) {
+    const holes = layers[l].filter((f) => f === null).length;
+    if (holes) warnings.push(`Paper layer ${l + 1} is missing ${holes} frame${holes === 1 ? '' : 's'}.`);
+  }
   const missingFrames: number[] = [];
   frames.forEach((f, i) => f === null && missingFrames.push(i));
   const failed = pages.filter((p) => R(p).status === 'failed');
@@ -100,12 +126,14 @@ export function assembleScan(input: PageScan[]): AssembledScan {
     frameWidthPx: frameW,
     frameHeightPx: frameH,
     recoveredFrames: totalFrames - missingFrames.length,
+    layerCount,
+    rounds,
     missingPages,
     missingFrames,
     complete: chosen.length > 0 && missingFrames.length === 0 && failed.length === 0,
     warnings,
   };
-  return { report, frames, pages };
+  return { report, frames, layers, pages };
 }
 
 /** Convenience for tests and headless use: scan every photo and assemble. */

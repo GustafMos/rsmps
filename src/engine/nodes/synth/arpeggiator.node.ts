@@ -18,7 +18,7 @@ export default defineNode({
   inputs: { midi: { type: 'midi', required: true, label: 'MIDI' } },
   outputs: { midi: { type: 'midi', label: 'MIDI' } },
   params: {
-    bpm: { type: 'number', default: 120, min: 30, max: 300, step: 0.1, label: 'Tempo (BPM)' },
+    bpm: { type: 'number', default: 120, min: 30, max: 300, step: 0.1, label: 'Tempo BPM' },
     rate: {
       type: 'enum',
       default: '1/8',

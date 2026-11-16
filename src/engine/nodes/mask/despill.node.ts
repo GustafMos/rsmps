@@ -23,7 +23,7 @@ export default defineNode({
       default: 'average',
       options: [
         { value: 'average', label: 'Average of others' },
-        { value: 'max', label: 'Max of others (gentler)' },
+        { value: 'max', label: 'Max of others' },
       ],
       label: 'Limit',
     },

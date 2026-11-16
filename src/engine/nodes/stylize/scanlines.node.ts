@@ -15,7 +15,7 @@ export default defineNode({
     thickness: { type: 'number', default: 0.5, min: 0.05, max: 0.95, step: 0.01, label: 'Line thickness', hint: 'Fraction of each row taken by the dark line.' },
     softness: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Softness' },
     vertical: { type: 'bool', default: false, label: 'Vertical lines' },
-    cycles: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Scroll (lines per loop)', hint: 'Whole number of line spacings the pattern moves in one loop. 0 = still.' },
+    cycles: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Scroll', hint: 'Whole number of line spacings the pattern moves in one loop. 0 = still.' },
   },
   summary: (p) => `${p.spacing} px · ${Math.round(p.strength * 100)}%${p.cycles ? ' · scrolling' : ''}`,
   render(ctx) {

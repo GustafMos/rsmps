@@ -14,7 +14,7 @@ export default defineNode({
       type: 'enum',
       default: 'ease',
       options: [
-        { value: 'ease', label: 'Ease (follow with a delay)' },
+        { value: 'ease', label: 'Ease' },
         { value: 'linear', label: 'Average over time' },
         { value: 'spring', label: 'Spring' },
         { value: 'slew', label: 'Limit speed of change' },
@@ -26,12 +26,12 @@ export default defineNode({
     time: { type: 'number', default: 0.2, min: 0, max: 600, softMax: 10, step: 0.01, unit: 's', label: 'Average over', hint: '0 = no smoothing.', visibleIf: (p) => p.mode === 'linear' },
     stiffness: { type: 'number', default: 2, min: 0.05, max: 100, softMax: 20, step: 0.05, unit: 'hz', label: 'Stiffness', hint: 'Natural speed of the spring in swings per second. Higher = snappier.', visibleIf: (p) => p.mode === 'spring' },
     bounce: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Bounce', hint: '0 = settles without overshoot, 1 = wobbles for a long time.', visibleIf: (p) => p.mode === 'spring' },
-    riseRate: { type: 'number', default: 1, min: 0, max: 1000000, softMax: 1000, step: 0.1, label: 'Max rise per second', hint: '0 = no limit.', visibleIf: (p) => p.mode === 'slew' },
-    fallRate: { type: 'number', default: 1, min: 0, max: 1000000, softMax: 1000, step: 0.1, label: 'Max fall per second', hint: '0 = no limit.', visibleIf: (p) => p.mode === 'slew' },
+    riseRate: { type: 'number', default: 1, min: 0, max: 1000000, softMax: 1000, step: 0.1, label: 'Max rise rate', hint: '0 = no limit.', visibleIf: (p) => p.mode === 'slew' },
+    fallRate: { type: 'number', default: 1, min: 0, max: 1000000, softMax: 1000, step: 0.1, label: 'Max fall rate', hint: '0 = no limit.', visibleIf: (p) => p.mode === 'slew' },
     history: { type: 'number', default: 2, min: 0.1, max: 600, softMax: 4, step: 0.1, unit: 's', label: 'Look back', hint: 'How far into the past to follow. Jumps bigger than rate × this are caught up instantly.', visibleIf: (p) => p.mode === 'slew' },
-    wrapAngle: { type: 'bool', default: false, label: 'Turn the short way round', hint: 'For angles: glides across the wrap point instead of spinning backwards through the whole circle.' },
+    wrapAngle: { type: 'bool', default: false, label: 'Shortest turn', hint: 'For angles: glides across the wrap point instead of spinning backwards through the whole circle.' },
     period: { type: 'number', default: 360, min: 0.0001, max: 1000000, step: 1, label: 'Full circle', visibleIf: (p) => p.wrapAngle === true },
-    loopAware: { type: 'bool', default: true, label: 'Loop with the project', hint: 'In a looping project the past of the first frames comes from the end, so exports loop cleanly. Live signals do not loop: turn off for MIDI/audio.' },
+    loopAware: { type: 'bool', default: true, label: 'Loop with project', hint: 'In a looping project the past of the first frames comes from the end, so exports loop cleanly. Live signals do not loop: turn off for MIDI/audio.' },
   },
   summary: (p) => {
     switch (p.mode) {

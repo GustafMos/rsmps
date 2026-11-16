@@ -6,11 +6,11 @@ const BLEND = ['max', 'add', 'behind'];
 
 export default defineNode({
   id: 'feedback-trail',
-  title: 'Echo Trail',
+  title: 'Warped Echo',
   category: 'filter',
   description:
-    'Leaves a trail of fading echoes behind the picture, each one moved, scaled, turned, recoloured and softened a little more than the last, like video feedback. Works on moving footage (echoes come from earlier frames) or on a still image (echoes are copies of it).',
-  keywords: ['echo', 'trail', 'feedback', 'ghost', 'streak', 'smear', 'afterimage', 'motion trail', 'tunnel', 'video feedback', 'repeat'],
+    'Warped echoes: leaves a trail of fading copies behind the picture, each one moved, scaled, turned, recolored and softened a little more than the last. Works on moving footage (echoes come from earlier frames) or on a still image (echoes are copies of it). For plain unmoved echoes use Frame Echo; for endless recursion use Feedback.',
+  keywords: ['echo', 'trail', 'feedback', 'ghost', 'streak', 'smear', 'afterimage', 'motion trail', 'tunnel', 'video feedback', 'repeat', 'echo trail'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
@@ -20,12 +20,12 @@ export default defineNode({
       default: 'time',
       label: 'Echoes come from',
       options: [
-        { value: 'time', label: 'Earlier frames (moving footage)' },
-        { value: 'still', label: 'Copies of this frame (no time)' },
+        { value: 'time', label: 'Earlier frames' },
+        { value: 'still', label: 'Copies of frame' },
       ],
     },
     echoes: { type: 'number', default: 8, min: 1, max: 48, softMax: 16, step: 1, integer: true, label: 'Echoes', group: 'Trail', hint: 'In "earlier frames" mode every echo re-renders the input once.' },
-    spacing: { type: 'number', default: 2, min: 1, max: 48, softMax: 12, step: 1, integer: true, label: 'Frames between echoes', group: 'Trail', visibleIf: (p) => p.mode === 'time' },
+    spacing: { type: 'number', default: 2, min: 1, max: 48, softMax: 12, step: 1, integer: true, label: 'Echo spacing', hint: 'In frames.', group: 'Trail', visibleIf: (p) => p.mode === 'time' },
     decay: { type: 'number', default: 0.75, min: 0, max: 1, step: 0.01, label: 'Fade per echo', group: 'Trail', hint: 'Each echo keeps this fraction of the previous one.' },
     blend: {
       type: 'enum',
@@ -33,9 +33,9 @@ export default defineNode({
       label: 'Blend',
       group: 'Trail',
       options: [
-        { value: 'max', label: 'Lighten (bright wins)' },
-        { value: 'add', label: 'Add (glowing)' },
-        { value: 'behind', label: 'Behind (sprites on transparency)' },
+        { value: 'max', label: 'Lighten' },
+        { value: 'add', label: 'Add' },
+        { value: 'behind', label: 'Behind' },
       ],
     },
     offsetX: { type: 'number', default: 14, min: -400, max: 400, softMax: 200, step: 0.5, unit: 'px', label: 'Shift X per echo', group: 'Transform' },
@@ -44,10 +44,10 @@ export default defineNode({
     rotation: { type: 'number', default: 0, min: -45, max: 45, step: 0.1, unit: 'deg', label: 'Turn per echo', group: 'Transform' },
     pivotX: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, unit: 'norm', label: 'Pivot X', group: 'Transform' },
     pivotY: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, unit: 'norm', label: 'Pivot Y', group: 'Transform' },
-    hueShift: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Hue shift per echo', group: 'Colour' },
-    darken: { type: 'number', default: 0.12, min: 0, max: 0.6, step: 0.01, label: 'Darken per echo', group: 'Colour', hint: 'Older echoes sink into the dark, for depth.' },
-    desaturate: { type: 'number', default: 0, min: 0, max: 0.6, step: 0.01, label: 'Desaturate per echo', group: 'Colour' },
-    blurGrowth: { type: 'number', default: 0, min: 0, max: 20, softMax: 8, step: 0.1, unit: 'px', label: 'Blur growth per echo', group: 'Colour' },
+    hueShift: { type: 'number', default: 0, min: -180, max: 180, step: 1, unit: 'deg', label: 'Hue shift per echo', group: 'Color' },
+    darken: { type: 'number', default: 0.12, min: 0, max: 0.6, step: 0.01, label: 'Darken per echo', group: 'Color', hint: 'Older echoes sink into the dark, for depth.' },
+    desaturate: { type: 'number', default: 0, min: 0, max: 0.6, step: 0.01, label: 'Desaturate', hint: 'Per echo.', group: 'Color' },
+    blurGrowth: { type: 'number', default: 0, min: 0, max: 20, softMax: 8, step: 0.1, unit: 'px', label: 'Blur growth', hint: 'Per echo.', group: 'Color' },
   },
   summary: (p) => `${p.echoes} echoes · ${p.mode === 'time' ? 'frames' : 'still'}`,
   async render(ctx) {

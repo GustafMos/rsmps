@@ -13,8 +13,8 @@ export default defineNode({
       type: 'enum',
       default: 'rect',
       options: [
-        { value: 'rect', label: 'Rectangle (fractions)' },
-        { value: 'margins', label: 'Trim edges (pixels)' },
+        { value: 'rect', label: 'Rectangle' },
+        { value: 'margins', label: 'Trim edges' },
       ],
       label: 'Crop by',
     },

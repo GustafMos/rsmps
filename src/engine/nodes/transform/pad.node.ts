@@ -14,7 +14,7 @@ export default defineNode({
       type: 'enum',
       default: 'margins',
       options: [
-        { value: 'margins', label: 'Add margins (pixels)' },
+        { value: 'margins', label: 'Add margins' },
         { value: 'aspect', label: 'Reach aspect ratio' },
       ],
       label: 'Pad by',
@@ -31,14 +31,14 @@ export default defineNode({
       default: 'transparent',
       options: [
         { value: 'transparent', label: 'Transparent' },
-        { value: 'color', label: 'Colour' },
+        { value: 'color', label: 'Color' },
         { value: 'clamp', label: 'Stretch edge pixels' },
         { value: 'mirror', label: 'Mirror' },
         { value: 'wrap', label: 'Repeat' },
       ],
       label: 'Fill with',
     },
-    color: { type: 'color', default: [0, 0, 0, 1], label: 'Colour', visibleIf: (p) => p.fill === 'color' },
+    color: { type: 'color', default: [0, 0, 0, 1], label: 'Color', visibleIf: (p) => p.fill === 'color' },
   },
   summary: (p) => (p.mode === 'aspect' ? `to ${p.ratioW}:${p.ratioH}` : `${p.left}/${p.top}/${p.right}/${p.bottom}`) + ` · ${p.fill}`,
   render(ctx) {

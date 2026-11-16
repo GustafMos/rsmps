@@ -16,7 +16,7 @@ export default defineNode({
       label: 'Inks',
       options: [
         { value: 'mono', label: 'One ink' },
-        { value: 'cmyk', label: 'CMYK (four screens)' },
+        { value: 'cmyk', label: 'CMYK' },
       ],
     },
     dotSize: { type: 'number', default: 8, min: 2, max: 80, step: 0.5, unit: 'px', label: 'Dot spacing' },

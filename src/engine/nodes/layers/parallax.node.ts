@@ -7,7 +7,7 @@ const MOTIONS = [
   { value: 'circle', label: 'Circle' },
   { value: 'figure-eight', label: 'Figure eight' },
   { value: 'push', label: 'Push in / out' },
-  { value: 'manual', label: 'Manual (camera params)' },
+  { value: 'manual', label: 'Manual' },
 ] as const;
 
 const MAX_LAYERS = 8;

@@ -15,9 +15,9 @@ import { srgbToOklab, toSpace, type DitherSpace, type Rgb } from './pixel-color'
 export const MAX_PALETTE = 1024;
 
 export const SPACE_OPTIONS = [
-  { value: 'oklab', label: 'OKLab (perceptual)' },
+  { value: 'oklab', label: 'OKLab' },
   { value: 'linear', label: 'Linear RGB' },
-  { value: 'srgb', label: 'RGB (sRGB)' },
+  { value: 'srgb', label: 'RGB' },
 ] as const;
 
 export const SPACE_INDEX: Record<DitherSpace, number> = { oklab: 0, linear: 1, srgb: 2 };

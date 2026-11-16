@@ -16,7 +16,7 @@ export default defineNode({
     sensitivity: { type: 'number', default: 0.45, min: 0, max: 1, step: 0.01, label: 'Sensitivity', group: 'Find lines', hint: 'Higher picks up fainter pencil.' },
     thicken: { type: 'number', default: 0, min: -8, max: 12, softMax: 6, step: 0.1, unit: 'px', label: 'Thicken / thin', group: 'Lines', hint: 'Positive grows the strokes, negative shrinks them.' },
     smooth: { type: 'number', default: 1, min: 0, max: 12, softMax: 5, step: 0.1, unit: 'px', label: 'Smooth jaggies', group: 'Lines' },
-    lineColor: { type: 'color', default: [0.05, 0.05, 0.08, 1], label: 'Line colour', group: 'Output' },
+    lineColor: { type: 'color', default: [0.05, 0.05, 0.08, 1], label: 'Line color', group: 'Output' },
     mode: {
       type: 'enum',
       default: 'lines',
@@ -24,11 +24,11 @@ export default defineNode({
       group: 'Output',
       options: [
         { value: 'lines', label: 'Lines only' },
-        { value: 'fills', label: 'Keep coloured fills' },
+        { value: 'fills', label: 'Keep colored fills' },
       ],
     },
-    fillThreshold: { type: 'number', default: 0.18, min: 0.02, max: 0.8, step: 0.01, label: 'Colour counts as fill above', group: 'Output', visibleIf: (p) => p.mode === 'fills' },
-    background: { type: 'color', default: [1, 1, 1, 1], label: 'Paper colour', group: 'Output', hint: 'Set alpha to 0 for transparent paper.' },
+    fillThreshold: { type: 'number', default: 0.18, min: 0.02, max: 0.8, step: 0.01, label: 'Fill threshold', hint: 'A color counts as fill above this.', group: 'Output', visibleIf: (p) => p.mode === 'fills' },
+    background: { type: 'color', default: [1, 1, 1, 1], label: 'Paper color', group: 'Output', hint: 'Set alpha to 0 for transparent paper.' },
   },
   summary: (p) => `${p.mode === 'fills' ? 'lines + fills' : 'lines'} · ${p.thicken >= 0 ? '+' : ''}${p.thicken} px`,
   render(ctx) {

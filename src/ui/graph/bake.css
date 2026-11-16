@@ -12,3 +12,17 @@
 .rs-bake__facts { font-size: var(--fs-xs); color: var(--text-dim); }
 .rs-bake__bar { height: 6px; background: var(--bg-0); border: 1px solid var(--line-strong); }
 .rs-bake__bar > span { display: block; height: 100%; width: 0; background: var(--text-dim); }
+
+/* Process mode (any node with a process): the badge states beyond Bake's, and the striped look while a job is queued or running. */
+.rs-node__proc[data-kind='running'], .rs-node__proc[data-kind='paused'] { background: linear-gradient(90deg, var(--bg-5) var(--p, 0%), var(--bg-1) var(--p, 0%)); }
+.rs-node__proc[data-kind='queued'] { border-style: dotted; }
+.rs-node__proc[data-kind='failed'] { border-color: var(--danger); color: var(--danger); }
+.rs-node__proc[data-kind='missing'] { border-style: dashed; color: var(--text); }
+.rs-node.is-processing { position: relative; }
+.rs-node.is-processing::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(135deg, transparent 0 7px, rgba(255, 255, 255, 0.045) 7px 14px); }
+.rs-process[data-process-state='failed'] .rs-bake__state { color: var(--danger); }
+.rs-proc { display: flex; flex-direction: column; gap: var(--s-2); }
+.rs-proc__row { display: flex; align-items: center; gap: var(--s-2); }
+.rs-proc__row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-proc__bar { height: 3px; background: var(--bg-0); }
+.rs-proc__bar > span { display: block; height: 100%; background: var(--text-dim); }

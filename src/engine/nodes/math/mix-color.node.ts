@@ -17,7 +17,7 @@ export default defineNode({
       type: 'enum',
       default: 'oklab',
       options: [
-        { value: 'oklab', label: 'Perceptual (smoothest)' },
+        { value: 'oklab', label: 'Perceptual' },
         { value: 'srgb', label: 'Plain RGB' },
         { value: 'linear', label: 'Light-accurate' },
       ],

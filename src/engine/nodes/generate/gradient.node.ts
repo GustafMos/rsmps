@@ -20,13 +20,13 @@ export default defineNode({
       options: [
         { value: 'linear', label: 'Linear' },
         { value: 'radial', label: 'Radial' },
-        { value: 'angular', label: 'Angular (sweep)' },
+        { value: 'angular', label: 'Angular' },
         { value: 'diamond', label: 'Diamond' },
       ],
     },
     colors: {
       type: 'palette',
-      label: 'Colour stops',
+      label: 'Color stops',
       hint: 'Stops are spaced evenly from start to end.',
       default: [
         [0.09, 0.1, 0.35],
@@ -42,7 +42,7 @@ export default defineNode({
       default: 'clamp',
       label: 'Beyond the ends',
       options: [
-        { value: 'clamp', label: 'Hold end colours' },
+        { value: 'clamp', label: 'Hold end colors' },
         { value: 'repeat', label: 'Repeat' },
         { value: 'mirror', label: 'Mirror' },
       ],

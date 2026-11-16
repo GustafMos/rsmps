@@ -3,6 +3,7 @@ import { mod } from '../../lib/util-time';
 
 export default defineNode({
   id: 'switch',
+  family: 'combine',
   title: 'Switch',
   category: 'composite',
   description: 'Pick one of several images by number. The index wraps around, so it pairs well with Batch Item or Time numbers.',

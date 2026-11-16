@@ -13,10 +13,10 @@ export default defineNode({
   outputs: { audio: { type: 'audio', label: 'Audio' } },
   params: {
     threshold: { type: 'number', default: -45, min: -90, max: 0, step: 0.5, unit: 'db', label: 'Opens above' },
-    reduction: { type: 'number', default: 60, min: 0, max: 90, step: 1, unit: 'db', label: 'Reduction when closed' },
-    attack: { type: 'number', default: 2, min: 0.1, max: 100, step: 0.1, label: 'Attack (ms)' },
-    hold: { type: 'number', default: 40, min: 0, max: 500, step: 1, label: 'Hold (ms)' },
-    release: { type: 'number', default: 120, min: 5, max: 2000, step: 1, label: 'Release (ms)' },
+    reduction: { type: 'number', default: 60, min: 0, max: 90, step: 1, unit: 'db', label: 'Closed gain', hint: 'How far the signal is reduced while the gate is closed.' },
+    attack: { type: 'number', default: 2, min: 0.1, max: 100, step: 0.1, label: 'Attack ms' },
+    hold: { type: 'number', default: 40, min: 0, max: 500, step: 1, label: 'Hold ms' },
+    release: { type: 'number', default: 120, min: 5, max: 2000, step: 1, label: 'Release ms' },
   },
   summary: (p) => `opens above ${p.threshold} dB`,
   audio: defineAudio({

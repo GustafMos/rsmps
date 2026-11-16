@@ -25,12 +25,12 @@ export default defineNode({
         { value: 'right', label: 'Right' },
       ],
     },
-    color: { type: 'color', default: [1, 1, 1, 1], label: 'Colour' },
+    color: { type: 'color', default: [1, 1, 1, 1], label: 'Color' },
     x: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Position X', group: 'Placement', hint: 'Anchor point; left/centre/right alignment decides which side of the text sits here.' },
     y: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Position Y', group: 'Placement', hint: 'Vertical centre of the text block.' },
     lineHeight: { type: 'number', default: 1.2, min: 0.5, max: 3, step: 0.05, label: 'Line height', group: 'Placement' },
     outline: { type: 'number', default: 0, min: 0, max: 200, unit: 'px', label: 'Outline width', group: 'Outline' },
-    outlineColor: { type: 'color', default: [0, 0, 0, 1], label: 'Outline colour', group: 'Outline' },
+    outlineColor: { type: 'color', default: [0, 0, 0, 1], label: 'Outline color', group: 'Outline' },
   },
   summary: (p) => {
     const first = p.text.split('\n')[0] ?? '';

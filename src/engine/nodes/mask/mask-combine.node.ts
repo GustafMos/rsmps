@@ -1,10 +1,10 @@
 import { defineNode } from '../../define';
 
 const OPS = [
-  { value: 'union', label: 'Union (max)' },
+  { value: 'union', label: 'Union' },
   { value: 'add', label: 'Add' },
-  { value: 'subtract', label: 'Subtract (A - B)' },
-  { value: 'intersect', label: 'Intersect (min)' },
+  { value: 'subtract', label: 'Subtract' },
+  { value: 'intersect', label: 'Intersect' },
   { value: 'multiply', label: 'Multiply' },
   { value: 'difference', label: 'Difference' },
 ] as const;

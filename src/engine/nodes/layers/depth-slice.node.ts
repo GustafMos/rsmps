@@ -118,7 +118,7 @@ export default defineNode({
       type: 'enum',
       default: 'balanced',
       options: [
-        { value: 'balanced', label: 'Balanced (equal area)' },
+        { value: 'balanced', label: 'Balanced' },
         { value: 'even', label: 'Even depth ranges' },
       ],
       label: 'Split by',

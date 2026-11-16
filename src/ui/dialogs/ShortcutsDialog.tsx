@@ -22,7 +22,7 @@ export function ShortcutsDialog() {
   const defs = useDefs();
   useKeymapVersion();
   const groups = ['Add nodes', 'Edit', 'Graph', 'Playback', 'View', 'File'] as const;
-  const nodes = nodeCommandIds().filter((id) => bindingsOf(id).length && defs.some((d) => d.id === nodeTypeOf(id)));
+  const nodes = nodeCommandIds().filter((id) => bindingsOf(id).length && defs.some((d) => d.id === nodeTypeOf(id) && !d.hidden));
   return (
     <Dialog
       title="Keyboard shortcuts"

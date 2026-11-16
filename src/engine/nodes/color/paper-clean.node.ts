@@ -13,8 +13,8 @@ export default defineNode({
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
   params: {
-    paperRadius: { type: 'number', default: 40, min: 4, max: 600, softMax: 200, step: 1, unit: 'px', label: 'Paper estimate size', group: 'Paper', hint: 'Larger than the thickest drawn shape. Smaller follows shadows more closely, but eats big filled areas.' },
-    removeCast: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Remove colour cast', group: 'Paper', hint: '1 = paper becomes neutral white, 0 = keep its tint.' },
+    paperRadius: { type: 'number', default: 40, min: 4, max: 600, softMax: 200, step: 1, unit: 'px', label: 'Paper estimate', group: 'Paper', hint: 'Larger than the thickest drawn shape. Smaller follows shadows more closely, but eats big filled areas.' },
+    removeCast: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Remove color cast', group: 'Paper', hint: '1 = paper becomes neutral white, 0 = keep its tint.' },
     blackPoint: { type: 'number', default: 0.04, min: 0, max: 0.5, step: 0.005, label: 'Black point', group: 'Levels' },
     whitePoint: { type: 'number', default: 0.9, min: 0.5, max: 1, step: 0.005, label: 'White point', group: 'Levels', hint: 'Anything this bright or brighter becomes pure white, which wipes out paper noise.' },
     gamma: { type: 'number', default: 1, min: 0.3, max: 3, step: 0.01, label: 'Midtones', group: 'Levels' },
@@ -25,8 +25,8 @@ export default defineNode({
       label: 'Output',
       group: 'Output',
       options: [
-        { value: 'paper', label: 'Clean picture on white paper' },
-        { value: 'ink', label: 'Ink only, transparent background' },
+        { value: 'paper', label: 'On white paper' },
+        { value: 'ink', label: 'Ink only' },
       ],
     },
     inkThreshold: { type: 'number', default: 0.12, min: 0, max: 0.9, step: 0.005, label: 'Ink threshold', group: 'Output', visibleIf: (p) => p.output === 'ink' },

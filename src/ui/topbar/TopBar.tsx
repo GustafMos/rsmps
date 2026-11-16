@@ -5,6 +5,7 @@ import pkg from '../../../package.json';
 import { enabledOutputs } from '../../engine/graph';
 import { resolveActiveOutput } from '../store/editor';
 import { useApp, useEd } from '../store/context';
+import { toggleMediaPanel, useMedia } from '../store/media';
 import { reloadInSafeMode } from '../safety';
 import { isDesktop } from '../../io/desktop';
 import { checkNow } from '../updateNotice';
@@ -19,7 +20,7 @@ export function TopBar() {
   const canRedo = useEd((s) => s.canRedo);
   const mode = useEd((s) => s.mode);
   const enabledCount = useEd((s) => enabledOutputs(s.graph, io.registry).length);
-  const leftOpen = useEd((s) => s.prefs.leftOpen);
+  const mediaOpen = !useMedia((s) => s.collapsed);
   const rightOpen = useEd((s) => s.prefs.rightOpen);
 
   // Non-personal technical context only: no project name, file names or graph contents.
@@ -45,6 +46,7 @@ export function TopBar() {
   const fileItems: MenuItem[] = [
     { label: 'New project (new tab)', onClick: () => void ed.newProjectTab(), shortcut: 'Ctrl+Alt+T' },
     { label: 'New scan (photos of printed sheets)', onClick: () => void ed.newScanTab() },
+    { label: 'Print blank sheets…', onClick: () => ed.openDialog('blankSheets') },
     { label: 'Open file in a new tab…', onClick: open, shortcut: 'Ctrl+O' },
     { label: 'Save…', onClick: save, shortcut: 'Ctrl+S' },
     { sep: true },
@@ -110,7 +112,7 @@ export function TopBar() {
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }}
       />
       <div className="rs-top__spacer" />
-      <button className={`rs-btn rs-btn--icon rs-btn--ghost${leftOpen ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ leftOpen: !leftOpen })} title="Toggle media panel" aria-label="Toggle media panel"><Icon name="folder" /></button>
+      <button className={`rs-btn rs-btn--icon rs-btn--ghost${mediaOpen ? ' is-on' : ''}`} onClick={toggleMediaPanel} title="Toggle media panel: open it, or fold it to a slim rail" aria-label="Toggle media panel"><Icon name="folder" /></button>
       <button className={`rs-btn rs-btn--icon rs-btn--ghost${rightOpen ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ rightOpen: !rightOpen })} title="Toggle inspector" aria-label="Toggle inspector"><Icon name="menu" /></button>
       <div className="rs-top__sep" />
       <button className="rs-btn rs-btn--ghost rs-top__link" onClick={open} title="Open file in a new tab (Ctrl+O)" aria-label="Open"><Icon name="open" /><span className="rs-top__label">Open</span></button>

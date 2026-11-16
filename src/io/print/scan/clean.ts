@@ -158,9 +158,9 @@ export function whiteAt(f: WhiteField, x: number, y: number, out: number[]): voi
  * Where the guide was printed ink, the scanned value is c = guide * drawing, so drawing = c / guide. Where the
  * guide is too dark to tell (< 15% brightness) the pixel is left white. Edits `frame` in place.
  */
-export function removeGuide(frame: RasterImage, original: RasterImage, mode: GuideMode, opacityPercent: number): void {
+export function removeGuide(frame: RasterImage, original: RasterImage, mode: GuideMode, opacityPercent: number, blue = false): void {
   if (mode === 'blank') return;
-  const guide = guideAppearance(resizeRaster(original, frame.width, frame.height, 'auto'), mode, opacityPercent);
+  const guide = guideAppearance(resizeRaster(original, frame.width, frame.height, 'auto'), mode, opacityPercent, blue);
   const d = frame.data;
   const gd = guide.data;
   for (let i = 0; i < frame.width * frame.height * 4; i += 4) {
@@ -197,4 +197,45 @@ export function extractDrawing(frame: RasterImage, opts: DrawingOptions = {}): R
     o[i + 3] = a * 255;
   }
   return out;
+}
+
+/**
+ * "Keep only what I drew", no original needed, for sheets whose guide is non-photo blue: the blue guide is bright in the
+ * green and blue channels, graphite and dark inks are not, so darkness is measured on the blue channel and anything lighter
+ * than `threshold` becomes paper. Edits `frame` in place (flattened frames expected).
+ */
+export function removeBlueGuide(frame: RasterImage, opts: { threshold?: number; softness?: number } = {}): void {
+  const t0 = opts.threshold ?? 0.2;
+  const t1 = t0 + Math.max(0.01, opts.softness ?? 0.12);
+  const d = frame.data;
+  for (let i = 0; i < frame.width * frame.height * 4; i += 4) {
+    const dark = 1 - d[i + 2] / 255;
+    const k = Math.min(1, Math.max(0, (dark - t0) / (t1 - t0)));
+    const keep = k * k * (3 - 2 * k);
+    for (let c = 0; c < 3; c++) d[i + c] = 255 - (255 - d[i + c]) * keep;
+  }
+}
+
+/**
+ * Fallback for faint / outline guides when the original frame is not available: the printed guide is never darker than
+ * `guideDarkness` (0..1, for faint sheets the percent of ink kept), so everything lighter than that plus a margin is paper.
+ */
+export function removeFaintGuide(frame: RasterImage, guideDarkness: number, softness = 0.08): void {
+  const t0 = Math.min(0.9, Math.max(0.03, guideDarkness) + 0.04);
+  const t1 = t0 + Math.max(0.01, softness);
+  const d = frame.data;
+  for (let i = 0; i < frame.width * frame.height * 4; i += 4) {
+    const dark = 1 - Math.min(d[i], d[i + 1], d[i + 2]) / 255;
+    const k = Math.min(1, Math.max(0, (dark - t0) / (t1 - t0)));
+    const keep = k * k * (3 - 2 * k);
+    for (let c = 0; c < 3; c++) d[i + c] = 255 - (255 - d[i + c]) * keep;
+  }
+}
+
+/** Remove the printed guide of a scanned frame with the best method available: original when known, else by colour / threshold. */
+export function keepOnlyDrawing(frame: RasterImage, how: { mode: GuideMode; opacityPercent: number; blue: boolean; original?: RasterImage | null }): void {
+  if (how.mode === 'blank') return;
+  if (how.original) removeGuide(frame, how.original, how.mode, how.opacityPercent, how.blue);
+  else if (how.blue) removeBlueGuide(frame);
+  else removeFaintGuide(frame, how.mode === 'faded' ? how.opacityPercent / 100 : 0.2);
 }

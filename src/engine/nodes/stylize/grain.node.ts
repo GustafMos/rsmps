@@ -15,7 +15,7 @@ export default defineNode({
     size: { type: 'number', default: 1.5, min: 0.5, max: 20, step: 0.1, unit: 'px', label: 'Grain size' },
     monochrome: { type: 'bool', default: true, label: 'Monochrome' },
     animated: { type: 'bool', default: true, label: 'Animated' },
-    hold: { type: 'number', default: 1, min: 1, max: 12, step: 1, integer: true, label: 'Change every N frames', visibleIf: (p) => p.animated === true },
+    hold: { type: 'number', default: 1, min: 1, max: 12, step: 1, integer: true, label: 'Change every N', visibleIf: (p) => p.animated === true },
     seed: { type: 'number', default: 1, min: 0, max: 9999, step: 1, integer: true, label: 'Seed' },
   },
   summary: (p) => `${Math.round(p.amount * 100)}% · ${p.size} px${p.animated ? ' · animated' : ''}`,

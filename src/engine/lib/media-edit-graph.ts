@@ -6,6 +6,7 @@
  */
 import { wiresInto } from '../graph';
 import type { GraphDoc, NodeInstance } from '../types';
+import { reconcileInterleave } from './interleave-graph';
 import { MEDIA_TIMELINE_ID, appendSource, normalizeEdit, remapSources, type SourceInfo } from './media-edit';
 
 /** What a source is: its label and natural length. The caller knows the host (asset info); this module stays pure. */
@@ -34,5 +35,6 @@ export function reconcileMediaEdits(prev: GraphDoc, next: GraphDoc, describe: De
     }
     if (changed) out = { ...out, nodes: out.nodes.map((n) => (n.id === node.id ? { ...n, params: { ...n.params, edit } } : n)) };
   }
-  return out;
+  // Frame Interleave keeps its source count, base length and project frames in step the same way.
+  return reconcileInterleave(prev, out, (from) => describe(from, 'clips').duration);
 }
