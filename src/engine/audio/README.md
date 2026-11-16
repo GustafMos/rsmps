@@ -260,6 +260,33 @@ keyboard themselves: put a Keyboard node in front.
 "fit the pattern to the project length" stretches it over the project duration so it loops exactly. The sequencer runs
 while the transport plays. A piano model is not included: the Sampler plays recorded or imported piano sounds.
 
+## Sound from video
+
+**Media In** has a **Sound** output next to Image: the sound track of the video it is showing, in sync with the picture.
+No separate "render the audio" step and no second node pointing at the same file:
+
+```
+Media In.Image ─► (picture effects) ─► Output
+Media In.Sound ─► (Volume, Compressor, Reverb ...) ─► Audio Out
+```
+
+* The sound uses exactly the picture's clip-time mapping (`src/engine/lib/media-time.ts`, one function used by both `render` and the
+  kernel): in/out **trim**, start **offset**, **loop** inside the trimmed span, and the **frame rate** setting as playback **speed**
+  (`fps / clip fps`: 12 on a 24 fps clip is half speed). Speed is done by resampling, so pitch follows speed like tape. A
+  keep-pitch option is not offered: the granular shifter works on live input, not on a varispeed read.
+* Short (4 ms) fades at loop wraps, seeks and trim edges. Silent for images, image sequences and videos without sound
+  (the host simply has no PCM for them). Params in the group "Sound": `volume` (dB), `mute`.
+* **Batch**: the stream domain has no batch item, so the engine is told the current one: `TransportState.item` while previewing,
+  `options.item` for `renderAudioOffline` / `analyzeSignalsOffline` (default 0). Media In plays `assets[item % assets.length]`.
+  The IO layer must pass the item it is showing or exporting.
+* **Decoding** is requested only for Media In nodes whose Sound output is wired, and only for the current item
+  (`audioAssetIds(graph, registry, item)`). The asset provider should return the video's sound track as
+  `{ sampleRate, channels, video: { duration, fps } }`: Media In needs `video` to map trim and speed (without it the duration
+  is taken from the audio and the speed setting has no effect).
+* Export: a Media In wired through any effects into an enabled Audio Out is export audio (`hasExportAudio`). It can also feed
+  a Timeline's `recordAudio` or the Sound to Numbers node.
+* **Audio File** stays for standalone audio assets (music, recordings) that follow the transport from time 0.
+
 ## Not in v1
 
 * **Plugins cannot add audio nodes.** The worklet only knows the built-in nodes (functions cannot be sent to it).

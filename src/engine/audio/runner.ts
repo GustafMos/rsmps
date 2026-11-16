@@ -28,6 +28,8 @@ export interface RunnerOptions {
 }
 
 export interface TransportUpdate {
+  /** Batch item being previewed or exported. */
+  item?: number;
   playing?: boolean;
   /** Seek to this position. */
   seconds?: number;
@@ -101,13 +103,17 @@ export function hasSignalTap(graph: GraphDoc, registry: Registry): boolean {
 }
 
 /** Asset ids referenced by audio nodes that are upstream of an output. */
-export function audioAssetIds(graph: GraphDoc, registry: Registry): string[] {
+export function audioAssetIds(graph: GraphDoc, registry: Registry, item = 0): string[] {
   const ids = new Set<string>();
   for (const n of graph.nodes) {
     const def = registry.get(n.type);
     if (!isAudioNode(def)) continue;
-    const extra = def.audio!.assets?.(resolveParams(def, n.params));
-    if (extra) for (const id of extra) ids.add(id);
+    const k = def.audio!;
+    if (k.loadAssetsOnlyWhenWired && !graph.edges.some((e) => e.from.node === n.id && (def.outputs as OutputSchema)[e.from.port]?.type === 'audio')) continue;
+    if (k.assets) {
+      for (const id of k.assets(resolveParams(def, n.params), item)) ids.add(id);
+      continue;
+    }
     for (const [key, p] of Object.entries(def.params as ParamSchema)) {
       if (p.type === 'assets') {
         const v = n.params[key];
@@ -121,7 +127,7 @@ export function audioAssetIds(graph: GraphDoc, registry: Registry): string[] {
 export class AudioGraphRunner {
   readonly sampleRate: number;
   readonly blockSize: number;
-  readonly time: AudioTime = { seconds: 0, sample: 0, bpm: 120, playing: false, loop: false, duration: 0 };
+  readonly time: AudioTime = { seconds: 0, sample: 0, bpm: 120, playing: false, loop: false, duration: 0, item: 0 };
 
   private registry: Registry;
   private fadeOnRebuild: boolean;
@@ -168,7 +174,7 @@ export class AudioGraphRunner {
     return this.nodes.get(id)?.state;
   }
 
-  setAsset(id: string, pcm: { sampleRate: number; channels: Float32Array[] } | null): void {
+  setAsset(id: string, pcm: { sampleRate: number; channels: Float32Array[]; video?: { duration: number; fps: number } } | null): void {
     if (!pcm) this.assets.delete(id);
     else this.assets.set(id, toAudioAsset(pcm, this.sampleRate));
   }
@@ -179,6 +185,7 @@ export class AudioGraphRunner {
     if (t.duration !== undefined) tm.duration = t.duration;
     if (t.loop !== undefined) tm.loop = t.loop;
     if (t.bpm !== undefined) tm.bpm = t.bpm;
+    if (t.item !== undefined) tm.item = t.item;
     if (t.seconds !== undefined) {
       tm.sample = Math.max(0, Math.round(t.seconds * this.sampleRate));
       tm.seconds = tm.sample / this.sampleRate;

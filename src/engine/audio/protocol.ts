@@ -6,8 +6,8 @@ import type { MidiEvent } from './types';
 export type ToWorklet =
   | { type: 'graph'; doc: GraphDoc }
   /** Decoded PCM at the context sample rate. One channel = mono. Buffers are transferred. */
-  | { type: 'asset'; id: string; sampleRate: number; channels: Float32Array[] }
-  | { type: 'transport'; playing: boolean; seconds: number; duration: number; loop: boolean }
+  | { type: 'asset'; id: string; sampleRate: number; channels: Float32Array[]; video?: { duration: number; fps: number } }
+  | { type: 'transport'; playing: boolean; seconds: number; duration: number; loop: boolean; item?: number }
   | { type: 'midi'; events: MidiEvent[] }
   /** Which worklet input carries which microphone node. */
   | { type: 'micSlots'; slots: Record<string, number> }

@@ -10,6 +10,8 @@ export interface PcmAudio {
   sampleRate: number;
   /** One Float32Array per channel (1 or 2), equal lengths. */
   channels: Float32Array[];
+  /** Set when this is the sound track of a video: the clip's duration (seconds) and frame rate. Media In needs it to map picture time to sound (trim, speed). */
+  video?: { duration: number; fps: number };
 }
 
 /** Decoded audio for an asset id (audio file, or the sound track of a video), or null. */
@@ -20,6 +22,11 @@ export interface TransportState {
   seconds: number;
   duration: number;
   loop: boolean;
+  /**
+   * Batch item being previewed or rendered (0 when there is no batch). Media In plays the sound of `assets[item % assets.length]`.
+   * The IO layer must pass the item it is showing / exporting, and pass it again whenever it changes.
+   */
+  item?: number;
 }
 
 export interface AudioDevice {
@@ -147,7 +154,7 @@ export type RenderAudioOffline = (
   graph: GraphDoc,
   registry: Registry,
   assets: AudioAssetProvider,
-  options: { duration: number; sampleRate?: number; loop: boolean },
+  options: { duration: number; sampleRate?: number; loop: boolean; /** Batch item to render (default 0). */ item?: number },
 ) => Promise<PcmAudio | null>;
 
 /** Signals sampled once per video frame (export). */
@@ -172,7 +179,7 @@ export type AnalyzeSignalsOffline = (
   graph: GraphDoc,
   registry: Registry,
   assets: AudioAssetProvider,
-  options: { duration: number; fps: number; sampleRate?: number; loop: boolean },
+  options: { duration: number; fps: number; sampleRate?: number; loop: boolean; /** Batch item (default 0). */ item?: number },
 ) => Promise<SignalTracks>;
 
 /**

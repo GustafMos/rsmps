@@ -25,7 +25,7 @@ describe('midi-keyboard', () => {
     const st = def.audio!.create({ sampleRate: SR, blockSize: 128, nodeId: 'k' });
     const io = (params: Record<string, unknown>, ui: MidiEvent[]) => {
       const out: MidiEvent[] = [];
-      def.audio!.process(st, { frames: 128, sampleRate: SR, in: {}, midiIn: {}, out: {}, midiOut: { midi: out }, params: { baseOctave: 5, velocity: 1, transpose: 0, sustain: false, latch: false, ...params }, signal: () => {}, time: { seconds: 0, sample: 0, bpm: 120, playing: false, loop: false, duration: 0 }, assets: { get: () => undefined }, live: { mic: null, deviceMidi: [], uiMidi: ui } });
+      def.audio!.process(st, { frames: 128, sampleRate: SR, in: {}, midiIn: {}, out: {}, midiOut: { midi: out }, params: { baseOctave: 5, velocity: 1, transpose: 0, sustain: false, latch: false, ...params }, signal: () => {}, time: { seconds: 0, sample: 0, bpm: 120, playing: false, loop: false, duration: 0, item: 0 }, assets: { get: () => undefined }, live: { mic: null, deviceMidi: [], uiMidi: ui } });
       return summary(out);
     };
     expect(io({ sustain: true }, [on(60, 0), off(60, 5)])).toEqual(['on:60@0']);

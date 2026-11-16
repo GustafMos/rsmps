@@ -50,10 +50,14 @@ export interface AudioTime {
   loop: boolean;
   /** Project duration in seconds (0 = unknown). */
   duration: number;
+  /** Batch item being previewed or exported (0 when there is no batch). Media In picks its asset with it. */
+  item: number;
 }
 
 /** Decoded asset PCM, already resampled to the context sample rate and made stereo. */
 export interface AudioAsset {
+  /** Set for the sound track of a video: the clip's duration and frame rate (Media In maps picture time to sound with them). */
+  video?: { duration: number; fps: number };
   sampleRate: number;
   frames: number;
   left: Float32Array;
@@ -131,7 +135,9 @@ export interface AudioKernel<S = any> { // eslint-disable-line @typescript-eslin
    */
   control?(state: S, message: any, params: AudioParams): any;
   /** Asset ids this node plays, for hosts that must load them first (beyond 'assets'-type params). */
-  assets?(params: AudioParams): string[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+  assets?(params: AudioParams, item: number): string[];
+  /** With `assets()` or 'assets' params: only request them when something is wired to one of this node's audio outputs. */
+  loadAssetsOnlyWhenWired?: boolean; // eslint-disable-line @typescript-eslint/no-explicit-any
   /** Clear tails and held notes (called on transport seek / stop where meaningful). Optional. */
   reset?(state: S): void;
 }

@@ -9,6 +9,7 @@ import { snapToScale, stepInScale } from '../scales';
 import { SR, audioRegistry, rms, sine, toneAmp } from '../testing';
 
 const EXPECTED = {
+  input: ['media-in'],
   'audio-source': ['audio-file', 'audio-timeline', 'microphone', 'oscillator'],
   output: ['audio-out'],
   'audio-fx': ['chorus', 'compressor', 'delay', 'distortion', 'eq', 'filter', 'flanger', 'gain', 'gate', 'limiter', 'mixer', 'pitch-shift', 'reverb', 'stereo-width', 'tremolo'],
@@ -32,13 +33,13 @@ describe('node definitions', () => {
   it.each(defs.map((d) => [d.id, d] as const))('%s is a valid, well-formed audio node', (_id, def) => {
     expect(validateDef(def)).toEqual([]);
     // bridge nodes (category math) also have a frame-domain render that reads Host.signal; everything else is stream-only
-    if (def.category === 'math') expect(typeof def.render).toBe('function');
+    if (def.category === 'math' || def.category === 'input') expect(typeof def.render).toBe('function');
     else expect(def.render).toBeUndefined();
     expect(typeof def.audio!.create).toBe('function');
     expect(typeof def.audio!.process).toBe('function');
     expect(def.description.length).toBeGreaterThan(15);
     for (const i of Object.values(def.inputs as Record<string, { type: string }>)) expect(['audio', 'midi']).toContain(i.type);
-    for (const o of Object.values(def.outputs as Record<string, { type: string }>)) expect(def.category === 'math' ? ['number'] : ['audio', 'midi']).toContain(o.type);
+    for (const o of Object.values(def.outputs as Record<string, { type: string }>)) expect(def.category === 'math' ? ['number'] : def.category === 'input' ? ['image', 'audio'] : ['audio', 'midi']).toContain(o.type);
     // every param has a plain-English label and sane numeric bounds
     for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) {
       expect(p.label, `${def.id}.${key} needs a label`).toBeTruthy();

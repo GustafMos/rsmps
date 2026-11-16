@@ -120,8 +120,10 @@ class WebAudioEngine implements AudioEngine {
   }
 
   setTransport(state: TransportState): void {
+    const itemChanged = (state.item ?? 0) !== (this.transport.item ?? 0);
     this.transport = { ...state };
     this.post({ type: 'transport', ...state });
+    if (itemChanged) this.loadAssets(); // Media In decodes only the current item's sound
   }
 
   setVolume(volume: number): void {
@@ -198,7 +200,7 @@ class WebAudioEngine implements AudioEngine {
   private loadAssets(): void {
     const { graph, registry, provider, ctx } = this;
     if (!graph || !registry || !provider || !ctx) return;
-    for (const id of audioAssetIds(graph, registry)) {
+    for (const id of audioAssetIds(graph, registry, this.transport.item ?? 0)) {
       if (this.requested.has(id)) continue;
       this.requested.add(id);
       provider(id)
@@ -207,7 +209,7 @@ class WebAudioEngine implements AudioEngine {
           const a = toAudioAsset(pcm, ctx.sampleRate);
           const mono = a.right === a.left;
           this.post(
-            { type: 'asset', id, sampleRate: a.sampleRate, channels: mono ? [a.left] : [a.left, a.right] },
+            { type: 'asset', id, sampleRate: a.sampleRate, channels: mono ? [a.left] : [a.left, a.right], ...(a.video ? { video: a.video } : {}) },
             mono ? [a.left.buffer] : [a.left.buffer, a.right.buffer],
           );
         })

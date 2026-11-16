@@ -34,8 +34,8 @@ export function resampleChannel(src: Float32Array, srcRate: number, dstRate: num
 }
 
 /** Convert decoded PCM (mono or stereo, any rate) into the stereo asset format the kernels read. */
-export function toAudioAsset(pcm: { sampleRate: number; channels: Float32Array[] }, sampleRate: number): AudioAsset {
+export function toAudioAsset(pcm: { sampleRate: number; channels: Float32Array[]; video?: { duration: number; fps: number } }, sampleRate: number): AudioAsset {
   const l = resampleChannel(pcm.channels[0] ?? new Float32Array(0), pcm.sampleRate, sampleRate);
   const r = pcm.channels[1] ? resampleChannel(pcm.channels[1], pcm.sampleRate, sampleRate) : l;
-  return { sampleRate, frames: Math.min(l.length, r.length), left: l, right: r };
+  return { sampleRate, frames: Math.min(l.length, r.length), left: l, right: r, ...(pcm.video ? { video: pcm.video } : {}) };
 }

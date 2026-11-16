@@ -49,10 +49,10 @@ class RsmpsProcessor extends AudioWorkletProcessor {
         r.setGraph(m.doc);
         break;
       case 'asset':
-        r.setAsset(m.id, { sampleRate: m.sampleRate, channels: m.channels });
+        r.setAsset(m.id, { sampleRate: m.sampleRate, channels: m.channels, video: m.video });
         break;
       case 'transport':
-        r.setTransport({ playing: m.playing, seconds: m.seconds, duration: m.duration, loop: m.loop });
+        r.setTransport({ playing: m.playing, seconds: m.seconds, duration: m.duration, loop: m.loop, item: m.item });
         break;
       case 'midi':
         for (const ev of m.events) r.sendMidi(null, ev);

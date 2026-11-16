@@ -157,7 +157,7 @@ export function runKernel(def: AnyNodeDef, run: KernelRun): KernelResult {
     out: bufOut,
     midiOut: bufMidiOut,
     params,
-    time: { seconds: 0, sample: 0, bpm: 120, playing: true, loop: false, duration: 0, ...run.time },
+    time: { seconds: 0, sample: 0, bpm: 120, playing: true, loop: false, duration: 0, item: 0, ...run.time },
     assets: { get: (id) => assets[id] },
     live,
   };

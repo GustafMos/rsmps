@@ -11,11 +11,11 @@ export const renderAudioOffline: RenderAudioOffline = async (graph, registry, as
   const sampleRate = options.sampleRate ?? 48000;
   const runner = new AudioGraphRunner(registry, { sampleRate, fadeOnRebuild: false, exportOnly: true });
   runner.setGraph(graph);
-  for (const id of audioAssetIds(graph, registry)) {
+  for (const id of audioAssetIds(graph, registry, options.item ?? 0)) {
     const pcm = await assets(id);
     if (pcm) runner.setAsset(id, pcm);
   }
-  runner.setTransport({ playing: true, seconds: 0, duration: options.duration, loop: options.loop });
+  runner.setTransport({ playing: true, seconds: 0, duration: options.duration, loop: options.loop, item: options.item ?? 0 });
   const total = Math.max(0, Math.round(options.duration * sampleRate));
   const left = new Float32Array(total);
   const right = new Float32Array(total);
@@ -44,11 +44,11 @@ export const analyzeSignalsOffline: AnalyzeSignalsOffline = async (graph, regist
   const tracks = new Map<string, Float32Array>();
   const runner = new AudioGraphRunner(registry, { sampleRate, fadeOnRebuild: false });
   runner.setGraph(graph);
-  for (const id of audioAssetIds(graph, registry)) {
+  for (const id of audioAssetIds(graph, registry, options.item ?? 0)) {
     const pcm = await assets(id);
     if (pcm) runner.setAsset(id, pcm);
   }
-  runner.setTransport({ playing: true, seconds: 0, duration: options.duration, loop: options.loop });
+  runner.setTransport({ playing: true, seconds: 0, duration: options.duration, loop: options.loop, item: options.item ?? 0 });
   const bl = new Float32Array(BLOCK_SIZE);
   const br = new Float32Array(BLOCK_SIZE);
   let done = 0;
