@@ -208,7 +208,7 @@ export interface PaletteParam extends ParamBase {
 export interface AssetsParam extends ParamBase {
   type: 'assets';
   default: string[];
-  accept: 'image-video' | 'audio' | 'midi' | 'any';
+  accept: 'image-video' | 'audio' | 'midi' | 'model' | 'any';
 }
 /** A hardware device chosen from a live list (system microphones, MIDI inputs). Value = device id; '' = system default / all. */
 export interface DeviceParam extends ParamBase {
@@ -394,6 +394,8 @@ export interface Host {
   assetInfo(assetId: string): AssetInfo | null;
   /** Decoded frame of an image/video asset at `seconds`, at most `maxSide` texels on the long side (0 = full). */
   assetFrame(assetId: string, seconds: number, maxSide: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
+  /** Raw bytes of an asset (3D models and other files a node parses itself). Null when missing. */
+  assetBytes?(assetId: string): Promise<ArrayBuffer | null>;
   /** Decoded PCM of an audio asset or a video's sound track (used by the audio engine, not by render nodes). */
   assetAudio?(assetId: string): Promise<{ sampleRate: number; channels: Float32Array[] } | null>;
   /**
@@ -422,7 +424,7 @@ export type LiveSource =
 export interface AssetInfo {
   id: string;
   name: string;
-  kind: 'image' | 'video' | 'audio' | 'midi';
+  kind: 'image' | 'video' | 'audio' | 'midi' | 'model';
   width: number;
   height: number;
   duration: number;
