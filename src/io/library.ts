@@ -20,6 +20,7 @@ import type { Gpu } from '../engine/gpu/gpu';
 import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
 import type { AssetProblem, LibraryAsset, MediaLibrary } from './api';
+import { mixToStereo } from './audio-util';
 import { encodeWav } from './wav';
 import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import type { SignalRouter } from './signals';
@@ -1232,8 +1233,8 @@ async function firstPositive(fns: (() => Promise<number | null>)[]): Promise<num
 }
 
 function audioBufferToPcm(buf: AudioBuffer): PcmAudio {
-  const channels: Float32Array[] = [];
-  for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) channels.push(new Float32Array(buf.getChannelData(c)));
+  const channels = Array.from({ length: Math.min(2, buf.numberOfChannels) }, () => new Float32Array(buf.length));
+  mixToStereo(channels, 0, Array.from({ length: buf.numberOfChannels }, (_, c) => buf.getChannelData(c))); // 5.1 and the like are folded down
   return { sampleRate: buf.sampleRate, channels };
 }
 
@@ -1257,9 +1258,12 @@ async function decodeTrackPcm(blob: Blob): Promise<PcmAudio | null> {
     const channels = Array.from({ length: nch }, () => new Float32Array(length));
     for (const { buffer, timestamp } of parts) {
       const at = Math.max(0, Math.round(timestamp * rate));
-      for (let c = 0; c < nch; c++) {
-        const src = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1));
-        channels[c].set(src.subarray(0, Math.max(0, Math.min(src.length, length - at))), at);
+      // Packets are laid down by their own time stamps. More than two channels (5.1 ...) are folded down to stereo, centre included.
+      const src = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+      if (src.length <= 2) for (let c = 0; c < nch; c++) channels[c].set(src[Math.min(c, src.length - 1)].subarray(0, Math.max(0, Math.min(buffer.length, length - at))), at);
+      else {
+        for (let c = 0; c < nch; c++) channels[c].fill(0, at, Math.min(length, at + buffer.length)); // overlapping packets replace, like the plain copy
+        mixToStereo(channels, at, src);
       }
     }
     return { sampleRate: rate, channels };

@@ -206,3 +206,25 @@ describe('registry and worklet bundle', () => {
     for (const bad of ['GPUDevice', 'GPUTexture', 'createTexture', 'document.', 'navigator.', 'window.']) expect(code, bad).not.toContain(bad);
   }, 60000);
 });
+
+describe('sending a sound to the worklet', () => {
+  it('never hands over the arrays of the decoded sound it was given (a transfer would empty the library cache)', async () => {
+    const { toAudioAsset, transferableChannels } = await import('../pcm');
+    const pcm = { sampleRate: SR, channels: [sine(440, 1000), sine(660, 1000)] };
+    const same = toAudioAsset(pcm, SR); // same rate: no resampling, the asset holds the caller's arrays
+    expect(same.left).toBe(pcm.channels[0]);
+    const sent = transferableChannels(pcm, same);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).not.toBe(pcm.channels[0]);
+    expect(sent[1]).not.toBe(pcm.channels[1]);
+    expect(sent[0]).toEqual(pcm.channels[0]);
+    structuredClone(sent, { transfer: sent.map((c) => c.buffer as ArrayBuffer) }); // what postMessage does
+    expect(pcm.channels[0].length).toBe(1000); // the caller's sound is still there
+    expect(pcm.channels[1].length).toBe(1000);
+    // Resampled sound is new memory already: sent as it is. Mono is one channel.
+    const other = toAudioAsset({ sampleRate: 44100, channels: [pcm.channels[0]] }, SR);
+    const mono = transferableChannels({ channels: [pcm.channels[0]] }, other);
+    expect(mono).toHaveLength(1);
+    expect(mono[0]).toBe(other.left);
+  });
+});

@@ -10,6 +10,9 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 - **Frames** field next to Length in the transport: set the project length in frames.
 
 ### Fixed
+- Exported sound of a video was silent (and waveforms and Beat Detect went empty) after the clip had been played in the preview, when the file's sample rate equals the sound card's (usually 48 kHz): the player handed the library's decoded sound to the audio thread instead of a copy.
+- Sound of 5.1 and other surround files is folded down to stereo with the centre and surround channels; before only front left and right were used, so speech was missing.
+- Command line: with several batch items every exported video got the sound of the first item; a trimmed or speed-changed Media In now maps its sound exactly as the app does.
 - H.264 exports from Firefox no longer start clean and turn blocky after about two seconds on busy pictures (grain, dither, analog noise).
 - The "Use this value" button of the large-number warning did nothing in some fields.
 - The memory bar froze while rendering was off.

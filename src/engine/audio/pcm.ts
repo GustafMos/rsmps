@@ -39,3 +39,13 @@ export function toAudioAsset(pcm: { sampleRate: number; channels: Float32Array[]
   const r = pcm.channels[1] ? resampleChannel(pcm.channels[1], pcm.sampleRate, sampleRate) : l;
   return { sampleRate, frames: Math.min(l.length, r.length), left: l, right: r, ...(pcm.video ? { video: pcm.video } : {}) };
 }
+
+/**
+ * The channels of `asset` (one when mono) as arrays that may be TRANSFERRED to the worklet. At the target rate `toAudioAsset`
+ * does not resample, so the asset holds the caller's own arrays (the media library's cache): transferring those would detach
+ * them and leave every later reader (the export, waveforms, beat detection) with empty sound. Such arrays are copied.
+ */
+export function transferableChannels(pcm: { channels: Float32Array[] }, asset: AudioAsset): Float32Array[] {
+  const own = (x: Float32Array): Float32Array => (pcm.channels.includes(x) ? x.slice() : x);
+  return asset.right === asset.left ? [own(asset.left)] : [own(asset.left), own(asset.right)];
+}

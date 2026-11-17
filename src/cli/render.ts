@@ -809,7 +809,7 @@ async function videoAudio(c: JobCtx, duration: number): Promise<PcmAudio | null>
   const graph = c.graph;
   try {
     if (hasAudioOutput(graph, c.registry)) {
-      const rendered = await renderAudioOffline(graph, c.registry, (id) => c.host.assetAudio(id), { duration, loop: graph.project.loop });
+      const rendered = await renderAudioOffline(graph, c.registry, (id) => c.host.assetAudio(id), { duration, loop: graph.project.loop, item: c.item });
       if (rendered && rendered.channels.length && rendered.channels[0].length) return rendered;
     }
     const up = upstream(graph, c.out.id);
@@ -967,7 +967,7 @@ async function exportSound(o: { graph: GraphDoc; registry: Registry; host: NodeH
   const { graph, registry, host, row } = o;
   if (!hasAudioOutput(graph, registry)) throw new Error('This graph has no Audio Output with sound wired to it.');
   const duration = totalFramesOf(graph.project) / graph.project.fps;
-  const rendered = await renderAudioOffline(graph, registry, (id) => host.assetAudio(id), { duration, loop: graph.project.loop });
+  const rendered = await renderAudioOffline(graph, registry, (id) => host.assetAudio(id), { duration, loop: graph.project.loop, item: o.item });
   if (!rendered || !rendered.channels.length || !rendered.channels[0].length) throw new Error('There is no enabled Audio Output with sound wired to it.');
   const pcm = fitAudio(rendered, 0, duration, false);
   let base = graph.name || 'audio';
