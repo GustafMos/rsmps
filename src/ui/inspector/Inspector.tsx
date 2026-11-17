@@ -30,6 +30,8 @@ import { bakeSelection } from '../store/bake';
 import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
 import { PhoneMotionPanel } from './PhoneMotionPanel';
+import { LiveRecordPanel } from './LiveRecordPanel';
+import { isLivePictureType } from '../../engine/lib/live-source';
 import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
 import { ProjectSettingsPanel } from './ProjectSettings';
@@ -218,6 +220,7 @@ function NodePanel({ id }: { id: string }) {
       {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
       {node.type === 'phone-motion' && !missing.length && <PhoneMotionPanel node={node} />}
+      {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}
       {def.playable && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Keyboard</div>

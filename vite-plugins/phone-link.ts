@@ -5,8 +5,15 @@
  *  - WebSocket /__rsmps/phone-ws?role=desktop|phone&token=<32 hex>   pairs a desktop session with one phone and relays
  *    signalling (WebRTC offer/answer/ICE) and fallback JPEG frames. No other endpoints, nothing written to disk.
  *  - /phone                     serves phone.html (the standalone phone page; any mode, it is only a page).
+ *
+ * The app itself stays on http://localhost:<port> in LAN mode, exactly as in plain `npm run dev`: a browser keeps projects per
+ * address, so serving the app over https would show an empty project list. Phones need https (camera access), so LAN mode adds a
+ * small https front on the next free port that passes every request on to the dev server. Only the phone uses that address.
  */
-import type { IncomingMessage } from 'node:http';
+import { request as httpRequest, type IncomingMessage } from 'node:http';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
+import { connect } from 'node:net';
+import { resolve } from 'node:path';
 import { networkInterfaces } from 'node:os';
 import type { Duplex } from 'node:stream';
 import type { Plugin } from 'vite';
@@ -25,7 +32,52 @@ export function lanCandidates(): Candidate[] {
 
 export const PING_PATH = '/__rsmps/ping';
 
-export function phoneLink(opts: { lan: boolean; https?: boolean; /** machine.tailnet.ts.net when a Tailscale certificate is in use. */ tailnetName?: string }): Plugin {
+/**
+ * The https front for phones: every request and WebSocket upgrade is passed on to the dev server on localhost.
+ * Listens on the first free port from `from` upward; resolves with the server and its port.
+ */
+export function startHttpsFront(tls: { cert: string | Buffer; key: string | Buffer }, target: () => number, from: number): Promise<{ server: HttpsServer; port: number }> {
+  const front = createHttpsServer(tls, (req, res) => {
+    const up = httpRequest({ host: 'localhost', port: target(), path: req.url, method: req.method, headers: { ...req.headers, 'x-forwarded-for': String(req.socket.remoteAddress ?? '') } }, (r) => {
+      res.writeHead(r.statusCode ?? 502, r.headers);
+      r.pipe(res);
+    });
+    up.on('error', () => {
+      if (!res.headersSent) res.statusCode = 502;
+      res.end();
+    });
+    req.pipe(up);
+  });
+  front.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const up = connect(target(), 'localhost', () => {
+      const lines = [`${req.method} ${req.url} HTTP/1.1`];
+      for (let i = 0; i < req.rawHeaders.length; i += 2) lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+      up.write(lines.join('\r\n') + '\r\n\r\n');
+      if (head.length) up.write(head);
+      up.pipe(socket);
+      socket.pipe(up);
+    });
+    const end = () => {
+      up.destroy();
+      socket.destroy();
+    };
+    up.on('error', end);
+    socket.on('error', end);
+    up.on('close', end);
+    socket.on('close', end);
+  });
+  return new Promise((done, fail) => {
+    let port = from;
+    front.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && port < from + 20) front.listen(++port);
+      else fail(err);
+    });
+    front.on('listening', () => done({ server: front, port }));
+    front.listen(port);
+  });
+}
+
+export function phoneLink(opts: { lan: boolean; https?: boolean; /** A real certificate (for example from Tailscale) for the https front; without one a self-signed certificate is made in .certs/. */ tls?: { cert: Buffer; key: Buffer } | null; /** machine.tailnet.ts.net when a Tailscale certificate is in use. */ tailnetName?: string }): Plugin {
   return {
     name: 'rsmps-phone-link',
     configureServer(server) {
@@ -41,24 +93,28 @@ export function phoneLink(opts: { lan: boolean; https?: boolean; /** machine.tai
         const addr = server.httpServer?.address();
         return typeof addr === 'object' && addr ? addr.port : (server.config.server.port ?? 5173);
       };
+      /** Port phones use: the https front when there is one, else the dev server itself (plain-http test mode). */
+      let frontPort = 0;
+      const phonePort = () => frontPort || port();
       const candidates = () => {
-        const list = lanCandidates().map((c) => ({ ...c, url: `${proto}://${c.address}:${port()}` }));
+        const list = lanCandidates().map((c) => ({ ...c, url: `${proto}://${c.address}:${phonePort()}` }));
         // The Tailscale HTTPS name (browser-trusted certificate, no warning on the phone) is the preferred address when there is one.
         if (opts.tailnetName) list.unshift({ address: opts.tailnetName, adapter: 'Tailscale', kind: 'tailscale' as const, label: `Tailscale name ${opts.tailnetName} (trusted https)`, url: `${proto}://${opts.tailnetName}:${port()}` });
         return list;
       };
       const origins = (): string[] => candidates().map((c) => c.url);
+      const xff = (req: IncomingMessage) => String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '');
 
       server.middlewares.use(INFO_PATH, (_req, res) => {
         res.setHeader('content-type', 'application/json');
         res.setHeader('cache-control', 'no-store');
-        res.end(JSON.stringify({ lan: true, origins: origins(), candidates: candidates(), port: port(), protocol: proto }));
+        res.end(JSON.stringify({ lan: true, origins: origins(), candidates: candidates(), port: phonePort(), protocol: proto }));
       });
 
       // "Your phone reached this computer": the phone page calls this first, with its token, before it opens the WebSocket.
       server.middlewares.use(PING_PATH, (req, res) => {
         const token = new URL(req.url ?? '/', 'http://x').searchParams.get('token') ?? '';
-        const known = sessions.reached(token, Date.now(), String(req.socket.remoteAddress ?? ''));
+        const known = sessions.reached(token, Date.now(), xff(req));
         res.setHeader('content-type', 'application/json');
         res.setHeader('cache-control', 'no-store');
         res.end(JSON.stringify({ ok: true, known }));
@@ -102,11 +158,29 @@ export function phoneLink(opts: { lan: boolean; https?: boolean; /** machine.tai
         wss.handleUpgrade(req, socket, head, (ws) => handle(ws, url));
       });
 
-      server.httpServer?.once('listening', () => {
+      server.httpServer?.once('listening', async () => {
+        if (opts.https !== false) {
+          try {
+            let tls: { cert: string | Buffer; key: string | Buffer } | null = opts.tls ?? null;
+            if (!tls) {
+              // The certificate helper of the desktop app's phone server (plain .mjs, no types): cached in the git-ignored .certs/ folder.
+              const mod = (await import(/* @vite-ignore */ '../desktop/phone/cert.mjs' as string)) as { ensureCertificate(dir: string, addresses: string[]): Promise<{ cert: string; key: string }> };
+              tls = await mod.ensureCertificate(resolve(server.config.root, '.certs'), lanCandidates().map((c) => c.address));
+            }
+            const front = await startHttpsFront(tls, port, port() + 1);
+            frontPort = front.port;
+            server.httpServer?.on('close', () => front.server.close());
+          } catch (err) {
+            console.error(`
+  RSMPS LAN mode: the https address for phones could not be started (${err instanceof Error ? err.message : String(err)}).
+`);
+            return;
+          }
+        }
         const list = candidates();
         const cert = opts.tailnetName ? 'Tailscale certificate: trusted by phones, no warning' : opts.https === false ? 'plain http (test mode)' : 'https, certificate may show a warning on the phone';
         console.log(
-          `\n  RSMPS LAN mode (${cert})\n  Addresses, best first (the app offers these for the QR code):\n${list.map((c, i) => `   ${i === 0 ? '>' : ' '} ${c.url}/   ${c.label}`).join('\n') || '    (no network address found)'}\n  The dev server is reachable by every device on this network while it runs.\n  If a phone cannot connect: Windows Security > Firewall & network protection > Allow an app through firewall > Node.js JavaScript Runtime > Private.\n  The Wi-Fi network must be "Private", and guest / AP-isolated Wi-Fi blocks phone-to-computer traffic (try the Tailscale address).\n`,
+          `\n  RSMPS LAN mode (${cert})\n  On this computer open the app at http://localhost:${port()}/ (the same address as "npm run dev", so the same projects).\n  Addresses for the phone, best first (the app offers these for the QR code):\n${list.map((c, i) => `   ${i === 0 ? '>' : ' '} ${c.url}/   ${c.label}`).join('\n') || '    (no network address found)'}\n  The phone address is reachable by every device on this network while it runs.\n  If a phone cannot connect: Windows Security > Firewall & network protection > Allow an app through firewall > Node.js JavaScript Runtime > Private.\n  The Wi-Fi network must be "Private", and guest / AP-isolated Wi-Fi blocks phone-to-computer traffic (try the Tailscale address).\n`,
         );
       });
     },

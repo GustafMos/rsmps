@@ -11,6 +11,7 @@ import { createPlayerStore } from './store/playerStore';
 import { PENDING_KEY, type PendingEdit } from './watchdog';
 import { beginSafety, installSafety, pushView, safetyStore } from './safety';
 import { installProcesses } from './store/processes';
+import { installLiveRecord } from './store/liveRecord';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { startUpdateCheck } from './updateNotice';
 import { NoWebGpu } from './responsive/NoWebGpu';
@@ -104,7 +105,9 @@ export function Root() {
         const uninstall = installSafety(app);
         const uninstallProcesses = installProcesses(app);
         const cancelUpdate = startUpdateCheck(ed);
+        const uninstallLiveRecord = installLiveRecord(app);
         stop = () => {
+          uninstallLiveRecord();
           cancelUpdate();
           uninstall();
           uninstallProcesses();

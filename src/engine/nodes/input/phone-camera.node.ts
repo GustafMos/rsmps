@@ -1,11 +1,12 @@
 import { defineNode } from '../../define';
 import { liveInputKernel } from '../../audio/live-input';
+import { phoneSource } from '../../lib/live-source';
 
 /**
  * A phone's camera, streamed to this computer through the QR-code phone link (needs the dev server in LAN mode:
  * `npm run dev:lan`, see docs/LIVE_INPUT.md). `session` is the pairing token the app fills in when you scan the code;
  * `liveTick` is stamped by the player so the live picture is never served from the evaluation cache. Leave both alone.
- * Live preview only: record it first to export.
+ * Live preview only: the Record button in the inspector saves the picture as a clip in Media, which exports.
  */
 export default defineNode({
   id: 'phone-camera',
@@ -49,10 +50,10 @@ export default defineNode({
     void ctx.time.seconds; // live: re-render every frame
     const host = ctx.host;
     if (!host.liveFrame) throw new Error('A phone camera is not available here (exports and headless runs cannot use one). Record it first.');
-    const session = ctx.params.session;
-    if (!session) throw new Error('Not linked to a phone yet. Use "Link a phone" in the inspector and scan the QR code.');
+    const source = phoneSource(ctx.params);
+    if (!source) throw new Error('Not linked to a phone yet. Use "Link a phone" in the inspector and scan the QR code.');
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
-    const frame = await host.liveFrame({ kind: 'phone', session, freeze: ctx.params.freeze } as never, maxSide);
+    const frame = await host.liveFrame(source, maxSide);
     if (!frame) throw new Error('Waiting for the phone picture…');
     const turns = ctx.params.rotate === 'auto' ? 0 : Number(ctx.params.rotate) / 90;
     const swap = turns % 2 === 1;

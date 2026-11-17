@@ -55,6 +55,7 @@ export function Transport() {
       <div className="rs-tp__group">
         <div className="rs-tp__field"><NumberField label="FPS" value={project.fps} min={1} max={120} integer defaultValue={24} onChange={(v) => ed.setProject({ fps: v })} /></div>
         <div className="rs-tp__field rs-tp__field--wide"><NumberField label="Length" value={project.duration} min={0.1} max={600} step={0.1} unit="s" defaultValue={4} disabled={lengthSet} title={lengthSet ? 'The length follows the Media Timeline (untick "Set project length" on it to type a length)' : undefined} onChange={(v) => ed.setProject({ duration: v })} /></div>
+        <div className="rs-tp__field rs-tp__field--wide"><NumberField label="Frames" value={Math.max(1, Math.round(project.duration * project.fps))} min={1} max={600 * project.fps} integer defaultValue={4 * project.fps} disabled={lengthSet} title={lengthSet ? 'The length follows the Media Timeline' : 'The same length, counted in frames'} onChange={(v) => ed.setProject({ duration: v / project.fps })} /></div>
         <RecordButton compact />
         {kbdTarget && (
           <span className="rs-tp__kbd" title="Computer keys play the selected node: A–; notes, 1–9 octave, Z/X octave down/up, C/V softer/harder. Esc or deselect to release the keys.">

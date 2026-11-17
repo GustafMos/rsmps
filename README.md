@@ -174,9 +174,10 @@ fix it, then remove `?safe`.
 
 ### Phone as a camera (optional)
 
-`npm run dev:lan` serves the app over https on your local network so a phone can act as a live camera through a QR code (the
-Phone Camera node). The phone will warn that the connection is not private: choose Advanced, then Proceed. It is your own
-computer. The other live inputs (Webcam, URL / Stream) are described in [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md).
+`npm run dev:lan` adds the phone link: a phone can act as a live camera through a QR code (the Phone Camera node). On the
+computer the app stays at `http://localhost:5173`, the same address as `npm run dev`, so both show the same projects; the phone
+gets an https address of its own on the next port. The phone will warn that the connection is not private: choose Advanced,
+then Proceed. It is your own computer. The other live inputs (Webcam, URL / Stream) are described in [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md).
 
 ## Export formats
 
@@ -310,7 +311,8 @@ The capture uses only generated content, `test-assets/` and the author's base pi
 - WebGPU is required; there is no fallback for browsers or machines without it.
 - The microphone and MIDI devices are live-only. For export, record the take (the Audio Timeline node records audio and MIDI); a
   recorded take exports like any other clip.
-- Webcam, URL / Stream and Phone Camera pictures are live-only too: record them to a file first to render them.
+- Webcam, URL / Stream and Phone Camera pictures are live-only too: press Record on the node to save the picture as a clip in
+  Media, then use that clip with Media In to render it (picture only, no sound).
 - ProRes-compatible, DXV-compatible and the other FFmpeg formats need FFmpeg: the optional add-on in the desktop app, or your own FFmpeg on the command line. FFmpeg is never bundled.
 - HAP, GIF and the other formats the app writes itself have been checked by decoding the files with FFmpeg and with the app's own test decoders. Playback in VJ and media-server software has not been tested: check that your software plays the HAP variant you export.
 - Motion JPEG in the browser is encoded through the browser's canvas; in a hidden window it was measured at about one second a frame, so give it a visible tab for long clips.

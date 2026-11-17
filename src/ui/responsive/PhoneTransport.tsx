@@ -55,6 +55,7 @@ function TransportSheet({ onClose }: { onClose: () => void }) {
       <div className="rs-sheet__grid">
         <NumberField label="FPS" value={project.fps} min={1} max={120} integer defaultValue={24} onChange={(v) => ed.setProject({ fps: v })} />
         <NumberField label="Length" value={project.duration} min={0.1} max={600} step={0.1} unit="s" defaultValue={4} disabled={lengthSet} title={lengthSet ? 'The length follows the Media Timeline' : undefined} onChange={(v) => ed.setProject({ duration: v })} />
+        <NumberField label="Frames" value={Math.max(1, Math.round(project.duration * project.fps))} min={1} max={600 * project.fps} integer defaultValue={4 * project.fps} disabled={lengthSet} title={lengthSet ? 'The length follows the Media Timeline' : 'The same length, counted in frames'} onChange={(v) => ed.setProject({ duration: v / project.fps })} />
       </div>
       <div className="rs-sheet__row">
         <span className="rs-sheet__lbl">Preview scale</span>

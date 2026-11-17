@@ -22,6 +22,7 @@ import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
 import { Library } from './library';
 import { listVideoInputs, onVideoDevicesChanged } from './live';
+import { LiveRecordController } from './live-record';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { NodePresetStore } from './node-presets';
@@ -149,6 +150,7 @@ export const createIo: CreateIo = async () => {
   router.phone = (token, name) => phone.motion.signal(token, name);
   phone.onStream((token, stream) => phoneAudio.setStream(token, stream));
   const recording = new RecordingController(audio, player, library);
+  const liveRecorder = new LiveRecordController({ live: library.live, add: (files) => library.add(files) });
   const plugins = new PluginManagerImpl(registry);
   const nodePresets = new NodePresetStore(registry, undefined, (n) => {
     const def = registry.get(n.type);
@@ -207,6 +209,7 @@ export const createIo: CreateIo = async () => {
     },
     freeMemory: () => governor.freeMemory(),
     async switchProject(id) {
+      await liveRecorder.finish('switch'); // a running live recording is stopped and saved: its stream is closed below
       await projects.flush(); // (a) the old project's pending save
       player.releaseCaches(); // (b) pause + audio off, (c) player frame cache
       audio.stop();
@@ -245,6 +248,7 @@ export const createIo: CreateIo = async () => {
       };
     },
     phone,
+    liveRecorder,
     addons: new AddonsImpl(desktop),
     capabilities: () => new Set([...(phone.available ? (['local-server'] as const) : []), ...(desktop ? (['desktop'] as const) : [])]),
     devices: {

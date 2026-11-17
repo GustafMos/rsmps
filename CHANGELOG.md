@@ -2,6 +2,19 @@
 
 All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify Studio) are documented here.
 
+## Unreleased
+
+### Added
+- **Record on live picture inputs.** Webcam, Phone Camera and URL / Stream nodes have a Record button: the incoming picture is saved as a clip in Media (picture only, up to 30 minutes).
+- **Auto bitrate** on the Output for the built-in MP4 and WebM codecs: the first frames of an export are measured and the bitrate is set to what the picture needs. On by default; projects with a bitrate set by hand keep it.
+- **Frames** field next to Length in the transport: set the project length in frames.
+
+### Fixed
+- H.264 exports from Firefox no longer start clean and turn blocky after about two seconds on busy pictures (grain, dither, analog noise).
+- The "Use this value" button of the large-number warning did nothing in some fields.
+- The memory bar froze while rendering was off.
+- `npm run dev:lan` now keeps the app at `http://localhost:5173`, so it shows the same projects as `npm run dev`; the phone gets an https address of its own on the next port.
+
 ## [0.7.1] - 2026-11-17
 
 ### Added

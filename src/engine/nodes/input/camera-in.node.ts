@@ -1,17 +1,10 @@
 import { defineNode } from '../../define';
-import type { LiveSource } from '../../types';
-
-const SIZES: Record<string, { width: number; height: number } | undefined> = {
-  auto: undefined,
-  '640x480': { width: 640, height: 480 },
-  '1280x720': { width: 1280, height: 720 },
-  '1920x1080': { width: 1920, height: 1080 },
-};
+import { cameraSource } from '../../lib/live-source';
 
 /**
  * Live webcam. The host opens the camera lazily, shares one stream between nodes using the same device and
  * closes it when nothing has asked for a frame for a few seconds. Live only: exports and headless runs have
- * no camera, so the node reports a readable error there (record the camera to a file first).
+ * no camera, so the node reports a readable error there (the Record button in the inspector saves the picture as a clip in Media).
  * `liveTick` is stamped by the player so a live picture is never served from the evaluation cache; leave it alone.
  */
 export default defineNode({
@@ -44,8 +37,7 @@ export default defineNode({
     void ctx.time.seconds; // live: re-render every frame
     const host = ctx.host;
     if (!host.liveFrame) throw new Error('A live camera is not available here (exports and headless runs cannot use one). Record it first.');
-    const size = SIZES[ctx.params.resolution];
-    const source: LiveSource & { freeze?: boolean } = { kind: 'camera', deviceId: ctx.params.device, ...size, freeze: ctx.params.freeze };
+    const source = cameraSource(ctx.params);
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
     const frame = await host.liveFrame(source, maxSide);
     if (!frame) throw new Error('Waiting for the camera…');

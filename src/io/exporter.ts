@@ -35,7 +35,8 @@ import { conformImage, enlargeNearest, type PassFormat } from './frame-gpu';
 import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
 import { encodeWav } from './wav';
 import { OffscreenPresenter, canEncodeAvif, presentToBlob, presentToFrame } from './encode';
-import { choosePipeline, fileTimestamps, isReordered, sourceOptions } from './encode-order';
+import { choosePipeline, fileTimestamps, isReordered, sourceOptions, type PipelineChoice } from './encode-order';
+import { AUTO_FRAMES, probeBitrate } from './auto-bitrate';
 import { GpuWatch, scopeMessage } from './gpu-watch';
 import type { EvalResult } from '../engine/engine';
 import { SILENT_TRACKS, type SignalRouter } from './signals';
@@ -96,6 +97,8 @@ interface OutParams {
   quality: number;
   codec: string;
   bitrate: number;
+  /** Measure the bitrate the picture needs instead of using `bitrate` (built-in MP4 and WebM codecs). */
+  autoBitrate: boolean;
   /** Every frame is a key frame (intra-only): bigger files, but VJ software and editors loop and scrub them frame-exactly. */
   allKeys: boolean;
   /** The Output's video "For" preset (general = none); resolved against what is available when the export runs. */
@@ -367,6 +370,8 @@ export class ExporterImpl implements Exporter {
       quality: Math.min(1, Math.max(0.1, num(p.quality, 0.92))),
       codec: typeof p.codec === 'string' ? p.codec : 'avc',
       bitrate: Math.max(0.5, num(p.bitrate, 12)),
+      // Projects saved before the switch existed keep a bitrate that was set by hand.
+      autoBitrate: typeof node.params.autoBitrate === 'boolean' ? node.params.autoBitrate : node.params.bitrate === undefined,
       allKeys: p.allKeys === true,
       videoFor: isVideoPreset(p.videoFor) ? p.videoFor : 'general',
       hapQuality: oneOf(p.hapQuality, ['fast', 'better'] as const, 'fast'),
@@ -1226,6 +1231,18 @@ export class ExporterImpl implements Exporter {
     let outH = 0;
     /** Whole frames added to every timestamp so the file starts at 0 (measured per browser and codec). */
     let shiftFrames = 0;
+    let pick: PipelineChoice | null = null;
+    /** Auto bitrate: the first frames wait here until the bitrate they need has been measured. */
+    const held: VideoFrame[] = [];
+    let autoNote = '';
+    const addFrame = async (vf: VideoFrame) => {
+      const sample = new VideoSample(vf);
+      try {
+        await videoSource!.add(sample);
+      } finally {
+        sample.close();
+      }
+    };
 
     const pushAudioUpTo = async (seconds: number, all = false) => {
       if (!pcm || !audioSource) return;
@@ -1253,7 +1270,7 @@ export class ExporterImpl implements Exporter {
         gpu.retain(img.texture);
         const comp = this.compose(img, job.params.scale, true);
         try {
-          if (!output) {
+          if (!chosen) {
             const { width, height } = comp.drawable;
             outW = width;
             outH = height;
@@ -1262,17 +1279,37 @@ export class ExporterImpl implements Exporter {
             if (fallback && !(await canEncodeVideo(job.params.codec as VideoCodec, { width, height, frameRate: fps, quality }).catch(() => false)) && (await this.ffmpegReady())) throw new FfmpegFallback(fallback);
             chosen = await this.pickCodec(job.params.codec, width, height, fps, quality);
             if (chosen.codec !== job.params.codec) run.warnings.push(`${job.label}: this browser cannot encode ${String(job.params.codec).toUpperCase()}; the video was written as ${chosen.codec.toUpperCase()} instead.`);
-            output = new Output({ format: chosen.webm ? new WebMOutputFormat() : new Mp4OutputFormat(), target: new BufferTarget() });
             // Frame order and timing are MEASURED, not assumed (see encode-order.ts): a few tiny frames go through this exact pipeline
             // first, and the export then uses settings that keep frames in order and start the file at time 0.
-            const pick = await choosePipeline(chosen, { width, height, fps }, job.params.allKeys, undefined, (codec) =>
+            pick = await choosePipeline(chosen, { width, height, fps }, job.params.allKeys, undefined, (codec) =>
               VideoEncoder.isConfigSupported({ codec, width, height, framerate: fps, bitrate: job.params.bitrate * 1_000_000, avc: { format: 'avc' } })
                 .then((r) => r.supported === true)
                 .catch(() => false),
             );
             shiftFrames = pick.shiftFrames;
             if (pick.note) run.warnings.push(`${job.label}: ${pick.note}`);
-            videoSource = new VideoSampleSource({ codec: chosen.codec, quality, ...sourceOptions(pick.options, fps) });
+          }
+          // present() and VideoFrame creation must happen in the same task.
+          const vf = await presentToFrame(presenter, comp.drawable, { timestamp: Math.round(((f + shiftFrames) / fps) * 1e6), duration: Math.round(1e6 / fps) });
+          if (output) {
+            await addFrame(vf);
+          } else if (job.params.autoBitrate && held.length + 1 < AUTO_FRAMES && f < frames - 1) {
+            held.push(vf);
+          } else {
+            held.push(vf);
+            let mbps = job.params.bitrate;
+            if (job.params.autoBitrate) {
+              const found = await probeBitrate(held, { codec: chosen.codec, width: outW, height: outH, fps, allKeys: pick!.options.allKeys === true, avcString: pick!.options.fullCodecString });
+              if (found) {
+                mbps = found.mbps;
+                autoNote = ` · auto ${mbps} Mbps`; // shown in the progress line: a note file on every export would be noise
+              } else {
+                run.warnings.push(`${job.label}: the bitrate could not be measured in this browser, so the Output's ${mbps} Mbps was used. If the video turns blocky, raise it.`);
+              }
+            }
+            const quality = new Quality({ bitrate: mbps * 1_000_000 });
+            output = new Output({ format: chosen.webm ? new WebMOutputFormat() : new Mp4OutputFormat(), target: new BufferTarget() });
+            videoSource = new VideoSampleSource({ codec: chosen.codec, quality, ...sourceOptions(pick!.options, fps) });
             output.addVideoTrack(videoSource, { frameRate: fps });
             pcm = await this.videoAudio(job, run, frames / fps);
             if (pcm) {
@@ -1287,21 +1324,14 @@ export class ExporterImpl implements Exporter {
               }
             }
             await output.start();
-          }
-          // present() and VideoFrame creation must happen in the same task.
-          const vf = await presentToFrame(presenter, comp.drawable, { timestamp: Math.round(((f + shiftFrames) / fps) * 1e6), duration: Math.round(1e6 / fps) });
-          const sample = new VideoSample(vf);
-          try {
-            await videoSource!.add(sample);
-          } finally {
-            sample.close();
+            for (const h of held.splice(0)) await addFrame(h);
           }
         } finally {
           comp.release();
           gpu.release(img.texture);
         }
         await pushAudioUpTo(((f + 1) / fps) + 0.1);
-        run.progress(((f + 1) / frames) * 0.97, `${job.label} · frame ${f + 1}/${frames}`);
+        run.progress(((f + 1) / frames) * 0.97, `${job.label} · frame ${f + 1}/${frames}${autoNote}`);
         await yieldToEventLoop();
       }
       if (!output || !chosen) throw new Error('No frames were rendered.');
@@ -1328,6 +1358,7 @@ export class ExporterImpl implements Exporter {
       run.progress(1, name);
       return [{ name: this.claim(run, name), blob: new Blob([buffer], { type: mime }) }];
     } catch (err) {
+      for (const h of held.splice(0)) h.close();
       if (output) await output.cancel().catch(() => undefined);
       throw err;
     }

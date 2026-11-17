@@ -1,8 +1,28 @@
 # Live picture inputs
 
-Two input nodes bring a live picture into the graph: **Webcam** (`camera-in`) and **URL / Stream** (`url-in`).
-They work in the live preview only. Exports and headless runs have no camera or network picture, so the node
-shows an error there: record the source to a file first and use that file as Media In.
+Three input nodes bring a live picture into the graph: **Webcam** (`camera-in`), **URL / Stream** (`url-in`) and
+**Phone Camera** (`phone-camera`, see "Phone as a camera (QR)" below). They work in the live preview only. Exports and
+headless runs have no camera or network picture, so the node shows an error there: press **Record** on the node to save
+the picture as a clip in Media, then use that clip with Media In.
+
+## Recording a live picture
+
+Each of the three nodes has a **Record** button in the inspector. Press it, and the incoming picture is recorded; the button
+shows **Stop** and the running time. Press Stop and the clip appears in the Media library as an ordinary video (a note says
+so, with its length). Wire it into the graph with a Media In node; the graph is not changed for you.
+
+- The button is available once the node shows a picture: view the node (or something after it) first.
+- Picture only, no sound in this version.
+- The clip has the size of the incoming picture (the long side is at most 1920 pixels, sides are even numbers) and the
+  project frame rate (between 5 and 60 fps). It is H.264 in an MP4 file, or VP9 in a WebM file where the browser cannot
+  encode H.264. Frames carry the real time they arrived at, so the clip plays at real speed even when the computer was busy.
+- The clip looks like the node's output: Mirror (Webcam, Phone Camera) and Rotate (Phone Camera) are applied. Freeze is
+  not: the camera keeps being recorded while the node holds a frame.
+- One recording at a time. A recording ends by itself after 30 minutes or 1.5 GB (it is held in memory until it is saved)
+  and is still saved. It is also stopped and saved when the node is deleted or another project is opened.
+- A browser tab in the background runs timers slowly, so a recording made while the tab is hidden has few frames. Keep the
+  tab visible while recording.
+- Names look like `Webcam take 2026-11-17 18.42.05.mp4`, `Phone take ...`, `Stream take ...`.
 
 ## Webcam
 
@@ -89,6 +109,9 @@ Tailscale. If no phone reaches the computer within 20 seconds the app shows this
 
 ### How it works and what it needs
 
+- **Two addresses, one server.** On the computer the app runs at `http://localhost:5173`, the same address as plain `npm run dev`
+  (a browser stores projects per address, so both modes show the same projects). Phones need https for camera access, so LAN mode
+  opens a second, https address on the next free port (5174) that passes everything on to the same server; the QR code points there.
 - **Open the app from the same server the QR code points at.** The code always uses the address and port of the page you have open,
   so it reaches the server that knows the code. If another server is running on a different port (for example plain `npm run dev`),
   a phone using its address gets "This code is not known to the computer": scan the code shown by the app you are using. The
@@ -98,7 +121,7 @@ Tailscale. If no phone reaches the computer within 20 seconds the app shows this
 - **Video travels with WebRTC** (peer to peer, host candidates only: no STUN/TURN server, nothing leaves your network; over Tailscale
   the 100.x address is used). If WebRTC does not connect within about 4 seconds the phone sends JPEG frames through the dev server
   instead (lower quality, still works through the same secure WebSocket).
-- Live preview only, like the other live inputs: record it before you export.
+- Live preview only, like the other live inputs: press Record on the node and use the clip to export (see "Recording a live picture").
 
 ### What the phone page does: modes
 

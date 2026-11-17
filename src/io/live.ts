@@ -163,6 +163,43 @@ export class LiveSources {
     return this.upload(e, maxSide);
   }
 
+  /**
+   * The element or bitmap that currently holds the picture of a source, for the live recorder (no GPU upload). Opens the source like
+   * `frame()` does and counts as a use, so a stream that is being recorded is not closed as idle. Null while there is no picture.
+   */
+  drawable(req: LiveRequest): CanvasImageSource | null {
+    const key = sourceKey(req);
+    let e = this.entries.get(key);
+    if (!e) {
+      e = this.open(key, req);
+      this.entries.set(key, e);
+      this.ensureSweeper();
+    }
+    e.lastUsed = performance.now();
+    return this.pictureOf(e);
+  }
+
+  /** True when a source is open and has a picture right now. Never opens anything (no camera prompt). */
+  hasPicture(req: LiveRequest): boolean {
+    const e = this.entries.get(sourceKey(req));
+    return !!e && this.pictureOf(e) !== null;
+  }
+
+  private pictureOf(e: Entry): CanvasImageSource | null {
+    if (e.req.kind === 'phone') {
+      const src = this.phone?.source(e.req.session) ?? null;
+      if (!src) return null;
+      return src.video && src.video.readyState >= 2 && src.video.videoWidth > 0 && src.video.videoHeight > 0 ? src.video : src.bitmap;
+    }
+    if (e.error) return null;
+    if (e.isVideo) {
+      const v = e.el as HTMLVideoElement;
+      return v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0 ? v : null;
+    }
+    const img = e.el as HTMLImageElement;
+    return img.naturalWidth > 0 && img.naturalHeight > 0 ? img : null;
+  }
+
   closeAll(): void {
     for (const e of [...this.entries.values()]) this.close(e);
   }

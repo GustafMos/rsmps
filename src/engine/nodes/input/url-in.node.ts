@@ -1,5 +1,5 @@
 import { defineNode } from '../../define';
-import type { LiveSource } from '../../types';
+import { urlSource } from '../../lib/live-source';
 
 /**
  * A picture from a web address: a still that is re-fetched every few seconds (also an IP-camera "snapshot"
@@ -45,10 +45,9 @@ export default defineNode({
   async render(ctx) {
     void ctx.time.seconds; // live: re-render every frame
     const host = ctx.host;
-    const url = ctx.params.url.trim();
-    if (!url) throw new Error('Enter an address (URL).');
+    const source = urlSource(ctx.params);
+    if (!source) throw new Error('Enter an address (URL).');
     if (!host.liveFrame) throw new Error('Network pictures are not available here (exports and headless runs). Record it first.');
-    const source: LiveSource = { kind: 'url', url, mode: ctx.params.kind, refresh: ctx.params.refresh };
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
     const frame = await host.liveFrame(source, maxSide);
     if (!frame) throw new Error('Waiting for the first picture…');

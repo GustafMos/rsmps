@@ -49,6 +49,8 @@ export function NumberConfirm({ anchor, value, label, softMax, askKey, format, o
       aria-label="Confirm large value"
       tabIndex={-1}
       data-nodrag
+      // The popover is a React child of the number field: without this the field starts a scrub, captures the pointer and the buttons never get their click.
+      onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === 'Escape') {
           e.preventDefault();

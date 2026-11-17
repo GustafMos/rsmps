@@ -647,6 +647,67 @@ export interface ProcessApi {
   setConcurrency(gpu: number): void;
 }
 
+/** What `LiveRecordApi.start` needs. */
+export interface LiveRecordStart {
+  /** Full path id of the node being recorded (only one recording runs at a time). */
+  nodeId: string;
+  /**
+   * The node's live source right now, read on every frame: null = not set up at the moment (the frame is skipped), 'gone' = the
+   * node no longer exists (the recording stops and is saved).
+   */
+  source: () => import('../engine/types').LiveSource | null | 'gone';
+  /** Project frame rate (used between 5 and 60). */
+  fps: number;
+  /** First word of the clip's name: "Webcam", "Phone", "Stream". */
+  label: string;
+  /** How the node shows the picture (mirror, quarter turns clockwise); the clip gets the same. */
+  orient?: () => { mirror: boolean; turns: number };
+}
+
+export interface LiveRecordResult {
+  /** The clip in the Media library. */
+  asset: AssetInfo;
+  name: string;
+  seconds: number;
+  frames: number;
+  width: number;
+  height: number;
+}
+
+/** How a recording ended. `result` is null when nothing was saved (then `error` says why). */
+export interface LiveRecordFinish {
+  /** 'stop' = the Stop button, 'limit' = 30 minutes or 1.5 GB, 'gone' = the node was deleted, 'switch' = another project was opened, 'error' = a frame could not be encoded. */
+  reason: 'stop' | 'limit' | 'gone' | 'switch' | 'error';
+  nodeId: string;
+  result: LiveRecordResult | null;
+  error?: string;
+}
+
+/**
+ * Record a live picture input (Webcam, Phone Camera, URL / Stream) into a video clip in the Media library. Picture only.
+ * One recording at a time. It ends by itself after 30 minutes or 1.5 GB (the clip is held in memory until then) and is still saved.
+ */
+export interface LiveRecordApi {
+  readonly state: 'idle' | 'recording' | 'saving';
+  /** The node being recorded, or null. */
+  readonly nodeId: string | null;
+  /** Seconds and frames recorded so far. */
+  readonly elapsed: number;
+  readonly frames: number;
+  /** True when this source is open and delivering a picture (never opens it, so no camera prompt). */
+  ready(source: import('../engine/types').LiveSource): boolean;
+  /** Throws when a recording is already running or the browser has no video encoder. */
+  start(opts: LiveRecordStart): void;
+  /** Stop and import the clip. Resolves null when nothing was saved; `onFinished` listeners get the details either way. */
+  stop(): Promise<LiveRecordResult | null>;
+  /** Throw the running recording away. */
+  cancel(): Promise<void>;
+  /** State changes, and about once a second while recording (for the running time). */
+  subscribe(listener: () => void): () => void;
+  /** Called once per recording, however it ended. */
+  onFinished(listener: (finish: LiveRecordFinish) => void): () => void;
+}
+
 export interface Io {
   engine: Engine;
   registry: Registry;
@@ -664,6 +725,8 @@ export interface Io {
   devices: DeviceApi;
   /** Phone as a camera through a QR code (LAN mode only). */
   phone: PhoneApi;
+  /** Record a live picture input into a clip in the Media library (the Record button on Webcam, Phone Camera and URL / Stream). */
+  liveRecorder: LiveRecordApi;
   /** Official add-ons (desktop app only; `supported` is false in the web version). */
   addons: AddonsApi;
   /**

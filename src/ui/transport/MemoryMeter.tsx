@@ -16,8 +16,11 @@ export function MemoryMeter() {
 
   useEffect(() => {
     const draw = () => {
-      const m = io.player.getState().memory;
-      if (!m || !fill.current || !btn.current) return;
+      const last = io.player.getState().memory;
+      if (!last || !fill.current || !btn.current) return;
+      // The player only reports memory when it renders a frame; read the live total so the bar also moves while rendering is off.
+      const allocatedBytes = io.memory().gpuTotalBytes ?? last.allocatedBytes;
+      const m = { ...last, allocatedBytes };
       const frac = m.budgetBytes > 0 ? Math.min(1, m.allocatedBytes / m.budgetBytes) : 0;
       fill.current.style.width = `${Math.round(frac * 100)}%`;
       btn.current.dataset.pressure = m.pressure;
@@ -25,7 +28,12 @@ export function MemoryMeter() {
       if (!btn.current.dataset.tip) btn.current.title = `GPU memory: ${mb(m.allocatedBytes)} of ${mb(m.budgetBytes)} (${m.pressure}). Click for details and settings.`;
     };
     draw();
-    return io.player.subscribe(draw);
+    const off = io.player.subscribe(draw);
+    const timer = window.setInterval(draw, 1000);
+    return () => {
+      off();
+      window.clearInterval(timer);
+    };
   }, [io]);
 
   // The full breakdown is only built when the pointer is on the button: io.memory() walks the GPU ledgers.
