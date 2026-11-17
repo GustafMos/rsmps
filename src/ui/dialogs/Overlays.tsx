@@ -11,10 +11,22 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 import { BackupsDialog } from './BackupsDialog';
 import { AboutDialog } from './AboutDialog';
 import { BlankSheetsDialog } from '../scan/BlankSheetsDialog';
+import { ConfirmHost, SaveNodeDialog } from './GroupDialogs';
 
 export function DialogHost() {
+  return (
+    <>
+      <DialogSwitch />
+      <ConfirmHost />
+    </>
+  );
+}
+
+function DialogSwitch() {
   const dialog = useEd((s) => s.dialog);
   switch (dialog) {
+    case 'saveNode':
+      return <SaveNodeDialog />;
     case 'export':
       return <ExportDialog />;
     case 'plugins':

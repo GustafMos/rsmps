@@ -16,7 +16,7 @@ export default defineNode({
   id: 'pattern',
   title: 'Pattern',
   category: 'generate',
-  description: 'Checkerboard, stripes, grid, dots, hexagons or bricks in two colours. Can scroll in a perfect loop.',
+  description: 'Checkerboard, stripes, grid, dots, hexagons or bricks in two colors. Can scroll in a perfect loop.',
   keywords: ['checker', 'checkerboard', 'stripes', 'lines', 'grid', 'dots', 'halftone', 'hexagon', 'brick', 'tile', 'texture'],
   inputs: { size: { type: 'image', label: 'Size from' } },
   outputs: { image: { type: 'image', label: 'Image' } },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { resolutionDiff, scalable } from '../../lib/fx-testutil';
 
 const bars = (x: number): [number, number, number, number] => (x % 16 < 8 ? [255, 255, 255, 255] : [0, 0, 0, 255]);
@@ -29,10 +29,10 @@ describe('wave-warp', () => {
     const t = await harness();
     const src = t.fromFn(64, 64, (x) => bars(x));
     const r = await t.loopCheck('wave-warp', { ...none, waveX: 8, waveXLength: 24, waveXCycles: 1 }, { image: src });
-    expect(r.seam).toBeLessThan(0.01);
+    expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion).toBeGreaterThan(1);
     const n = await t.loopCheck('wave-warp', { ...none, noiseAmount: 10, noiseScale: 20, noiseEvolution: 2 }, { image: src });
-    expect(n.seam).toBeLessThan(0.01);
+    expect(n.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(n.motion).toBeGreaterThan(0.5);
   });
 

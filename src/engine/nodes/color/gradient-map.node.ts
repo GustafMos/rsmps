@@ -5,8 +5,8 @@ export default defineNode({
   id: 'gradient-map',
   title: 'Gradient Map',
   category: 'color',
-  description: 'Recolours the image by mapping its brightness through a palette: darkest pixels take the first colour, brightest the last.',
-  keywords: ['duotone', 'tritone', 'palette', 'recolor', 'false colour', 'heatmap'],
+  description: 'Recolours the image by mapping its brightness through a palette: darkest pixels take the first color, brightest the last.',
+  keywords: ['duotone', 'tritone', 'palette', 'recolor', 'false color', 'heatmap'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
@@ -25,7 +25,7 @@ export default defineNode({
     stepped: { type: 'bool', default: false, label: 'Hard steps' },
     reverse: { type: 'bool', default: false, label: 'Reverse' },
   },
-  summary: (p) => `${p.palette.length} colours${p.stepped ? ' · steps' : ''}`,
+  summary: (p) => `${p.palette.length} colors${p.stepped ? ' · steps' : ''}`,
   render(ctx) {
     const p = ctx.params;
     if (p.palette.length === 0) return { image: ctx.in.image };

@@ -179,7 +179,7 @@ export default defineNode({
     resolution: { type: 'number', default: 384, min: 128, max: 1024, softMax: 768, step: 8, integer: true, label: 'Height', hint: 'Height of the scope picture; waveforms, parades and histograms are twice as wide, the vectorscope is square.' },
     samples: { type: 'number', default: 192, min: 32, max: 512, softMax: 256, step: 8, integer: true, label: 'Samples', hint: 'The picture is decimated to this many sample rows (waveform) or this many samples per side (histogram, vectorscope) before counting.' },
     gain: { type: 'number', default: 1, min: 0.1, max: 10, softMax: 6, step: 0.05, label: 'Brightness' },
-    graticule: { type: 'bool', default: true, label: 'Graticule', hint: 'Reference lines: 0, 25, 50, 75 and 100%; on the vectorscope the 75% colour-bar targets and the skin-tone line.' },
+    graticule: { type: 'bool', default: true, label: 'Graticule', hint: 'Reference lines: 0, 25, 50, 75 and 100%; on the vectorscope the 75% color-bar targets and the skin-tone line.' },
   },
   summary: (p) => p.type,
   render(ctx) {

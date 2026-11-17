@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createAddonManager, parseCatalogue, sha256File } from './manager.mjs';
+import { createAddonManager, parseCatalogue, probeAddon, sha256File } from './manager.mjs';
 
 const real = JSON.parse(readFileSync(new URL('./catalogue.json', import.meta.url), 'utf8'));
 const KEY = 'win32-x64';
@@ -16,7 +16,8 @@ describe('catalogue', () => {
     const list = parseCatalogue(real);
     const ff = list.find((a) => a.id === 'ffmpeg');
     expect(ff).toBeTruthy();
-    for (const b of Object.values(ff.builds)) {
+    expect(list.map((a) => a.id)).toEqual(['ffmpeg', 'colmap', 'colmap-cuda', 'brush']);
+    for (const b of list.flatMap((a) => Object.values(a.builds))) {
       expect(b.url.startsWith('https://')).toBe(true);
       expect(b.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(b.size).toBeGreaterThan(1e6);
@@ -120,5 +121,93 @@ describe('install, verification and state', () => {
     expect(st.download).toBeNull();
     expect(st.bringYourOwn).toMatch(/apt/);
     expect(() => m.install('ffmpeg')).toThrow(/No download/);
+  });
+});
+
+describe('multi-file tools (COLMAP, Brush)', () => {
+  let server, url, zip, sha, dir;
+  const enc = (t) => new TextEncoder().encode(t);
+  beforeAll(async () => {
+    // COLMAP-like layout: the program needs its DLL folder and Qt plugins; the archive also carries test programs we do not want
+    zip = Buffer.from(
+      zipSync({
+        'bin/colmap.exe': enc('FAKE-COLMAP program'),
+        'bin/ceres.dll': enc('dll'),
+        'bin/feature_test.exe': enc('a test program'),
+        'plugins/platforms/qwindows.dll': enc('plugin'),
+        'COLMAP.bat': enc('@echo off'),
+      }),
+    );
+    sha = createHash('sha256').update(zip).digest('hex');
+    server = createServer((_q, r) => (r.writeHead(200, { 'content-length': zip.length }), r.end(zip)));
+    await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+    url = `http://127.0.0.1:${server.address().port}/c.zip`;
+    dir = mkdtempSync(join(tmpdir(), 'rsmps-addon-tree-'));
+  });
+  afterAll(() => {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const probe = async (file, addon) => (existsSync(file) && readFileSync(file, 'utf8').startsWith(addon?.id === 'colmap' ? 'FAKE-COLMAP' : 'FAKE-FFMPEG') ? { ok: true, version: '4.2.1' } : { ok: false, version: '' });
+  const make = (name) => {
+    const c = structuredClone(real);
+    const col = c.addons.find((a) => a.id === 'colmap');
+    Object.assign(col.builds[KEY], { url, sha256: sha, size: zip.length });
+    return createAddonManager({ userData: join(dir, name), catalogue: parseCatalogue(c, { allowLocalHttp: true }), platformKey: KEY, allowLocalHttp: true, detectSystem: false, probe });
+  };
+
+  it('the shipped COLMAP and Brush entries keep their layout rules, licences and the unsigned notice', () => {
+    const list = parseCatalogue(real);
+    const col = list.find((a) => a.id === 'colmap');
+    expect(col.builds['win32-x64'].extract).toMatchObject({ binary: 'bin/colmap.exe', tree: ['bin/', 'plugins/'], exclude: ['_test.exe'] });
+    expect(col.builds['linux-x64']).toBeUndefined(); // COLMAP publishes no Linux binary: bring your own
+    expect(col.bringYourOwn.linux).toMatch(/Locate/);
+    for (const id of ['colmap', 'colmap-cuda', 'brush']) {
+      const a = list.find((x) => x.id === id);
+      expect(a.group).toBe('splat-train');
+      expect(a.notice).toMatch(/third-party program that runs on your computer/);
+      expect(a.probe.args.length).toBeGreaterThan(0);
+    }
+    expect(list.find((a) => a.id === 'brush').builds['win32-x64'].license.name).toBe('Apache-2.0');
+    expect(() => parseCatalogue({ ...real, addons: [{ ...real.addons[1], builds: { [KEY]: { ...real.addons[1].builds[KEY], extract: { binary: 'bin/colmap.exe', tree: ['bin'] } } } }] })).toThrow(/tree/);
+  });
+
+  it('installs the whole needed tree with paths kept, skips excluded files, records the main program hash', async () => {
+    const m = make('tree');
+    await m.install('colmap');
+    const st = await m.get('colmap');
+    expect(st.state).toBe('installed');
+    const bin = await m.binary('colmap');
+    expect(bin.replace(/\\/g, '/')).toMatch(/addons\/colmap\/4\.2\.1\/bin\/colmap\.exe$/);
+    const root = join(bin, '..', '..');
+    expect(existsSync(join(root, 'bin', 'ceres.dll'))).toBe(true);
+    expect(existsSync(join(root, 'plugins', 'platforms', 'qwindows.dll'))).toBe(true);
+    expect(existsSync(join(root, 'bin', 'feature_test.exe'))).toBe(false);
+    expect(existsSync(join(root, 'COLMAP.bat'))).toBe(false); // scripts from the archive are never unpacked
+    expect(m.state().colmap.binarySha256).toBe(await sha256File(bin));
+    writeFileSync(bin, 'FAKE-COLMAP tampered');
+    expect(await make('tree').binary('colmap')).toBeNull(); // re-checked before use in a new session
+  });
+
+  it('locate works for add-ons with a probe and is refused where the catalogue says so', async () => {
+    const m = make('loc');
+    const mine = join(dir, 'colmap-mine.exe');
+    writeFileSync(mine, 'FAKE-COLMAP mine');
+    await m.locate('colmap', mine);
+    expect((await m.get('colmap')).installed.source).toBe('custom');
+    await expect(m.locate('colmap', join(dir, 'colmap-mine.exe.missing'))).rejects.toThrow(/exist/);
+    writeFileSync(join(dir, 'other.exe'), 'nope');
+    await expect(m.locate('colmap', join(dir, 'other.exe'))).rejects.toThrow(/COLMAP/);
+    await expect(m.locate('colmap-cuda', mine)).rejects.toThrow(/cannot be located/);
+    expect((await m.get('colmap-cuda')).canLocate).toBe(false);
+  });
+
+  it('probeAddon runs the program with the catalogue arguments and reads the version from its output', async () => {
+    const ok = await probeAddon(process.execPath, { probe: { args: ['-e', 'console.log("COLMAP 4.2.1 (Commit x)")'], pattern: '^COLMAP (\\S+)' } });
+    expect(ok).toEqual({ ok: true, version: '4.2.1' });
+    const bad = await probeAddon(process.execPath, { probe: { args: ['-e', 'console.log("something else")'], pattern: '^COLMAP (\\S+)' } });
+    expect(bad.ok).toBe(false);
+    const failed = await probeAddon(process.execPath, { probe: { args: ['-e', 'console.log("COLMAP 1"); process.exit(3)'], pattern: '^COLMAP (\\S+)' } });
+    expect(failed.ok).toBe(false); // a crashing program is not accepted even when it printed the right words
   });
 });

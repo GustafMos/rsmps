@@ -14,7 +14,7 @@ export default defineNode({
   title: 'Detect Blobs',
   category: 'track',
   description:
-    'Finds bright, dark or vividly coloured spots (stars, lights, highlights, shadows) and outputs them as regions. Wire the regions into Region Overlay to draw boxes on them, or Regions To Mask to apply any effect only there.',
+    'Finds bright, dark or vividly colored spots (stars, lights, highlights, shadows) and outputs them as regions. Wire the regions into Region Overlay to draw boxes on them, or Regions To Mask to apply any effect only there.',
   keywords: ['detect', 'stars', 'lights', 'highlights', 'spots', 'bright', 'threshold', 'find', 'objects'],
   cpu: true,
   inputs: { image: { type: 'image', required: true, label: 'Image' } },

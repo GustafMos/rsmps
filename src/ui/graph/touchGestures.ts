@@ -2,6 +2,14 @@
  * Two-finger pinch-zoom and pan for the node graph (touch screens). Pure maths plus a small pointer tracker; GraphView feeds it
  * pointer events. Mouse and trackpad (wheel, middle button, Space-drag) do not go through here at all.
  */
+/**
+ * The other pure recognisers of the touch layer live next to their users and are tested there; they are re-exported so the graph code has ONE import point:
+ *  - `LongPress` (500 ms, 8 px; responsive/longPress.ts, tests with fake timers in longPress.test.ts)
+ *  - `DoubleTap`, `isTap`, `edgePanVelocity` (graph-touch/pure.ts; pure.test.ts)
+ */
+export { LongPress, LONG_PRESS_MS, LONG_PRESS_SLOP } from '../responsive/longPress';
+export { DoubleTap, edgePanVelocity, isTap } from '../graph-touch/pure';
+
 export interface Pt {
   x: number;
   y: number;

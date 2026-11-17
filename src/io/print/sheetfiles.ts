@@ -30,7 +30,7 @@ export interface FileOptions {
 }
 
 export function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+  if (signal?.aborted) throw new DOMException('Export canceled', 'AbortError');
 }
 
 const noYield = () => Promise.resolve();

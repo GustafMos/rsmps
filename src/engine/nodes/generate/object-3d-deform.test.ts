@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { sheet, writePng, type Img } from '../../lib/gen-3d-testutil';
 
 let shared: ReturnType<typeof harness> | null = null;
@@ -54,7 +54,7 @@ it('deform on changes the picture; each feature does something', T, async () => 
 it('animated noise loops exactly', T, async () => {
   const t = await H();
   const r = await t.loopCheck('object-3d', { shape: 'sphere', dNoise: 0.15, dNoiseCycles: 1, cameraType: 'orthographic' });
-  expect(r.seam).toBeLessThan(0.05);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(0.2);
 });
 

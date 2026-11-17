@@ -114,7 +114,7 @@ describe('track: Analyse clip (process mode)', () => {
     const done = withProcessResult(g, t.registry, track, await rt.run(g, track));
     expect(rt.pending(done, [track])).toEqual([]);
     lib.assets.clear();
-    expect(rt.pending(done, [track])).toMatchObject([{ node: track, title: 'Analyse clip', state: 'missing' }]);
+    expect(rt.pending(done, [track])).toMatchObject([{ node: track, title: 'Analyze clip', state: 'missing' }]);
     const stale = setParam(withProcessResult(g, t.registry, track, await rt.run(g, track)), track, 'smooth', 0.9);
     expect(rt.pending(stale, [track])).toMatchObject([{ state: 'stale' }]);
   });

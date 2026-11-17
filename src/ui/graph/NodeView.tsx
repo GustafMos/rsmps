@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORIES } from '../../engine/types';
+import { defOf, GROUP_INPUT_TYPE, GROUP_TYPE, isBoundaryNode, NEW_PORT, PATH_SEP } from '../../engine/group';
 import type { AnyNodeDef, InputSchema, NodeInstance, OutputSchema, ParamDef, SocketType } from '../../engine/types';
 import { Icon, type IconName } from '../components/Icon';
 import { KIND_ICON, kindOptions } from '../lib/outputInfo';
@@ -36,15 +37,23 @@ function Socket({ node, port, type, dir, wired }: { node: string; port: string; 
   return <span className={`rs-sock rs-sock--${type} rs-sock--${dir}${wired ? ' is-wired' : ''}`} data-sock data-node={node} data-port={port} data-dir={dir} data-type={type} />;
 }
 
+/** Full path id of a node of the shown level (what the viewer, the engine and processes use). */
+const pathId = (path: readonly string[], id: string) => (path.length ? [...path, id].join(PATH_SEP) : id);
+
 export const NodeView = memo(function NodeView({ node }: { node: NodeInstance }) {
   const { ed, graphCtl } = useApp();
-  const def = useDef(node.type);
+  const regDef = useDef(node.type);
+  // groups and the boundary of an open group get their ports and params from their own params
+  const def = useMemo(() => defOf({ get: () => regDef }, node) ?? regDef, [regDef, node]);
+  const isGroup = node.type === GROUP_TYPE;
+  const boundary = isBoundaryNode(node);
+  const fullId = useEd((s) => pathId(s.path, node.id));
   const selected = useEd((s) => s.selection.includes(node.id));
-  const viewed = useEd((s) => s.viewedNodeId === node.id);
-  const wiredSig = useEd((s) => inboundSignature(s.graph.edges, node.id));
-  const portSig = useEd((s) => (def ? '|' : portSignature(s.graph.edges, node.id)));
+  const viewed = useEd((s) => s.viewedNodeId === pathId(s.path, node.id));
+  const wiredSig = useEd((s) => inboundSignature(s.level.edges, node.id));
+  const portSig = useEd((s) => (def ? '|' : portSignature(s.level.edges, node.id)));
   const debug = useEd((s) => s.prefs.debug);
-  const rawError = usePlayer((s) => s.errors.get(node.id));
+  const rawError = usePlayer((s) => s.errors.get(fullId));
   const { io } = useApp();
   const missingReq = useMemo(() => missingCapabilities(io, def), [io, def]);
   // one clear message instead of the raw engine error when the app cannot run this node here
@@ -81,18 +90,21 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
     };
   }, [graphCtl, node.id]);
 
+  // Loop snapping: a summary can say when the loop switch changed a typed value ("speed 2 → 3 to loop"); it gets the project's loop / length / rate.
+  const clockKey = useEd((st) => `${st.level.project.loop ? 1 : 0}|${Math.max(1, Math.round(st.level.project.duration * st.level.project.fps))}|${st.level.project.fps}`);
   const summary = useMemo(() => {
     if (!def?.summary) return '';
     try {
       const params: Record<string, unknown> = {};
       for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.default;
-      return def.summary(params, wired);
+      const [lp, fr, fp] = clockKey.split('|').map(Number);
+      return def.summary(params, wired, { loop: lp === 1, frames: fr, fps: fp });
     } catch {
       return '';
     }
-  }, [def, node.params, wired]);
+  }, [def, node.params, wired, clockKey]);
 
-  const frameTxt = useEd((s) => (hasFrameParams(def) ? (() => { const z = frameSize(s.graph.project, node); return `${z.width}×${z.height}`; })() : ''));
+  const frameTxt = useEd((s) => (hasFrameParams(def) ? (() => { const z = frameSize(s.level.project, node); return `${z.width}×${z.height}`; })() : ''));
   const title = node.label || def?.title || node.type;
   const missing = !def;
   const hasAudioOut = !!def && Object.values(def.outputs as OutputSchema).some((o) => o.type === 'audio');
@@ -102,21 +114,21 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   const hasProcess = !!def?.process;
   const activeProject = useEd((s) => s.activeProject) ?? 'project';
   // Process mode: the scheduler's job for this node (null for nodes without a process: no work at all for them).
-  const job = useSelector(processStore, (s) => (hasProcess ? jobOf(s.jobs, activeProject, node.id) : null));
+  const job = useSelector(processStore, (s) => (hasProcess ? jobOf(s.jobs, activeProject, fullId) : null));
   const bakeFraction = isCache && isActiveJob(job) ? job!.progress : undefined;
-  const bake = useEd((s) => (isCache ? bakeStatusOf(s.graph, node, statusDeps(app, s.graph, bakeFraction === undefined ? null : { fraction: bakeFraction })) : null), (a, b) => a?.badge === b?.badge && a?.kind === b?.kind);
+  const bake = useEd((s) => (isCache ? bakeStatusOf(s.level, node, statusDeps(app, s.level, bakeFraction === undefined ? null : { fraction: bakeFraction })) : null), (a, b) => a?.badge === b?.badge && a?.kind === b?.kind);
   // Other process nodes: queued / % / done / stale / failed / lost.
   const pbadge = useEd(
-    (s) => (hasProcess && !isCache ? processBadge(def!.process!.title, app.io.processes.status(s.graph, node.id)?.state ?? 'none', job) : null),
+    (s) => (hasProcess && !isCache ? processBadge(def!.process!.title, app.io.processes.status(s.graph, pathId(s.path, node.id))?.state ?? 'none', job) : null),
     (a, b) => a?.text === b?.text && a?.kind === b?.kind,
   );
   const processing = isActiveJob(job);
-  const frozen = useEd((s) => frozenIds(app, s.graph).has(node.id));
+  const frozen = useEd((s) => !s.path.length && frozenIds(app, s.graph).has(node.id));
 
   return (
     <div
       ref={el}
-      className={`rs-node${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}${exportOff ? ' is-notexported' : ''}${frozen ? ' is-frozen' : ''}${processing ? ' is-processing' : ''}`}
+      className={`rs-node${isGroup ? ' rs-node--group' : ''}${boundary ? ' rs-node--boundary' : ''}${selected ? ' is-selected' : ''}${viewed ? ' is-viewed' : ''}${node.bypass ? ' is-bypassed' : ''}${missing ? ' rs-node--missing' : ''}${error ? ' has-error' : ''}${node.collapsed ? ' is-collapsed' : ''}${exportOff ? ' is-notexported' : ''}${frozen ? ' is-frozen' : ''}${processing ? ' is-processing' : ''}`}
       data-node-id={node.id}
       title={frozen ? 'Frozen: everything after this node is baked, so it is not calculated any more' : undefined}
       style={{ transform: `translate(${node.x}px, ${node.y}px)`, width: layout.width, height: layout.height, ['--cat' as string]: catColor(def) }}
@@ -132,6 +144,11 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
         >
           <Icon name={node.collapsed ? 'chevronRight' : 'chevronDown'} size={16} />
         </button>
+        {isGroup && (
+          <button className="rs-node__hbtn rs-node__stack" data-nodrag title="A group: double-click (or Tab) to open it" aria-label="Open group" onClick={() => ed.enterGroup(node.id)}>
+            <Icon name="stack" size={16} />
+          </button>
+        )}
         {renaming ? (
           <input
             className="rs-node__rename"
@@ -157,8 +174,8 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
           </span>
         )}
         {missingReq.length > 0 && (
-          <span className="rs-node__req" data-nodrag title={missingReq[0].explanation}>
-            <Icon name="warn" size={16} />{missingReq[0].label}
+          <span className="rs-node__req" data-nodrag title={`${missingReq[0].label}: ${missingReq[0].explanation}`} aria-label={missingReq[0].label}>
+            <Icon name="warn" size={16} />
           </span>
         )}
         {error && !missingReq.length && (
@@ -176,13 +193,13 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
             {pbadge.text}
           </span>
         )}
-        {debug && <NodeTiming id={node.id} />}
+        {debug && <NodeTiming id={fullId} group={isGroup} />}
         {hasEnabled && (
           <button className={`rs-node__hbtn rs-node__exp${exportOff ? '' : ' is-on'}`} data-nodrag title={exportOff ? 'Excluded from export: click to include' : 'Included in export: click to exclude'} aria-label={exportOff ? 'Excluded from export' : 'Included in export'} aria-pressed={!exportOff} onClick={() => ed.setParam(node.id, 'enabled', exportOff)}>
             <Icon name="exportBox" size={16} />
           </button>
         )}
-        <button
+        {!boundary && <button
           className={`rs-node__hbtn${node.bypass ? ' is-on' : ''}`}
           data-nodrag
           title={node.bypass ? 'Bypassed: click to enable (B)' : 'Bypass (B)'}
@@ -191,17 +208,17 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
           onClick={() => ed.toggleBypass(node.id)}
         >
           <Icon name="bypass" size={16} />
-        </button>
-        <button
+        </button>}
+        {!boundary && <button
           className={`rs-node__hbtn rs-node__eye${viewed ? ' is-on' : ''}`}
           data-nodrag
           title="View this node (Ctrl+Shift+click)"
           aria-label="View this node"
           aria-pressed={viewed}
-          onClick={() => ed.setViewed(node.id)}
+          onClick={() => ed.setViewed(fullId)}
         >
           <Icon name="monitor" size={16} />
-        </button>
+        </button>}
         {hasAudioOut && <Meter id={node.id} />}
       </div>
 
@@ -221,6 +238,21 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
         </div>
       )}
       {error && !node.collapsed && <div className="rs-node__errtext" role="alert" title={error}>{error}</div>}
+      {boundary && (
+        <div className="rs-row rs-row--io rs-node__newport" style={{ top: layout.height + 2, height: ROW_H }} title={node.type === GROUP_INPUT_TYPE ? 'Drag a wire from an inner input here to add a group input' : 'Drag a wire from an inner output here to add a group output'}>
+          {node.type === GROUP_INPUT_TYPE ? (
+            <>
+              <span className="rs-row__label rs-row__label--out">+ input</span>
+              <Socket node={node.id} port={NEW_PORT} type="image" dir="out" />
+            </>
+          ) : (
+            <>
+              <Socket node={node.id} port={NEW_PORT} type="image" dir="in" />
+              <span className="rs-row__label">+ output</span>
+            </>
+          )}
+        </div>
+      )}
       {missing && !node.collapsed && (
         <div className="rs-node__missing" style={{ top: HEAD_H + 6 + ROW_H * Math.max(1, layout.rows.length) }}>
           Missing node type
@@ -242,8 +274,17 @@ function KindSelect({ node }: { node: NodeInstance }) {
   );
 }
 
-function NodeTiming({ id }: { id: string }) {
-  const t = usePlayer((s) => s.timings.get(id));
+function NodeTiming({ id, group }: { id: string; group?: boolean }) {
+  // a group's time is the sum of what rendered inside it
+  const t = usePlayer((s) => {
+    if (!group) return s.timings.get(id);
+    let sum: number | undefined;
+    const prefix = id + PATH_SEP;
+    s.timings.forEach((v, k) => {
+      if (k.startsWith(prefix)) sum = (sum ?? 0) + v;
+    });
+    return sum === undefined ? undefined : Math.round(sum * 10) / 10;
+  });
   return t === undefined ? null : <span className="rs-node__ms rs-num">{t}ms</span>;
 }
 
@@ -377,7 +418,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         control = (
           <div className="rs-row__pair">
             <span className="rs-row__label">{label}</span>
-            <div className="rs-row__palette" title={`${colors.length} colours`}>
+            <div className="rs-row__palette" title={`${colors.length} colors`}>
               {colors.slice(0, 16).map((c, i) => (
                 <span key={i} style={{ background: hexOf(c) }} />
               ))}

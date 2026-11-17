@@ -78,13 +78,13 @@ export function PaletteEditor({ value, onChange, onStudio }: { value: RGB[]; onC
             onClick={() => setSel(i)}
           />
         ))}
-        <button className="rs-pal__sw rs-pal__add" title="Add colour" onClick={() => { onChange([...colors, cur ? [...cur] as RGB : [0.5, 0.5, 0.5]]); setSel(colors.length); }}>
+        <button className="rs-pal__sw rs-pal__add" title="Add color" onClick={() => { onChange([...colors, cur ? [...cur] as RGB : [0.5, 0.5, 0.5]]); setSel(colors.length); }}>
           <Icon name="plus" size={14} />
         </button>
       </div>
       {cur && (
         <div className="rs-pal__edit">
-          <button ref={editBtn} className="rs-pal__cur" style={{ background: hexOf(cur) }} title="Edit this colour" aria-label="Edit colour" onClick={() => setPicking((p) => !p)} />
+          <button ref={editBtn} className="rs-pal__cur" style={{ background: hexOf(cur) }} title="Edit this color" aria-label="Edit color" onClick={() => setPicking((p) => !p)} />
           {picking && <ColorPopover anchor={editBtn.current} alpha={false} extra={colors} value={[cur[0], cur[1], cur[2], 1]} onChange={(v) => update(idx, [v[0], v[1], v[2]])} onClose={() => setPicking(false)} />}
           <input
             className="rs-input rs-mono"
@@ -97,14 +97,14 @@ export function PaletteEditor({ value, onChange, onStudio }: { value: RGB[]; onC
           />
           <button className="rs-btn rs-btn--icon rs-btn--ghost" title="Move left" onClick={() => move(idx, idx - 1)}><Icon name="chevronLeft" /></button>
           <button className="rs-btn rs-btn--icon rs-btn--ghost" title="Move right" onClick={() => move(idx, idx + 1)}><Icon name="chevronRight" /></button>
-          <button className="rs-btn rs-btn--icon rs-btn--ghost rs-btn--danger" title="Remove colour" onClick={() => { onChange(colors.filter((_, j) => j !== idx)); setSel(Math.max(0, idx - 1)); }}><Icon name="trash" /></button>
+          <button className="rs-btn rs-btn--icon rs-btn--ghost rs-btn--danger" title="Remove color" onClick={() => { onChange(colors.filter((_, j) => j !== idx)); setSel(Math.max(0, idx - 1)); }}><Icon name="trash" /></button>
         </div>
       )}
       <div className="rs-pal__tools">
         <NumberField label="Steps" value={steps} min={2} max={64} integer defaultValue={8} onChange={setSteps} />
         <div className="rs-pal__btns">
-          <button className="rs-btn" onClick={gradient} disabled={colors.length < 2} title="Fill with a gradient between the first and last colour">Gradient</button>
-          <button className="rs-btn" onClick={greys} title="Greyscale ramp">Greys</button>
+          <button className="rs-btn" onClick={gradient} disabled={colors.length < 2} title="Fill with a gradient between the first and last color">Gradient</button>
+          <button className="rs-btn" onClick={greys} title="Grayscale ramp">Grays</button>
           <button className="rs-btn" onClick={harmony} title="Random harmonious ramp">Random</button>
           <button className="rs-btn" onClick={() => onChange([...colors].sort((a, b) => lum(a) - lum(b)))} title="Sort dark to light">Sort</button>
           <button className="rs-btn" onClick={() => onChange([...colors].reverse())} title="Reverse order">Reverse</button>
@@ -113,7 +113,7 @@ export function PaletteEditor({ value, onChange, onStudio }: { value: RGB[]; onC
       <textarea
         className="rs-input rs-mono"
         rows={2}
-        placeholder="Paste hex colours (#1a1c2c #5d275d …) to import"
+        placeholder="Paste hex colors (#1a1c2c #5d275d …) to import"
         value={paste}
         spellCheck={false}
         onKeyDown={(e) => e.stopPropagation()}
@@ -125,7 +125,7 @@ export function PaletteEditor({ value, onChange, onStudio }: { value: RGB[]; onC
           <button className="rs-btn" onClick={() => { const l = parseHexList(paste); if (l.length) { onChange([...colors, ...l]); setPaste(''); } }}>Append</button>
         </div>
       )}
-      <div className="rs-pal__count rs-caps">{colors.length} colours</div>
+      <div className="rs-pal__count rs-caps">{colors.length} colors</div>
       {onStudio && <button className="rs-btn rs-btn--primary" onClick={onStudio}>Edit in Palette Studio</button>}
     </div>
   );

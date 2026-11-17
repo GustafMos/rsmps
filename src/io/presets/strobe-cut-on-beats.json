@@ -1,0 +1,122 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Strobe cut on beats",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 8,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop a clip with sound here"
+    },
+    {
+      "id": "beat",
+      "type": "beat-detect",
+      "x": 260,
+      "y": 260,
+      "params": {}
+    },
+    {
+      "id": "inv",
+      "type": "invert",
+      "x": 260,
+      "y": -200,
+      "params": {},
+      "label": "Negative"
+    },
+    {
+      "id": "sw",
+      "type": "switch",
+      "x": 520,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 780,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "audio"
+      },
+      "to": {
+        "node": "beat",
+        "port": "audio"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "inv",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "sw",
+        "port": "images"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "inv",
+        "port": "image"
+      },
+      "to": {
+        "node": "sw",
+        "port": "images"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "beat",
+        "port": "count"
+      },
+      "to": {
+        "node": "sw",
+        "port": "index"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "sw",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

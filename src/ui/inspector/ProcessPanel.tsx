@@ -45,8 +45,10 @@ export function ProcessPanel({
   const pdef = def?.process;
   const graph = useEd((s) => s.graph);
   const project = useEd((s) => s.activeProject) ?? 'project';
-  const job = useSelector(processStore, (s) => jobOf(s.jobs, project, node.id));
-  const status = useMemo(() => (pdef ? app.io.processes.status(graph, node.id) : null), [app, pdef, graph, node.id, job?.state]);
+  // The node belongs to the SHOWN level: jobs, status and every action use its full path id (it differs from node.id inside an open group).
+  const fullId = useEd((s) => (s.path.length ? [...s.path, node.id].join('/') : node.id));
+  const job = useSelector(processStore, (s) => jobOf(s.jobs, project, fullId));
+  const status = useMemo(() => (pdef ? app.io.processes.status(graph, fullId) : null), [app, pdef, graph, fullId, job?.state]);
   const active = isActiveJob(job);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -69,7 +71,7 @@ export function ProcessPanel({
   const pct = Math.round((job?.progress ?? 0) * 100);
   const result = status?.result ?? null;
   const text = stateText?.(status, job) ?? processStateText(pdef.title, pdef.standIn, state, job);
-  const run = () => void runProcess(app, node.id, { options: options?.() });
+  const run = () => void runProcess(app, fullId, { options: options?.() });
   const shown = !active && (has || state === 'missing' || job?.state === 'failed');
 
   return (
@@ -104,14 +106,14 @@ export function ProcessPanel({
       {extra}
       <div className="rs-insp__actions">
         {active ? (
-          <button className="rs-btn" onClick={() => cancelProcess(app, node.id)}><Icon name="close" /> Cancel</button>
+          <button className="rs-btn" onClick={() => cancelProcess(app, fullId)}><Icon name="close" /> Cancel</button>
         ) : (
           <>
             <button className="rs-btn rs-btn--primary" onClick={run} title={pdef.description ?? `Run ${pdef.title.toLowerCase()} once and store the result`}>
               <Icon name="play" /> {shown ? (rerunLabel ?? `${pdef.title} again`) : (runLabel ?? pdef.title)}
             </button>
             {shown && (
-              <button className="rs-btn rs-btn--danger" onClick={() => void clearProcess(app, node.id)} title="Delete the stored result; the node goes back to its stand-in">
+              <button className="rs-btn rs-btn--danger" onClick={() => void clearProcess(app, fullId)} title="Delete the stored result; the node goes back to its stand-in">
                 <Icon name="trash" /> Clear
               </button>
             )}

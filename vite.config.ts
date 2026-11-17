@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { defineConfig, type PluginOption } from 'vite';
 import react from '@vitejs/plugin-react';
 import { phoneLink } from './vite-plugins/phone-link';
+import { ortFiles } from './vite-plugins/ort-files';
 
 /**
  * RSMPS_LAN=1 (npm run dev:lan): serve over https with a self-signed certificate on all network interfaces and enable the
@@ -15,7 +16,7 @@ const ssl = lan && process.env.RSMPS_LAN_NOSSL !== '1';
 const realCert = lan && process.env.RSMPS_CERT && process.env.RSMPS_KEY ? { cert: readFileSync(process.env.RSMPS_CERT), key: readFileSync(process.env.RSMPS_KEY) } : null;
 
 export default defineConfig(async () => {
-  const plugins: PluginOption[] = [react(), phoneLink({ lan, https: ssl, tailnetName: realCert ? process.env.RSMPS_TS_NAME : undefined })];
+  const plugins: PluginOption[] = [react(), phoneLink({ lan, https: ssl, tailnetName: realCert ? process.env.RSMPS_TS_NAME : undefined }), ortFiles(__dirname)];
   if (ssl && !realCert) {
     const { default: basicSsl } = await import('@vitejs/plugin-basic-ssl');
     plugins.push(basicSsl());

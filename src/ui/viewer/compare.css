@@ -1,0 +1,23 @@
+/* Snapshots and A/B compare. Greyscale; fluid (no fixed widths over 320px). */
+.rs-cmp__bar { gap: var(--s-1); }
+.rs-cmp__ctl { display: flex; align-items: center; gap: var(--s-1); color: var(--text-dim); font-size: var(--fs-xs); }
+.rs-cmp__ctl input[type='range'] { width: 72px; max-width: 30vw; }
+.rs-cmp__note { color: var(--yellow); }
+.rs-cmp__img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+.rs-cmp__wipe { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.rs-cmp__line { stroke: #fff; stroke-width: 2px; filter: drop-shadow(0 0 1px #000); pointer-events: none; }
+.rs-cmp__hit { stroke: transparent; stroke-width: 16px; pointer-events: stroke; cursor: ew-resize; }
+.rs-viewer.is-cmp-side .rs-viewer__stage, .rs-viewer.is-cmp-side .rs-viewer__backing { visibility: hidden !important; }
+.rs-cmp__side { position: absolute; inset: 0; z-index: 3; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: #000; }
+.rs-cmp__side figure { margin: 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.rs-cmp__side img { flex: 1; min-height: 0; width: 100%; object-fit: contain; image-rendering: auto; }
+.rs-cmp__side figcaption { padding: 2px var(--s-2); font-size: var(--fs-xs); color: var(--text-dim); background: var(--bg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rs-cmp__wait { flex: 1; display: grid; place-items: center; color: var(--text-faint); font-size: var(--fs-sm); }
+.rs-cmp__strip { position: absolute; left: var(--s-2); right: var(--s-2); bottom: var(--s-2); z-index: 7; display: flex; gap: var(--s-1); overflow-x: auto; padding: var(--s-1); background: #000a; border: 1px solid var(--line-strong); }
+.rs-cmp__thumb { position: relative; flex: none; }
+.rs-cmp__pick { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; background: var(--bg-2); border: 1px solid var(--line-strong); color: var(--text-dim); cursor: pointer; }
+.rs-cmp__pick img { width: 56px; height: 40px; object-fit: contain; background: #000; }
+.rs-cmp__thumb.is-on .rs-cmp__pick { border-color: var(--text); color: var(--text); }
+.rs-cmp__x { position: absolute; top: 0; right: 0; width: 16px; height: 16px; opacity: 0; background: var(--bg-3); }
+.rs-cmp__x2 { top: 0; right: 16px; }
+.rs-cmp__thumb:hover .rs-cmp__x, .rs-cmp__thumb:focus-within .rs-cmp__x { opacity: 1; }

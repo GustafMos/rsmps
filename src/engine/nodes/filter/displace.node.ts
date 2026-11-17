@@ -4,7 +4,7 @@ export default defineNode({
   id: 'displace',
   title: 'Noise Displace',
   category: 'filter',
-  description: 'Warps the image with a flowing noise field: heat haze, water ripple, wobbly hand-drawn edges. Loops seamlessly when animated.',
+  description: 'Warps the image with a flowing noise field: heat haze, water ripple, wobbly hand-drawn edges. Loops seamlessly when animated. To warp with a picture instead of noise (a displacement map, refraction through a bump map, footage motion), use Displace by Map.',
   keywords: ['warp', 'distort', 'wobble', 'heat', 'wave', 'ripple', 'turbulence', 'boil'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

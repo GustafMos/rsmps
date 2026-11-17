@@ -5,6 +5,7 @@
 import { Registry, canConnect, paramSocketType } from './define';
 import { defaultParams } from './engine';
 import { resolveParams } from './audio/params';
+import { defOf, groupData, GROUP_MAX_DEPTH, GROUP_TYPE } from './group';
 import { DEFAULT_PROJECT, type Edge, type GraphDoc, type NodeInstance, type SocketType } from './types';
 
 let counter = 0;
@@ -33,7 +34,7 @@ export function addNode(
 /** Socket type of an output port, or null. */
 export function outputType(graph: GraphDoc, registry: Registry, nodeId: string, port: string): SocketType | null {
   const node = graph.nodes.find((n) => n.id === nodeId);
-  const def = node && registry.get(node.type);
+  const def = defOf(registry, node);
   return def?.outputs[port]?.type ?? null;
 }
 
@@ -45,7 +46,7 @@ export function inputType(
   port: string,
 ): { type: SocketType; multi: boolean } | null {
   const node = graph.nodes.find((n) => n.id === nodeId);
-  const def = node && registry.get(node.type);
+  const def = defOf(registry, node);
   if (!def) return null;
   const input = def.inputs[port];
   if (input) return { type: input.type, multi: !!input.multi };
@@ -103,7 +104,7 @@ export function removeNodes(graph: GraphDoc, registry: Registry, ids: string[], 
   for (const id of ids) {
     const node = g.nodes.find((n) => n.id === id);
     if (!node) continue;
-    const def = registry.get(node.type);
+    const def = defOf(registry, node);
     const incoming = g.edges.filter((e) => e.to.node === id);
     const outgoing = g.edges.filter((e) => e.from.node === id);
     let next: GraphDoc = {
@@ -169,19 +170,57 @@ export function enabledOutputs(graph: GraphDoc, registry: Registry): NodeInstanc
   return outputNodes(graph, registry).filter((n) => !n.bypass && n.params.enabled !== false);
 }
 
-/** Batch size: the largest asset list on any node with an `assets` param (minimum 1). */
+/** Biggest batch a node may ask for with `NodeDef.batchSize` (a runaway value would make every export and viewer scrub absurd). */
+export const BATCH_SIZE_MAX = 100000;
+
+/** Batch size: the largest of every `assets` list and every node's own `NodeDef.batchSize` (minimum 1). */
 export function batchCount(graph: GraphDoc, registry: Registry): number {
+  return batchOf(graph.nodes, registry, 0);
+}
+
+/** Largest asset list among nodes; assets inside groups count too (a Media In bundled into a group still drives the batch). */
+function batchOf(nodes: readonly NodeInstance[], registry: Registry, depth: number): number {
   let count = 1;
-  for (const n of graph.nodes) {
+  for (const n of nodes) {
+    if (n.type === GROUP_TYPE) {
+      if (depth < GROUP_MAX_DEPTH) count = Math.max(count, batchOf(groupData(n).nodes, registry, depth + 1));
+      continue;
+    }
     const def = registry.get(n.type);
     if (!def) continue;
+    if (def.batchSize) {
+      let size: number | null = null;
+      try {
+        size = def.batchSize(resolveParams(def, n.params) as never);
+      } catch {
+        size = null;
+      }
+      if (typeof size === 'number' && Number.isFinite(size)) count = Math.max(count, Math.min(BATCH_SIZE_MAX, Math.floor(size)));
+    }
     for (const [key, p] of Object.entries(def.params)) {
-      if ((p as { type: string }).type === 'assets' && Array.isArray(n.params[key])) {
+      if ((p as { type: string; batch?: boolean }).type === 'assets' && (p as { batch?: boolean }).batch !== false && Array.isArray(n.params[key])) {
         count = Math.max(count, (n.params[key] as unknown[]).length);
       }
     }
   }
   return count;
+}
+
+/** Longest `projectLength` among nodes (groups included, bypassed nodes skipped), in seconds, unrounded. */
+function longestLength(nodes: readonly NodeInstance[], registry: Registry, depth: number): number | null {
+  let best: number | null = null;
+  for (const n of nodes) {
+    if (n.bypass) continue;
+    let len: number | null = null;
+    if (n.type === GROUP_TYPE) len = depth < GROUP_MAX_DEPTH ? longestLength(groupData(n).nodes, registry, depth + 1) : null;
+    else {
+      const def = registry.get(n.type);
+      if (!def?.projectLength) continue;
+      len = def.projectLength(resolveParams(def, n.params) as never);
+    }
+    if (typeof len === 'number' && Number.isFinite(len) && len > 0 && (best === null || len > best)) best = len;
+  }
+  return best;
 }
 
 /** Ids of every node upstream of `nodeId` (inclusive). */
@@ -252,14 +291,7 @@ export function groupOutputs(graph: GraphDoc, nodeIds: Iterable<string>, registr
  * wins; bypassed nodes do not count. Whole frames, at least one.
  */
 export function effectiveDuration(graph: GraphDoc, registry: Registry): number | null {
-  let best: number | null = null;
-  for (const n of graph.nodes) {
-    if (n.bypass) continue;
-    const def = registry.get(n.type);
-    if (!def?.projectLength) continue;
-    const len = def.projectLength(resolveParams(def, n.params) as never);
-    if (typeof len === 'number' && Number.isFinite(len) && len > 0 && (best === null || len > best)) best = len;
-  }
+  const best = longestLength(graph.nodes, registry, 0);
   if (best === null) return null;
   const fps = graph.project.fps > 0 ? graph.project.fps : 1;
   return Math.max(1, Math.round(best * fps)) / fps;

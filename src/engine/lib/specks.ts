@@ -69,7 +69,7 @@ export const SPECK_PARAMS = {
   },
   speckColor: { type: 'color', default: [1, 0.95, 0.85, 1], label: 'Color', group: G, visibleIf: (p) => p.speckColorMode === 'custom' || p.speckColorMode === 'random' },
   speckColor2: { type: 'color', default: [0.55, 0.8, 1, 1], label: 'Second color', group: G, visibleIf: (p) => p.speckColorMode === 'random' },
-  speckBrightness: { type: 'number', default: 0.8, min: 0, max: 1, step: 0.01, label: 'Brightening', group: G, hint: 'How far the picture colour is pushed to white.', visibleIf: (p) => p.speckColorMode === 'picture' },
+  speckBrightness: { type: 'number', default: 0.8, min: 0, max: 1, step: 0.01, label: 'Brightening', group: G, hint: 'How far the picture color is pushed to white.', visibleIf: (p) => p.speckColorMode === 'picture' },
   speckDark: { type: 'number', default: 0.1, min: 0, max: 1, step: 0.01, label: 'Dark share', group: G, hint: 'Fraction of specks that drop to black instead (From the picture / White only).', visibleIf: (p) => p.speckColorMode === 'picture' || p.speckColorMode === 'white' },
   speckAlpha: { type: 'number', default: 0.95, min: 0, max: 1, step: 0.01, label: 'Opacity', group: G },
   speckBlend: {
@@ -83,7 +83,7 @@ export const SPECK_PARAMS = {
     label: 'Blend',
     group: G,
   },
-  speckChroma: { type: 'number', default: 0.7, min: 0, max: 1, step: 0.01, label: 'Color loss', group: G, hint: 'How much of the picture colour under a speck is lost.' },
+  speckChroma: { type: 'number', default: 0.7, min: 0, max: 1, step: 0.01, label: 'Color loss', group: G, hint: 'How much of the picture color under a speck is lost.' },
   speckFlicker: { type: 'number', default: 2, min: 0, max: 24, step: 1, integer: true, unit: 'cycles', label: 'Change every N', group: G, hint: 'Needs Animate. 0 = one fixed pattern.' },
   speckDriftX: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Drift X', group: G, hint: 'Whole picture widths per loop. Combine with 0 flicker for specks that travel.' },
   speckDriftY: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Drift Y', group: G },

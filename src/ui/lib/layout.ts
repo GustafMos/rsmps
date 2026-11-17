@@ -4,6 +4,7 @@
  */
 import { paramSocketType } from '../../engine/define';
 import { paletteInputPort } from './sockets';
+import { defOf } from '../../engine/group';
 import { nodeViewStore } from '../store/nodeView';
 import type { AnyNodeDef, Edge, GraphDoc, InputSchema, NodeInstance, OutputSchema, ParamDef, SocketType } from '../../engine/types';
 
@@ -289,6 +290,8 @@ export function multiCounts(def: AnyNodeDef, edges: Edge[], nodeId: string): Rec
 }
 
 export function layoutFor(graph: GraphDoc, node: NodeInstance, def: AnyNodeDef | undefined): NodeLayout {
+  // group nodes (and the boundary of an open group) take their ports from their own params, not from the registered placeholder
+  def = defOf({ get: () => def }, node) ?? def;
   const pp = def ? paletteInputPort(def) : null;
   const hint = !!pp && !graph.edges.some((e) => e.to.node === node.id && e.to.port === pp);
   return layoutNode(node, def, def ? undefined : parsePortSignature(portSignature(graph.edges, node.id)), hint, def ? multiCounts(def, graph.edges, node.id) : {}, def ? bodyViewFor(def, node.id, graph.edges) : undefined);

@@ -14,9 +14,10 @@
 .rs-insp__actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .rs-insp__group { position: sticky; top: 0; z-index: 3; background: var(--bg-1); margin: calc(var(--s-3) * -1) calc(var(--s-3) * -1) 0; padding: 0 var(--s-3); height: 32px; border: 0; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s-1); color: var(--text-dim); text-align: left; }
 .rs-insp__group:hover { color: var(--text); }
-.rs-insp__row { display: grid; grid-template-columns: minmax(70px, 36%) 1fr; align-items: center; gap: var(--s-2); }
+.rs-insp__row { display: grid; grid-template-columns: minmax(84px, 40%) 1fr; align-items: center; gap: var(--s-2); }
+.rs-insp__row.rs-insp__port { grid-template-columns: minmax(44px, 20%) 1fr auto; }
 .rs-insp__row.is-stacked { grid-template-columns: 1fr; gap: var(--s-1); }
-.rs-insp__label { color: var(--text-dim); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-insp__label { color: var(--text-dim); font-size: var(--fs-sm); min-width: 0; }
 .rs-insp__ctl { min-width: 0; }
 .rs-insp__phint { grid-column: 1 / -1; color: var(--text-faint); font-size: var(--fs-xs); line-height: 1.4; }
 .rs-insp__wired { display: flex; align-items: center; gap: var(--s-2); color: var(--text-dim); font-size: var(--fs-sm); min-width: 0; }
@@ -62,7 +63,7 @@
 .rs-json__pre { margin: 0; max-height: 140px; overflow: auto; padding: var(--s-2); background: var(--bg-0); border: 1px solid var(--line); font-size: var(--fs-xs); color: var(--text-dim); user-select: text; }
 
 .rs-insp__label { display: flex; align-items: center; gap: 4px; }
-.rs-insp__lt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-insp__lt { min-width: 0; overflow-wrap: anywhere; line-height: 1.25; }
 .rs-insp__pin { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; background: transparent; border: 0; color: var(--text-faint); opacity: 0.4; border-radius: var(--r); flex: none; }
 .rs-insp__row:hover .rs-insp__pin, .rs-insp__pin.is-on { opacity: 1; }
 .rs-insp__pin.is-on { color: var(--yellow); }
@@ -104,3 +105,11 @@
 .rs-code__area:focus { border-color: var(--accent-hi); outline: none; }
 .rs-code__help summary { cursor: pointer; color: var(--text-3, #8a8a8a); }
 .rs-code__help pre { margin: var(--s-1) 0 0; white-space: pre-wrap; font-size: var(--fs-xs, 11px); color: var(--text-2, #b0b0b0); }
+
+/* Group inspector: exposed params editor and the inner-param picker. */
+.rs-insp__exposed { display: flex; align-items: center; gap: 2px; }
+.rs-insp__exposed .rs-insp__ctl { flex: 1; min-width: 0; }
+.rs-insp__picklist { display: flex; flex-direction: column; max-height: 220px; overflow: auto; margin-top: 4px; border: 1px solid var(--line); background: var(--bg-1); }
+.rs-insp__pick { text-align: left; padding: 4px 8px; background: transparent; border: 0; color: var(--text); font-size: var(--fs-sm); }
+.rs-insp__pick:hover, .rs-insp__pick:focus-visible { background: var(--bg-4); }
+.rs-insp__pickn { color: var(--text-faint); }

@@ -4,6 +4,7 @@ import { nodeRect } from '../lib/layout';
 import { useApp, useEd } from '../store/context';
 import { bakeSelection } from '../store/bake';
 import { bindingsOf } from '../keymap';
+import { defOf, GROUP_TYPE, isBoundaryNode } from '../../engine/group';
 
 /**
  * Floating toolbar above the selected nodes: the mouse / touch way to the common shortcuts. It lives outside the scaled node
@@ -13,7 +14,7 @@ export function SelectionToolbar() {
   const app = useApp();
   const { ed, graphCtl: ctl } = app;
   const selection = useEd((s) => s.selection);
-  const graph = useEd((s) => s.graph);
+  const graph = useEd((s) => s.level);
   const el = useRef<HTMLDivElement>(null);
   const single = selection.length === 1 ? graph.nodes.find((n) => n.id === selection[0]) : undefined;
 
@@ -22,7 +23,7 @@ export function SelectionToolbar() {
     if (!picked.length) return null;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const n of picked) {
-      const r = nodeRect(graph, n, ed.registry.get(n.type));
+      const r = nodeRect(graph, n, defOf(ed.registry, n));
       x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h);
     }
     return { x0, y0, x1, y1 };
@@ -41,7 +42,16 @@ export function SelectionToolbar() {
     if (top < 4) top = bounds.y1 * zoom + y + 8; // no room above: go below, never over the header
     const left = Math.max(4, Math.min(cx - w / 2, W - w - 4));
     top = Math.max(4, Math.min(top, H - h - 4));
-    t.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+    // The graph's own toolbar (Add, frame, tidy, search, zoom) sits top left: slide the selection toolbar to its right instead of hiding under it.
+    const bar = ctl.root?.querySelector('.rs-graph__bar') as HTMLElement | null;
+    let left2 = left;
+    if (bar && ctl.root) {
+      const root = ctl.root.getBoundingClientRect();
+      const b = bar.getBoundingClientRect();
+      const bl = b.left - root.left, bt = b.top - root.top, br = bl + b.width, bb = bt + b.height;
+      if (left < br + 6 && left + w > bl - 6 && top < bb + 6 && top + h > bt - 6) left2 = Math.min(Math.max(left, br + 8), W - w - 4);
+    }
+    t.style.transform = `translate(${Math.round(left2)}px, ${Math.round(top)}px)`;
     t.style.visibility = bounds.x1 * zoom + x < 0 || bounds.x0 * zoom + x > W || bounds.y1 * zoom + y < 0 || bounds.y0 * zoom + y > H ? 'hidden' : 'visible';
   };
   useLayoutEffect(() => {
@@ -62,9 +72,12 @@ export function SelectionToolbar() {
       {btn('copy', 'Duplicate', 'Duplicate (Ctrl+D)', () => ed.duplicate())}
       {btn('trash', 'Delete', 'Delete (Del)', () => ed.deleteSelection())}
       {btn('bypass', 'Bypass', 'Bypass (B)', () => selection.forEach((id) => ed.toggleBypass(id)), !!single?.bypass)}
-      {single && btn('monitor', 'View', 'View this node (Ctrl+Shift+click)', () => ed.setViewed(single.id), ed.state.viewedNodeId === single.id)}
-      {btn('save', 'Bake', `Bake selection: freeze these nodes into a stored sequence${bindingsOf('graph.bake')[0] ? ` (${bindingsOf('graph.bake')[0]})` : ''}`, () => void bakeSelection(app))}
-      {selection.length > 1 && btn('frame', 'Group', 'Group into frame (Ctrl+G)', () => ed.groupSelection())}
+      {single && !isBoundaryNode(single) && btn('monitor', 'View', 'View this node (Ctrl+Shift+click)', () => ed.setViewed(ed.fullId(single.id)), ed.state.viewedNodeId === ed.fullId(single.id))}
+      {btn('save', 'Bake', `Bake selection: group these nodes and freeze the group into stored frames${bindingsOf('graph.bake')[0] ? ` (${bindingsOf('graph.bake')[0]})` : ''}`, () => void bakeSelection(app))}
+      {single?.type === GROUP_TYPE
+        ? btn('stack', 'Open', 'Open the group (Tab or double-click)', () => ed.enterGroup(single.id))
+        : btn('stack', 'Group', `Group into one node${bindingsOf('graph.makeGroup')[0] ? ` (${bindingsOf('graph.makeGroup')[0]})` : ''}`, () => ed.groupNodes())}
+      {selection.length > 1 && btn('frame', 'Frame', `Put in a frame${bindingsOf('graph.group')[0] ? ` (${bindingsOf('graph.group')[0]})` : ''}`, () => ed.groupSelection())}
       <button
         className="rs-seltb__btn"
         title="More"

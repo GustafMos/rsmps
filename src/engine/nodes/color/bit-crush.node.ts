@@ -7,8 +7,8 @@ export default defineNode({
   title: 'Color Crush',
   category: 'color',
   description:
-    'Throws colour precision away: a different bit depth per channel with optional dither noise, plus broken-hardware tricks like swapping channels and XOR-ing bits of each channel (emulated exactly on 8-bit values).',
-  keywords: ['bit crush', 'posterize', 'bit depth', 'quantize', 'xor', 'channel swap', 'glitch', 'retro', '8-bit', 'corrupt', 'banding', 'dither noise', 'colour crush', 'colour depth'],
+    'Throws color precision away: a different bit depth per channel with optional dither noise, plus broken-hardware tricks like swapping channels and XOR-ing bits of each channel (emulated exactly on 8-bit values).',
+  keywords: ['bit crush', 'posterize', 'bit depth', 'quantize', 'xor', 'channel swap', 'glitch', 'retro', '8-bit', 'corrupt', 'banding', 'dither noise', 'color crush', 'color depth'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,

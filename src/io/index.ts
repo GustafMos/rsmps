@@ -11,6 +11,7 @@ import type { Io, CreateIo } from './api';
 import { createAudioBridge } from './audio-bridge';
 import { ExporterImpl } from './exporter';
 import { AddonsImpl } from './addons';
+import { createSplatTrainHost } from './splat-train';
 import { DesktopClient, isDesktop } from './desktop';
 import { MemoryGovernor, defaultBudget, defaultRamBudget } from './memory';
 import { RamColdStore } from './ram-store';
@@ -23,12 +24,15 @@ import { Library } from './library';
 import { listVideoInputs, onVideoDevicesChanged } from './live';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
+import { NodePresetStore } from './node-presets';
+import { processParamsPatch } from '../engine/process';
 import { ProjectStoreImpl } from './projects';
 import { PhoneLink } from './phone';
 import { PhoneAudioRouter } from './phone-audio';
 import { RecordingController } from './recording';
 import { SignalRouter } from './signals';
 import { ScanImpl } from './scan';
+import { installDepthAi } from './depth-ai';
 
 /** Every asset id referenced by an `assets` param anywhere in the graph. */
 export function assetIdsOf(graph: import('../engine/types').GraphDoc, registry: Registry): Set<string> {
@@ -146,6 +150,11 @@ export const createIo: CreateIo = async () => {
   phone.onStream((token, stream) => phoneAudio.setStream(token, stream));
   const recording = new RecordingController(audio, player, library);
   const plugins = new PluginManagerImpl(registry);
+  const nodePresets = new NodePresetStore(registry, undefined, (n) => {
+    const def = registry.get(n.type);
+    return def?.process && n.type !== 'group' ? processParamsPatch(def, null) : null;
+  });
+  void nodePresets.restore();
   const purgeOwned = (id: string, kind: 'graph' | 'scan') => {
     processes.cancelAll(id); // jobs of a project that is gone
     if (kind === 'scan') void library.removeOwned(id);
@@ -160,7 +169,9 @@ export const createIo: CreateIo = async () => {
   // Process mode: one scheduler for every long job (bake, clip analysis...). Bake is a thin layer over it.
   const processes = new ProcessRuntime({ engine, gpu, registry, gate, library, player, governor, activeProject: () => projects.activeId() });
   library.liveProcess = (id) => processes.live(id);
+  library.splatTrain = createSplatTrainHost() ?? undefined; // desktop app only: Splat from Video's COLMAP + Brush pipeline
   exporter.setProcesses(processes); // the export gate
+  installDepthAi(); // AI Depth jobs find their model runtime here (nothing is loaded or downloaded until a job asks)
   player.subscribe(() => processes.poke()); // playback started / stopped: held jobs continue
   void projects.activeId().then((id) => processes.setActiveProject(id)).catch(() => undefined);
   const bake = new BakeImpl({ engine, gpu, registry, gate, library, player, governor, activeProject: () => projects.activeId() }, processes);
@@ -174,6 +185,7 @@ export const createIo: CreateIo = async () => {
     player,
     exporter,
     plugins,
+    nodePresets,
     projects,
     scan: new ScanImpl(library, { memoryBudget: () => governor.getRam() }),
     memoryBudget: {
@@ -204,6 +216,7 @@ export const createIo: CreateIo = async () => {
       gpu.trim(); // (c) idle pooled textures of the old project
       await projects.setActive(id); // (e) works for graph and scan projects (a scan project without a graph yet returns null)
       processes.setActiveProject(id); // (f) jobs of the project that was left pause; this project's resume
+      if (graph) void processes.prune(id, graph, { unreferenced: true }).catch(() => undefined); // (g) stored results nothing references any more (copies, undone bakes)
       return graph;
     },
     memory() {
@@ -233,7 +246,7 @@ export const createIo: CreateIo = async () => {
     },
     phone,
     addons: new AddonsImpl(desktop),
-    capabilities: () => new Set(phone.available ? (["local-server"] as const) : []),
+    capabilities: () => new Set([...(phone.available ? (['local-server'] as const) : []), ...(desktop ? (['desktop'] as const) : [])]),
     devices: {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),
       onChanged: (l) => {
@@ -265,6 +278,6 @@ export const createIo: CreateIo = async () => {
       return res.value;
     },
   };
-  if (import.meta.env.DEV) (window as unknown as { __rsmpsIo?: Io }).__rsmpsIo = io; // dev-only handle for browser tests
+  if (import.meta.env.DEV || import.meta.env.VITE_RSMPS_QA) (window as unknown as { __rsmpsIo?: Io }).__rsmpsIo = io; // dev-only handle for browser tests (also in a build made with VITE_RSMPS_QA=1: scripts/screenshots)
   return io;
 };

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 // one harness per file: creating many exhausts the headless GPU
 let shared: ReturnType<typeof harness> | null = null;
@@ -43,11 +43,11 @@ it('scroll and rotate loop exactly and move', async () => {
   for (const animate of ['scroll', 'rotate']) {
     for (const kind of ['linear', 'angular', 'radial']) {
       const r = await t.loopCheck('gradient', { animate, kind, cycles: 2, repeat: 'repeat' });
-      expect(r.seam, `${animate}/${kind}`).toBeLessThan(0.01);
+      expect(r.seam, `${animate}/${kind}`).toBeLessThan(LOOP_SEAM_OK);
     }
   }
   const m = await t.loopCheck('gradient', { animate: 'scroll', cycles: 1, repeat: 'mirror' });
-  expect(m.seam).toBeLessThan(0.01);
+  expect(m.seam).toBeLessThan(LOOP_SEAM_OK);
   const s = await t.loopCheck('gradient', { animate: 'scroll', cycles: 1, repeat: 'repeat' });
   expect(s.motion).toBeGreaterThan(0.5);
   const r = await t.loopCheck('gradient', { animate: 'rotate', cycles: 1 });

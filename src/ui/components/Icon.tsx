@@ -69,6 +69,8 @@ const PATHS = {
   folderPlus: 'M1.5 4.5v8h13v-7h-7l-1.5-2h-4.5z M8 7.5v3.5 M6.25 9.25h3.5',
   sortUp: 'M8 13V3 M4 7l4-4 4 4',
   sortDown: 'M8 3v10 M4 9l4 4 4-4',
+  /** A group node (nodes bundled into one). */
+  stack: 'M2 5.5l6-3 6 3-6 3z M2 8.5l6 3 6-3 M2 11.25l6 3 6-3',
 } as const;
 
 export type IconName = keyof typeof PATHS;

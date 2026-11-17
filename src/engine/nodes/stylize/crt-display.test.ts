@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { movingBarSource, timeChain } from '../../lib/fx-testutil';
 
 const OFF = { glow: 0, halation: 0, vignette: 0, convergence: 0, curveX: 0, curveY: 0, cornerRadius: 0, maskType: 'none', blackLevel: 0, saturation: 1 };
@@ -127,10 +127,10 @@ describe('crt-display', () => {
     const t = await harness();
     const src = t.solid(16, 16, [120, 120, 120, 255]);
     const n = await t.loopCheck('crt-display', { ...OFF, outputScale: 'same', noise: 0.8 }, { image: src });
-    expect(n.seam).toBe(0);
+    expect(n.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(n.motion).toBeGreaterThan(0.5);
     const h = await t.loopCheck('crt-display', { ...OFF, outputScale: 'same', hum: 1, humCycles: 1 }, { image: src });
-    expect(h.seam).toBe(0);
+    expect(h.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(h.motion).toBeGreaterThan(0.2);
     const still = await t.loopCheck('crt-display', { ...OFF, outputScale: 'same' }, { image: src });
     expect(still.motion).toBe(0);

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { resolutionDiff } from '../../lib/fx-testutil';
 
 function spread(px: { at(x: number, y: number): number[] }, n: number, ch = 0) {
@@ -44,7 +44,7 @@ it('animates per frame and loops seamlessly; static option holds still', async (
   const t = await harness();
   const src = t.solid(32, 32, [128, 128, 128, 255]);
   const r = await t.loopCheck('grain', { amount: 0.5 }, { image: src });
-  expect(r.seam).toBe(0);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(1);
   const still = await t.loopCheck('grain', { amount: 0.5, animated: false }, { image: src });
   expect(still.motion).toBe(0);

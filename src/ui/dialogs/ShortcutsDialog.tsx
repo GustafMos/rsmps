@@ -31,7 +31,7 @@ export function ShortcutsDialog() {
       footer={
         <>
           <button className="rs-btn" onClick={() => ed.openDialog(null)}>Close</button>
-          <button className="rs-btn rs-btn--primary" onClick={() => ed.openDialog('keymap')}>Customise shortcuts…</button>
+          <button className="rs-btn rs-btn--primary" onClick={() => ed.openDialog('keymap')}>Customize shortcuts…</button>
         </>
       }
     >

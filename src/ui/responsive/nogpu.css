@@ -1,0 +1,31 @@
+/* The "no WebGPU" screen. One column, readable at 360 px, scrolls on its own (the app body never scrolls). */
+.rs-nogpu {
+  position: fixed; inset: 0; overflow-y: auto; overflow-x: hidden; background: var(--bg-0) var(--dither);
+  padding: max(var(--s-4), env(safe-area-inset-top)) max(var(--s-4), env(safe-area-inset-right)) max(var(--s-6), env(safe-area-inset-bottom)) max(var(--s-4), env(safe-area-inset-left));
+  -webkit-overflow-scrolling: touch; user-select: text;
+}
+.rs-nogpu__in { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--s-4); }
+.rs-nogpu__head { display: flex; align-items: center; gap: var(--s-4); }
+.rs-nogpu__head img { image-rendering: pixelated; flex: none; }
+.rs-nogpu__h1 { margin: 0; font-size: 20px; line-height: 1.25; color: var(--danger); font-weight: 600; }
+.rs-nogpu__card { padding: var(--s-4); background: var(--bg-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow-hard-sm); }
+.rs-nogpu__card h2 { margin: 0 0 var(--s-2); font-size: var(--fs-lg); font-weight: 600; }
+.rs-nogpu__card p { margin: 0 0 var(--s-2); line-height: 1.55; font-size: 14px; }
+.rs-nogpu__card ol, .rs-nogpu__card ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: var(--s-2); font-size: 14px; line-height: 1.55; }
+.rs-nogpu__dim { color: var(--text-dim); }
+.rs-nogpu__dim a, .rs-nogpu__card a { color: var(--accent-hi); }
+.rs-nogpu__verdict { margin: 0; padding: var(--s-3) var(--s-4); background: var(--danger-bg); border: 1px solid var(--danger); font-size: 15px; font-weight: 600; line-height: 1.5; }
+.rs-nogpu__actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rs-nogpu__actions .rs-btn { flex: 1 1 200px; height: 44px; font-size: 15px; }
+.rs-nogpu__live { margin: calc(var(--s-2) * -1) 0 0; min-height: 1.2em; color: var(--yellow); font-size: 13px; }
+.rs-nogpu__notes { list-style: none; padding: 0 !important; }
+.rs-nogpu__notes li { display: flex; flex-direction: column; gap: 2px; padding: var(--s-2) var(--s-3); background: var(--bg-1); border: 1px solid var(--line); border-left-width: 3px; }
+.rs-nogpu__notes li.is-own { border-color: var(--accent-hi); background: var(--bg-3); }
+.rs-nogpu__notes li.is-blocked { border-left-color: var(--danger); }
+.rs-nogpu__notes strong { font-size: 14px; }
+.rs-nogpu__notes span { color: var(--text-dim); }
+.rs-nogpu__tech { font-size: 13px; color: var(--text-dim); }
+.rs-nogpu__tech summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.rs-nogpu__tech dl { margin: 0; display: grid; gap: 2px var(--s-3); grid-template-columns: minmax(0, 1fr); font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.rs-nogpu__tech dt { color: var(--text-faint); margin-top: var(--s-2); }
+.rs-nogpu__tech dd { margin: 0; }

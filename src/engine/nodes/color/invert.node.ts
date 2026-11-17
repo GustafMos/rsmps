@@ -4,7 +4,7 @@ export default defineNode({
   id: 'invert',
   title: 'Invert',
   category: 'color',
-  description: 'Turns colours into their opposites, like a photographic negative.',
+  description: 'Turns colors into their opposites, like a photographic negative.',
   keywords: ['negative', 'opposite', 'reverse'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

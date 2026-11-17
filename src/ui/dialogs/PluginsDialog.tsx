@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 're
 import { Icon } from '../components/Icon';
 import { useApp } from '../store/context';
 import { AddonsSection } from './AddonsSection';
+import { AiModelsSection } from './AiModelsSection';
 import { Dialog } from './Dialog';
 
 export function PluginsDialog() {
@@ -35,6 +36,7 @@ export function PluginsDialog() {
       footer={<><button className="rs-btn" onClick={() => ed.openDialog(null)}>Close</button><button className="rs-btn rs-btn--primary" disabled={busy} onClick={() => file.current?.click()}><Icon name="plus" /> Install plugin (.js)…</button></>}>
       <input ref={file} type="file" accept=".js,.mjs,text/javascript" hidden onChange={(e) => { void install(e.target.files?.[0]); e.target.value = ''; }} />
       <AddonsSection />
+      <AiModelsSection />
       <div className="rs-dlg__sec"><span className="rs-caps">Your plugins</span></div>
       <div className="rs-dlg__warn">
         <Icon name="warn" />

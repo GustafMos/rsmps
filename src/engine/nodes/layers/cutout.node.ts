@@ -49,7 +49,7 @@ export default defineNode({
   id: 'cutout',
   title: 'Cutout',
   category: 'composite',
-  description: 'Applies a mask as the image alpha (alpha x mask), with optional edge shrink, feather and colour decontamination of the fringe.',
+  description: 'Applies a mask as the image alpha (alpha x mask), with optional edge shrink, feather and color decontamination of the fringe.',
   keywords: ['alpha', 'matte', 'knockout', 'remove background', 'transparent', 'extract', 'apply mask'],
   inputs: {
     image: { type: 'image', required: true, label: 'Image' },
@@ -60,7 +60,7 @@ export default defineNode({
     invert: { type: 'bool', default: false, label: 'Invert mask' },
     shrink: { type: 'number', default: 0, min: 0, max: 50, step: 0.25, unit: 'px', label: 'Shrink edge' },
     feather: { type: 'number', default: 0, min: 0, max: 50, step: 0.25, unit: 'px', label: 'Feather' },
-    decontaminate: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Decontaminate', hint: 'Replaces the colour of semi-transparent edge pixels with colour from the inside of the subject.' },
+    decontaminate: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Decontaminate', hint: 'Replaces the color of semi-transparent edge pixels with color from the inside of the subject.' },
   },
   summary: (p) => (p.invert ? 'inverted' : 'alpha × mask'),
   render(ctx) {

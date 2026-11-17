@@ -1,0 +1,111 @@
+# Splat from Video
+
+The **Splat from Video** node (category Generate, desktop app only) turns a clip or a photo set into a 3D Gaussian splat scene that you can
+fly through, and gives back the camera move of the original shot as a Camera output. It is a process node: until you press
+**Reconstruct** the clip passes through unchanged, so the graph keeps playing.
+
+## What happens when you press Reconstruct
+
+1. **Frames are chosen** (renderer, `src/engine/lib/frame-select.ts`). Up to 4 x *Frames* candidate moments of the clip (or of *Use from* /
+   *Use until*) are looked at small. The camera's "distance travelled" is measured from frame to frame (exposure changes do not count),
+   and the picks are spread evenly along it: a stretch where the camera stands still gives no frames, a fast stretch gives more. In each
+   stretch the sharpest candidate wins (variance of the Laplacian), which drops motion-blurred frames. The picked frames are pulled through
+   the graph, so anything upstream (crop, colour, stabilise) applies, made at most *Max side* pixels and sent as JPEG (quality 0.92).
+   A photo set (*Photos*) is used as is, in its order.
+2. **COLMAP** (`feature_extractor`, then `sequential_matcher` for video or `exhaustive_matcher` for photo sets of up to 150 pictures,
+   then `mapper` or `global_mapper`, then `image_undistorter`) finds where the camera was for every frame. One SIMPLE_RADIAL camera
+   for a clip; the frames are undistorted to a pinhole camera before training.
+3. **Brush** trains the splats on those frames and cameras (spherical harmonics degree 1, which is what the viewer draws).
+4. The result is moved into this tool's frame (y up; `src/engine/lib/colmap.ts`) and stored with the project: the splats as a standard
+   3DGS `.ply` (`comment up +y`, so it also opens correctly in a Gaussian Splat node) and the solved cameras as a camera path keyed by clip time.
+
+The node then renders the splats with exactly the view and look settings of Gaussian Splat. Its **Solved camera** output is the original
+camera at the current time, carried through the node's own transform: wire it into the node's Camera input to see the scene from the
+original move, or into another 3D node to composite 3D objects into the footage (match-moving).
+
+## Footage that works, footage that fails
+
+Works best:
+
+- a **20 to 60 second walk around** a still subject (an object on a table, a statue, a room corner), the camera always moving sideways;
+- sharp frames: good light, slow movement, no digital zoom; locked exposure and focus if your phone allows it;
+- plenty of texture (wood, stone, print, plants, clutter).
+
+Fails or gives poor results, with the message you will see:
+
+| Footage | What happens |
+| --- | --- |
+| The camera only turns on the spot (a pan) | COLMAP "solves" it but there is no depth. Refused: "The camera hardly moved sideways (it only turned)." Measured on a synthetic pan: parallax 0.14 (an orbit is about 1.6). |
+| Plain surfaces, sky, water, heavy blur | "No two frames share recognisable detail, so no camera could be placed." |
+| No good start | "COLMAP found no good starting pair of frames: the camera must MOVE sideways..." |
+| Only part of the clip is placed | A warning: "Only N of M frames could be placed; the rest are left out." |
+| Moving people, cars, leaves, reflections, screens | Smears and floaters in the splats (the method assumes a still scene). Crop them away or film without them. |
+| Views far from where the camera went | Holes and fog. Splats only know what the camera saw: an arc of 100 degrees gives a good scene inside that arc and a poor one behind it. |
+| Not enough graphics memory | "Brush ran out of graphics memory." Use Draft, fewer frames or a smaller Max side. |
+
+## Measured on synthetic scenes (stage 0, Windows 11, RTX 3080, COLMAP 4.2.1 without CUDA on 4 CPU threads, Brush 0.3.0)
+
+There was no real phone footage in these tests. The test scenes are ray-traced (a textured floor, boxes, spheres; 640x480 or 640x360) with
+exactly known cameras, so every number below compares with the truth.
+
+| Scene | Frames | COLMAP | Placed | Rotation error | Position error | Training | Held-out PSNR / SSIM |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Orbit, photo set | 48 | exhaustive + incremental: 4 s + 59 s + 5 s | 48 / 48, 0.42 px | 0.05 deg mean, 0.11 max | 0.07 % of the orbit radius | 10,000 steps 88 s | 24.8 dB / 0.90 |
+| Same, through the node (frame selection, the real client and main-process module) | 47 | sequential + incremental | 47 / 47 | | 0.29 % RMS | Normal, 144 s for everything | 24.4 dB (23.7 to 25.1) / match-move 22.6 and 23.8 dB |
+| 100 degree arc ("video") | 60 | sequential + incremental: 5 s + 26 s + 13 s | 60 / 60, 0.36 px | 0.20 deg mean | 0.04 % | 10,000 steps | 19 dB inside the arc, 12-15 dB behind it |
+| Handheld-style: wandering 160 degree walk, shake, motion blur, exposure drift | 130 | sequential + incremental: 13 s + 51 s + 54 s | 130 / 130 | 0.15 deg mean, 0.27 max | 0.2 % | Normal, 103 s (222 s for everything) | 19-22 dB inside the walk, 15-16 dB behind it |
+
+Other findings that set the defaults:
+
+- **COLMAP's no-CUDA build hangs** (no output for 5 minutes) when asked for GPU feature extraction. The pipeline always asks it for CPU;
+  only the CUDA build (a separate add-on) is asked for GPU. The CUDA build itself was not tested.
+- Global and incremental solving were equally accurate here (global 0.03-0.17 deg, incremental 0.05-0.20 deg). Incremental is the default.
+- Exhaustive matching in blocks of 10 took twice as long as one block (118 s against 59 s for 48 frames); blocks of 25 are used.
+- Brush trained at degree 3 and drawn at degree 1 scored 0.7 dB lower than training at degree 1: the pipeline trains degree 1.
+- **"Fade tiny splats" (Mip-Splatting compensation) was wrong for trained files**: with it on, held-out views scored 22.2 dB / 0.82
+  instead of 24.8 dB / 0.90. It is now off by default in Gaussian Splat too.
+- **Min opacity 0.02** (Gaussian Splat's default) punched holes in the trained sky (21.2 dB instead of 24.4 dB through the node), so
+  Splat from Video defaults to 0.
+
+## What you need
+
+- The **desktop app**. The web version cannot start programs on your computer; the node says so. The command line cannot run it either.
+- The **COLMAP** add-on (Windows: 128 MB download, about 230 MB unpacked; macOS Apple silicon: 83 MB), or **COLMAP (NVIDIA)** (Windows only,
+  415 MB, needs an NVIDIA card), and the **Brush** add-on (Windows 159 MB, macOS 41 MB, Linux 44 MB). COLMAP has no Linux download: install it
+  with your package manager and press Locate. All are installed only when you press Install in Plugins > Official add-ons; each download is
+  checked against a pinned SHA-256 and size, and the program is re-checked before it runs. The Windows programs are not code-signed: your
+  antivirus may scan them the first time (COLMAP's first start took about 30 s).
+- A **graphics card Brush can use** (Vulkan on Windows and Linux, Metal on macOS). Tested: NVIDIA RTX 3080 (Vulkan). Not tested: AMD,
+  Intel, Apple.
+- **Disk space**: the job checks for at least 2 GB plus 12 times the size of the frames before it starts.
+- **Time**: Draft (3,000 steps at up to 960 px) took 27-33 s of training for 48 frames, Normal (10,000 steps, up to 1280 px) 90-150 s, High
+  (30,000 steps, up to 1600 px) several times longer, plus COLMAP (1-2 minutes for 50-130 frames on the CPU). Real footage at 1280 px will
+  take longer than these 640 px tests.
+
+## Where the files live
+
+Everything runs on your computer; nothing is uploaded.
+
+- Add-on programs: `<app data>/addons/colmap/4.2.1/`, `<app data>/addons/brush/0.3.0/` (Plugins > Official add-ons > Remove deletes them).
+- Work folders: `<app data>/splat-train/jobs/<id>/` while a job runs; deleted when its result was read (a failed job keeps its logs until the
+  next start of the app or 24 hours).
+- Kept camera solutions (*Keep poses*): `<app data>/splat-train/cache/`, the last 3 frame sets.
+- Brush's GPU tuning cache: `<app data>/splat-train/brush-home/`.
+- The trained splats and the camera path: stored with the project, like a bake.
+
+## Licences
+
+COLMAP is BSD-3-Clause (its Windows archive also contains libraries under their own licences, such as Qt under LGPL-3.0); Brush is
+Apache-2.0. Neither is part of RSMPS, and both run as separate programs. Not used, for licence reasons: the INRIA 3DGS reference code
+(non-commercial), OpenSplat (AGPL), gsplat (needs Python and PyTorch), VGGT / MASt3R (gated or non-commercial weights). See
+THIRD_PARTY_NOTICES.md.
+
+## For developers
+
+- Pipeline: `desktop/addons/splat-train.mjs` (argument arrays, progress parsing from recorded logs, error mapping, process-tree kill,
+  timeouts, disk check, cache), endpoints `/__rsmps/splat-train` in `desktop/main.mjs`, client `src/io/splat-train.ts`, node
+  `src/engine/nodes/generate/splat-train.node.ts`, coordinates `src/engine/lib/colmap.ts`, shared view code `src/engine/lib/splat-scene.ts`.
+- Tests: `desktop/addons/splat-train.test.mjs`, `desktop/addons/manager.test.mjs`, `src/engine/lib/colmap.test.ts` (a recorded COLMAP solve
+  against the truth), `src/engine/lib/frame-select.test.ts`, `src/engine/nodes/generate/splat-train.test.ts`. The last one has an opt-in end
+  to end run with the real programs: set `RSMPS_SPLAT_E2E` (a folder with `scene/orbit`, `scene/heldout`, `scene/cameras.json`),
+  `RSMPS_COLMAP` and `RSMPS_BRUSH`. The synthetic scene generator used for stage 0 is not part of the repository.

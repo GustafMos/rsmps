@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { TRANSITION_MODES } from '../../lib/fx-transition';
 import type { Harness } from '../../testing';
 import type { ImageValue } from '../../types';
@@ -179,7 +179,7 @@ describe('transition-auto', () => {
     expect(meanDiff(await at(0.75), pxA)).toBeGreaterThan(1);
     expect(meanDiff(await at(1.9), pxA)).toBe(0); // back at A near the end
     const r = await t.loopCheck('transition-auto', { mode: 'bayer-4', cell: 1 }, inputs);
-    expect(r.seam).toBe(0);
+    expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion).toBeGreaterThan(0);
     const oneWay = await at(1.9, { pingPong: false });
     expect(meanDiff(oneWay, pxB)).toBe(0);

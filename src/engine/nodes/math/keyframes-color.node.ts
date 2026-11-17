@@ -7,8 +7,8 @@ export default defineNode({
   id: 'keyframes-color',
   title: 'Color Keyframes',
   category: 'math',
-  description: 'Animate a colour through a list of colour stops over the loop, blended smoothly in perceptual (OKLab) space. An optional curve controls the pace.',
-  keywords: ['gradient', 'color animation', 'colour cycle', 'palette', 'ramp', 'fade', 'hue shift', 'keyframe'],
+  description: 'Animate a color through a list of color stops over the loop, blended smoothly in perceptual (OKLab) space. An optional curve controls the pace.',
+  keywords: ['gradient', 'color animation', 'color cycle', 'palette', 'ramp', 'fade', 'hue shift', 'keyframe'],
   inputs: { time: { type: 'number', label: 'Position (0..1)' } },
   outputs: { color: { type: 'color', label: 'Color' } },
   params: {
@@ -21,11 +21,11 @@ export default defineNode({
       ],
       label: 'Color stops',
     },
-    pace: { type: 'curve', default: presetLinear(), label: 'Pace', hint: 'Position along the stops (0 = first colour, 1 = last) over the loop. A straight line = even speed.' },
+    pace: { type: 'curve', default: presetLinear(), label: 'Pace', hint: 'Position along the stops (0 = first color, 1 = last) over the loop. A straight line = even speed.' },
     repeat: { type: 'number', default: 1, min: 1, max: 256, softMax: 32, step: 1, integer: true, unit: 'cycles', label: 'Repeats per loop' },
-    loop: { type: 'enum', default: 'project', options: LOOP_MODES, label: 'At the end', hint: 'When looping, the last colour fades back into the first.' },
+    loop: { type: 'enum', default: 'project', options: LOOP_MODES, label: 'At the end', hint: 'When looping, the last color fades back into the first.' },
   },
-  summary: (p) => `${p.palette.length} colours${p.repeat > 1 ? ` · ×${p.repeat}` : ''}`,
+  summary: (p) => `${p.palette.length} colors${p.repeat > 1 ? ` · ×${p.repeat}` : ''}`,
   render(ctx) {
     const p = ctx.params;
     const stops = p.palette.length ? p.palette : [[0, 0, 0] as [number, number, number]];

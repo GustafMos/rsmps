@@ -9,6 +9,9 @@ import type { GraphDoc } from '../../engine/types';
 import { bakeSource, frozenNodes, insertCacheNodes, servesBake, type BakeStatusDeps, CACHE_TYPE } from '../lib/bake';
 import type { AppCtx } from './context';
 import { cancelProcess, clearProcess, jobOf, processStore, runProcess } from './processes';
+import { groupBakeProblem, groupData, groupDefOf, GROUP_TYPE, hasGroups, nodeAtPath } from '../../engine/group';
+import { withProcessResult } from '../../engine/process';
+import { isActiveJob } from '../lib/process';
 
 const QUALITY_KEY = 'rsmps.ui.bakeQuality';
 export type BakeQuality = 'lossless' | 'compressed';
@@ -56,6 +59,10 @@ export function frozenIds(app: Pick<App, 'io'>, graph: GraphDoc): ReadonlySet<st
     });
     if (ok) serving.add(n.id);
   }
+  for (const n of graph.nodes) {
+    if (n.type !== GROUP_TYPE || !n.params.__process) continue;
+    if (app.io.processes.status(graph, n.id)?.state === 'done') serving.add(n.id);
+  }
   set = serving.size ? frozenNodes(graph, serving) : NONE;
   frozenMemo.set(graph, set);
   return set;
@@ -70,9 +77,11 @@ export function bakeJobOf(app: Pick<App, 'ed'>, nodeId: string): { fraction: num
 /** Bake (or re-bake) one Cache / Bake node. Resolves true when the frames were stored and the node now serves them. */
 export async function bakeNode(app: App, nodeId: string, quality: BakeQuality = getBakeQuality(), quiet = false): Promise<boolean> {
   const { ed } = app;
-  const node = ed.state.graph.nodes.find((n) => n.id === nodeId);
+  // `nodeId` is a full path id; what is wired is read on the flattened document (a Cache inside a group may be fed from outside it).
+  const node = nodeAtPath(ed.state.graph, nodeId);
   if (!node || node.type !== CACHE_TYPE) return false;
-  if (!bakeSource(ed.state.graph, nodeId)) {
+  const doc = hasGroups(ed.state.graph) && app.io.engine.flatView ? app.io.engine.flatView(ed.state.graph).graph : ed.state.graph;
+  if (!bakeSource(doc, nodeId)) {
     ed.toast('Connect a picture to the Cache / Bake node first: there is nothing to bake.', 'info');
     return false;
   }
@@ -88,8 +97,83 @@ export async function clearBake(app: App, nodeId: string): Promise<void> {
   await clearProcess(app, nodeId);
 }
 
-/** "Bake selection": a Cache / Bake node after the selected group's picture output(s), then bake them one after the other. */
+/**
+ * "Bake selection" (Ctrl+Shift+B): the cache region. The selected nodes become one group (one undo step) and the group's outputs are baked:
+ * a named, collapsible region that costs nothing once baked and goes live again when anything inside or before it changes. A single
+ * selected group is baked as it is; a single Cache / Bake node is baked as before. (Cache / Bake nodes after the selection, the older way,
+ * stay available as `bakeSelectionWithCacheNodes` in the node menu.)
+ */
 export async function bakeSelection(app: App): Promise<void> {
+  const { ed } = app;
+  const ids = ed.state.selection;
+  if (!ids.length) {
+    ed.toast('Select the nodes you consider finished, then bake them.', 'info');
+    return;
+  }
+  const level = ed.state.level;
+  const only = ids.length === 1 ? level.nodes.find((n) => n.id === ids[0]) : undefined;
+  if (only?.type === CACHE_TYPE) {
+    await bakeNode(app, ed.fullId(only.id));
+    return;
+  }
+  if (only?.type === GROUP_TYPE) {
+    await bakeGroup(app, only.id);
+    return;
+  }
+  const gid = ed.groupNodes('group', ids);
+  if (!gid) return;
+  ed.setGroupInfo(gid, { title: 'Baked region' });
+  await bakeGroup(app, gid);
+}
+
+/** Bake a group node of the shown level: its outputs are rendered once and stored (one undo step when done). Resolves true when stored. */
+export async function bakeGroup(app: App, levelId: string): Promise<boolean> {
+  const { ed, io } = app;
+  const node = ed.state.level.nodes.find((n) => n.id === levelId);
+  if (!node || node.type !== GROUP_TYPE) return false;
+  const problem = groupBakeProblem(groupData(node));
+  if (problem) {
+    ed.toast(problem, 'info');
+    return false;
+  }
+  const full = ed.fullId(levelId);
+  const project = ed.state.activeProject ?? 'project';
+  if (isActiveJob(jobOf(processStore.get().jobs, project, full))) return false;
+  try {
+    const result = await io.processes.run(ed.state.graph, full, { projectId: project, item: ed.state.item });
+    if (ed.state.activeProject !== null && ed.state.activeProject !== project) {
+      ed.toast('The bake finished in another project. Bake it again there to use it.', 'info');
+      return false;
+    }
+    ed.edit((g) => withProcessResult(g, ed.registry, full, result));
+    io.processes.dismiss(full, project);
+    ed.toast(`${node.label || groupDefOf(node).title}: baked`, 'ok', [{ label: 'View', run: () => ed.setViewed(full) }]);
+    return true;
+  } catch (err) {
+    if ((err as { name?: string })?.name === 'AbortError') {
+      io.processes.dismiss(full, project);
+      ed.toast('Bake canceled.', 'info');
+    } else ed.toast(`Bake failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    return false;
+  }
+}
+
+/** Forget a group's bake (the stored frames are deleted): the inside is calculated live again. */
+export async function clearGroupBake(app: App, levelId: string): Promise<void> {
+  const { ed, io } = app;
+  const full = ed.fullId(levelId);
+  const project = ed.state.activeProject ?? 'project';
+  try {
+    await io.processes.clear(full, project);
+  } catch (err) {
+    ed.toast(err instanceof Error ? err.message : String(err), 'error');
+  }
+  io.processes.dismiss(full, project);
+  ed.edit((g) => withProcessResult(g, ed.registry, full, null));
+}
+
+/** The older "Bake selection": a Cache / Bake node after the selected group's picture output(s), then bake them one after the other. */
+export async function bakeSelectionWithCacheNodes(app: App): Promise<void> {
   const { ed } = app;
   const ids = ed.state.selection;
   if (!ids.length) {

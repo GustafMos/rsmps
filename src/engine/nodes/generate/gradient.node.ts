@@ -8,7 +8,7 @@ export default defineNode({
   id: 'gradient',
   title: 'Gradient',
   category: 'generate',
-  description: 'Linear, radial, angular or diamond gradient through any number of colour stops. Can scroll or rotate in a perfect loop.',
+  description: 'Linear, radial, angular or diamond gradient through any number of color stops. Can scroll or rotate in a perfect loop.',
   keywords: ['ramp', 'blend', 'sweep', 'conic', 'colour', 'color', 'background'],
   inputs: { size: { type: 'image', label: 'Size from' } },
   outputs: { image: { type: 'image', label: 'Image' } },

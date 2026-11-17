@@ -1,5 +1,6 @@
 import { defineNode } from '../../define';
 import { COPY_COMMON_WGSL, MAX_SLICES, rad, rgba4 } from '../../lib/copy-wgsl';
+import { snapMultiple, snapNote, wholeCycles } from '../../lib/loop-snap';
 import { wrapSeconds } from '../../lib/util-time';
 import type { ImageValue } from '../../types';
 
@@ -12,9 +13,41 @@ import type { ImageValue } from '../../types';
  *
  * Where analytic inversion is impossible (a finite grid / line / ring with per-copy offset, rotation or scale steps) and the array is
  * small (<= 25 copies per axis) the neighbourhood is the whole array (exact). Larger arrays with big steps use the local neighbourhood.
+ *
+ * One-click looping (Loop on, scrolling): see `arrayLoop`. A scrolled finite Grid wraps inside its own box (a conveyor), so a copy that leaves
+ * one side comes in on the other; per-copy colour steps blend toward the colour of the cell the copy ends the loop in (the colour index moves
+ * linearly, so nothing pops); a brick offset with an odd vertical scroll slides alternate rows sideways, an odd horizontal scroll with mirroring
+ * turns the copies over like cards; whatever is picked per copy (jitter, sprite sheet cell, time slice) cannot be blended, so the scroll is
+ * rounded to whole tiles instead. With Loop off nothing changes.
  */
 const MODES = { grid: 0, linear: 1, radial: 2, infinite: 3 } as const;
 const MAX_WIN = 25;
+
+export interface ArrayLoop {
+  sx: number;
+  sy: number;
+  /** The loop switch is on and the array scrolls: the loop closing code runs. */
+  on: boolean;
+  notes: string[];
+}
+
+/** Effective scroll for the project clock. Pure (summary and render share it). */
+export function arrayLoop(
+  p: { mode: string; scrollX: number; scrollY: number; columns: number; rows: number; sheetColumns: number; sheetRows: number; timeSlices: number; jitterPos: number; jitterRotate: number; jitterScale: number },
+  loop: boolean,
+): ArrayLoop {
+  const scrolling = (p.mode === 'grid' || p.mode === 'infinite') && (p.scrollX !== 0 || p.scrollY !== 0);
+  if (!loop || !scrolling) return { sx: p.scrollX, sy: p.scrollY, on: false, notes: [] };
+  let sx = wholeCycles(p.scrollX);
+  let sy = wholeCycles(p.scrollY);
+  const discrete = p.sheetColumns * p.sheetRows > 1 || p.timeSlices > 1 || p.jitterPos > 0 || p.jitterRotate > 0 || p.jitterScale > 0;
+  if (discrete) {
+    sx = snapMultiple(sx, Math.round(p.columns));
+    sy = snapMultiple(sy, Math.round(p.rows));
+  }
+  const notes = [snapNote('scroll X', p.scrollX, sx), snapNote('scroll Y', p.scrollY, sy)].filter(Boolean);
+  return { sx, sy, on: true, notes };
+}
 
 const wgsl = (timed: boolean) => /* wgsl */ `
 ${COPY_COMMON_WGSL}
@@ -41,7 +74,8 @@ fn evalCopy(p: vec2f, c0: vec2f, rot0: f32, s0v: f32, fl: vec2f, nc: f32, key: v
   s = max(s, 0.0001);
   let d = p - c;
   var l = unrot(d, cos(rot), sin(rot)) / s;
-  l = l * fl;
+  // A copy that turns over (loop closing of an odd scroll with mirroring) passes through zero width; at +-1 this is exactly the old multiply.
+  l = l / vec2f(select(fl.x, 0.001, abs(fl.x) < 0.001), select(fl.y, 0.001, abs(fl.y) < 0.001));
   let hf = u.cell * 0.5;
   let e = (hf - abs(l)) * s;
   let cov = saturate(e.x + 0.5) * saturate(e.y + 0.5);
@@ -59,12 +93,21 @@ fn evalCopy(p: vec2f, c0: vec2f, rot0: f32, s0v: f32, fl: vec2f, nc: f32, key: v
   var sl = 0;
   if (u.slices > 1.5) { sl = pmodi(i32(nc + 0.5), i32(u.slices + 0.5)); }
   let t = unpremul(srcAt(sl, uv, 1.0 / s));
-  var rgb = hueShift(t.rgb, u.hueStep * nc);
-  rgb = rgb * max(0.0, 1.0 + u.brightStep * nc);
-  let g = select(0.0, nc / (total - 1.0), total > 1.0);
+  // Colour steps ride on the copy index. With a closing scroll the index moves toward the cell the copy ends the loop in (linear, no pop).
+  var ncc = nc;
+  if (u.lw > 0.5) {
+    let icl = max(i32(u.cols + 0.5), 1);
+    let irw = max(i32(u.rows + 0.5), 1);
+    let nci = i32(nc + 0.5);
+    let tgt = f32(pmodi(pmodi(nci, icl) + i32(u.sc.x), icl) + icl * pmodi(nci / icl + i32(u.sc.y), irw));
+    ncc = mix(nc, tgt, smoothstep(0.6667, 1.0, u.ph));
+  }
+  var rgb = hueShift(t.rgb, u.hueStep * ncc);
+  rgb = rgb * max(0.0, 1.0 + u.brightStep * ncc);
+  let g = select(0.0, ncc / (total - 1.0), total > 1.0);
   let grad = mix(u.tintA.rgb, u.tintB.rgb, saturate(g));
   if (u.tintMode > 1.5) { rgb = grad; } else if (u.tintMode > 0.5) { rgb = rgb * grad; }
-  let fadeK = select(1.0, pow(max(u.fade, 0.0), nc), nc > 0.0);
+  let fadeK = select(1.0, pow(max(u.fade, 0.0), ncc), ncc > 0.0);
   let a = t.a * cov * fadeK;
   return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)) * a, a);
 }
@@ -75,13 +118,18 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let ft = u.firstTop > 0.5;
   let mi = i32(u.mirror + 0.5);
   if (m == 0 || m == 3) {
-    let fin = (m == 0);
+    let wg = u.wg > 0.5;
+    if (wg) {
+      let dd = abs(px - u.ctr);
+      if (dd.x > u.clip.x || dd.y > u.clip.y) { return vec4f(0.0); }
+    }
+    let fin = (m == 0) && !wg;
     let icols = i32(u.cols + 0.5);
     let irows = i32(u.rows + 0.5);
     let c0 = u.ctr + u.scroll * u.pitch;
     let q = px - c0;
-    let midc = select(0.0, (u.cols - 1.0) * 0.5, fin);
-    let midr = select(0.0, (u.rows - 1.0) * 0.5, fin);
+    let midc = select(0.0, (u.cols - 1.0) * 0.5, m == 0);
+    let midr = select(0.0, (u.rows - 1.0) * 0.5, m == 0);
     let jc = i32(round(q.y / u.pitch.y + midr));
     let ic = i32(round(q.x / u.pitch.x + midc));
     let wx = i32(u.win.x + 0.5);
@@ -102,13 +150,19 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
         if (fin) { nc = f32(j * icols + i); nst = nc; } else { nc = f32(pmodi(i, icols) + icols * pmodi(j, irows)); }
         var c = c0 + vec2f((f32(i) - midc) * u.pitch.x, (f32(j) - midr) * u.pitch.y);
         if (pmodi(j, 2) == 1) { c.x += u.stagger * u.pitch.x; }
+        // an odd vertical scroll swaps which rows are offset: alternate rows slide sideways so the brick wall ends the loop where it began
+        if (u.lw > 0.5 && abs(i32(u.sc.y)) % 2 == 1) { c.x += u.stagger * u.pitch.x * u.ph * (1.0 - 2.0 * f32(pmodi(j, 2))); }
         c += nst * u.stepOff;
         let rot = nst * u.stepRot;
         let s = u.base * pow(u.stepScale, nst);
         var fl = vec2f(1.0);
         if ((mi == 1 || mi == 3) && pmodi(i, 2) == 1) { fl.x = -1.0; }
         if ((mi == 2 || mi == 3) && pmodi(j, 2) == 1) { fl.y = -1.0; }
-        let l = evalCopy(px, c, rot, s, fl, nc, vec2i(i, j), u.total);
+        // an odd horizontal / vertical scroll with mirroring: the copies turn over once during the loop
+        if (u.lw > 0.5 && (mi == 1 || mi == 3) && abs(i32(u.sc.x)) % 2 == 1) { fl.x = fl.x * cos(PI * u.ph); }
+        if (u.lw > 0.5 && (mi == 2 || mi == 3) && abs(i32(u.sc.y)) % 2 == 1) { fl.y = fl.y * cos(PI * u.ph); }
+        let key = select(vec2i(i, j), vec2i(pmodi(i, icols), pmodi(j, irows)), u.lw > 0.5);
+        let l = evalCopy(px, c, rot, s, fl, nc, key, u.total);
         acc = l + acc * (1.0 - l.a);
       }
     }
@@ -158,7 +212,7 @@ export default defineNode({
   category: 'transform',
   description:
     'Duplicates a picture: a grid, a line, a ring, or an endless grid that tiles in every direction so scrolling it never shows an edge. Each copy can be offset, rotated, scaled, mirrored, faded and recoloured by its position in the array. Computed in one pass, so thousands of copies cost the same as a few.',
-  keywords: ['duplicate', 'repeat', 'tile', 'clone', 'grid', 'instances', 'copies', 'cloner', 'pattern', 'brick', 'radial', 'circle', 'ring', 'infinite', 'wallpaper', 'scroll', 'sprite sheet'],
+  keywords: ['duplicate', 'repeat', 'tile', 'clone', 'grid', 'instances', 'copies', 'cloner', 'pattern', 'brick', 'radial', 'circle', 'ring', 'infinite', 'wallpaper', 'scroll', 'sprite sheet', 'tile preview', 'seamless', 'tileable', 'texture repeat'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
@@ -193,7 +247,7 @@ export default defineNode({
     },
     fit: { type: 'bool', default: true, label: 'Fit to frame', hint: 'Grid and Infinite: the whole grid (or one period) fills the frame at Size 1. Line and Ring: the first copy starts at about a third of the frame. Off = copies keep the input’s own pixel size × Size.' },
     scale: { type: 'number', default: 1, min: 0.01, max: 20, step: 0.01, label: 'Size', hint: 'Size of every copy (multiplies the fitted size).' },
-    columns: { type: 'number', default: 3, min: 1, max: 1000, softMax: 100, step: 1, integer: true, label: 'Columns', hint: 'Infinite grid: the pattern repeats every Columns × Rows copies (colour steps, sprite order, time offset).', visibleIf: (p) => p.mode === 'grid' || p.mode === 'infinite' },
+    columns: { type: 'number', default: 3, min: 1, max: 1000, softMax: 100, step: 1, integer: true, label: 'Columns', hint: 'Infinite grid: the pattern repeats every Columns × Rows copies (color steps, sprite order, time offset).', visibleIf: (p) => p.mode === 'grid' || p.mode === 'infinite' },
     rows: { type: 'number', default: 3, min: 1, max: 1000, softMax: 100, step: 1, integer: true, label: 'Rows', visibleIf: (p) => p.mode === 'grid' || p.mode === 'infinite' },
     count: { type: 'number', default: 6, min: 1, max: 100000, softMax: 256, step: 1, integer: true, label: 'Copies', visibleIf: (p) => p.mode === 'linear' || p.mode === 'radial' },
     spacing: { type: 'vec2', default: [10, 10], unit: '%', min: -90, max: 1000, step: 1, label: 'Gap', hint: 'Space between copies as a percentage of a copy. Negative overlaps them.', visibleIf: (p) => p.mode === 'grid' || p.mode === 'infinite' },
@@ -221,7 +275,7 @@ export default defineNode({
     stepScale: { type: 'number', default: 1, min: 0.5, max: 2, step: 0.005, label: 'Scale per copy', hint: 'Each copy is this many times the size of the one before.', group: 'Per-copy change', visibleIf: (p) => p.mode !== 'infinite' },
     firstOnTop: { type: 'bool', default: false, label: 'First copy on top', hint: 'By default later copies are drawn over earlier ones.', group: 'Per-copy change' },
     offset: { type: 'vec2', default: [0, 0], unit: 'norm', min: -2, max: 2, step: 0.005, label: 'Move the array', hint: 'Fraction of the frame. Copies beyond the frame edge are real, so moving shows them instead of cutting off.', group: 'Move' },
-    scrollX: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Scroll X', hint: 'Whole copies travelled per loop. Loops seamlessly in Infinite mode (with colour steps, use a multiple of Columns).', group: 'Move', visibleIf: (p) => p.mode === 'grid' || p.mode === 'infinite' },
+    scrollX: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Scroll X', hint: 'Whole copies traveled per loop. Loops seamlessly in Infinite mode (with color steps, use a multiple of Columns).', group: 'Move', visibleIf: (p) => p.mode === 'grid' || p.mode === 'infinite' },
     scrollY: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Scroll Y', hint: 'With a brick offset use an even number to loop seamlessly.', group: 'Move', visibleIf: (p) => p.mode === 'grid' || p.mode === 'infinite' },
     jitterPos: { type: 'number', default: 0, min: 0, max: 100, step: 1, unit: '%', label: 'Random position', hint: 'Percentage of a copy.', group: 'Random' },
     jitterRotate: { type: 'number', default: 0, min: 0, max: 180, step: 1, unit: 'deg', label: 'Random rotation', group: 'Random' },
@@ -259,7 +313,11 @@ export default defineNode({
     timeSlices: { type: 'number', default: 1, min: 1, max: MAX_SLICES, softMax: MAX_SLICES, step: 1, integer: true, label: 'Time slices', hint: '1 = every copy shows the same moment. More: copies cycle through that many different moments of the clip (copy 0 now, copy 1 a little earlier, ...). Costs one extra evaluation of the input per slice, not per copy.', group: 'Time offset' },
     timeStep: { type: 'number', default: 4, min: -240, max: 240, step: 1, integer: true, label: 'Slice spacing', hint: 'In frames.', group: 'Time offset', visibleIf: (p) => (p.timeSlices as number) > 1 },
   },
-  summary: (p) => (p.mode === 'grid' ? `grid ${p.columns}×${p.rows}` : p.mode === 'infinite' ? `infinite ${p.columns}×${p.rows} period` : `${p.mode} × ${p.count}`),
+  summary: (p, _wired, clock) => {
+    const a = arrayLoop(p, !!clock?.loop);
+    const base = p.mode === 'grid' ? `grid ${p.columns}×${p.rows}` : p.mode === 'infinite' ? `infinite ${p.columns}×${p.rows} period` : `${p.mode} × ${p.count}`;
+    return a.notes.length ? `${base} · ${a.notes.join(', ')}` : base;
+  },
   async render(ctx) {
     const p = ctx.params;
     const src = ctx.in.image;
@@ -268,6 +326,7 @@ export default defineNode({
     const slices = Math.max(1, Math.min(MAX_SLICES, Math.round(p.timeSlices)));
     const scrolling = (mode === 'grid' || mode === 'infinite') && (p.scrollX !== 0 || p.scrollY !== 0);
     const phase = scrolling ? ctx.time.phase : 0;
+    const al = arrayLoop(p, scrolling && ctx.time.loop);
 
     const sheetC = Math.max(1, Math.round(p.sheetColumns));
     const sheetR = Math.max(1, Math.round(p.sheetRows));
@@ -328,6 +387,9 @@ export default defineNode({
         winX = count;
       }
     }
+    // Loop on + scrolled finite grid: it wraps inside its own box, copies are indexed like the infinite grid (local neighbourhood).
+    const wrapGrid = al.on && mode === 'grid';
+    if (wrapGrid) full = false;
     winX = Math.min(winX, MAX_WIN);
     winY = Math.min(winY, MAX_WIN);
 
@@ -357,7 +419,12 @@ export default defineNode({
         sheet: [sheetC, sheetR],
         vary: p.vary === 'random' ? 2 : sheetC * sheetR > 1 ? 1 : 0,
         ctr: [Ow / 2 + p.offset[0] * Ow, Oh / 2 + p.offset[1] * Oh],
-        scroll: [p.scrollX * phase, p.scrollY * phase],
+        scroll: [al.sx * phase, al.sy * phase],
+        lw: al.on,
+        wg: wrapGrid,
+        sc: [al.sx, al.sy],
+        ph: phase,
+        clip: wrapGrid ? [(cols * pitchX) / 2, (rows * pitchY) / 2] : [0, 0],
         pitch: [pitchX, pitchY],
         cols,
         rows,

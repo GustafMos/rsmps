@@ -7,7 +7,7 @@ export default defineNode({
   title: 'Specks / Dropouts',
   category: 'stylize',
   description:
-    'Tape dropouts, dust, dots, blocks and film scratches drawn as editable particles over the picture: density, clustering, length, thickness, shape, colour, opacity, blend, flicker and drift. The same generator that Analog Video uses for its dropouts.',
+    'Tape dropouts, dust, dots, blocks and film scratches drawn as editable particles over the picture: density, clustering, length, thickness, shape, color, opacity, blend, flicker and drift. The same generator that Analog Video uses for its dropouts.',
   keywords: ['dropout', 'speck', 'dust', 'scratch', 'tape', 'vhs', 'film', 'noise', 'damage', 'particles', 'glitch', 'streak'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

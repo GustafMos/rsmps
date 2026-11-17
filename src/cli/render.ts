@@ -2,9 +2,9 @@
  * The batch renderer: one engine, one GPU, every (item x output) job written to disk.
  * Pure orchestration; argument parsing lives in main.ts and graph preparation in prepare.ts.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import sharp from 'sharp';
 import type { PcmAudio } from '../engine/audio/api';
 import { renderAudioOffline } from '../engine/audio/offline';
@@ -17,7 +17,11 @@ import type { AssetInfo, GraphDoc, ImageValue, MaskValue, NodeInstance } from '.
 import { fitAudio } from '../io/audio-util';
 import { resolvePattern, sanitizeFileName, sequencePattern, uniqueName, type NameTokens } from '../io/naming';
 import { exportPrint, readPrintParams, type PrintParams } from '../io/print/export';
-import { layoutSheet, sheetMetadata } from '../io/spritesheet';
+import { distinctColors, formatReport, type ReportEntry } from '../io/export-report';
+import { encodePngRgba } from '../io/png-encode';
+import { writeSheetMeta } from '../io/spritesheet-meta';
+import { bleedTransparent, buildSheets, type Bitmap } from '../io/spritesheet-pack';
+import { buildOptionsOf, readSheetParams, tagsOfClips, type SheetParams } from '../io/spritesheet-params';
 import { errorMessage, totalFramesOf } from '../io/util';
 import { CODECS, imageExt, normalizeImageFormat, parseCodec, VideoWriter, writePcmFile, writeStill, type CodecSpec, type ImageFormat } from './encode';
 import { NodeHost } from './host';
@@ -46,6 +50,8 @@ export interface Overrides {
   codec?: CodecSpec;
   quality?: number;
   bitrate?: number;
+  /** Output node params forced on every output (the sheet / game flags: sheetLayout, sheetMeta, preset, extrude, powerOfTwo, sheetTrim, maxSheet, bleed, padding, columns). */
+  outputParams?: Record<string, unknown>;
 }
 
 export interface RenderOptions {
@@ -61,6 +67,8 @@ export interface RenderOptions {
   durationFromSource?: boolean;
   sequenceFps: number;
   dryRun?: boolean;
+  /** Write export-report.json / export-report.txt into the output folder (file size, colors, off-palette fraction, frames per file). */
+  report?: 'json' | 'text';
   reporter?: Reporter;
   /** Share a GPU (tests). */
   gpu?: Gpu;
@@ -91,6 +99,7 @@ export interface RenderSummary {
   skipped: string[];
   plan: PlannedFile[];
   seconds: number;
+  report: ReportEntry[];
 }
 
 interface OutParams {
@@ -104,11 +113,12 @@ interface OutParams {
   scale: number;
   columns: number;
   padding: number;
+  sheet: SheetParams;
 }
 
 function readParams(registry: Registry, node: NodeInstance, ov: Overrides): OutParams {
   const def = registry.get(node.type);
-  const p = { ...(def ? defaultParams(def) : {}), ...node.params } as Record<string, unknown>;
+  const p = { ...(def ? defaultParams(def) : {}), ...node.params, ...(ov.outputParams ?? {}) } as Record<string, unknown>;
   const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
   const kinds = ['auto', 'image', 'sequence', 'video', 'spritesheet', 'print'];
   const kind = (kinds.includes(p.kind as string) ? p.kind : 'auto') as OutParams['kind'];
@@ -123,6 +133,7 @@ function readParams(registry: Registry, node: NodeInstance, ov: Overrides): OutP
     scale: Math.max(1, Math.round(num(p.scale, 1))),
     columns: Math.max(0, Math.round(num(p.columns, 0))),
     padding: Math.max(0, Math.round(num(p.padding, 0))),
+    sheet: readSheetParams(p),
   };
 }
 
@@ -157,7 +168,7 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
   const { registry } = opts;
   const ov = opts.overrides ?? {};
   let graph = opts.graph;
-  const summary: RenderSummary = { items: 0, jobs: 0, files: [], errors: [], skipped: [], plan: [], seconds: 0 };
+  const summary: RenderSummary = { items: 0, jobs: 0, files: [], errors: [], skipped: [], plan: [], seconds: 0, report: [] };
 
   const { nodes: outs } = selectOutputs(graph, registry, opts.outputs);
   const usable: NodeInstance[] = outs;
@@ -249,6 +260,8 @@ Run them in the app, or pass --process to run them first (headless, results are 
 
       let itemGraph = graph;
       for (const out of usable) {
+        // One sheet for the whole batch: the first item makes it (it renders every item itself).
+        if (batchSheetOut(out, ov, registry) && item !== items[0]) continue;
         jobNo++;
         const label = out.label || out.id;
         const up = upstream(graph, out.id);
@@ -301,7 +314,28 @@ Run them in the app, or pass --process to run them first (headless, results are 
             continue;
           }
 
-          const ctx: JobCtx = { engine: engine!, gpu: gpu as Gpu, host, graph: itemGraph, out, item, count, frames, params, tokens, used, outDir: opts.outDir, tmp: tmp!, rep, firstVideo, registry, label, where };
+          const ctx: JobCtx = {
+            engine: engine!, gpu: gpu as Gpu, host, graph: itemGraph, out, item, count, frames, params, tokens, used, outDir: opts.outDir, tmp: tmp!, rep, firstVideo, registry, label, where,
+            report: opts.report ? summary.report : null,
+            allItems: items,
+            prepareItem: async (i) => {
+              const r = await registerItemAssets(i);
+              if (r.error) throw new Error(r.error);
+              return () => {
+                engine!.clear();
+                host.dropCaches();
+                for (const id of r.assets) host.forget(id);
+              };
+            },
+            itemName: (i) => {
+              for (const m of graph.nodes.filter((n) => up.has(n.id) && n.type === 'media-in')) {
+                const id = assetIdFor(m, i);
+                const info = id ? host.assetInfo(id) : null;
+                if (info) return info.name;
+              }
+              return null;
+            },
+          };
           let written: string[];
           switch (kind) {
             case 'image':
@@ -345,6 +379,11 @@ Run them in the app, or pass --process to run them first (headless, results are 
     if (tmp) rmSync(tmp, { recursive: true, force: true });
   }
   summary.seconds = (Date.now() - t0) / 1000;
+  if (opts.report && !dry && summary.report.length) {
+    const name = opts.report === 'json' ? 'export-report.json' : 'export-report.txt';
+    writeFileSync(join(opts.outDir, name), formatReport(summary.report, opts.report));
+    summary.files.push(name);
+  }
   return summary;
 }
 
@@ -369,6 +408,53 @@ interface JobCtx {
   registry: Registry;
   label: string;
   where: string;
+  /** Report entries are collected here when a report was asked for. */
+  report: ReportEntry[] | null;
+  /** Batch items that feed one sheet, and how to make one of them current (returns what to call to drop it again). */
+  allItems: number[];
+  prepareItem: (item: number) => Promise<() => void>;
+  itemName: (item: number) => string | null;
+}
+
+/** An Output that makes one sheet from every batch item. */
+function batchSheetOut(out: NodeInstance, ov: Overrides, registry: Registry): boolean {
+  const p = readParams(registry, out, ov);
+  return p.kind === 'spritesheet' && p.sheet.from === 'batch';
+}
+
+/** The largest offPalette that Palette Lock nodes upstream of the Output report at frame 0, or null when the chain has none. */
+async function offPaletteOf(c: JobCtx): Promise<number | null> {
+  const up = upstream(c.graph, c.out.id);
+  let worst: number | null = null;
+  for (const n of c.graph.nodes) {
+    if (!up.has(n.id) || n.type !== 'palette-lock' || n.bypass) continue;
+    const res = await c.engine.evaluate({ graph: c.graph, node: n.id, port: 'offPalette', seconds: 0, item: c.item, itemCount: c.count, proxy: 1, quality: 'final' });
+    if (typeof res.value === 'number' && res.value >= 0) worst = Math.max(worst ?? 0, res.value);
+  }
+  return worst;
+}
+
+async function addReport(c: JobCtx, e: Omit<ReportEntry, 'bytes' | 'offPalette' | 'file'> & { files: string[] }): Promise<void> {
+  if (!c.report) return;
+  const off = await offPaletteOf(c);
+  for (const file of e.files) {
+    let bytes = 0;
+    try {
+      bytes = statSync(join(c.outDir, file)).size;
+    } catch {
+      /* not written yet / missing: report 0 */
+    }
+    const { files: _f, ...rest } = e;
+    c.report.push({ ...rest, file, bytes, offPalette: off });
+  }
+}
+
+/** PNG with straight alpha; with "bleed" the colour under transparent pixels is the nearest opaque colour (sharp would not promise to keep it). */
+async function writePng(file: string, data: Uint8ClampedArray, width: number, height: number, bleed: boolean): Promise<void> {
+  if (!bleed) return writeStill(file, data, width, height, 'png', 1);
+  bleedTransparent(data, width, height);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, await encodePngRgba(data, width, height));
 }
 
 function planFiles(kind: Kind, p: OutParams, codec: CodecSpec, tokens: JobCtx['tokens'], frames: number, w: number, h: number, used: Set<string>): { path: string; note?: string } {
@@ -524,7 +610,10 @@ async function exportImage(c: JobCtx): Promise<string[]> {
   const opaque = p.imageFormat === 'jpeg';
   const f = await frameBytes(c, 0, p.scale, false, !opaque);
   const name = uniqueName(c.used, `${resolvePattern(p.name, c.tokens(f.width, f.height))}.${imageExt(p.imageFormat)}`);
-  await writeStill(join(c.outDir, name), f.data, f.width, f.height, p.imageFormat, p.quality);
+  const colors = c.report ? distinctColors(f.data) : 0;
+  if (p.imageFormat === 'png' && p.sheet.bleedStills) await writePng(join(c.outDir, name), f.data, f.width, f.height, true);
+  else await writeStill(join(c.outDir, name), f.data, f.width, f.height, p.imageFormat, p.quality);
+  await addReport(c, { files: [name], kind: 'image', item: c.item + 1, width: f.width, height: f.height, frames: 1, colors });
   return [name];
 }
 
@@ -538,7 +627,10 @@ async function exportSequence(c: JobCtx): Promise<string[]> {
     const px = await frameBytes(c, f, p.scale, false, !opaque);
     if (!dir) dir = uniqueName(c.used, sequenceDir(p.name, c.tokens(px.width, px.height)));
     const name = `${dir}/${resolvePattern(pattern, c.tokens(px.width, px.height, f, c.frames))}.${imageExt(p.imageFormat)}`;
-    await writeStill(join(c.outDir, name), px.data, px.width, px.height, p.imageFormat, p.quality);
+    const colors = c.report ? distinctColors(px.data) : 0;
+    if (p.imageFormat === 'png' && p.sheet.bleedStills) await writePng(join(c.outDir, name), px.data, px.width, px.height, true);
+    else await writeStill(join(c.outDir, name), px.data, px.width, px.height, p.imageFormat, p.quality);
+    await addReport(c, { files: [name], kind: 'sequence', item: c.item + 1, width: px.width, height: px.height, frames: 1, colors });
     files.push(name);
     c.rep.progress(c.label, f + 1, c.frames);
   }
@@ -547,31 +639,65 @@ async function exportSequence(c: JobCtx): Promise<string[]> {
 
 async function exportSheet(c: JobCtx): Promise<string[]> {
   const p = c.params;
+  const sp = p.sheet;
   const project = c.graph.project;
-  let layout: ReturnType<typeof layoutSheet> | null = null;
-  let sheet: Buffer | null = null;
-  for (let f = 0; f < c.frames; f++) {
-    const px = await frameBytes(c, f, p.scale, false, true);
-    if (!layout) {
-      layout = layoutSheet(c.frames, px.width, px.height, p.columns, p.padding);
-      if (layout.width * layout.height * 4 > 2 ** 31 - 1) throw new Error(`The spritesheet would be ${layout.width}x${layout.height}: too large. Use fewer frames, a smaller size or more columns.`);
-      sheet = Buffer.alloc(layout.width * layout.height * 4);
+  const batch = sp.from === 'batch';
+  const itemList = batch ? c.allItems : [c.item];
+  const bitmaps: Bitmap[] = [];
+  const clips: { name: string; frames: number }[] = [];
+  const sourceName = c.tokens(0, 0).name;
+  for (const item of itemList) {
+    // A batch sheet walks the items itself: make each one's files known, render its frames, drop it again.
+    const drop = batch ? await c.prepareItem(item) : null;
+    try {
+      const cc: JobCtx = { ...c, item };
+      const name = batch ? sanitizeFileName(c.itemName(item) ?? `item${item + 1}`) : sourceName;
+      if (!batch) clips.push({ name: sp.animName || sanitizeFileName(name), frames: c.frames });
+      else clips.push({ name: sp.animName ? `${sp.animName}_${name}` : name, frames: c.frames });
+      for (let f = 0; f < c.frames; f++) {
+        const px = await frameBytes(cc, f, p.scale, false, true);
+        bitmaps.push({ width: px.width, height: px.height, data: px.data });
+        c.rep.progress(c.label, bitmaps.length, c.frames * itemList.length);
+      }
+    } finally {
+      drop?.();
     }
-    if (px.width !== layout.frameWidth || px.height !== layout.frameHeight) throw new Error('Frame size changed during export.');
-    const r = layout.rects[f];
-    const src = Buffer.from(px.data.buffer, px.data.byteOffset, px.data.byteLength);
-    for (let y = 0; y < r.h; y++) src.copy(sheet!, ((r.y + y) * layout.width + r.x) * 4, y * r.w * 4, (y + 1) * r.w * 4);
-    c.rep.progress(c.label, f + 1, c.frames);
   }
-  if (!layout || !sheet) throw new Error('No frames were rendered.');
-  const base = resolvePattern(p.name, c.tokens(layout.width, layout.height));
-  const imageName = uniqueName(c.used, `${base}.png`);
-  const jsonName = uniqueName(c.used, `${base}.json`);
+  const build = buildSheets(bitmaps, buildOptionsOf(sp));
+  for (const pg of build.pages) if (pg.width * pg.height * 4 > 2 ** 31 - 1) throw new Error(`The spritesheet would be ${pg.width}x${pg.height}: too large. Use fewer frames, a smaller size, more columns or a maximum sheet size.`);
+  const base = resolvePattern(p.name, c.tokens(build.pages[0].width, build.pages[0].height));
   mkdirSync(c.outDir, { recursive: true });
-  await sharp(sheet, { raw: { width: layout.width, height: layout.height, channels: 4 } }).png().toFile(join(c.outDir, imageName));
-  const meta = sheetMetadata(layout, imageName, project.fps, project.loop);
-  writeFileSync(join(c.outDir, jsonName), JSON.stringify(meta, null, 2));
-  return [imageName, jsonName];
+  const images: string[] = [];
+  const written: string[] = [];
+  const colorSet = new Set<number>();
+  for (const pg of build.pages) {
+    const name = uniqueName(c.used, `${base}${pg.index ? `_${pg.index + 1}` : ''}.png`);
+    images.push(name);
+    if (c.report) distinctColors(pg.data, colorSet);
+    if (sp.bleed) writeFileSync(join(c.outDir, name), await encodePngRgba(pg.data, pg.width, pg.height));
+    else await sharp(Buffer.from(pg.data.buffer, pg.data.byteOffset, pg.data.byteLength), { raw: { width: pg.width, height: pg.height, channels: 4 } }).png().toFile(join(c.outDir, name));
+    written.push(name);
+  }
+  const meta = writeSheetMeta(sp.meta, {
+    baseName: sanitizeFileName(base),
+    images,
+    build,
+    durationsMs: bitmaps.map(() => 1000 / project.fps),
+    tags: tagsOfClips(clips),
+    fps: project.fps,
+    loop: project.loop,
+    padding: sp.padding,
+    extrude: sp.extrude,
+    pivot: sp.pivot,
+  });
+  for (const m of meta) {
+    const name = uniqueName(c.used, `${base}${m.suffix}.${m.ext}`);
+    writeFileSync(join(c.outDir, name), m.text);
+    written.push(name);
+  }
+  const first = build.pages[0];
+  await addReport(c, { files: images, kind: 'spritesheet', item: c.item + 1, width: first.width, height: first.height, frames: bitmaps.length, colors: colorSet.size, pages: build.pages.length });
+  return written;
 }
 
 /** Audio for a video export: the graph's audio output, else the first source video's own sound, else none. */

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { clamp } from '../lib/drag';
 import { NumberConfirm, isQuiet } from './NumberConfirm';
+import { scrubIntent, stepValue } from '../responsive/touchNumber';
 import './fields.css';
 
 export interface NumberFieldProps {
@@ -47,7 +48,7 @@ export function NumberField(p: NumberFieldProps) {
   const [draft, setDraft] = useState('');
   const [confirm, setConfirm] = useState<number | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  const gesture = useRef<{ x0: number; lastX: number; v0: number; vf: number; moved: boolean; id: number } | null>(null);
+  const gesture = useRef<{ x0: number; y0: number; lastX: number; v0: number; vf: number; moved: boolean; id: number } | null>(null);
   const [mode, setMode] = useState<'fine' | 'coarse' | null>(null);
 
   const fix = (v: number, scrub = false) => {
@@ -88,7 +89,7 @@ export function NumberField(p: NumberFieldProps) {
     } catch {
       /* synthetic or already-gone pointer: scrubbing still works while the pointer stays over the field */
     }
-    gesture.current = { x0: e.clientX, lastX: e.clientX, v0: value, vf: value, moved: false, id: e.pointerId };
+    gesture.current = { x0: e.clientX, y0: e.clientY, lastX: e.clientX, v0: value, vf: value, moved: false, id: e.pointerId };
   };
   const move = (e: PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
@@ -102,7 +103,11 @@ export function NumberField(p: NumberFieldProps) {
     if (!g.moved) {
       // Dead zone: a click (even a slightly shaky one) never changes the value. No pointer lock: locking on a click made some
       // browsers report large bogus movement, which sent the value flying.
-      if (Math.abs(e.clientX - g.x0) < 6) return;
+      if (Math.abs(e.clientX - g.x0) < 6) {
+        // on touch a vertical drag is page scroll (the field has touch-action: pan-y): do not treat it as a scrub or a tap
+        if (e.pointerType === 'touch' && scrubIntent(e.clientX - g.x0, e.clientY - g.y0) === 'scroll') gesture.current = null;
+        return;
+      }
       g.moved = true;
       g.lastX = e.clientX;
       return;
@@ -210,6 +215,7 @@ export function NumberField(p: NumberFieldProps) {
       onKeyDown={keys}
     >
       {bounded && <div className="rs-nf__fill" style={{ width: `${frac * 100}%` }} />}
+      <button type="button" className="rs-nf__step rs-nf__step--dec" tabIndex={-1} disabled={p.disabled} aria-label={`Decrease ${p.label ?? 'value'}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => p.onChange(fix(stepValue(value, -1, { step, min, max, integer })))}>−</button>
       {p.label && <span className="rs-nf__label">{p.label}</span>}
       {mode && <span className="rs-nf__mode" aria-hidden="true">{mode === 'fine' ? 'Fine ÷10' : 'Coarse ×10'}</span>}
       {confirm !== null && (
@@ -227,9 +233,12 @@ export function NumberField(p: NumberFieldProps) {
           onCancel={() => setConfirm(null)}
         />
       )}
+      <button type="button" className="rs-nf__step rs-nf__step--inc" tabIndex={-1} disabled={p.disabled} aria-label={`Increase ${p.label ?? 'value'}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => p.onChange(fix(stepValue(value, 1, { step, min, max, integer })))}>+</button>
       {editing ? (
         <input
           className="rs-nf__input rs-num"
+          inputMode={min !== undefined && min >= 0 ? (integer ? 'numeric' : 'decimal') : undefined} // a numeric keypad has no minus sign: fields that can go negative keep the full keyboard
+          enterKeyHint="done"
           autoFocus
           value={draft}
           onFocus={(e) => e.currentTarget.select()}

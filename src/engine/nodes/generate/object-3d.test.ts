@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 let shared: ReturnType<typeof harness> | null = null;
 const H = () => (shared ??= harness());
@@ -80,7 +80,7 @@ it('spinning loops exactly (whole turns) and moves', async () => {
   const size = { size: t.solid(64, 64, [0, 0, 0, 255], 1) };
   for (const shape of ['cube', 'torus', 'pyramid']) {
     const r = await t.loopCheck('object-3d', { shape, spinY: 1, spinX: 2, cameraType: 'perspective' }, size);
-    expect(r.seam, shape).toBeLessThan(0.05);
+    expect(r.seam, shape).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion, shape).toBeGreaterThan(1);
   }
   const still = await t.loopCheck('object-3d', { spinY: 0 }, size);

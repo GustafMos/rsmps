@@ -93,7 +93,7 @@ function hasAudioSockets(def: ReturnType<ReturnType<typeof useApp>['io']['regist
 }
 
 /** Time and frame readout: updated straight from the player, never through React state. */
-function Readout() {
+export function Readout() {
   const { io, ed } = useApp();
   const time = useRef<HTMLSpanElement>(null);
   const frame = useRef<HTMLSpanElement>(null);
@@ -115,7 +115,7 @@ function Readout() {
 }
 
 /** Scrubber with the cached-frames bar. Everything is imperative. */
-function Scrubber() {
+export function Scrubber() {
   const { io, ed } = useApp();
   const track = useRef<HTMLDivElement>(null);
   const head = useRef<HTMLDivElement>(null);

@@ -66,6 +66,28 @@ Without overrides each Output node's own params decide (`kind`, `imageFormat`, `
 `padding`, `name`). `kind: auto` becomes a video when a source is a video or the picture changes between
 frames, otherwise a still. An Output node with kind `print` writes its print sheets (PDF and/or page PNGs, set by the node's Print options) with the same code as the app; see PRINT_AND_SCAN.md.
 
+### Game assets (spritesheets, engine presets, report)
+
+Apply to every spritesheet Output; each flag is the same as the Output node's param of the same meaning (`--set Out.sheetLayout=pack` works too).
+See docs/GAME_ASSETS.md for what they do.
+
+| Option | Output param | Meaning |
+| --- | --- | --- |
+| `--for <preset>` | `preset` | `generic`, `godot`, `unity`, `gamemaker`, `rpgmaker`, `web`: starting points that override the sheet fields they list |
+| `--sheet-layout <x>` | `sheetLayout` | `grid`, `row`, `column`, `pack` |
+| `--columns <n>`, `--sheet-padding <n>`, `--extrude <n>` | `columns`, `padding`, `extrude` | grid columns (0 = about square), gap between cells, edge pixels repeated around each frame |
+| `--trim`, `--pot`, `--max-sheet <n>` | `sheetTrim`, `powerOfTwo`, `maxSheet` | trim transparent borders, power-of-two pages, largest page (more pages: `name_2.png`) |
+| `--sheet-meta <x>` | `sheetMeta` | `json` (generic, default), `aseprite`, `texturepacker`, `css`, `none` |
+| `--sheet-from <clip|batch>` | `sheetFrom` | `batch` = ONE sheet holding every batch item, one animation tag per item (named after its file) |
+| `--anim-name <name>`, `--pivot x,y` | `animName`, `pivotOn` + `pivot` | tag name; pivot (0..1, y down) written to the metadata |
+| `--bleed` | `bleed` | color under transparent pixels = nearest opaque color (PNG; also for stills and sequences) |
+| `--report <json|text>` | | write `export-report.json` / `.txt`: per image file width x height, colors, frames, bytes, pages and the off-palette fraction of a Palette Lock (report mode) upstream |
+
+```
+rsmps render look.rsmps.json ./sprites/*.png --kind spritesheet --sheet-from batch --sheet-layout pack --trim --extrude 1 --pot --sheet-meta aseprite --out ./atlas
+rsmps render look.rsmps.json ./sprites --for godot --bleed --report text --out ./done
+```
+
 ### Codecs
 
 | `--codec` | File | Alpha | Notes |

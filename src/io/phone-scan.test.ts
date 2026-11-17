@@ -298,7 +298,7 @@ describe('photos from the phone go through the scan pool', () => {
     t.drain();
     expect(last(t.statuses, 11)).toMatchObject({ state: 'failed' });
     expect(last(t.statuses, 11)!.retake).toBeUndefined();
-    expect(last(t.statuses, 11)!.note).toMatch(/cancelled/);
+    expect(last(t.statuses, 11)!.note).toMatch(/canceled/);
   });
 });
 

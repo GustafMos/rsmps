@@ -67,6 +67,10 @@ export interface AddonInfo {
   /** Text for platforms with no download (install it yourself, then locate it). */
   bringYourOwn: string;
   canLocate: boolean;
+  /** A warning shown on the card (large third-party program, not code-signed...). */
+  notice?: string;
+  /** Add-ons that belong together (COLMAP and Brush: 'splat-train'). */
+  group?: string;
   installed: { source: 'download' | 'custom' | 'system'; version: string; path: string } | null;
   progress?: { phase: 'downloading' | 'verifying' | 'extracting'; received: number; total: number };
   error?: string;
@@ -201,6 +205,8 @@ export function parseAddon(raw: unknown): AddonInfo {
       : null,
     bringYourOwn: typeof bring === 'string' ? bring : '',
     canLocate: o.canLocate === true,
+    ...(typeof o.notice === 'string' && o.notice ? { notice: o.notice } : {}),
+    ...(typeof o.group === 'string' && o.group ? { group: o.group } : {}),
     installed: inst ? { source: (['download', 'custom', 'system'] as const).find((s) => s === inst.source) ?? 'custom', version: str(inst.version), path: str(inst.path) } : null,
     ...(prog ? { progress: { phase: phases.find((p) => p === prog.phase) ?? 'downloading', received: num(prog.received), total: num(prog.total) } } : {}),
     ...(typeof o.error === 'string' && o.error ? { error: o.error } : {}),

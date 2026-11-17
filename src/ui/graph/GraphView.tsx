@@ -9,13 +9,15 @@ import { Frames } from './Frames';
 import { SelectionToolbar } from './SelectionToolbar';
 import { nodeViewStore } from '../store/nodeView';
 import { PresetRow } from '../components/PresetRow';
+import { groupAtPath, groupDefOf } from '../../engine/group';
 import './graph.css';
 
 export function GraphView() {
   const app = useApp();
   const { ed, graphCtl: ctl } = app;
-  const nodes = useEd((s) => s.graph.nodes);
+  const nodes = useEd((s) => s.level.nodes);
   const docRev = useEd((s) => s.docRev);
+  const pathKey = useEd((s) => s.path.join('/'));
   const debug = useEd((s) => s.prefs.debug);
   const gridSnap = useEd((s) => s.prefs.gridSnap !== false);
   const root = useRef<HTMLDivElement>(null);
@@ -144,7 +146,7 @@ export function GraphView() {
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [docRev, app, ctl]);
+  }, [docRev, pathKey, app, ctl]);
 
   return (
     <div
@@ -173,6 +175,7 @@ export function GraphView() {
         </svg>
       </div>
       <div ref={box} className="rs-graph__box" />
+      <Breadcrumb />
       <SelectionToolbar />
       <svg className="rs-graph__overlay">
         <line ref={cut} className="rs-wire is-cut" style={{ display: 'none', stroke: 'var(--danger)', strokeWidth: 2 }} />
@@ -205,7 +208,7 @@ export function GraphView() {
         <span className="rs-graph__zoom rs-num">{zoomPct}%</span>
       </div>
 
-      {nodes.length === 0 && (
+      {nodes.length === 0 && !pathKey && (
         <div className="rs-graph__empty">
           <div>
             Empty graph.
@@ -216,5 +219,38 @@ export function GraphView() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Where the graph view is: "Project › Logo fall › Recolor pass" while a group is open. Click a level to go back to it (Esc = one up). */
+function Breadcrumb() {
+  const { ed } = useApp();
+  const path = useEd((s) => s.path);
+  const root = useEd((s) => s.graph);
+  if (!path.length) return null;
+  const names = path.map((id, i) => {
+    const n = groupAtPath(root, path.slice(0, i + 1));
+    return n ? n.label || groupDefOf(n).title : id;
+  });
+  return (
+    <nav className="rs-graph__crumbs" aria-label="Open groups" data-nodrag onPointerDown={(e) => e.stopPropagation()}>
+      <button className="rs-graph__crumb" onClick={() => ed.exitGroup(0)} title="Back to the top level (Esc closes one level)">
+        {root.name || 'Project'}
+      </button>
+      {names.map((name, i) => (
+        <span key={path[i]} className="rs-graph__crumbsep">
+          ›
+          {i < names.length - 1 ? (
+            <button className="rs-graph__crumb" onClick={() => ed.exitGroup(i + 1)}>
+              {name}
+            </button>
+          ) : (
+            <span className="rs-graph__crumb is-here" aria-current="location">
+              <Icon name="stack" size={14} /> {name}
+            </span>
+          )}
+        </span>
+      ))}
+    </nav>
   );
 }

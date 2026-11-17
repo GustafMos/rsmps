@@ -7,7 +7,7 @@ export default defineNode({
   title: 'Paper Clean',
   category: 'color',
   description:
-    'Cleans up a photo or scan of a drawing on paper: evens out shadows and uneven light, turns the paper white, removes colour casts and faint printed guides, and can output just the ink on a transparent background.',
+    'Cleans up a photo or scan of a drawing on paper: evens out shadows and uneven light, turns the paper white, removes color casts and faint printed guides, and can output just the ink on a transparent background.',
   keywords: ['scan', 'paper', 'whiten', 'shadow removal', 'flatten', 'illumination', 'background', 'cleanup', 'photo of drawing', 'ink', 'transparent', 'guide', 'cast', 'white balance'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

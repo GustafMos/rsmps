@@ -42,12 +42,63 @@ export class RenderTally {
   }
 }
 
+/** An input fed by a registered node (e.g. an animated test source) instead of a still picture: `{ node: 'noise', params: {...} }`. */
+export interface NodeInput {
+  node: string;
+  params?: Record<string, unknown>;
+}
+type HarnessInput = ImageValue | MaskValue | number | NodeInput | (ImageValue | MaskValue | NodeInput)[];
+const isNodeInput = (v: unknown): v is NodeInput => !!v && typeof v === 'object' && 'node' in (v as object) && !('texture' in (v as object));
+
 export interface Pixels {
   data: Uint8ClampedArray;
   width: number;
   height: number;
   /** Straight RGBA at (x, y). */
   at(x: number, y: number): [number, number, number, number];
+}
+
+/** Largest acceptable `LoopReport.seam`. A perfect loop is about 1 or below; a pop is several times that. */
+export const LOOP_SEAM_OK = 1.25;
+/** Steps smaller than this (mean absolute byte difference, or 0.1% of the range for numbers) count as "no change". */
+const STEP_FLOOR = 0.05;
+
+export interface LoopCheckOptions {
+  /** Loop length in frames (default 20). */
+  frames?: number;
+  fps?: number;
+  /** Canvas size for generators and the size hint (default 64). */
+  size?: number | { width: number; height: number };
+  /** Output port to measure (default: the first picture output, else the first number). */
+  port?: string;
+  /** Also evaluate frame N (and N + a few) and report `exactDiff`: periodic bit-for-bit. */
+  exact?: boolean;
+  /** Extra project settings (loop is always on). */
+  project?: Partial<ProjectSettings>;
+}
+
+export interface LoopReport {
+  frames: number;
+  /** Difference of the wrap step (last frame -> first frame). Mean absolute byte difference, or absolute value difference for numbers. */
+  wrap: number;
+  /** Median ordinary step. */
+  typical: number;
+  /** Mean ordinary step. */
+  mean: number;
+  /** Largest ordinary step. */
+  max: number;
+  /** wrap / max(largest ordinary step, floor). <= LOOP_SEAM_OK means the seam is no bigger than the biggest step elsewhere. */
+  seam: number;
+  /** Largest difference between frame 0 and any other frame: > 0 means it really moves (a still picture has 0). */
+  motion: number;
+  /** The worst step of all, wrap included. */
+  worst: { from: number; to: number; diff: number; wrap: boolean };
+  /** Every step k -> k + 1 (index k), the wrap step last. */
+  steps: number[];
+  /** With `exact`: largest absolute difference between frame N (and N + k) and frame 0 (and k). 0 = periodic bit for bit. */
+  exactDiff?: number;
+  /** One line for assertion messages. */
+  text: string;
 }
 
 export interface Harness {
@@ -73,7 +124,7 @@ export interface Harness {
   run(
     type: string,
     params?: Record<string, unknown>,
-    inputs?: Record<string, ImageValue | MaskValue | number | (ImageValue | MaskValue)[]>,
+    inputs?: Record<string, HarnessInput>,
     opts?: { seconds?: number; project?: Partial<ProjectSettings>; item?: number; itemCount?: number; proxy?: number },
   ): Promise<Record<string, Value | null>>;
   /** Evaluate a prepared graph at a node. */
@@ -82,15 +133,18 @@ export interface Harness {
   /** Mean absolute difference per channel (0..255) between two images of the same size. */
   diff(a: ImageValue | MaskValue, b: ImageValue | MaskValue): Promise<number>;
   /**
-   * Assert-friendly loop check: renders the node at frame 0 and at the frame one full loop later
-   * and returns their difference (must be ~0 for anything animated), plus the difference between
-   * frame 0 and the middle frame (must be > 0 if the node is supposed to move).
+   * THE loop test. Renders frames 0..N-1 of a loop of N frames with Loop ON and compares the WRAP step (frame N-1 -> frame 0) with the
+   * ordinary steps (k -> k+1). Frame N itself is never used for the seam: the clock wraps, so comparing frame 0 with "frame N" compares a
+   * frame with itself and proves nothing (the old check did exactly that).
+   * See `LoopReport`: `seam <= LOOP_SEAM_OK` and `motion > 0` is a real loop; `exact: true` additionally evaluates times beyond the
+   * loop and reports `exactDiff` (0 = bit-for-bit periodic).
    */
   loopCheck(
     type: string,
     params?: Record<string, unknown>,
-    inputs?: Record<string, ImageValue | MaskValue | number>,
-  ): Promise<{ seam: number; motion: number }>;
+    inputs?: Record<string, HarnessInput>,
+    opts?: LoopCheckOptions,
+  ): Promise<LoopReport>;
 }
 
 const nullHost: Host = {
@@ -153,9 +207,9 @@ export async function harness(extraDefs: AnyNodeDef[] = [], host: Host = nullHos
     graph = added.graph;
     for (const [port, value] of Object.entries(inputs)) {
       for (const v of Array.isArray(value) ? value : [value]) {
-        const srcType = typeof v === 'number' ? valueSource(v) : source(v);
-        const s = addNode(graph, registry, srcType);
-        graph = connect(s.graph, registry, { node: s.node.id, port: 'out' }, { node: added.node.id, port });
+        const srcType = typeof v === 'number' ? valueSource(v) : isNodeInput(v) ? v.node : source(v);
+        const s = addNode(graph, registry, srcType, { x: 0, y: 0 }, isNodeInput(v) ? v.params : undefined);
+        graph = connect(s.graph, registry, { node: s.node.id, port: isNodeInput(v) ? Object.keys(registry.get(srcType)!.outputs)[0] : 'out' }, { node: added.node.id, port });
       }
     }
     const outputs: Record<string, Value | null> = {};
@@ -224,21 +278,66 @@ export async function harness(extraDefs: AnyNodeDef[] = [], host: Host = nullHos
       for (let i = 0; i < pa.length; i++) sum += Math.abs(pa[i] - pb[i]);
       return sum / pa.length;
     },
-    loopCheck: async (type, params = {}, inputs = {}) => {
-      const project = { fps: 10, duration: 2, loop: true, width: 64, height: 64 };
-      const first = await run(type, params, inputs, { seconds: 0, project });
-      const key = Object.keys(first).find((k) => first[k] && typeof first[k] === 'object' && 'texture' in (first[k] as object));
-      if (!key) throw new Error('loopCheck(): node has no image output');
-      const a = await gpu.read(first[key] as ImageValue, false);
-      const mid = await gpu.read((await run(type, params, inputs, { seconds: 1, project }))[key] as ImageValue, false);
-      const end = await gpu.read((await run(type, params, inputs, { seconds: 2, project }))[key] as ImageValue, false);
-      let seam = 0;
-      let motion = 0;
-      for (let i = 0; i < a.length; i++) {
-        seam += Math.abs(a[i] - end[i]);
-        motion += Math.abs(a[i] - mid[i]);
+    loopCheck: async (type, params = {}, inputs = {}, opts = {}) => {
+      const frames = Math.max(2, Math.round(opts.frames ?? 20));
+      const fps = opts.fps ?? 10;
+      const sz = typeof opts.size === 'number' ? { width: opts.size, height: opts.size } : (opts.size ?? { width: 64, height: 64 });
+      const project = { fps, duration: frames / fps, loop: true, ...sz, referenceSide: Math.min(sz.width, sz.height), ...opts.project };
+      type Shot = Uint8ClampedArray | Float32Array | number;
+      let key = opts.port ?? '';
+      const grab = async (f: number): Promise<Shot> => {
+        const out = await run(type, params, inputs, { seconds: f / fps, project });
+        if (!key) {
+          key = Object.keys(out).find((k) => out[k] && typeof out[k] === 'object' && 'texture' in (out[k] as object)) ?? Object.keys(out).find((k) => typeof out[k] === 'number') ?? '';
+          if (!key) throw new Error('loopCheck(): node has no picture or number output');
+        }
+        const v = out[key];
+        if (typeof v === 'number') return v;
+        if (v && typeof v === 'object' && 'texture' in v) return gpu.read(v as ImageValue, false);
+        if (Array.isArray(v) && v.every((n) => typeof n === 'number')) return Float32Array.from(v as number[]);
+        throw new Error(`loopCheck(): output "${key}" is neither a picture, a number nor a vector`);
+      };
+      const dist = (a: Shot, b: Shot): number => {
+        if (typeof a === 'number' || typeof b === 'number') return Math.abs((a as number) - (b as number));
+        let s = 0;
+        for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+        return s / a.length;
+      };
+      const maxDist = (a: Shot, b: Shot): number => {
+        if (typeof a === 'number' || typeof b === 'number') return Math.abs((a as number) - (b as number));
+        let m = 0;
+        for (let i = 0; i < a.length; i++) m = Math.max(m, Math.abs(a[i] - b[i]));
+        return m;
+      };
+      const shots: Shot[] = [];
+      for (let f = 0; f < frames; f++) shots.push(await grab(f));
+      const steps: number[] = [];
+      for (let f = 0; f < frames; f++) steps.push(dist(shots[f], shots[(f + 1) % frames]));
+      const wrap = steps[frames - 1];
+      const ord = steps.slice(0, frames - 1);
+      const sorted = [...ord].sort((x, y) => x - y);
+      const typical = sorted[Math.floor(sorted.length / 2)];
+      const max = sorted[sorted.length - 1];
+      const mean = ord.reduce((x, y) => x + y, 0) / ord.length;
+      let floor = STEP_FLOOR;
+      if (!(shots[0] instanceof Uint8ClampedArray)) {
+        const vals = shots.flatMap((x) => (typeof x === 'number' ? [x] : [...x]));
+        floor = Math.max(1e-9, (Math.max(...vals) - Math.min(...vals)) * 1e-3);
       }
-      return { seam: seam / a.length, motion: motion / a.length };
+      const seam = wrap / Math.max(max, floor);
+      let motion = 0;
+      for (let f = 1; f < frames; f++) motion = Math.max(motion, dist(shots[0], shots[f]));
+      let wi = 0;
+      steps.forEach((d, i) => { if (d > steps[wi]) wi = i; });
+      const worst = { from: wi, to: (wi + 1) % frames, diff: steps[wi], wrap: wi === frames - 1 };
+      let exactDiff: number | undefined;
+      if (opts.exact) {
+        const k = Math.max(1, Math.floor(frames / 3));
+        exactDiff = Math.max(maxDist(await grab(frames), shots[0]), maxDist(await grab(frames + k), shots[k]));
+      }
+      const r4 = (n: number) => Math.round(n * 1e4) / 1e4;
+      const text = `${type} ${frames}f: wrap ${r4(wrap)} (${frames - 1}->0) vs ordinary median ${r4(typical)} max ${r4(max)} => seam ${r4(seam)}; worst step ${worst.from}->${worst.to} = ${r4(worst.diff)}${worst.wrap ? ' (THE WRAP)' : ''}; motion ${r4(motion)}${exactDiff === undefined ? '' : `; exact diff ${r4(exactDiff)}`}`;
+      return { frames, wrap, typical, mean, max, seam, motion, worst, steps, exactDiff, text };
     },
   };
 }

@@ -35,6 +35,10 @@ import { missingCapabilities } from '../lib/requirements';
 import { ProjectSettingsPanel } from './ProjectSettings';
 import { BakePanel } from './BakePanel';
 import { ProcessPanel } from './ProcessPanel';
+import { SplatTrainPanel } from './SplatTrainPanel';
+import { DepthAiPanel } from './DepthAiPanel';
+import { GroupPanel } from './GroupPanel';
+import { defOf, GROUP_TYPE } from '../../engine/group';
 import './inspector.css';
 
 export function Inspector() {
@@ -74,9 +78,11 @@ function MultiPanel({ count }: { count: number }) {
       <div className="rs-insp__sec">
         <div className="rs-insp__title">{count} nodes selected</div>
         <div className="rs-insp__actions">
-          <button className="rs-btn" onClick={() => ed.groupSelection()} title="Ctrl+G"><Icon name="frame" /> Group</button>
+          <button className="rs-btn" onClick={() => ed.groupNodes()} title="One node made of these nodes (Ctrl+G)"><Icon name="stack" /> Group</button>
+          <button className="rs-btn" onClick={() => ed.groupNodes('repeat')} title="A Repeat group: the nodes applied several times">Repeat</button>
+          <button className="rs-btn" onClick={() => ed.groupSelection()} title="Put them in a frame (Shift+G)"><Icon name="frame" /> Frame</button>
           <button className="rs-btn" onClick={() => ed.autoLayout(true)}><Icon name="layout" /> Arrange</button>
-          <button className="rs-btn" onClick={() => void bakeSelection(app)} title="Put a Cache / Bake node after these nodes and bake them: the nodes stop costing time and memory"><Icon name="save" /> Bake</button>
+          <button className="rs-btn" onClick={() => void bakeSelection(app)} title="Group these nodes and bake the group: they stop costing time and memory (Ctrl+Shift+B)"><Icon name="save" /> Bake</button>
           <button className="rs-btn" onClick={() => ed.duplicate()} title="Ctrl+D">Duplicate</button>
           <button className="rs-btn rs-btn--danger" onClick={() => ed.deleteSelection()} title="Delete"><Icon name="trash" /> Delete</button>
         </div>
@@ -111,17 +117,20 @@ function FramePanel({ id }: { id: string }) {
 
 function FrameColor({ color, onChange }: { color: string; onChange: (c: string) => void }) {
   const rgb = parseHex(color)?.rgb ?? [0.4, 0.5, 0.9];
-  return <ColorField large label="Custom colour" value={[rgb[0], rgb[1], rgb[2], 1]} onChange={(v) => onChange(toHex(v))} />;
+  return <ColorField large label="Custom color" value={[rgb[0], rgb[1], rgb[2], 1]} onChange={(v) => onChange(toHex(v))} />;
 }
 
 function NodePanel({ id }: { id: string }) {
   const { ed } = useApp();
-  const node = useEd((s) => s.graph.nodes.find((n) => n.id === id));
-  const def = useDef(node?.type ?? '');
-  const edges = useEd((s) => s.graph.edges);
-  const viewed = useEd((s) => s.viewedNodeId === id);
-  const nodes = useEd((s) => s.graph.nodes);
-  const error = usePlayer((s) => s.errors.get(id));
+  // the shown level (inside an open group: its nodes); viewer, errors and processes use the full path id
+  const node = useEd((s) => s.level.nodes.find((n) => n.id === id));
+  const regDef = useDef(node?.type ?? '');
+  const def = useMemo(() => defOf({ get: () => regDef }, node) ?? regDef, [regDef, node]);
+  const edges = useEd((s) => s.level.edges);
+  const fullId = useEd((s) => (s.path.length ? [...s.path, id].join('/') : id));
+  const viewed = useEd((s) => s.viewedNodeId === fullId);
+  const nodes = useEd((s) => s.level.nodes);
+  const error = usePlayer((s) => s.errors.get(fullId));
   const { io } = useApp();
   const missing = missingCapabilities(io, def);
   if (!node) return null;
@@ -160,7 +169,7 @@ function NodePanel({ id }: { id: string }) {
         <TextField large value={node.label ?? ''} placeholder={def.title} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
         <Description key={id} text={def.description} />
         <div className="rs-insp__actions">
-          <button className={`rs-btn${viewed ? ' is-on' : ''}`} onClick={() => ed.setViewed(id)} title="Show this node in the viewer">
+          <button className={`rs-btn${viewed ? ' is-on' : ''}`} onClick={() => ed.setViewed(fullId)} title="Show this node in the viewer">
             <Icon name={viewed ? 'eye' : 'eyeOff'} /> View
           </button>
           <button className={`rs-btn${node.bypass ? ' is-on' : ''}`} onClick={() => ed.toggleBypass(id)} title="Bypass (B)">
@@ -175,7 +184,7 @@ function NodePanel({ id }: { id: string }) {
           <div key={m.capability} className="rs-insp__req" role="note">
             <div className="rs-insp__reqhead"><Icon name="warn" size={16} /><strong>{m.label}</strong></div>
             <p>{m.explanation}</p>
-            <CopyCode text={m.command} />
+            {m.command && <CopyCode text={m.command} />}
           </div>
         ))}
         {def.cpu && <p className="rs-insp__warn">Heavy CPU node: may be slow on large images.</p>}
@@ -201,7 +210,7 @@ function NodePanel({ id }: { id: string }) {
           {(!wired.has('recordAudio') || !wired.has('recordMidi')) && <p className="rs-insp__hint">Nothing is wired into the record inputs yet: these buttons add the source node and connect it. Then arm a track (the ● button) and press Record.</p>}
         </div>
       )}
-      {node.type === 'cache' ? <BakePanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
+      {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
       {node.type === 'phone-motion' && !missing.length && <PhoneMotionPanel node={node} />}
       {def.playable && (
@@ -217,7 +226,7 @@ function NodePanel({ id }: { id: string }) {
       )}
       {Object.entries(def.inputs as InputSchema).filter(([, d]) => d.multi).map(([port, d]) => (
         <div key={port} className="rs-insp__sec">
-          <div className="rs-caps">{isLayerType(d.type) ? 'Layers' : 'Inputs'}: {d.label ?? port}</div>
+          <div className="rs-caps">{/^layers/i.test(d.label ?? '') ? d.label : `${isLayerType(d.type) ? 'Layers' : 'Inputs'}: ${d.label ?? port}`}</div>
           {isLayerType(d.type) && <p className="rs-insp__hint">Top of the list is drawn on top. Drag rows or use the arrows to reorder.</p>}
           <LayerList nodeId={id} port={port} type={d.type} variant="inspector" />
         </div>
@@ -231,7 +240,7 @@ function NodePanel({ id }: { id: string }) {
         label={(port) => {
           const e = wired.get(port);
           const src = e && nodes.find((n) => n.id === e.from.node);
-          return src ? `${src.label || ed.registry.get(src.type)?.title || src.type}` : '';
+          return src ? `${src.label || defOf(ed.registry, src)?.title || src.type}` : '';
         }}
         onDisconnect={(port) => {
           const e = wired.get(port);
@@ -282,17 +291,26 @@ function ParamGroups({
   }, [def, node.params]);
 
   if (!groups.length) return <div className="rs-insp__sec"><p className="rs-insp__hint">This node has no parameters.</p></div>;
+  // A node with a very long inspector (SDF 3D has about a hundred settings) starts with its groups closed, except the shape slots that are switched on.
+  const big = groups.reduce((n, g) => n + g.items.length, 0) > 60;
+  const autoClosed = (name: string): boolean => {
+    if (hasKind(def) && String(node.params.kind ?? 'auto') === 'auto' && AUTO_COLLAPSED.includes(name)) return true;
+    if (!big || !name) return false;
+    const slot = /^Shape (d+)$/.exec(name);
+    return slot ? node.params[`shape${slot[1]}`] === 'off' : true;
+  };
+  const isClosed = (name: string): boolean => collapsed[name] ?? autoClosed(name);
   return (
     <>
       {groups.map((g) => (
         <div key={g.name} className="rs-insp__sec">
           {g.name && (
-            <button className="rs-insp__group" onClick={() => setCollapsed((c) => ({ ...c, [g.name]: !(c[g.name] ?? (hasKind(def) && String(node.params.kind ?? 'auto') === 'auto' && AUTO_COLLAPSED.includes(g.name))) }))}>
-              <Icon name={(collapsed[g.name] ?? (hasKind(def) && String(node.params.kind ?? 'auto') === 'auto' && AUTO_COLLAPSED.includes(g.name))) ? 'chevronRight' : 'chevronDown'} size={12} />
+            <button className="rs-insp__group" aria-expanded={!isClosed(g.name)} onClick={() => setCollapsed((c) => ({ ...c, [g.name]: !(c[g.name] ?? autoClosed(g.name)) }))}>
+              <Icon name={isClosed(g.name) ? 'chevronRight' : 'chevronDown'} size={12} />
               <span className="rs-caps">{g.name}</span>
             </button>
           )}
-          {!(collapsed[g.name] ?? (hasKind(def) && node.params.kind === undefined ? AUTO_COLLAPSED.includes(g.name) : hasKind(def) && String(node.params.kind) === 'auto' && AUTO_COLLAPSED.includes(g.name))) &&
+          {!isClosed(g.name) &&
             g.items.map(([key, p]) => (
               <ParamControl key={key} node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} wiredFrom={label(key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(key)} onDisconnect={() => onDisconnect(key)} />
             ))}
@@ -366,7 +384,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
     }
   }
   return (
-    <div className={`rs-insp__row${stacked ? ' is-stacked' : ''}`} title={isCode ? undefined : p.hint} {...(sockType ? { 'data-insp-sock': '', 'data-node': node.id, 'data-port': keyName, 'data-dir': 'in', 'data-type': sockType } : {})}>
+    <div className={`rs-insp__row${stacked ? ' is-stacked' : ''}`} title={isCode ? undefined : p.hint} data-param-node={node.id} data-param-key={keyName} {...(sockType ? { 'data-insp-sock': '', 'data-node': node.id, 'data-port': keyName, 'data-dir': 'in', 'data-type': sockType } : {})}>
       <label className="rs-insp__label">
         <button className={`rs-insp__pin${pinned ? ' is-on' : ''}`} aria-pressed={pinned} title={pinned ? 'Shown on the node: click to hide' : 'Show on the node'} onClick={() => onPin(!pinned)}><Icon name="pin" size={12} /></button>
         {sockType && <span className={`rs-insp__dot rs-sock--${sockType}`} title="Drag a wire from a node's output onto this row to drive it" />}

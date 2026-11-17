@@ -37,7 +37,7 @@ export default defineNode({
     thickness: { type: 'number', default: 24, min: 0, max: 1000, unit: 'px', label: 'Thickness', group: 'Shape', hint: 'Ring thickness or line thickness.', visibleIf: (p) => p.kind === 'ring' || p.kind === 'line' },
     fill: { type: 'color', default: [1, 0.55, 0.25, 1], label: 'Fill color', group: 'Look' },
     stroke: { type: 'color', default: [1, 1, 1, 1], label: 'Outline color', group: 'Look' },
-    strokeWidth: { type: 'number', default: 0, min: 0, max: 500, unit: 'px', label: 'Outline width', group: 'Look', hint: 'Centred on the shape edge. 0 = no outline.' },
+    strokeWidth: { type: 'number', default: 0, min: 0, max: 500, unit: 'px', label: 'Outline width', group: 'Look', hint: 'Centerd on the shape edge. 0 = no outline.' },
     soft: { type: 'number', default: 0, min: 0, max: 500, unit: 'px', label: 'Soft edge', group: 'Look', hint: '0 = a crisp 1px antialiased edge.' },
   },
   summary: (p) => `${p.kind}${p.kind === 'polygon' || p.kind === 'star' ? ` (${p.sides})` : ''} at ${p.x.toFixed(2)}, ${p.y.toFixed(2)}`,

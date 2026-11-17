@@ -128,7 +128,7 @@ export default defineNode({
     sharpness: { type: 'number', default: 0.3, min: -1, max: 1, step: 0.01, label: 'Detailed = nearer', group: 'Heuristic' },
     saturation: { type: 'number', default: 0.25, min: -1, max: 1, step: 0.01, label: 'Saturated = nearer', group: 'Heuristic' },
     brightness: { type: 'number', default: 0, min: -1, max: 1, step: 0.01, label: 'Brighter = nearer', group: 'Heuristic', hint: 'Negative: darker is nearer (hazy distance).' },
-    softness: { type: 'number', default: 0.02, min: 0, max: 0.2, step: 0.005, label: 'Boundary softness', hint: 'Depth range over which neighbouring slices cross-fade.' },
+    softness: { type: 'number', default: 0.02, min: 0, max: 0.2, step: 0.005, label: 'Boundary softness', hint: 'Depth range over which neighboring slices cross-fade.' },
     grow: { type: 'number', default: 3, min: 0, max: 100, step: 0.5, unit: 'px', label: 'Grow holes', hint: 'How far past a nearer slice the fill starts.' },
     smoothness: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Fill smoothness' },
     texture: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Fill texture' },

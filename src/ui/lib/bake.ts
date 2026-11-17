@@ -6,6 +6,7 @@ import type { Registry } from '../../engine/define';
 import { addNode, connect, groupOutputs } from '../../engine/graph';
 import type { Edge, GraphDoc, NodeInstance } from '../../engine/types';
 import { nodeRect } from './layout';
+import { GROUP_TYPE } from '../../engine/group';
 
 export const CACHE_TYPE = 'cache';
 
@@ -77,6 +78,8 @@ export function servesBake(node: NodeInstance, deps: { assetExists(id: string): 
  * A node that also feeds something live is not frozen (it is still being calculated). Nodes without outgoing wires are not frozen.
  */
 export function frozenNodes(graph: GraphDoc, serving: ReadonlySet<string>): Set<string> {
+  // a baked group serves every output from the store: nothing wired into it (any port) is calculated
+  const groups = new Set(graph.nodes.filter((n) => n.type === GROUP_TYPE && serving.has(n.id)).map((n) => n.id));
   const out = new Map<string, Edge[]>();
   for (const e of graph.edges) {
     const l = out.get(e.from.node);
@@ -90,7 +93,7 @@ export function frozenNodes(graph: GraphDoc, serving: ReadonlySet<string>): Set<
     if (depth > 500) return false;
     memo.set(id, false); // cycles never freeze
     const edges = out.get(id) ?? [];
-    const ok = edges.length > 0 && edges.every((e) => (serving.has(e.to.node) && e.to.port === 'image') || frozen(e.to.node, depth + 1));
+    const ok = edges.length > 0 && edges.every((e) => (serving.has(e.to.node) && (e.to.port === 'image' || groups.has(e.to.node))) || frozen(e.to.node, depth + 1));
     memo.set(id, ok);
     return ok;
   };

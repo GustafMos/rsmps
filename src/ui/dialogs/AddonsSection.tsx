@@ -61,18 +61,19 @@ function Card({ a, io }: { a: AddonInfo; io: Io }) {
       </div>
       <p className="rs-addon__meta">
         {a.id === 'ffmpeg'
-          ? 'FFmpeg (optional): enables ProRes-compatible export and video with transparency. FFmpeg is separate software under its own licence; RSMPS does not include it.'
+          ? 'FFmpeg (optional): enables ProRes-compatible export and video with transparency. FFmpeg is separate software under its own license; RSMPS does not include it.'
           : a.description}
       </p>
+      {a.notice && <p className="rs-addon__meta rs-addon__notice" role="note">{a.notice}</p>}
       {a.state === 'installed' && a.installed && <p className="rs-addon__meta">In use: {SOURCE[a.installed.source]}.</p>}
       {d ? (
         <>
           <p className="rs-addon__meta">
-            Downloaded from {d.host} · {d.sizeLabel} · Licence: {d.license.name}
+            Downloaded from {d.host} · {d.sizeLabel} · License: {d.license.name}
           </p>
           <div className="rs-addon__links">
             {a.homepage && <a href={a.homepage} target="_blank" rel="noopener noreferrer">{a.name} website</a>}
-            {d.license.url && <a href={d.license.url} target="_blank" rel="noopener noreferrer">Licence</a>}
+            {d.license.url && <a href={d.license.url} target="_blank" rel="noopener noreferrer">License</a>}
           </div>
           <p className="rs-addon__meta">Verified by checksum before use.</p>
         </>
@@ -95,7 +96,7 @@ function Card({ a, io }: { a: AddonInfo; io: Io }) {
         ) : (
           <>
             {d && a.state !== 'installed' && <button className="rs-btn rs-btn--primary" disabled={busy} onClick={() => void run(() => io.addons.install(a.id), 'Nothing was downloaded.')}>Install</button>}
-            {a.canLocate && <button className="rs-btn" disabled={busy} onClick={() => void run(() => io.addons.locate(a.id), '')}>Use an FFmpeg already on this computer…</button>}
+            {a.canLocate && <button className="rs-btn" disabled={busy} onClick={() => void run(() => io.addons.locate(a.id), '')}>{a.id === 'ffmpeg' ? 'Use an FFmpeg already on this computer…' : `Locate ${a.name}…`}</button>}
             {a.state === 'installed' && <button className="rs-btn rs-btn--danger" disabled={busy} onClick={() => void run(() => io.addons.remove(a.id), '')}>Remove</button>}
           </>
         )}
@@ -122,7 +123,16 @@ export function AddonsSection() {
           No add-ons could be listed. <button className="rs-btn rs-btn--ghost" onClick={retry}>Try again</button>
         </p>
       ) : (
-        list.map((a) => <Card key={a.id} a={a} io={io} />)
+        list.map((a, i) => (
+          <div key={a.id}>
+            {a.group === 'splat-train' && list[i - 1]?.group !== 'splat-train' && (
+              <p className="rs-dlg__note">
+                <strong>For Splat from Video</strong>: COLMAP and Brush are separate, large programs that run on your computer. The node needs both (COLMAP or COLMAP (NVIDIA), plus Brush). Nothing is downloaded until you press Install.
+              </p>
+            )}
+            <Card a={a} io={io} />
+          </div>
+        ))
       )}
     </div>
   );

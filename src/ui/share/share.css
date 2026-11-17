@@ -1,0 +1,6 @@
+.rs-share { display: flex; flex-direction: column; gap: var(--s-3); font-size: var(--fs-md); line-height: 1.5; }
+.rs-share p { margin: 0; }
+.rs-share__facts { margin: 0; padding-left: var(--s-5); color: var(--text-dim); font-size: var(--fs-sm); }
+.rs-share__btns { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rs-share__size { color: var(--text-faint); font-size: var(--fs-xs); }
+.rs-share__size.is-warn, .rs-share__warn { color: var(--yellow); }

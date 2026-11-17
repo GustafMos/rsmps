@@ -17,7 +17,7 @@ export default defineNode({
   title: 'Region Trails',
   category: 'track',
   description:
-    'Draws motion trails behind tracked regions: a fading line, dots or ghost boxes through where each region was over the last few frames. Use Track first so each object keeps one id and one colour. In a looping project the trail wraps around the loop.',
+    'Draws motion trails behind tracked regions: a fading line, dots or ghost boxes through where each region was over the last few frames. Use Track first so each object keeps one id and one color. In a looping project the trail wraps around the loop.',
   keywords: ['trail', 'path', 'motion', 'history', 'streak', 'ghost', 'regions', 'follow'],
   inputs: {
     image: { type: 'image', required: true, label: 'Size from' },

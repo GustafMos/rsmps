@@ -17,6 +17,7 @@ import type {
 } from './types';
 import type { Registry } from './define';
 import { upstream } from './graph';
+import { defOf, nodeAtPath, PATH_SEP, updateNodeAtPath } from './group';
 
 /** Reserved param that holds the result handle of a node whose process has no `handle` adapter of its own. */
 export const PROCESS_PARAM = '__process';
@@ -44,11 +45,12 @@ export function processParamsPatch(def: AnyNodeDef, result: ProcessResult | null
 
 /** Pure: the graph with `result` written into the node (null clears it). */
 export function withProcessResult(graph: GraphDoc, registry: Registry, nodeId: string, result: ProcessResult | null): GraphDoc {
-  const node = graph.nodes.find((n) => n.id === nodeId);
-  const def = node && registry.get(node.type);
+  // `nodeId` may be a path inside groups (`group/inner`); a group's own handle is its bake.
+  const node = nodeAtPath(graph, nodeId);
+  const def = defOf(registry, node);
   if (!node || !def?.process) return graph;
   const patch = processParamsPatch(def, result);
-  return { ...graph, nodes: graph.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, ...patch } } : n)) };
+  return updateNodeAtPath(graph, nodeId, (n) => ({ ...n, params: { ...n.params, ...patch } }));
 }
 
 /** Every stored item still exists in the store (the host can answer for its id). */
@@ -120,7 +122,10 @@ export function pendingProcesses(
   registry: Registry,
   statusOf: (nodeId: string) => ProcessStatus | null,
   outputs: readonly string[] = [],
+  /** The document as the engine evaluates it (`Engine.flatView`): with groups, inner processes are listed by path. */
+  flat?: (graph: GraphDoc) => GraphDoc,
 ): PendingProcess[] {
+  if (flat) graph = flat(graph);
   const outs = outputs.length ? [...outputs] : graph.nodes.filter((n) => registry.get(n.type)?.category === 'output' && !n.bypass && n.params.enabled !== false).map((n) => n.id);
   const inbound = new Map<string, string[]>();
   for (const e of graph.edges) {
@@ -137,7 +142,7 @@ export function pendingProcesses(
     const node = byId.get(id);
     if (!node) continue;
     needed.add(id);
-    const def = registry.get(node.type);
+    const def = defOf(registry, node);
     if (node.bypass === true && !def?.process) {
       for (const from of inbound.get(id) ?? []) stack.push(from);
       continue;
@@ -152,7 +157,7 @@ export function pendingProcesses(
   const out: PendingProcess[] = [];
   for (const id of needed) {
     const node = byId.get(id)!;
-    const def = registry.get(node.type);
+    const def = defOf(registry, node);
     if (!def?.process || node.bypass) continue;
     const st = statusOf(id);
     if (!st || st.state === 'done') continue;
@@ -167,7 +172,25 @@ export function pendingProcesses(
 /** Process nodes of a graph in document order (for "Process selected nodes" and the panels). */
 export function processNodes(graph: GraphDoc, registry: Registry, ids?: Iterable<string>): NodeInstance[] {
   const set = ids ? new Set(ids) : null;
-  return graph.nodes.filter((n) => (!set || set.has(n.id)) && !!registry.get(n.type)?.process);
+  return graph.nodes.filter((n) => (!set || set.has(n.id)) && !!defOf(registry, n)?.process);
+}
+
+/** Process nodes among the nodes at FULL path ids (`group/inner`), in the order given (the shown level's selection, mapped to paths). */
+export function processNodePaths(graph: GraphDoc, registry: Registry, ids: Iterable<string>): string[] {
+  const out: string[] = [];
+  for (const id of ids) if (defOf(registry, nodeAtPath(graph, id))?.process) out.push(id);
+  return out;
+}
+
+/** A readable name for a node by path: `Group name › Inner node` (just the node's name at the top level). */
+export function processLabel(graph: GraphDoc, registry: Registry, id: string): string {
+  const parts = id.split(PATH_SEP).filter((x) => !x.startsWith('~'));
+  const names: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const n = nodeAtPath(graph, parts.slice(0, i + 1).join(PATH_SEP));
+    names.push(n ? n.label || defOf(registry, n)?.title || n.type : parts[i]);
+  }
+  return names.join(' › ');
 }
 
 /** Nodes upstream of `nodeId` that have a process and still need running, deepest first (the order to run them in). */
@@ -180,14 +203,12 @@ export function processOrder(graph: GraphDoc, registry: Registry, nodeIds: reado
     if (seen.has(id) || !want.has(id)) return;
     seen.add(id);
     for (const e of graph.edges) if (e.to.node === id) visit(e.from.node);
-    if (registry.get(byType(graph, id))?.process) order.push(id);
+    if (defOf(registry, graph.nodes.find((n) => n.id === id))?.process) order.push(id);
   };
   for (const id of nodeIds) visit(id);
   return order;
 }
-function byType(graph: GraphDoc, id: string): string {
-  return graph.nodes.find((n) => n.id === id)?.type ?? '';
-}
+
 
 /* ----------------------------------- the placeholder card ----------------------------------- */
 

@@ -20,7 +20,7 @@ const ASPECTS = [
 ];
 
 const GUIDE_LABEL: Record<FrameGuide, string> = {
-  cross: 'Centre cross',
+  cross: 'Center cross',
   thirds: 'Thirds',
   safe: 'Safe area',
   grid: 'Light grid',

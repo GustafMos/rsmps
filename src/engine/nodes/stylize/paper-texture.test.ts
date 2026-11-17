@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
-import { wholeCyclePoses } from '../../lib/boil';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 const speckle = (x: number, y: number): [number, number, number, number] => {
   const v = 150 + (((x * 7 + y * 13) % 5) * 20);
@@ -57,14 +56,19 @@ describe('paper-texture', () => {
     expect(await t.diff(a, b)).toBeGreaterThan(1);
     expect(await t.diff(a, c)).toBeLessThan(0.01);
     const still = await t.loopCheck('paper-texture', { amount: 1, boil: 0.1, boilPoses: 4 }, { image: img, texture: tex });
-    expect(still.seam).toBeLessThan(0.01);
+    expect(still.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(still.motion).toBeGreaterThan(0);
   });
 
-  it('wholeCyclePoses reduces the pose count to a divisor of the loop', () => {
-    expect(wholeCyclePoses(24, 5)).toBe(4);
-    expect(wholeCyclePoses(24, 12)).toBe(12);
-    expect(wholeCyclePoses(13, 5)).toBe(1);
-    expect(wholeCyclePoses(7, 7)).toBe(7);
+  it('boils through every pose and still closes over a loop that no pose count divides', async () => {
+    const t = await harness();
+    const img = t.fromFn(24, 24, (x, y) => [x * 10, y * 10, 80, 255]);
+    const tex = t.fromFn(16, 16, (x, y) => [((x * 53 + y * 29) % 255) | 0, 120, 200, 255]);
+    // 13 frames (prime), 5 poses: used to collapse to ONE pose (no boil at all)
+    const r = await t.loopCheck('paper-texture', { amount: 1, boil: 0.1, boilPoses: 5 }, { image: img, texture: tex }, { frames: 13, fps: 8, size: 24 });
+    expect(r.motion, r.text).toBeGreaterThan(0.1);
+    // the jump between two random poses varies in size from pair to pair, so the wrap may be the largest of 12 by a little
+    expect(r.seam, r.text).toBeLessThan(2);
+    expect(r.worst.diff).toBeLessThan(14);
   });
 });

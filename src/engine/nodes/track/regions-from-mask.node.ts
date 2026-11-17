@@ -7,7 +7,7 @@ export default defineNode({
   title: 'Regions From Mask',
   category: 'track',
   description:
-    'Turns any mask into regions: every separate white island becomes a region with a box. This makes every mask node (subject, colour key, painted mask...) a detector you can track and decorate.',
+    'Turns any mask into regions: every separate white island becomes a region with a box. This makes every mask node (subject, color key, painted mask...) a detector you can track and decorate.',
   keywords: ['mask', 'regions', 'detect', 'blobs', 'islands', 'connected', 'components', 'boxes', 'subject'],
   cpu: true,
   inputs: { mask: { type: 'mask', required: true, label: 'Mask' } },

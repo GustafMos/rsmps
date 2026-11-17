@@ -7,7 +7,7 @@ export default defineNode({
   title: 'RGB Delay',
   category: 'filter',
   description:
-    'Splits the colour channels in time and space: red from a moment earlier, blue from a moment later, each optionally nudged sideways. Anything that moves gets a rainbow-edged time smear; a still picture only gets the spatial split.',
+    'Splits the color channels in time and space: red from a moment earlier, blue from a moment later, each optionally nudged sideways. Anything that moves gets a rainbow-edged time smear; a still picture only gets the spatial split.',
   keywords: ['chromatic', 'rgb split', 'time offset', 'channel delay', 'glitch', 'smear', 'color fringe', 'temporal', 'anaglyph', 'misregistration'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

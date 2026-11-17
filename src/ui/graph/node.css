@@ -128,3 +128,14 @@
 .rs-sock--in:not(.is-wired) { background: var(--bg-2); }
 .rs-node__req { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 var(--s-1); margin-right: 2px; font-size: var(--fs-xs); color: var(--yellow); background: #f5c5421f; border: 1px solid #f5c54266; border-radius: var(--r); white-space: nowrap; cursor: default; }
 .rs-slide .rs-node { transition: transform 120ms ease-out; }
+
+/* Group nodes: a node with a second card behind it (a stack) and the stack glyph in its header. */
+.rs-node--group { box-shadow: 0 0 0 1px var(--line-strong), 4px 4px 0 -1px var(--bg-3), 4px 4px 0 0 var(--line-strong), 7px 7px 0 rgba(0, 0, 0, 0.45); }
+.rs-node--group:hover { box-shadow: 0 0 0 1px var(--bg-5), 4px 4px 0 -1px var(--bg-3), 4px 4px 0 0 var(--bg-5), 7px 7px 0 rgba(0, 0, 0, 0.45); }
+.rs-node--group.has-error { box-shadow: 0 0 0 1px var(--danger), 4px 4px 0 -1px var(--bg-3), 4px 4px 0 0 var(--danger), 7px 7px 0 rgba(0, 0, 0, 0.45); }
+.rs-node__stack { color: var(--text); }
+/* The boundary of an open group: dashed, no category stripe. */
+.rs-node--boundary { background: var(--bg-1); box-shadow: 0 0 0 1px var(--line-strong); outline: 1px dashed var(--text-faint); outline-offset: 3px; }
+.rs-node--boundary .rs-node__head { background: var(--bg-3); box-shadow: inset 0 -2px 0 var(--text-faint); }
+.rs-node__newport { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 6px; padding: 0 12px; color: var(--text-faint); font-size: var(--fs-xs); }
+.rs-node__newport .rs-row__label--out { margin-left: auto; }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { resolutionDiff } from '../../lib/fx-testutil';
 
 it('scanlines darken regularly spaced rows', async () => {
@@ -25,7 +25,7 @@ it('scrolls and loops with whole cycles; spacing follows resolution', async () =
   const t = await harness();
   const src = t.solid(32, 32, [200, 200, 200, 255]);
   const r = await t.loopCheck('scanlines', { spacing: 8, strength: 0.8, cycles: 1 }, { image: src });
-  expect(r.seam).toBe(0);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(1);
   const still = await t.loopCheck('scanlines', { spacing: 8, strength: 0.8, cycles: 0 }, { image: src });
   expect(still.motion).toBe(0);

@@ -4,7 +4,8 @@ import { ModelError, type ParsedModel } from './gen-model';
 import { parseModelBytes } from './gen-model-load';
 import { PRELUDE } from '../gpu/prelude';
 import { deformUniforms, type DeformFeat, type DeformP, deformFeatures } from './gen-deform';
-import type { CameraValue, Host, ImageValue, NodeGpu, TimeInfo } from '../types';
+import { materialKey, materialRasterData, materialRasterGroup, materialRasterLayout, materialRasterWgsl, MATERIAL_RASTER_BYTES } from './gen-material';
+import type { CameraValue, Host, ImageValue, MaterialValue, NodeGpu, TimeInfo } from '../types';
 
 /**
  * 3D Model: renders an imported glTF (.glb / self-contained .gltf) or .obj mesh with the same camera system and lighting
@@ -97,8 +98,9 @@ struct Frame {
   dfB: vec4f,       // inflate, twist (rad per unit), bend, taper
   dfC: vec4f,       // morph, melt, explode, low-fi grid (cells across the screen, 0 = off)
   dfFlags: vec4f,   // bit set of the compiled-in features (0 = no deform at all)
+  objc: vec4f,      // object centre in the world (xyz) and object scale (w): the object-space frame of materials
 };
-struct Mat { color: vec4f, info: vec4f };  // info: alphaMode (0 opaque, 1 cutout), cutoff, hasTexture, 0
+struct Mat { color: vec4f, info: vec4f };  // info: alphaMode (0 opaque, 1 cutout), cutoff, hasTexture, has UV coordinates
 @group(0) @binding(0) var<uniform> fr: Frame;
 @group(0) @binding(1) var smpNearest: sampler;
 @group(0) @binding(2) var smpLinear: sampler;
@@ -346,6 +348,110 @@ function getPipelines(device: GPUDevice, gpu: NodeGpu): Promise<Pipelines> {
   return p;
 }
 
+/** Fragment stage of a model with a Material: the base colour / texture logic of `fs`, then the family's `matShade` (lib/gen-material.ts). */
+const FS_MATERIAL = /* wgsl */ `
+@fragment fn fsMat(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4f {
+  var base = mt.color * i.col;
+  if (mt.info.z > 0.5) {
+    var t = textureSampleLevel(baseTex, smpLinear, i.uv, 0.0);
+    if (fr.opts.y > 0.5) { t = textureSampleLevel(baseTex, smpNearest, i.uv, 0.0); }
+    var rgb = vec3f(0.0);
+    if (t.a > 0.00001) { rgb = t.rgb / t.a; }
+    base = base * vec4f(rgb, t.a);
+  }
+  let mode = i32(fr.opts.x);
+  if (mode == 1) { base = base * fr.tint; }
+  if (mode == 2) { base = vec4f(fr.tint.rgb, base.a * fr.tint.a); }
+  if (mt.info.x > 0.5 && base.a < mt.info.y) { discard; }
+  base.a = select(1.0, fr.tint.a, mode != 0);
+  var V = normalize(fr.camPos.xyz - i.wpos);
+  if (i32(fr.camPos.w) == 0) { V = -fr.camFwd.xyz; }
+  var n = normalize(i.wnrm);
+  if (i32(fr.shade.w) == 1) {
+    n = normalize(cross(dpdx(i.wpos), dpdy(i.wpos)));
+    if (dot(n, V) < 0.0) { n = -n; }
+  } else if (!front) {
+    n = -n;
+  }
+  let t0 = fr.rot[0].xyz; let t1 = fr.rot[1].xyz; let t2 = fr.rot[2].xyz;
+  let wl = (i.wpos - fr.objc.xyz) / max(fr.objc.w, 1e-4);
+  let pl = vec3f(dot(t0, wl), dot(t1, wl), dot(t2, wl));
+  let nl = vec3f(dot(t0, n), dot(t1, n), dot(t2, n));
+  gMeshUv = vec3f(i.uv.x * 2.0 - 1.0, 1.0 - i.uv.y * 2.0, mt.info.w);
+  let dp1 = dpdx(i.wpos); let dp2 = dpdy(i.wpos); let du1 = dpdx(i.uv); let du2 = dpdy(i.uv);
+  let r1 = cross(dp2, n); let r2 = cross(n, dp1);
+  let tt = r1 * du1.x + r2 * du2.x;
+  let bb = -(r1 * du1.y + r2 * du2.y);
+  gMeshT = select(vec3f(0.0), tt / length(tt), length(tt) > 1e-12);
+  gMeshB = select(vec3f(0.0), bb / length(bb), length(bb) > 1e-12);
+  matSetup(fr.camRight.xyz, fr.camUp.xyz, fr.camFwd.xyz, t0, t1, t2);
+  let s = matShade(base.rgb, n, -V, 1.0, 1.0, pl, nl, i.clip.xy / mb.v[11].zw);
+  let a = clamp(base.a * s.a, 0.0, 1.0);
+  return vec4f(clamp(s.rgb, vec3f(0.0), vec3f(1.0)) * a, a);
+}
+`;
+
+interface MaterialPipes {
+  cull: GPURenderPipeline;
+  both: GPURenderPipeline;
+  layout: GPUBindGroupLayout;
+}
+const materialPipes = new WeakMap<GPUDevice, Map<string, Promise<MaterialPipes>>>();
+const MAX_MATERIAL_PIPES = 12;
+/** Number of material pipelines created so far (tests: a slider must not add one). */
+export const modelMaterialDebug = { pipelines: 0 };
+
+/** One pipeline pair per material STRUCTURE (model + wired pictures + flags): every slider is a uniform, so moving one compiles nothing. */
+function getMaterialPipelines(device: GPUDevice, m: MaterialValue, base: Pipelines): Promise<MaterialPipes> {
+  let byKey = materialPipes.get(device);
+  if (!byKey) materialPipes.set(device, (byKey = new Map()));
+  const key = materialKey(m);
+  let p = byKey.get(key);
+  if (p) {
+    byKey.delete(key); // refresh LRU position
+    byKey.set(key, p);
+    return p;
+  }
+  p = (async () => {
+    modelMaterialDebug.pipelines++;
+    const module = device.createShaderModule({ label: 'model-3d material ' + key, code: SHADER + materialRasterWgsl(m, 2, true) + FS_MATERIAL });
+    const info = await module.getCompilationInfo();
+    const errors = info.messages.filter((e) => e.type === 'error');
+    if (errors.length) throw new Error('model-3d material shader failed to compile: ' + errors.map((e) => 'line ' + e.lineNum + ': ' + e.message).join('; '));
+    const layout = materialRasterLayout(device, m);
+    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [base.frameLayout, base.matLayout, layout] });
+    const buffers: GPUVertexBufferLayout[] = [
+      {
+        arrayStride: 36,
+        attributes: [
+          { shaderLocation: 0, offset: 0, format: 'float32x3' },
+          { shaderLocation: 1, offset: 12, format: 'float32x3' },
+          { shaderLocation: 2, offset: 24, format: 'float32x2' },
+          { shaderLocation: 3, offset: 32, format: 'unorm8x4' },
+        ],
+      },
+    ];
+    const make = (cull: GPUCullMode) =>
+      device.createRenderPipeline({
+        label: 'model-3d material ' + cull,
+        layout: pipelineLayout,
+        vertex: { module, entryPoint: 'vs', buffers },
+        fragment: { module, entryPoint: 'fsMat', targets: [{ format: 'rgba8unorm' }] },
+        primitive: { topology: 'triangle-list', frontFace: 'ccw', cullMode: cull },
+        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+        multisample: { count: 4 },
+      });
+    return { cull: make('back'), both: make('none'), layout };
+  })();
+  byKey.set(key, p);
+  const entry = p;
+  p.catch(() => {
+    if (byKey!.get(key) === entry) byKey!.delete(key);
+  });
+  while (byKey.size > MAX_MATERIAL_PIPES) byKey.delete(byKey.keys().next().value as string);
+  return p;
+}
+
 function uploadModel(gpu: NodeGpu, key: ArrayBuffer, m: ParsedModel, wantWire: boolean): GpuModel {
   const device = gpu.device;
   let g = gpuData.get(key);
@@ -486,6 +592,7 @@ export async function renderModel(
   camera: CameraValue | null,
   textureOverride: ImageValue | null,
   deform: { p: DeformP; map: ImageValue | null } | null = null,
+  material: MaterialValue | null = null,
 ): Promise<ImageValue> {
   const out = ctx.gpu.alloc(size.width, size.height, size.unit ?? 1);
   const device = ctx.gpu.device;
@@ -565,6 +672,7 @@ export async function renderModel(
     mode, p.nearestTexture ? 1 : 0, 0, 0,
     ...rgba(p.wireColor),
     ...deformFrame(deform, p, fit, c, ctx),
+    p.posX, p.posY, p.posZ, p.objectScale,
   ]);
 
   // --- GPU resources ----------------------------------------------------
@@ -584,6 +692,14 @@ export async function renderModel(
   });
   const temp: GPUBuffer[] = [frameBuf];
   const matBinds: GPUBindGroup[] = [];
+  const mp = material ? await getMaterialPipelines(device, material, pl) : null;
+  let materialBind: GPUBindGroup | null = null;
+  if (material && mp) {
+    const mbuf = gpu.scratch(MATERIAL_RASTER_BYTES, GPUBufferUsage.UNIFORM, 'model-3d material frame');
+    device.queue.writeBuffer(mbuf, 0, materialRasterData(material, { light, ambient: p.ambient, cel: p.cel, steps: p.celSteps, width: W, height: H }));
+    temp.push(mbuf);
+    materialBind = materialRasterGroup(device, mp.layout, material, mbuf, pl.linear, (t) => gpu.view(t));
+  }
   for (const mat of model.materials) {
     let tex: GPUTexture | null = textureOverride ? textureOverride.texture : null;
     if (!tex && mat.texture && ctx.host.decodeImageBytes) {
@@ -591,7 +707,7 @@ export async function renderModel(
       tex = (await ctx.host.decodeImageBytes(mat.texture.data, mat.texture.mime))?.texture ?? null;
     }
     const ub = gpu.scratch(32, GPUBufferUsage.UNIFORM, 'model-3d material');
-    device.queue.writeBuffer(ub, 0, new Float32Array([...mat.baseColor, mat.alphaMode === 'opaque' ? 0 : 1, mat.alphaCutoff, tex ? 1 : 0, 0]));
+    device.queue.writeBuffer(ub, 0, new Float32Array([...mat.baseColor, mat.alphaMode === 'opaque' ? 0 : 1, mat.alphaCutoff, tex ? 1 : 0, model.hasUVs ? 1 : 0]));
     temp.push(ub);
     matBinds.push(
       device.createBindGroup({
@@ -617,8 +733,10 @@ export async function renderModel(
   rp.setIndexBuffer(gm.index, 'uint32');
   for (const g of model.groups) {
     const mat = model.materials[g.material];
-    rp.setPipeline(mat.doubleSided || p.backFaces ? pl.both : pl.cull);
+    const dbl = mat.doubleSided || p.backFaces;
+    rp.setPipeline(mp ? (dbl ? mp.both : mp.cull) : dbl ? pl.both : pl.cull);
     rp.setBindGroup(1, matBinds[g.material]);
+    if (materialBind) rp.setBindGroup(2, materialBind);
     rp.drawIndexed(g.count, 1, g.start);
   }
   if (p.wireframe && gm.wire) {

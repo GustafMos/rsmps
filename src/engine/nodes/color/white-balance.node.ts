@@ -12,7 +12,7 @@ export default defineNode({
   category: 'color',
   description:
     'Corrects colour cast in linear light with a real chromatic adaptation (Bradford or CAT16). Set the colour temperature (Kelvin) and tint, pick something that should be grey, or let it estimate the cast automatically.',
-  keywords: ['grade', 'white balance', 'wb', 'temperature', 'kelvin', 'tint', 'cast', 'neutral', 'grey world', 'colour temperature', 'color temperature', 'bradford', 'cat16', 'warm', 'cool', 'correct'],
+  keywords: ['grade', 'white balance', 'wb', 'temperature', 'kelvin', 'tint', 'cast', 'neutral', 'gray world', 'color temperature', 'color temperature', 'bradford', 'cat16', 'warm', 'cool', 'correct'],
   cpu: true,
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
@@ -36,14 +36,14 @@ export default defineNode({
       max: 12000,
       step: 10,
       label: 'Temperature',
-      hint: 'In kelvin. The colour temperature of the LIGHT in the scene, as in a raw converter: set 3200 for tungsten-lit footage and the picture turns cooler to compensate. 6500 leaves the picture alone. In the other modes this is an extra adjustment on top.',
+      hint: 'In kelvin. The color temperature of the LIGHT in the scene, as in a raw converter: set 3200 for tungsten-lit footage and the picture turns cooler to compensate. 6500 leaves the picture alone. In the other modes this is an extra adjustment on top.',
     },
     tint: { type: 'number', default: 0, min: -1, max: 1, step: 0.01, label: 'Tint', hint: 'Moves along the line perpendicular to the temperature locus (Duv). Positive = magenta, negative = green.' },
     neutral: {
       type: 'color',
       default: [0.5, 0.5, 0.5, 1],
       label: 'Neutral color',
-      hint: 'The colour of something that should be grey or white in the picture. It is mapped to neutral (equal R, G, B) and everything else follows.',
+      hint: 'The color of something that should be gray or white in the picture. It is mapped to neutral (equal R, G, B) and everything else follows.',
       visibleIf: (p) => p.mode === 'neutral',
     },
     estimate: {

@@ -6,7 +6,7 @@ export default defineNode({
   id: 'pixel-upscale',
   title: 'Pixel Upscale',
   category: 'pixel',
-  description: 'Enlarges by a whole number with nearest-neighbour sampling, so pixel art stays perfectly crisp.',
+  description: 'Enlarges by a whole number with nearest-neighbor sampling, so pixel art stays perfectly crisp.',
   keywords: ['enlarge', 'scale', 'nearest', 'integer', 'zoom', 'export'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

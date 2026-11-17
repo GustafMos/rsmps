@@ -83,7 +83,7 @@ export function jobLine(j: ProcessJob): string {
     case 'failed':
       return `${what} · failed: ${j.error ?? ''}`;
     case 'cancelled':
-      return `${what} · cancelled`;
+      return `${what} · canceled`;
     default:
       return `${what} · done`;
   }

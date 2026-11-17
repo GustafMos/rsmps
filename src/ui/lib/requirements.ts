@@ -12,6 +12,14 @@ const COPY: Record<Capability, { label: string; command: string; explain: (where
       return 'The app is running without its local server. This node needs it: start the app with npm run dev:lan, or use the desktop app.';
     },
   },
+  desktop: {
+    label: 'Desktop app only',
+    command: '',
+    explain: (where) => {
+      if (where === 'packaged') return 'The add-on service did not start in this build of the app. Restart the app; if it is still missing, please report it.';
+      return 'This node runs separate programs on your computer (COLMAP and Brush, optional add-ons), which a web page is not allowed to do. Use the RSMPS desktop app and install the add-ons in Plugins > Official add-ons.';
+    },
+  },
 };
 
 function where(): 'web' | 'packaged' | 'local' {

@@ -10,7 +10,7 @@ export default defineNode({
   id: 'despill',
   title: 'Despill',
   category: 'mask',
-  description: 'Removes the colour cast of a key colour (green or blue screen spill) from the image edges.',
+  description: 'Removes the color cast of a key color (green or blue screen spill) from the image edges.',
   keywords: ['spill', 'green screen', 'fringe', 'cast', 'chroma', 'decontaminate'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

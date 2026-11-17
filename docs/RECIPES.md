@@ -233,14 +233,35 @@ sockets: wire audio loudness into *Noise displace* and it pulses with the music.
 
 **Materials.** **Material** makes a surface look (matte, clay, plastic, metal, glass, toon, emissive, hologram, matcap, wire grid) from a colour, roughness, rim light and optional
 pictures: colour map, normal map, roughness map, emission map, matcap, a 360° environment for reflections. Wire its output into the **Material** input of 3D Object, Image to 3D
-or SDF 3D; one Material can feed several objects. Glass refracts a picture wired into *Background*. Hologram scanlines move in whole cycles per loop. Without a Material
-connected, the 3D nodes look exactly as before. (Custom 3D models and 3D Array do not take a Material yet.)
+SDF 3D, a custom model (an imported .glb / .gltf / .obj uses the model's own UVs for colour and normal maps and falls back to triplanar projection when it has none), 3D Array (every card is lit with its own
+normal and the Material's normal map; the light is set on the node) or **Material 2D** (below); one Material can feed several nodes. Glass refracts a picture wired into *Background*. Hologram scanlines move in whole
+cycles per loop. Without a Material connected, the 3D nodes look exactly as before.
 
 **Fog and depth of field.** Every 3D node has a **Depth** output: distance from the camera (in scene units) in all three colour channels, alpha 1 where the object is. Feed it to a
 **Gradient Map** or **Levels** to turn it into a mask, then blur or fade the picture with it. It is only rendered when something is wired to it.
 
 Cost (1920x1080, headless GPU, default settings, warm shader): 3D Object about 2 ms; Image to 3D 6-8 ms (about half is the 10-pass silhouette field); SDF 3D with two spheres about
 4 ms, 8 spheres about 9 ms; shadows add 3 ms, noise displacement 4 ms, High quality about doubles, an infinite 3-axis repeat is the most expensive thing here (about 20 ms).
+
+## Materials on flat pictures (Material 2D, Normal Map, Displace by Map)
+
+**Make a flat logo look like metal.** Put the logo on a transparent background (any color, black is fine), add **Material 2D** (Stylize) and wire a **Material** node (*Metal*) into its Material input.
+The logo's transparency is the object: it gets a rounded bevel (*Bevel width* 10-30 px, *Bevel profile* Round, Chisel, Pillow or Flat with edge) and real lighting from the Material: the top of the bevel reflects the sky,
+the bottom the ground, with a highlight from the light you aim with *Light angle* and *Light height*. Gold = Metal with a gold color; Plastic, Clay, Glass, Toon, Hologram and Wire grid (contour lines of the height) work the same way.
+*Color from: Automatic* uses the Material's color when one is wired (so a black logo becomes chrome) and the picture's own colors when none is. Wire a picture into **Environment** to reflect your own scene; **Fill light**, **Light color** and a
+soft **Shadow** (small distance = contact shadow, large = drop shadow) finish it. *Light sweep* 1 circles the light around the logo once per loop; nothing animates by default. The bevel needs one jump-flood distance field per
+render (about 11 small passes, roughly 3 ms at 1920x1080 for a re-lit still or a new video frame; *Field detail: Draft* is cheaper); sliders never compile anything.
+
+**Lit pixel sprites.** Pixelate the sprite (or use a sprite that carries a pixel grid) and wire it into **Material 2D**: lighting is computed per art pixel, so edges stay crisp. Turn on *Posterize light* with 3-4 *Light steps* for the
+console look (a "pixel bevel"), keep *Bevel width* around 1-2 art pixels, and use *Surface shape: Brightness* with *Fine detail* to light the sprite's own shading. For game assets or hand-lit looks, make the normals first:
+**Normal Map** turns the sprite (brightness), its silhouette (*Height from: Shape bevel*) or a height picture into a normal map, per art pixel, with *Tilt directions: 8 directions / 4 directions* for clean sprite normals. Wire it into the
+**Normal map** input of Material 2D (or of a Material node) and the light follows the relief. *Green channel* picks OpenGL (Y up, what Material 2D and most tools use) or DirectX (Y down); a map that looks lit from the wrong
+vertical side needs the other one. Material 2D also outputs the normal map and height it used (only rendered when something is wired to them).
+
+**Refract footage through a shape.** Wire the footage into Material 2D's **Background** (and into the Material node's Background if you like), put the shape (a logo on transparent) into Image, and use a *Glass* Material. Inside the shape
+the footage shows through, bent by the bevel (*Refraction* on the Material, *Depth* and *Bevel profile: Pillow* on Material 2D). For other bends use **Displace by Map**: its *Brightness slope* mode pushes pixels along the slope of any picture (wire
+Material 2D's **Height** output into it for a lens), *Red and green* is the classic displacement map (mid gray = no move), *Normal map* uses the tilt of a normal map, and *Optical flow* moves pixels along the motion of an Optical Flow node.
+*Prism split* separates the color channels for a glassy fringe, *Map scroll* slides the map in whole cycles for heat haze, and on pixel art *Snap to art pixels* keeps every move a whole number of art pixels.
 
 ## Steer a 3D object and the camera with your phone
 
@@ -279,12 +300,37 @@ Picture to Splats' *Capture camera*, and wire a second **3D Camera** (orbiting, 
 Cost (1920x1080, headless GPU, warm): Gaussian Splat 100k / 500k / 1M splats sorted with the camera still 2 / 9 / 14 ms, with the camera moving (re-sort every frame) 4 / 19 / 33 ms, Draft 2 / 14 / 14 ms. Picture to Splats at the default 640 across (230,400 splats) about 2 ms,
 921,600 splats about 3 ms, with the Depth output about 4 ms. Parsing a 1 M splat `.ply` (65 MB) takes about 0.35 s once per file.
 
+## Scan a scene from a phone video (Splat from Video, desktop app)
+
+1. Film a **20-60 second walk around a still, textured subject**: slow and steady, the camera always moving sideways (not just turning),
+   plenty of light, no zoom, locked exposure if your phone allows. Import the clip.
+2. Install **COLMAP** and **Brush** once in Plugins > Official add-ons (large downloads; nothing is fetched until you press Install).
+3. **Media In** > **Splat from Video**. Leave *Frames* at 80, *Quality preset* at **Draft** for a first look, press **Reconstruct** in the
+   inspector. The clip keeps playing while COLMAP and Brush run (Draft: a few minutes on a recent graphics card).
+4. Fly through it: wire a **3D Camera** into the node's *Camera* (orbit, dolly), or use *Spin Y*. Crop floaters with **Crop** and **Min opacity**.
+5. **Match-move:** wire the node's *Solved camera* output into another 3D node's *Camera* (3D Object, SDF 3D, Gaussian Splat) and composite it
+   over the original clip with **Merge**: the 3D object stays glued to the filmed scene. Wire it into the node's own *Camera* to see the
+   reconstructed scene from the original camera move.
+6. Happy with the cameras but want more detail: set *Quality preset* to **Normal** or **High** and Reconstruct again; with *Keep poses* on the
+   camera solving is skipped.
+
+Anything upstream applies before reconstruction (a Crop, a colour grade, a stabiliser), and a **photo set** works too: choose the photos in
+*Photos* instead of wiring a clip. What fails and why: docs/SPLATS.md.
+
 ## Give a photo depth (Depth from Picture)
 
 **Give a photo depth.** Wire a picture into **Depth from Picture**, then wire its **Depth** output into **Picture to Splats** (*Depth*), **Lens Blur** (*Depth*), **Depth Slice** (*Depth map*) or **Image to 3D** (*Depth map*, with *Relief* above 0). It is a fast guess made from cheap cues, not a measurement: white = near, black = far, the same convention every depth consumer reads, so nothing needs inverting.
 Start with a **Look** (Portrait, Landscape, Room, Graphic, Moving camera, Flat with subject), then dial the cue sliders (0 = off; they are relative weights). Wire **Preview** (a colored near / far tint over the picture) to see what it decided. In **Picture to Splats**, set *Near / Far distance* 3.5 / 5.5 and a slow camera move: the subject and the foreground now slide against the background instead of bending as one sheet.
 Fix mistakes by hand: paint a **Paint Mask** over what should be nearer and wire it to *Nearer paint* (or over what should be farther into *Farther paint*); its brush softness is the falloff. For video turn **Stabilize** on (the range is measured once, at *Analyze at*, so it never flickers) and, for a moving camera over a still scene, wire an **Optical Flow** node into *Flow* and raise *Motion*.
 A distance picture from a 3D node (its **Depth** output) is a different convention: put it through **Depth Convert** (*3D distance to depth map*) before it goes into Lens Blur, Depth Slice or Image to 3D. Picture to Splats reads it directly with *Depth picture is: From 3D nodes*.
+
+## Real depth for a clip (AI Depth)
+
+**Real depth for a clip.** **AI Depth** is the measured-looking sibling of Depth from Picture: a small neural model (Depth Anything V2 Small, Apache-2.0) that runs on your own GPU, nothing uploaded. It needs a one-time 50 MB download: open **Plugins**, find **AI models**, press **Download** (or press **Get the AI model** in the node's panel, which opens the same place). Nothing is fetched until you do.
+Wire the picture or clip into **AI Depth** and its **Depth** output into **Picture to Splats** (*Depth*), **Lens Blur** (*Depth*), **Depth Slice** (*Depth map*) or **Image to 3D** (*Depth map*). The output convention is exactly Depth from Picture's (white = near), so it is a drop-in, and until the model has run the node shows the quick Depth from Picture guess so the graph keeps working.
+Press **Estimate depth** once. It walks the clip, shows progress and the time left, and keeps the depth steady from frame to frame: the model's numbers float in scale and offset for every frame, so each frame is fitted onto the previous one on the pixels that did not change, and one range maps the whole clip to 0 to 1. The result is stored with the project (16 bit, no banding in Lens Blur) and used by exports; editing the picture before it, or *Model size*, *Every N frames* or *Smoothing in time*, makes it stale (it says so; nothing restarts by itself). *Near level*, *Far level* and *Invert* act on the stored depth and cost nothing.
+For a long clip set **Every N frames** to 2 to 4: the model runs on every Nth frame and the frames between are blended. **Model size** 392 is fastest, 518 is what the model was trained at, 700 adds a little fine detail. **Smoothing in time** blends neighbouring frames and backs off where a pixel changes fast; it has no motion tracking, so a fast-moving object is simply not smoothed. A still picture costs one model run.
+In **Picture to Splats** set *Near / Far distance* 3.5 / 5.5 and move the camera slowly: with real depth the foreground slides against the background. Speed on an RTX 3080: about 40 ms per frame at 518 on the GPU, about 3 s per frame on the processor if the browser has no WebGPU (the job says so). The command line cannot run the model: it uses the stored result, or stops with the list of processes an export still needs.
 
 ## Keep the look of the playback preview (Render Scale)
 
@@ -315,3 +361,106 @@ The **Subtitles** node (Generate) turns an `.srt` / `.vtt` file, or lines you ty
 **Letters filled with video.** Wire any picture into **Fill**: the letters show it (the outline and box keep their own colors). **Word colors** takes a palette: word *n* uses color *n* of it. **Text mask** outputs the letters' coverage; **Cue showing**, **Cue progress** and **Word index** are numbers for driving other nodes (a flash on every word, a zoom on the cue).
 
 Cost: each distinct word is drawn once into an atlas (with its distance field) per 24 captions of the file; playing a frame then costs one small instanced draw and no rasterising, whatever the file length (atlases are kept in a bounded cache, 8 pages / 128 MB). Known limits: emoji come out as single-color silhouettes, no letter spacing control (the host's text call has none), CJK text without spaces is one "word" per caption.
+
+## Game assets (sprite sheets, tiles, shared palettes)
+
+The whole guide, with the tile templates and metadata formats, is docs/GAME_ASSETS.md. The short recipes:
+
+**A sheet in, a clean sheet out.** Sprite Sheet In (grid or the JSON of Aseprite / TexturePacker) > Pixel Cleanup > Pixel Outline > Output kind Spritesheet. Set the project length to the number of cells divided by the frame rate and the project loop on; the Output writes a trimmed, packed, extruded sheet and the JSON.
+
+**Every sprite of a folder in one atlas.** Media In with all the sprites > look chain > Output: Export as Spritesheet, Sheet from All batch items, Sheet layout Packed, Trim frames, Extrude 1, Power of two, Metadata Aseprite (or Generic). One PNG, one JSON with a tag per file.
+
+**One palette for a character set.** Batch Palette: Sprites = the same files as Media In, Color count 16, press Extract shared palette. Wire its palette into Palette Lock (Snap) at the end of the look chain. Add a second Palette Lock in Report only mode behind it and the command line `--report json` lists the off-palette fraction of every exported file.
+
+**An outline that matches the sprite.** Pixel Outline, Color from Darker neighbour (selective outline), Corners 8-connected. For a drop-shadow style edge turn Top and Left off. A second outline in white gives a sticker look.
+
+**Normal-mapped sprites.** Sprite look chain > Normal Map (4 / 8 direction pixel-art normals) > the engine's lighting, or Material 2D with per-art-pixel lighting (see "Materials on flat pictures" above).
+
+**A seamless ground texture.** Make Seamless (Offset blend, or Pixel art on for hard dither) > Array (Grid, 3 x 3, Gap 0, Output size Same as input) to check the repeat. There is no separate Tile Preview node: Array does it, with a Brick offset for staggered tiles.
+
+**A terrain tileset and a painted map.** Draw the five pieces in a row (center, edge, outer corner, inner corner, single) > Autotile (47 tile blob) > a tileset PNG. Paint a white-on-black mask > Tileset Map with that tileset: the terrain picture with correct edges. Use the 16 tile edge layout for simple tilemaps.
+
+## Fall into a logo, recolored at each pass (Repeat group)
+
+The look: a logo that keeps appearing smaller and smaller inside itself, each copy in another color, like falling into it.
+
+1. **Media In** with your logo (a transparent PNG works best), then a **Transform** (scale 1) and a **Color Adjust** after it.
+2. Select the Transform and the Color Adjust and choose **Repeat** (right-click > Repeat, or the Repeat button in the inspector): they become one
+   Repeat group. In the inspector set **Mode** to *Accumulate* (every pass starts from the original logo and is laid over the passes before it),
+   **Count** 8, **Blend** *Normal*.
+3. Double-click the group to open it. Add an **Iteration** node (Math & Utility). Wire *Fraction* (0 for the first pass, 1 for the last) through a
+   **Remap** (0..1 to 1..0.15) into the Transform's *Scale*: each pass is smaller. Wire *Index* through a **Math** (multiply by 40) into the Color
+   Adjust's *Hue shift*: each pass is 40 degrees further round the color wheel.
+4. Right-click *Hue shift* (or any parameter you want to tweak from outside) and choose **Expose on group**; press Esc to close the group. The
+   exposed parameter now sits on the group node and can be wired or animated like any other.
+5. To make it fall: drive the Remap's output range with an **Animate** node (whole cycles), or wire an animated number into **Count** (each frame
+   unrolls that many passes; above 64 it is clamped and the node says so).
+
+Each pass is cached on its own, so changing something that only the later passes use re-renders only those. Save the group with **Save as node...**
+to find it in the add menu next time, or **Export node file...** to share it as a `.rsmps-node.json` file (drop it on the graph to add it).
+
+## Freeze a finished part of the graph (cache regions)
+
+When part of the graph is done, select those nodes and press **Ctrl+Shift+B** (Bake selection). They become one group named *Baked region* and its
+outputs are rendered once and stored: from then on nothing inside the group, and nothing that only feeds it, is calculated, and the region stays a
+single tidy node you can collapse, rename and reopen (double-click). Edit anything inside or before it and the group goes back to live calculation
+and says *stale* until you press Bake again; it never re-bakes by itself, and an export never waits for it (the live inside is exactly what it
+computes). Clear in the inspector deletes the stored frames. The older way, a Cache / Bake node after the nodes, is still there (right-click >
+Bake with Cache nodes) and old projects keep working.
+
+## Compare before and after (snapshots and A/B)
+
+1. View the node you are working on. Press **Shift+S** (or the **Snapshot** button): the picture on screen is stored in the strip at the bottom of the viewer (12 per project, the one you
+   used least goes first). The pixels are the ones shown, at the current preview scale; press Shift+R first for a full-resolution snapshot.
+2. Change something. Click the snapshot, then pick a mode under **A/B**: **Wipe** (drag the line; the angle slider tilts it), **Side by side**, **Toggle** (hold **Q** to flip to the snapshot),
+   **Onion** (blend) or **Difference** (black means identical; raise the gain to see small changes).
+3. **Node...** compares the view with another node at this frame. The first entry, "Selected node vs its input", answers "what did this node change" in one click. The other node is rendered once
+   (the viewer shows it for a moment), so it is exact when paused and not live during playback.
+
+Zoom and pan are linked in Wipe, Toggle, Onion and Difference. Side by side shows both pictures fitted into halves and refreshes the live side when paused.
+
+## Render several projects overnight (queue)
+
+1. Open each project and choose **Export > Add to render queue** (or File > Render queue... > Add... for other open tabs and saved `.rsmps.json` files).
+2. In the queue, switch outputs on or off per job, add a file name pattern if you want, duplicate a job to render the same project with other outputs, and reorder.
+3. Choose a folder once (Chromium browsers and the desktop app where available; otherwise each job downloads as one zip), then **Start queue**. Pause waits for the running job to finish.
+   Jobs are saved: after a crash or reload a job that was running shows "interrupted" and can be retried. Processes the outputs depend on run first, automatically.
+4. The app does not put the computer to sleep or shut it down when the queue ends.
+
+Without the window, the command line batches the same way: `npm run build:cli`, then one `node dist-cli/rsmps.mjs render project.rsmps.json --out folder` per project, for example in a
+shell loop or a scheduled task (see docs/CLI.md).
+
+## Share a look
+
+**File > Share this look...** saves the graph without media as a small `.rsmps.json` file, or copies a link. The link holds the whole look after the `#` (compressed), so it is never sent to a
+server; above about 8 kB it warns, and a look too large for a link is offered as a file. Whoever opens it sees a confirmation (node types, "contains a custom shader", plugins it needs) and gets
+a new tab with empty media slots labelled "Drop ... here". Media is never included; plugins are never installed for you.
+
+## Stop-motion
+
+See docs/LIVE_INPUT.md, "Stop-motion capture". Put a camera on a tripod, capture on twos, check the onion skin, then **Save and open** to animate the sequence in the graph.
+
+## Cut on the beat (Beat Detect)
+
+1. Put a clip with music on a **Media In** (or an Audio File for the soundtrack and a picture clip beside it). Add **Beat Detect** and wire the sound into its **Sound** input.
+2. For exact beats, choose the music under *Sound file* and press **Analyse sound file** once. Skip this to listen live instead.
+3. Two or more clips into **Switch**: wire **Beat count** into the Switch's *Index*. The picture changes on every beat. Use *Half time* (analysed) to change on every second beat.
+4. For a glitch on the snare: **Snare** into the Glitch node's *Trigger*. For a flash on the kick: **Kick** through a Remap Range into an Exposure or Color Adjust setting.
+5. Or right-click any number setting and use **React to sound**. The presets Pulse with the beat, Glitch on snare, Hue cycle per bar, Strobe cut on beats and Zoom punch per beat are built this way.
+6. If the cuts sit a little early or late, move *Offset ms*. If the tempo is half or double what you feel, use *Half time* or *Double time*.
+
+## Play samples from the keyboard (Sampler)
+
+1. Add a **Sampler** and wire a **MIDI Keyboard** (it plays from the computer keyboard) into its MIDI input; wire the Sampler's audio to an **Audio Output**.
+2. *Sound*: pick an audio file, or one you recorded with the Audio Timeline's record button (a take is an ordinary sound file).
+3. **Pitched hold** plays the sound across the keyboard around *Root note*; **Pitched one-shot** ignores the key release.
+4. **Slices** chops the sound into equal pieces on consecutive keys from *First key*: drop a drum loop in and play it back in any order.
+5. **One sound per key** is a drum kit: pick several files in the *Sound* list (the first is on *First key*, the next on the next key). *Choke group size* of 2 makes pairs of keys cut each other, for an open and a closed hat.
+6. *Reverse*, *Start / End*, the envelope and *Notes at once* shape every sound.
+
+## Perform with a MIDI controller and record it
+
+1. Right-click the settings you want under your hands (a Blur radius, a Hue shift, a Zoom) and pick **MIDI learn**, then move a knob. Open **Output > MIDI mappings...** to set ranges and curves.
+2. Open the **Output** window on the projector and press F in it. Use Alt+B for blackout and Alt+F to freeze it.
+3. Turn Loop on, choose **Record** next to a mapping, and play the knob for one pass of the loop. A **Keyframes** node appears, wired to the setting, with your movement as editable keys.
+4. Export as usual: the keyframes (or the values you set) are in the project, so the export matches what you played.

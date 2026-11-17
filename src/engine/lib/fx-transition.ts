@@ -46,7 +46,7 @@ export const transitionParams = {
   amount: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Strength', hint: 'How strong the warping, glow or glitch is.' },
   seed: { type: 'number', default: 1, min: 0, max: 9999, step: 1, integer: true, label: 'Seed' },
   center: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', step: 0.001, label: 'Center', hint: 'Where iris, clock, ripple, zoom and spin start.' },
-  edgeColor: { type: 'color', default: [1, 0.55, 0.1, 1], label: 'Edge / dip color', hint: 'Burn glow, flash tint and the colour to dip through.' },
+  edgeColor: { type: 'color', default: [1, 0.55, 0.1, 1], label: 'Edge / dip color', hint: 'Burn glow, flash tint and the color to dip through.' },
   lumaFrom: {
     type: 'enum',
     default: 'a',

@@ -7,7 +7,7 @@ export default defineNode({
   id: 'watercolor',
   title: 'Watercolor',
   category: 'stylize',
-  description: 'Soft painted look: flattened colour washes, darker pigment pooling at edges and a touch of paper grain.',
+  description: 'Soft painted look: flattened color washes, darker pigment pooling at edges and a touch of paper grain.',
   keywords: ['paint', 'painting', 'wash', 'artistic', 'paper', 'ink'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

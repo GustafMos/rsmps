@@ -1,0 +1,171 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Pulse with the beat",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 8,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop a clip with sound here"
+    },
+    {
+      "id": "beat",
+      "type": "beat-detect",
+      "x": 260,
+      "y": 260,
+      "params": {}
+    },
+    {
+      "id": "zoom",
+      "type": "remap",
+      "x": 520,
+      "y": 300,
+      "params": {
+        "fromMin": 0,
+        "fromMax": 1,
+        "toMin": 1,
+        "toMax": 1.1,
+        "clamp": true
+      },
+      "label": "Zoom on kick"
+    },
+    {
+      "id": "glow",
+      "type": "remap",
+      "x": 520,
+      "y": 520,
+      "params": {
+        "fromMin": 0,
+        "fromMax": 1,
+        "toMin": 0,
+        "toMax": 0.14,
+        "clamp": true
+      },
+      "label": "Brighten on kick"
+    },
+    {
+      "id": "xf",
+      "type": "transform",
+      "x": 780,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "ca",
+      "type": "color-adjust",
+      "x": 1040,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1300,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "audio"
+      },
+      "to": {
+        "node": "beat",
+        "port": "audio"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "beat",
+        "port": "kick"
+      },
+      "to": {
+        "node": "zoom",
+        "port": "value"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "beat",
+        "port": "kick"
+      },
+      "to": {
+        "node": "glow",
+        "port": "value"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "zoom",
+        "port": "value"
+      },
+      "to": {
+        "node": "xf",
+        "port": "scale"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "glow",
+        "port": "value"
+      },
+      "to": {
+        "node": "ca",
+        "port": "brightness"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "xf",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "xf",
+        "port": "image"
+      },
+      "to": {
+        "node": "ca",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "ca",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

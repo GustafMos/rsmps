@@ -6,7 +6,7 @@ export default defineNode({
   title: 'Region Info',
   category: 'track',
   description:
-    'Reads numbers from one region: centre position, size, score, id and how many regions there are. Wire them into any number setting (every number setting has a socket) so tracked positions can drive any effect.',
+    'Reads numbers from one region: center position, size, score, id and how many regions there are. Wire them into any number setting (every number setting has a socket) so tracked positions can drive any effect.',
   keywords: ['position', 'x', 'y', 'size', 'number', 'drive', 'value', 'centre', 'center', 'info', 'count'],
   inputs: { regions: { type: 'regions', required: true, label: 'Regions' } },
   outputs: {

@@ -97,7 +97,7 @@ export default defineNode({
   title: 'ASCII Art',
   category: 'stylize',
   description:
-    'Redraws the picture as a grid of text characters. Pick a character set (classic ramp, blocks, braille dots, digits, your own text), match by brightness or by the shape of each cell so edges become / \\ | and _, and colour it like the source, one ink, a palette or a green terminal. Also outputs the glyphs as a mask.',
+    'Redraws the picture as a grid of text characters. Pick a character set (classic ramp, blocks, braille dots, digits, your own text), match by brightness or by the shape of each cell so edges become / \\ | and _, and color it like the source, one ink, a palette or a green terminal. Also outputs the glyphs as a mask.',
   keywords: ['ascii', 'text', 'characters', 'terminal', 'matrix', 'console', 'braille', 'typewriter', 'letters', 'code', 'hacker', 'monospace', 'glyph'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' }, mask: { type: 'mask', label: 'Glyph mask' } },
@@ -144,7 +144,7 @@ export default defineNode({
         { value: 'shape', label: 'Shape' },
       ],
     },
-    edgeBoost: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Favour edges', group: 'Matching', visibleIf: (p) => p.match === 'shape', hint: 'Higher = in busy cells the line shape matters more than the average brightness.' },
+    edgeBoost: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Favor edges', group: 'Matching', visibleIf: (p) => p.match === 'shape', hint: 'Higher = in busy cells the line shape matters more than the average brightness.' },
     contrast: { type: 'number', default: 1.2, min: 0.2, max: 4, step: 0.01, label: 'Contrast', group: 'Matching' },
     gamma: { type: 'number', default: 1, min: 0.2, max: 3, step: 0.01, label: 'Gamma', group: 'Matching', hint: 'Above 1 uses fewer dense characters.' },
     brightness: { type: 'number', default: 0, min: -1, max: 1, step: 0.01, label: 'Brightness', group: 'Matching' },

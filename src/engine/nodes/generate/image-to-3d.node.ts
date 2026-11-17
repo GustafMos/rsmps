@@ -31,7 +31,7 @@ export default defineNode({
   title: 'Image to 3D',
   category: 'generate',
   description:
-    'Turns a picture into a solid object: the picture is its front (and back) face, transparent pixels are holes and it has thickness. Pixel-art sprites become chunky voxel-like objects, logos get coloured walls. Mix in a depth map for relief, or spin the silhouette around a vertical axis (Lathe) for a vase or bottle from a drawing. Works on animated and video input every frame; use the Camera node and the depth output for compositing.',
+    'Turns a picture into a solid object: the picture is its front (and back) face, transparent pixels are holes and it has thickness. Pixel-art sprites become chunky voxel-like objects, logos get colored walls. Mix in a depth map for relief, or spin the silhouette around a vertical axis (Lathe) for a vase or bottle from a drawing. Works on animated and video input every frame; use the Camera node and the depth output for compositing.',
   keywords: ['extrude', 'logo', 'sprite', 'voxel', 'relief', 'thickness', '2.5d', 'lathe', 'revolve', 'emboss', 'bas-relief', 'depth map', 'displace 3d', 'morph', 'melt', 'wobble', 'coin', 'card', '3d'],
   inputs: {
     image: { type: 'image', label: 'Picture', required: true },

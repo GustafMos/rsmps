@@ -14,10 +14,10 @@ const ACCEPT = 'image/*,video/*,audio/*,.mid,.midi,.glb,.gltf,.obj,.cube,.ply,.s
  * The left column: the media panel (or, collapsed, a slim rail) above the outputs list. It is the `<aside>` itself, so its width
  * (remembered per user) and the drag handle on its right edge live here. Files dropped anywhere on it are imported.
  */
-export function Sidebar() {
+export function Sidebar({ fill = false }: { fill?: boolean } = {}) {
   const app = useApp();
   const { io, ed } = app;
-  const collapsed = useMedia((s) => s.collapsed);
+  const collapsed = useMedia((s) => s.collapsed) && !fill; // fill: a drawer or tab that gives the panel the whole width, never the rail
   const width = useMedia((s) => s.width);
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
@@ -65,7 +65,7 @@ export function Sidebar() {
     <aside
       ref={aside}
       className={`rs-left${collapsed ? ' is-rail' : ''}${over ? ' is-drop' : ''}`}
-      style={{ width: collapsed ? RAIL_WIDTH : width }}
+      style={fill ? { width: '100%' } : { width: collapsed ? RAIL_WIDTH : width }}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault();
@@ -96,7 +96,7 @@ export function Sidebar() {
           </>
         )}
       </div>
-      {!collapsed && (
+      {!collapsed && !fill && (
         <div
           className="rs-left__grip"
           role="separator"

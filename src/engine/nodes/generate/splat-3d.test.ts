@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { ballCloud, manualCloud, quatAxisAngle, terrainCloud, torusCloud } from '../../lib/splat-gen';
 import { dropSplatBuffers, resetSplatDebug, splatDebug } from '../../lib/splat-render';
 import { projectRef, viewSetup, worldCovariance } from '../../lib/splat-math';
@@ -298,18 +298,19 @@ describe('look', () => {
   });
 
   it('view-dependent colour (SH degree 1) changes with the viewing direction and can be switched off', T, async () => {
+    // "Fade tiny splats" was the default when these numbers were set (now off by default); it only changes coverage, not the colour maths
     const c = manualCloud([{ p: [0, 0, 0], s: [0.5, 0.5, 0.5], rgb: [0.5, 0.5, 0.5], o: 1 }]);
     c.sh1 = new Float32Array([1, 0, 0, 0, 0, 0, 0, 0, 0]); // red: +1 on the y term
     putCloud(files, 'sh1', c);
-    const above = sample(await draw('sh1', { viewDependent: true }, { camera: cam({ projection: 'perspective', position: [0, 4, -4] }) }), 64, 48);
-    const below = sample(await draw('sh1', { viewDependent: true }, { camera: cam({ projection: 'perspective', position: [0, -4, -4] }) }), 64, 48);
+    const above = sample(await draw('sh1', { viewDependent: true, antialias: true }, { camera: cam({ projection: 'perspective', position: [0, 4, -4] }) }), 64, 48);
+    const below = sample(await draw('sh1', { viewDependent: true, antialias: true }, { camera: cam({ projection: 'perspective', position: [0, -4, -4] }) }), 64, 48);
     // dir (camera -> splat) has y = -0.707 from above: colour = 0.5 - C1 * y * k0 = 0.5 + 0.3455
     expect(above[0]).toBeGreaterThan(205);
     expect(above[0]).toBeLessThan(225);
     expect(below[0]).toBeGreaterThan(30);
     expect(below[0]).toBeLessThan(50);
     expect(above[1]).toBe(128);
-    const flat = sample(await draw('sh1', { viewDependent: false }, { camera: cam({ projection: 'perspective', position: [0, 4, -4] }) }), 64, 48);
+    const flat = sample(await draw('sh1', { viewDependent: false, antialias: true }, { camera: cam({ projection: 'perspective', position: [0, 4, -4] }) }), 64, 48);
     expect(flat[0]).toBe(128);
   });
 });
@@ -418,7 +419,7 @@ describe('outputs and edge cases', () => {
     const t = await H();
     putCloud(files, 'spin', torusCloud(3000, 15));
     const r = await t.loopCheck('splat-3d', { file: ['spin'], orientation: 'asis', rotX: 35, spinY: 1 });
-    expect(r.seam).toBeLessThan(0.01);
+    expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion).toBeGreaterThan(0.3);
   });
 });

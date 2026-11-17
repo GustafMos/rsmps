@@ -64,7 +64,7 @@ export default defineNode({
         [0.5, 0.8],
       ],
       label: 'Points',
-      hint: 'List of [x, y] pairs, travelled in order and evenly timed.',
+      hint: 'List of [x, y] pairs, traveled in order and evenly timed.',
       visibleIf: (p) => p.mode === 'path',
     },
     closed: { type: 'bool', default: true, label: 'Close the path', hint: 'The last point flows back to the first.', visibleIf: (p) => p.mode === 'path' },

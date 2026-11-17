@@ -93,7 +93,7 @@ function Curve({ a, b }: { a: number[]; b: number[] }) {
   const span = Math.max(1e-6, hi - lo);
   const path = (v: number[]) => v.map((x, i) => `${(i / (n - 1)) * 200},${38 - ((x - lo) / span) * 34}`).join(' ');
   return (
-    <svg width="200" height="40" viewBox="0 0 200 40" role="img" aria-label="Yaw before (grey) and after (blue) smoothing" style={{ border: '1px solid var(--line)', borderRadius: 6 }}>
+    <svg width="200" height="40" viewBox="0 0 200 40" role="img" aria-label="Yaw before (gray) and after (blue) smoothing" style={{ border: '1px solid var(--line)', borderRadius: 6 }}>
       <polyline points={path(a)} fill="none" stroke="currentColor" strokeOpacity={0.45} strokeWidth={1} />
       <polyline points={path(b)} fill="none" stroke="var(--accent, #38bdf8)" strokeWidth={1.5} />
     </svg>
@@ -158,7 +158,7 @@ export function PhoneMotionPanel({ node }: { node: NodeInstance }) {
             {st?.live ? `Receiving motion (${st.hz} per second)` : st?.caps ? 'Phone linked: press Start motion on the phone' : 'Waiting for the phone'}
           </div>
           {st?.caps && CAPS.map(([k, label]) => <div key={k} style={{ opacity: st.caps![k] ? 1 : 0.45 }}>{st.caps![k] ? '✓' : '–'} {label}{k === 'ar' && st.caps![k] ? ' (untested)' : ''}</div>)}
-          {st?.live && <div className="rs-insp__hint">Position comes from: {st.positionSource === 'ar' ? 'AR tracking' : st.positionSource === 'location' ? 'location (metres from where you started)' : 'the touch pad (two fingers = virtual dolly)'}</div>}
+          {st?.live && <div className="rs-insp__hint">Position comes from: {st.positionSource === 'ar' ? 'AR tracking' : st.positionSource === 'location' ? 'location (meters from where you started)' : 'the touch pad (two fingers = virtual dolly)'}</div>}
         </div>
       </div>
       <div className="rs-insp__actions">

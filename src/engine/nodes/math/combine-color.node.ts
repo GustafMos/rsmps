@@ -4,7 +4,7 @@ export default defineNode({
   id: 'combine-color',
   title: 'Combine Color',
   category: 'math',
-  description: 'Build a colour from red, green, blue and alpha numbers (0..1).',
+  description: 'Build a color from red, green, blue and alpha numbers (0..1).',
   keywords: ['rgb', 'make color', 'colour', 'compose', 'join'],
   inputs: {},
   outputs: { color: { type: 'color', label: 'Color' } },

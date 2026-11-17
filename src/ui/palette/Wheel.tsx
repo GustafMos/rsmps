@@ -142,7 +142,7 @@ export function Wheel({ swatches, base, sel, onSelect, onDrag }: {
       height={SIZE * dpr}
       style={{ width: SIZE, height: SIZE }}
       onPointerDown={down}
-      aria-label="Colour wheel: drag a handle to change its hue and saturation"
+      aria-label="Color wheel: drag a handle to change its hue and saturation"
     />
   );
 }

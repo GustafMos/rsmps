@@ -18,14 +18,14 @@ export interface Rule {
 }
 
 export const RULES: Rule[] = [
-  { id: 'analogous', label: 'Analogous', help: 'Neighbouring hues, 30° apart.' },
+  { id: 'analogous', label: 'Analogous', help: 'Neighboring hues, 30° apart.' },
   { id: 'monochromatic', label: 'Monochromatic', help: 'One hue, varying saturation and brightness.' },
   { id: 'triad', label: 'Triad', offsets: [0, 120, 240], help: 'Three hues evenly spaced.' },
   { id: 'complementary', label: 'Complementary', offsets: [0, 180], help: 'Opposite hues.' },
-  { id: 'split', label: 'Split complementary', offsets: [0, 150, 210], help: 'A hue and the two neighbours of its opposite.' },
+  { id: 'split', label: 'Split complementary', offsets: [0, 150, 210], help: 'A hue and the two neighbors of its opposite.' },
   { id: 'tetradic', label: 'Double split', offsets: [0, 30, 180, 210], help: 'Two complementary pairs, close together.' },
   { id: 'square', label: 'Square', offsets: [0, 90, 180, 270], help: 'Four hues evenly spaced.' },
-  { id: 'compound', label: 'Compound', offsets: [0, 15, 180, 195, 330], help: 'Complementary plus analogous neighbours.' },
+  { id: 'compound', label: 'Compound', offsets: [0, 15, 180, 195, 330], help: 'Complementary plus analogous neighbors.' },
   { id: 'shades', label: 'Shades', help: 'One hue and saturation, from light to dark.' },
   { id: 'custom', label: 'Custom', help: 'Free handles: drag each swatch anywhere.' },
 ];

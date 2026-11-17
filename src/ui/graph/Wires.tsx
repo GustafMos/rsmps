@@ -5,6 +5,7 @@ import { nodeViewStore } from '../store/nodeView';
 import { edgeEndpoints } from '../lib/geometry';
 import { layoutFor, wirePath, type NodeLayout } from '../lib/layout';
 import type { SocketType } from '../../engine/types';
+import { defOf } from '../../engine/group';
 
 /**
  * Wires live in one SVG inside the transformed layer. The SVG is 1x1 with visible overflow, so it
@@ -12,8 +13,8 @@ import type { SocketType } from '../../engine/types';
  */
 export const Wires = memo(function Wires() {
   const { io, graphCtl } = useApp();
-  const nodes = useEd((s) => s.graph.nodes);
-  const edges = useEd((s) => s.graph.edges);
+  const nodes = useEd((s) => s.level.nodes);
+  const edges = useEd((s) => s.level.edges);
   const selection = useEd((s) => s.selection);
   useDefs();
   const viewVersion = useSelector(nodeViewStore, (s) => s);
@@ -21,13 +22,13 @@ export const Wires = memo(function Wires() {
   const items = useMemo(() => {
     const graph = { nodes, edges } as Parameters<typeof edgeEndpoints>[0];
     const layouts = new Map<string, NodeLayout>();
-    for (const n of nodes) layouts.set(n.id, layoutFor(graph, n, io.registry.get(n.type)));
+    for (const n of nodes) layouts.set(n.id, layoutFor(graph, n, defOf(io.registry, n)));
     const byId = new Map(nodes.map((n) => [n.id, n]));
     return edges.flatMap((e) => {
       const ep = edgeEndpoints(graph, io.registry, e, undefined, layouts);
       if (!ep) return [];
       const from = byId.get(e.from.node)!;
-      const type: SocketType = io.registry.get(from.type)?.outputs[e.from.port]?.type ?? 'image';
+      const type: SocketType = defOf(io.registry, from)?.outputs[e.from.port]?.type ?? 'image';
       return [{ e, d: wirePath(ep.from, ep.to), type }];
     });
   }, [nodes, edges, io, viewVersion]);

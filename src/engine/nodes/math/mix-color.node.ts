@@ -5,7 +5,7 @@ export default defineNode({
   id: 'mix-color',
   title: 'Mix Colors',
   category: 'math',
-  description: 'Blend between two colours. Wire a number into Factor to fade over time.',
+  description: 'Blend between two colors. Wire a number into Factor to fade over time.',
   keywords: ['blend', 'gradient', 'lerp', 'interpolate', 'colour', 'fade'],
   inputs: {},
   outputs: { color: { type: 'color', label: 'Color' } },

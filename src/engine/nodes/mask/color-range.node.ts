@@ -5,7 +5,7 @@ export default defineNode({
   title: 'Similar Color',
   category: 'mask',
   description: 'Selects pixels similar to one picked color using separate hue, saturation and value tolerances (a magic wand). For hard green-screen removal use Chroma Key; for explicit hue/saturation/lightness ranges use HSL Qualifier.',
-  keywords: ['select', 'hue', 'saturation', 'pick', 'sample', 'similar', 'magic wand', 'color range', 'colour range'],
+  keywords: ['select', 'hue', 'saturation', 'pick', 'sample', 'similar', 'magic wand', 'color range', 'color range'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { mask: { type: 'mask', label: 'Mask' } },
   params: {

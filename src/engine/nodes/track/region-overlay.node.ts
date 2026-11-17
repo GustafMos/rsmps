@@ -18,7 +18,7 @@ export default defineNode({
   title: 'Region Overlay',
   category: 'track',
   description:
-    'Draws a detection HUD over the image: boxes, rounded boxes, corner brackets, ellipses or crosshairs, with optional glow, fill, centre dot and text labels. Turn on "Overlay only" to get just the HUD on transparent so it can be exported with alpha.',
+    'Draws a detection HUD over the image: boxes, rounded boxes, corner brackets, ellipses or crosshairs, with optional glow, fill, center dot and text labels. Turn on "Overlay only" to get just the HUD on transparent so it can be exported with alpha.',
   keywords: ['hud', 'box', 'brackets', 'label', 'glow', 'detection', 'overlay', 'bounding', 'draw', 'stardetect', 'crosshair'],
   inputs: {
     image: { type: 'image', required: true, label: 'Image' },
@@ -30,7 +30,7 @@ export default defineNode({
     style: { type: 'enum', default: 'brackets', options: STYLES, label: 'Style' },
     lineWidth: { type: 'number', default: 3, min: 0.5, max: 100, step: 0.5, unit: 'px', label: 'Line width' },
     color: { type: 'color', default: [0.25, 0.95, 0.85, 1], label: 'Color' },
-    perId: { type: 'bool', default: false, label: 'Color per id', hint: 'Colours come from the palette, picked by the region id (use Track for steady ids).' },
+    perId: { type: 'bool', default: false, label: 'Color per id', hint: 'Colors come from the palette, picked by the region id (use Track for steady ids).' },
     palette: { type: 'palette', default: HUD_PALETTE, label: 'Palette', visibleIf: (p) => p.perId === true },
     cornerLength: { type: 'number', default: 0.25, min: 0.02, max: 1, step: 0.01, label: 'Bracket length', hint: 'Fraction of the box\'s shorter side.', visibleIf: (p) => p.style === 'brackets' },
     cornerRadius: { type: 'number', default: 16, min: 0, max: 500, step: 1, unit: 'px', label: 'Corner radius', visibleIf: (p) => p.style === 'rounded' },

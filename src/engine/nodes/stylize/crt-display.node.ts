@@ -66,7 +66,7 @@ export default defineNode({
       type: 'enum',
       default: 'custom',
       label: 'Look',
-      hint: 'A preset overrides the controls it lists (lines, mask, glow, curvature, colour, noise). Choose Custom to use every control below as set.',
+      hint: 'A preset overrides the controls it lists (lines, mask, glow, curvature, color, noise). Choose Custom to use every control below as set.',
       options: [
         { value: 'custom', label: 'Custom' },
         { value: 'arcade', label: 'Arcade monitor' },

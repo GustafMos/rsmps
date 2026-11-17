@@ -13,12 +13,24 @@ describe('retime', () => {
     const fast = sourceChain(t, 'test-ramp', 'retime', { speed: 2 });
     near(await sampleAt(t, fast.graph, fast.node, 0.5), exp(1));
     near(await sampleAt(t, fast.graph, fast.node, 1.5), exp(1)); // wrapped: 3 mod 2
-    const slow = sourceChain(t, 'test-ramp', 'retime', { speed: 0.5 });
+    const slow = sourceChain(t, 'test-ramp', 'retime', { speed: 0.5 }, { loop: false }); // with Loop on 0.5 would become 1 (a loop needs a whole number)
     near(await sampleAt(t, slow.graph, slow.node, 1), exp(0.5));
-    const hold = sourceChain(t, 'test-ramp', 'retime', { holdFps: 5 });
+    const hold = sourceChain(t, 'test-ramp', 'retime', { holdFps: 5 }, { loop: false });
     near(await sampleAt(t, hold.graph, hold.node, 0.1), exp(0));
     near(await sampleAt(t, hold.graph, hold.node, 0.3), exp(0.2));
     near(await sampleAt(t, hold.graph, hold.node, 0.5), exp(0.4));
+  });
+
+  it('Loop on: a speed that is not a whole number of cycles per loop is rounded, so the footage comes back with the project', async () => {
+    const t = await harness([ramp]);
+    const slow = sourceChain(t, 'test-ramp', 'retime', { speed: 0.5 }); // loop is on in sourceChain's default project
+    near(await sampleAt(t, slow.graph, slow.node, 1), exp(1)); // 0.5 -> 1
+    const fast = sourceChain(t, 'test-ramp', 'retime', { speed: 1.7 });
+    near(await sampleAt(t, fast.graph, fast.node, 0.5), exp(1)); // 1.7 -> 2: half a loop is 1 s of footage... wrapped
+    const pp = sourceChain(t, 'test-ramp', 'retime', { speed: 1, pingPong: true }); // there and back needs an even speed
+    near(await sampleAt(t, pp.graph, pp.node, 0.5), exp(1)); // speed 2
+    const stop = sourceChain(t, 'test-ramp', 'retime', { holdFps: 3.3 }); // 6.6 held frames per 2 s loop -> 7 per loop = 3.5 fps
+    near(await sampleAt(t, stop.graph, stop.node, 0.5), exp(Math.floor(0.5 * 3.5) / 3.5), 2);
   });
 
   it('plays backwards, ping-pong and can hold the last frame', async () => {

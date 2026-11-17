@@ -42,7 +42,7 @@ export function CurveField({ nodeId, keyName, label, value, min, max, large }: {
     <>
       <button className={`rs-curve${large ? ' rs-curve--lg' : ''}`} data-nodrag onClick={() => setOpen((o) => !o)} title="Edit the curve (keyframes and splines)">
         <canvas ref={cv} />
-        <span>{curve.keys.length} keys</span>
+        <span>{curve.keys.length} {curve.keys.length === 1 ? 'key' : 'keys'}</span>
       </button>
       {open && <CurveEditor title={label} curve={curve} min={min} max={max} onChange={(c) => ed.setParam(nodeId, keyName, c)} onClose={() => setOpen(false)} />}
     </>

@@ -25,7 +25,7 @@ export default defineNode({
     bottom: { type: 'number', default: 16, min: 0, max: 8000, unit: 'px', label: 'Bottom', visibleIf: (p) => p.mode === 'margins' },
     ratioW: { type: 'number', default: 16, min: 1, max: 100, integer: true, label: 'Aspect width', visibleIf: (p) => p.mode === 'aspect' },
     ratioH: { type: 'number', default: 9, min: 1, max: 100, integer: true, label: 'Aspect height', visibleIf: (p) => p.mode === 'aspect' },
-    align: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: 0, max: 1, step: 0.01, label: 'Image position', hint: 'Where the original sits inside the new area. 0.5, 0.5 centres it.', visibleIf: (p) => p.mode === 'aspect' },
+    align: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: 0, max: 1, step: 0.01, label: 'Image position', hint: 'Where the original sits inside the new area. 0.5, 0.5 centers it.', visibleIf: (p) => p.mode === 'aspect' },
     fill: {
       type: 'enum',
       default: 'transparent',

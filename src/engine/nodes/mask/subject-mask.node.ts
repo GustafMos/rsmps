@@ -28,14 +28,14 @@ export default defineNode({
   title: 'Subject Mask',
   category: 'mask',
   description:
-    'Finds the main subject automatically by learning the background colours from the image border, refining the result with the subject colours and snapping the edge to the image. Output: mask (1 = subject).',
+    'Finds the main subject automatically by learning the background colors from the image border, refining the result with the subject colors and snapping the edge to the image. Output: mask (1 = subject).',
   keywords: ['extract', 'remove background', 'saliency', 'cutout', 'segment', 'foreground', 'feature extraction', 'matte'],
   cpu: true,
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { mask: { type: 'mask', label: 'Subject' } },
   params: {
-    sensitivity: { type: 'number', default: 0.65, min: 0, max: 1, step: 0.01, label: 'Sensitivity', hint: 'Higher separates colours that are closer to the background.' },
-    centerBias: { type: 'number', default: 0.25, min: 0, max: 1, step: 0.01, label: 'Center bias', hint: 'Favour the middle of the frame over the edges.' },
+    sensitivity: { type: 'number', default: 0.65, min: 0, max: 1, step: 0.01, label: 'Sensitivity', hint: 'Higher separates colors that are closer to the background.' },
+    centerBias: { type: 'number', default: 0.25, min: 0, max: 1, step: 0.01, label: 'Center bias', hint: 'Favor the middle of the frame over the edges.' },
     cleanup: { type: 'number', default: 0.4, min: 0, max: 1, step: 0.01, label: 'Remove islands', hint: 'Drops separate regions smaller than this share of the main one.' },
     regions: {
       type: 'enum',
@@ -47,8 +47,8 @@ export default defineNode({
       ],
       label: 'Keep',
     },
-    fillHoles: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Fill holes', hint: 'Fills enclosed background-coloured pockets inside the subject (highlights, eyes).' },
-    edgeSnap: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Edge snap', hint: 'How strongly the edge follows colour edges in the full-resolution image.' },
+    fillHoles: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Fill holes', hint: 'Fills enclosed background-colored pockets inside the subject (highlights, eyes).' },
+    edgeSnap: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Edge snap', hint: 'How strongly the edge follows color edges in the full-resolution image.' },
     softness: { type: 'number', default: 0.5, min: 0, max: 100, step: 0.1, unit: 'px', label: 'Edge softness' },
     invert: { type: 'bool', default: false, label: 'Invert' },
   },

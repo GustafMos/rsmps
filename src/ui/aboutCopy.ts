@@ -7,7 +7,7 @@ export const NOT_AFFILIATED =
 
 export const ABOUT = {
   title: 'RipScorpy Media Processing Suite (RSMPS)',
-  licence: 'Licence: MIT. The source is free.',
+  licence: 'License: MIT. The source is free.',
   source: 'https://github.com/GustafMos/rsmps',
   updates: 'The desktop app asks GitHub once a day whether a newer version exists and sends nothing else. You can turn this off.',
 } as const;

@@ -50,7 +50,7 @@ export function isAbort(err: unknown): boolean {
 }
 
 export function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) throw new DOMException('Export cancelled.', 'AbortError');
+  if (signal?.aborted) throw new DOMException('Export canceled.', 'AbortError');
 }
 
 let channel: MessageChannel | null = null;

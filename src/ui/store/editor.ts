@@ -25,7 +25,7 @@ import type { AssetInfo, Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, Ou
 import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
 import { pushBelow, separateMoved } from '../lib/separate';
-import { outputType } from '../../engine/graph';
+import { inputType, outputType } from '../../engine/graph';
 import { createScanProject } from '../scan/session';
 import { buildLayeredScanGraph, guideRemovalStep } from '../scan/scanGraph';
 import { reconcileMediaEdits, type DescribeSource } from '../../engine/lib/media-edit-graph';
@@ -36,8 +36,53 @@ import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sour
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
 import { convertNode, describeDropped } from '../lib/convert';
+import {
+  addBoundaryPort,
+  defOf,
+  editExposed,
+  exposeParam,
+  GROUP_IN,
+  GROUP_OUT,
+  GROUP_TYPE,
+  groupProblem,
+  isBoundaryNode,
+  isPathId,
+  levelGraph,
+  makeGroup,
+  NEW_PORT,
+  nodeAtPath,
+  PATH_SEP,
+  removeBoundaryPort,
+  renameGroupPort,
+  ungroupNode,
+  unexposeParam,
+  validateGroupNode,
+  validPath,
+  withLevel,
+  withoutProcessResults,
+  type GroupKind,
+} from '../../engine/group';
+import { processParamsPatch } from '../../engine/process';
+import type { AnyNodeDef } from '../../engine/types';
 
-export type DialogId = 'export' | 'blankSheets' | 'backups' | 'about' | 'plugins' | 'presets' | 'savePreset' | 'shortcuts' | 'keymap' | 'palette' | null;
+/** A port name from the socket it was made from. */
+function portName(def: AnyNodeDef | undefined, port: string, dir: 'in' | 'out'): string {
+  if (!def) return port;
+  const d = dir === 'out' ? (def.outputs as Record<string, { label?: string }>)[port] : ((def.inputs as Record<string, { label?: string }>)[port] ?? (def.params as Record<string, { label?: string }>)[port]);
+  return d?.label ?? port;
+}
+
+export type DialogId = 'export' | 'blankSheets' | 'backups' | 'about' | 'plugins' | 'presets' | 'savePreset' | 'saveNode' | 'shortcuts' | 'keymap' | 'palette' | null;
+
+/** A question shown in the app's own dialog (`Editor.ask`), never a browser `confirm`. */
+export interface ConfirmRequest {
+  title: string;
+  text: string;
+  /** Optional bullet list under the text. */
+  items?: string[];
+  ok: string;
+  cancel?: string;
+}
 
 export interface AddMenuRequest {
   clientX: number;
@@ -84,7 +129,15 @@ export interface UiPrefs {
 }
 
 export interface EditorState {
+  /** The document (top level, with groups): what is evaluated, saved and undone. */
   graph: GraphDoc;
+  /** Open groups, outermost first (ids from the top level down). Empty = the top level is shown. */
+  path: readonly string[];
+  /**
+   * What the node editor shows and edits: the document itself at the top level, or the inside of the open group (with its boundary nodes
+   * `@in` / `@out`). Selection and node ids in the graph view are ids of this level; `viewedNodeId` is a full path.
+   */
+  level: GraphDoc;
   selection: readonly string[];
   selectedFrame: string | null;
   viewedNodeId: string | null;
@@ -119,6 +172,10 @@ export interface EditorState {
   scanStage: 1 | 2;
   /** Top-level tab: the node editor or the print-scan-back tool. */
   mode: 'edit' | 'scan';
+  /** The question `ask` is waiting on (rendered by the dialog host). */
+  confirm: ConfirmRequest | null;
+  /** "Save group as node…": the group (full path id) the dialog saves. */
+  saveNodeTarget: string | null;
 }
 
 interface Clip {
@@ -174,8 +231,11 @@ export class Editor {
   studioTarget: { nodeId: string; key: string } | null = null;
 
   constructor(readonly io: Io) {
+    const first = createGraph();
     this.store = createStore<EditorState>({
-      graph: createGraph(),
+      graph: first,
+      path: [],
+      level: first,
       selection: [],
       selectedFrame: null,
       viewedNodeId: null,
@@ -199,6 +259,8 @@ export class Editor {
       armed: null,
       supportPrompt: null,
       socketPicker: null,
+      confirm: null,
+      saveNodeTarget: null,
     });
   }
 
@@ -208,8 +270,21 @@ export class Editor {
   get state(): EditorState {
     return this.store.get();
   }
+  /** The graph shown in the node editor (top level, or the inside of the open group). */
+  get level(): GraphDoc {
+    return this.state.level;
+  }
+  /** Full path id of a node of the shown level (what the engine, the viewer and processes use). */
+  fullId(levelId: string): string {
+    return this.state.path.length ? [...this.state.path, levelId].join(PATH_SEP) : levelId;
+  }
   private patch(p: Partial<EditorState>) {
-    if (p.selection) {
+    if (p.graph !== undefined || p.path !== undefined) {
+      const root = p.graph ?? this.state.graph;
+      const path = validPath(root, p.path ?? this.state.path);
+      p = { ...p, path: path.length === this.state.path.length && path.every((x, i) => x === this.state.path[i]) && p.path === undefined ? this.state.path : path, level: levelGraph(root, path) };
+    }
+    if (p.selection && !(p.path ?? this.state.path).length) {
       const g = p.graph ?? this.state.graph;
       const outs = p.selection.filter((id) => this.registry.get(g.nodes.find((n) => n.id === id)?.type ?? '')?.category === 'output');
       if (outs.length) p = { ...p, activeOutput: outs[outs.length - 1] };
@@ -230,6 +305,7 @@ export class Editor {
     this.lastKey = '';
     this.patch({
       graph: g,
+      path: [],
       selection: [],
       selectedFrame: null,
       viewedNodeId: this.defaultView(g),
@@ -272,7 +348,7 @@ export class Editor {
 
   /** What a newly wired source is, for the Media Timeline: label and natural length (Media In knows its file). */
   private describeSource: DescribeSource = ({ node, port }, to) => {
-    const def = this.registry.get(node.type);
+    const def = defOf(this.registry, node);
     const name = node.label || def?.title || node.type;
     if (node.type === 'media-in' && (port === 'image' || port === 'audio')) {
       const ids = node.params.assets;
@@ -316,8 +392,8 @@ export class Editor {
 
   /** Start over from the current graph without moving anything (after load / undo / redo). */
   syncHeights(): void {
-    const g = this.state.graph;
-    this.heights = new Map(g.nodes.map((n) => [n.id, layoutFor(g, n, this.registry.get(n.type)).height]));
+    const g = this.level;
+    this.heights = new Map(g.nodes.map((n) => [n.id, layoutFor(g, n, defOf(this.registry, n)).height]));
     this.pushed.clear();
   }
 
@@ -333,9 +409,9 @@ export class Editor {
    * pull back only what its own growth pushed. Positions change without a history entry of their own.
    */
   reflow(): void {
-    const g0 = this.state.graph;
+    const g0 = this.level;
     let g = g0;
-    const cur = new Map(g0.nodes.map((n) => [n.id, layoutFor(g0, n, this.registry.get(n.type)).height]));
+    const cur = new Map(g0.nodes.map((n) => [n.id, layoutFor(g0, n, defOf(this.registry, n)).height]));
     for (const [id, h] of cur) {
       const prev = this.heights.get(id);
       if (prev === undefined) continue;
@@ -365,7 +441,7 @@ export class Editor {
     this.heights = cur;
     if (g !== g0) {
       this.slide();
-      this.applyGraph(g);
+      this.applyGraph(this.state.path.length ? withLevel(this.state.graph, this.state.path, g) : g);
     }
   }
 
@@ -402,11 +478,39 @@ export class Editor {
     }
   }
 
+  /**
+   * Replace the shown level (the top level, or the inside of the open group): the edited level is written back into its group, then
+   * committed like any edit (one undo step; `key` coalesces). Media Timeline bookkeeping runs on the level that was edited.
+   */
+  commitLevel(next: GraphDoc, key?: string): void {
+    const path = this.state.path;
+    if (!path.length) return this.commit(next, key);
+    const level = this.level;
+    if (next === level) return;
+    next = reconcileMediaEdits(level, next, this.describeSource);
+    this.commit(withLevel(this.state.graph, path, next), key);
+  }
+
+  /** `edit` for the shown level: `fn` gets the level's graph and returns it edited (errors become a toast). */
+  editLevel(fn: (g: GraphDoc) => GraphDoc, key?: string): void {
+    if (!this.state.path.length) return this.edit(fn, key);
+    try {
+      const g0 = this.level;
+      const made = fn(g0);
+      const separated = separateMoved(g0, made, this.registry);
+      if (separated !== made) this.slide();
+      this.commitLevel(separated, key);
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : String(err), 'error');
+    }
+  }
+
   private applyGraph(g: GraphDoc) {
     const s = this.state;
-    const ids = new Set(g.nodes.map((n) => n.id));
-    const selection = s.selection.filter((id) => ids.has(id));
-    const viewed = s.viewedNodeId && ids.has(s.viewedNodeId) ? s.viewedNodeId : this.defaultView(g);
+    const path = validPath(g, s.path);
+    const ids = new Set(levelGraph(g, path).nodes.map((n) => n.id));
+    const selection = path.length === s.path.length ? s.selection.filter((id) => ids.has(id)) : [];
+    const viewed = s.viewedNodeId && (g.nodes.some((n) => n.id === s.viewedNodeId) || (isPathId(s.viewedNodeId) && nodeAtPath(g, s.viewedNodeId))) ? s.viewedNodeId : this.defaultView(g);
     const count = batchCount(g, this.registry);
     const frames = g.frames ?? [];
     this.patch({
@@ -456,7 +560,7 @@ export class Editor {
     this.patch({ selection: next, selectedFrame: null });
   }
   selectAll(): void {
-    this.patch({ selection: this.state.graph.nodes.map((n) => n.id), selectedFrame: null });
+    this.patch({ selection: this.level.nodes.map((n) => n.id), selectedFrame: null });
   }
   selectFrame(id: string | null): void {
     this.patch({ selectedFrame: id, selection: [] });
@@ -476,17 +580,17 @@ export class Editor {
 
   setParam(nodeId: string, key: string, value: unknown): void {
     this.rememberPending(nodeId, key, value);
-    this.commit(setParam(this.state.graph, nodeId, key, value), `p:${nodeId}:${key}`);
+    this.commitLevel(setParam(this.level, nodeId, key, value), `p:${nodeId}:${key}`);
   }
   /** Remember the in-flight edit so a reload after a render that never finished can offer to revert it. */
   private rememberPending(nodeId: string, key: string, value: unknown): void {
     try {
-      const node = this.state.graph.nodes.find((n) => n.id === nodeId);
+      const node = this.level.nodes.find((n) => n.id === nodeId);
       if (!node || JSON.stringify(value).length > 300) return;
       const prevRaw = localStorage.getItem('rsmps.pendingEdit');
       const prev = prevRaw ? JSON.parse(prevRaw) : null;
       const same = prev && prev.nodeId === nodeId && prev.key === key && Date.now() - prev.at < 15000;
-      const def = this.registry.get(node.type);
+      const def = defOf(this.registry, node);
       const label = `${node.label || def?.title || node.type} · ${(def?.params as Record<string, { label?: string }> | undefined)?.[key]?.label ?? key}`;
       localStorage.setItem('rsmps.pendingEdit', JSON.stringify({ nodeId, key, label, oldValue: same ? prev.oldValue : node.params[key], newValue: value, at: Date.now() }));
     } catch {
@@ -494,7 +598,7 @@ export class Editor {
     }
   }
   setNode(nodeId: string, patch: Partial<NodeInstance>, key?: string): void {
-    this.commit(updateNode(this.state.graph, nodeId, patch), key);
+    this.commitLevel(updateNode(this.level, nodeId, patch), key);
   }
   setProject(patch: Partial<ProjectSettings>): void {
     const g = this.state.graph;
@@ -505,8 +609,8 @@ export class Editor {
   }
 
   moveNodes(deltas: ReadonlyMap<string, { dx: number; dy: number }>): void {
-    const g = this.state.graph;
-    this.commit({
+    const g = this.level;
+    this.commitLevel({
       ...g,
       nodes: g.nodes.map((n) => {
         const d = deltas.get(n.id);
@@ -529,16 +633,37 @@ export class Editor {
     return moveWire(g, edgeId, delta);
   }
   connect(from: Edge['from'], to: Edge['to'], slot?: number): boolean {
-    const err = connectError(this.state.graph, this.registry, from, to);
+    // Inside an open group: a wire onto the "+" socket of a boundary node adds a group port of the wire's type.
+    if (from.node === GROUP_IN && from.port === NEW_PORT) {
+      const it = inputType(this.level, this.registry, to.node, to.port);
+      if (!it) return false;
+      const name = portName(defOf(this.registry, this.level.nodes.find((n) => n.id === to.node)), to.port, 'in');
+      this.editLevel((g) => {
+        const added = addBoundaryPort(g, 'in', it.type, name);
+        return this.connectSlot(added.graph, { node: GROUP_IN, port: added.port }, to, slot);
+      });
+      return true;
+    }
+    if (to.node === GROUP_OUT && to.port === NEW_PORT) {
+      const ot = outputType(this.level, this.registry, from.node, from.port);
+      if (!ot) return false;
+      const name = portName(defOf(this.registry, this.level.nodes.find((n) => n.id === from.node)), from.port, 'out');
+      this.editLevel((g) => {
+        const added = addBoundaryPort(g, 'out', ot, name);
+        return this.connectSlot(added.graph, from, { node: GROUP_OUT, port: added.port });
+      });
+      return true;
+    }
+    const err = connectError(this.level, this.registry, from, to);
     if (err) {
       this.toast(err, 'error');
       return false;
     }
-    this.edit((g) => this.connectSlot(g, from, to, slot));
+    this.editLevel((g) => this.connectSlot(g, from, to, slot));
     return true;
   }
   disconnect(edgeId: string): void {
-    this.edit((g) => disconnect(g, edgeId));
+    this.editLevel((g) => disconnect(g, edgeId));
   }
 
   deleteSelection(): void {
@@ -547,21 +672,23 @@ export class Editor {
       this.ungroup(selectedFrame);
       return;
     }
-    if (!selection.length) return;
-    this.edit((g) => removeNodes(g, this.registry, [...selection], true));
+    // the boundary of an open group stays (remove a port from the group's inspector instead)
+    const ids = selection.filter((id) => !isBoundaryNode(this.level.nodes.find((n) => n.id === id)));
+    if (!ids.length) return;
+    this.editLevel((g) => removeNodes(g, this.registry, ids, true));
     void graph;
   }
 
   toggleBypass(id: string): void {
-    const n = this.state.graph.nodes.find((x) => x.id === id);
+    const n = this.level.nodes.find((x) => x.id === id);
     if (n) this.setNode(id, { bypass: !n.bypass });
   }
   toggleCollapse(ids: readonly string[]): void {
-    const g = this.state.graph;
+    const g = this.level;
     const first = g.nodes.find((n) => n.id === ids[0]);
     if (!first) return;
     const collapsed = !first.collapsed;
-    this.commit({ ...g, nodes: g.nodes.map((n) => (ids.includes(n.id) ? { ...n, collapsed } : n)) });
+    this.commitLevel({ ...g, nodes: g.nodes.map((n) => (ids.includes(n.id) ? { ...n, collapsed } : n)) });
   }
 
   /** Add a node (optionally wired). Returns its id. */
@@ -569,7 +696,7 @@ export class Editor {
     const def = this.registry.get(type);
     if (!def) return null;
     let id = '';
-    this.edit((g) => {
+    this.editLevel((g) => {
       const { graph, node } = addNode(g, this.registry, type, at, params);
       id = node.id;
       let next = graph;
@@ -588,7 +715,7 @@ export class Editor {
         }
       } else if (this.state.selection.length === 1) {
         const src = next.nodes.find((n) => n.id === this.state.selection[0]);
-        const sdef = src && this.registry.get(src.type);
+        const sdef = src && defOf(this.registry, src);
         if (src && sdef) next = this.insertInChain(next, src.id, node.id);
       }
       return this.withPalette(next, node.id, false) ?? next;
@@ -606,8 +733,8 @@ export class Editor {
   private insertInChain(g: GraphDoc, srcId: string, newId: string): GraphDoc {
     const src = g.nodes.find((n) => n.id === srcId)!;
     const nn = g.nodes.find((n) => n.id === newId)!;
-    const sdef = this.registry.get(src.type)!;
-    const ndef = this.registry.get(nn.type)!;
+    const sdef = defOf(this.registry, src)!;
+    const ndef = defOf(this.registry, nn)!;
     const srcOuts = Object.entries(sdef.outputs as OutputSchema);
     const GAP = 60;
     const srcW = layoutFor(g, src, sdef).width;
@@ -632,8 +759,8 @@ export class Editor {
     const srcId = from.node;
     const src = g.nodes.find((n) => n.id === srcId)!;
     const nn = g.nodes.find((n) => n.id === newId)!;
-    const ndef = this.registry.get(nn.type)!;
-    const srcW = layoutFor(g, src, this.registry.get(src.type)).width;
+    const ndef = defOf(this.registry, nn)!;
+    const srcW = layoutFor(g, src, defOf(this.registry, src)).width;
     const newW = layoutFor(g, nn, ndef).width;
     const GAP = 60;
     const move = (gr: GraphDoc, id: string, x: number, y: number): GraphDoc => ({ ...gr, nodes: gr.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)) });
@@ -650,7 +777,7 @@ export class Editor {
           rerouted.push(e);
           continue;
         }
-        const tdef = this.registry.get(next.nodes.find((n) => n.id === e.to.node)?.type ?? '');
+        const tdef = defOf(this.registry, next.nodes.find((n) => n.id === e.to.node));
         const multi = !!(tdef?.inputs as Record<string, { multi?: boolean }> | undefined)?.[e.to.port]?.multi;
         const pos = wiresInto(next, e.to.node, e.to.port).findIndex((x) => x.id === e.id);
         next = connect(disconnect(next, e.id), this.registry, target, e.to);
@@ -694,7 +821,7 @@ export class Editor {
     const pct = Math.min(100, Math.max(5, Math.round(percent * 10) / 10));
     const g0 = this.state.graph;
     const viewed = g0.nodes.find((n) => n.id === this.state.viewedNodeId);
-    const vdef = viewed && this.registry.get(viewed.type);
+    const vdef = viewed && defOf(this.registry, viewed);
     if (!viewed || !vdef) {
       this.toast('Nothing is being viewed. Click the eye on a node first.', 'info');
       return null;
@@ -755,7 +882,7 @@ export class Editor {
    */
   private withPalette(g: GraphDoc, nodeId: string, custom: boolean): GraphDoc | null {
     const node = g.nodes.find((n) => n.id === nodeId);
-    const def = node && this.registry.get(node.type);
+    const def = node && defOf(this.registry, node);
     const palDef = this.registry.get('palette');
     if (!node || !def || !palDef) return null;
     const pp = paletteInputPort(def);
@@ -779,16 +906,16 @@ export class Editor {
 
   /** "Extract from image" on a node with no palette: one undo step. */
   extractPaletteFor(nodeId: string): void {
-    const next = this.withPalette(this.state.graph, nodeId, false);
+    const next = this.withPalette(this.level, nodeId, false);
     if (!next) return this.toast('Connect an image to this node first, then extract a palette from it.', 'info');
-    this.commit(next);
+    this.commitLevel(next);
     this.patch({ selection: [this.lastPaletteId], selectedFrame: null });
   }
   /** "Create palette…": a custom Palette node wired in, then Palette Studio on it. */
   createPaletteFor(nodeId: string): void {
-    const next = this.withPalette(this.state.graph, nodeId, true);
+    const next = this.withPalette(this.level, nodeId, true);
     if (!next) return this.toast('The Palette node type is not available.', 'error');
-    this.commit(next);
+    this.commitLevel(next);
     this.patch({ selection: [this.lastPaletteId], selectedFrame: null });
     this.studioTarget = { nodeId: this.lastPaletteId, key: 'custom' };
     this.openDialog('palette');
@@ -799,7 +926,7 @@ export class Editor {
    * Images/masks make a Merge, audio makes a Mixer. One undo step. Returns false when the pair is not mergeable.
    */
   mergeOutputs(held: Edge['from'], base: Edge['from']): boolean {
-    const g0 = this.state.graph;
+    const g0 = this.level;
     const ta = outputType(g0, this.registry, held.node, held.port);
     const tb = outputType(g0, this.registry, base.node, base.port);
     const visual = (t: SocketType | null) => t === 'image' || t === 'mask';
@@ -811,12 +938,12 @@ export class Editor {
     }
     const nodeA = g0.nodes.find((n) => n.id === held.node)!;
     const nodeB = g0.nodes.find((n) => n.id === base.node)!;
-    const wA = layoutFor(g0, nodeA, this.registry.get(nodeA.type)).width;
+    const wA = layoutFor(g0, nodeA, defOf(this.registry, nodeA)).width;
     const at = { x: Math.round(Math.max(nodeA.x, nodeB.x) + wA + 70), y: Math.round((nodeA.y + nodeB.y) / 2) };
     let newId = '';
     const viewed = this.state.viewedNodeId;
     let viewMerge = false;
-    this.edit((g) => {
+    this.editLevel((g) => {
       const added = addNode(g, this.registry, kind, at);
       newId = added.node.id;
       let next = added.graph;
@@ -850,13 +977,13 @@ export class Editor {
 
   /** "Type" dropdown / "Convert to…": turn a node into another member of its family in place. One undo step. */
   convertNodeType(id: string, newType: string): boolean {
-    const res = convertNode(this.state.graph, this.registry, id, newType);
+    const res = convertNode(this.level, this.registry, id, newType);
     if (res.error) {
       this.toast(res.error, 'error');
       return false;
     }
-    if (res.graph === this.state.graph) return true;
-    this.commit(res.graph);
+    if (res.graph === this.level) return true;
+    this.commitLevel(res.graph);
     const lost = describeDropped(res.dropped);
     if (lost) this.toast(`Converted to ${this.registry.get(newType)?.title ?? newType}: ${lost}.`, 'info');
     return true;
@@ -876,7 +1003,7 @@ export class Editor {
 
   /** Commit a finished node drag: positions, frame membership and optional insertion on a wire, as ONE undo step. */
   finishDrag(deltas: ReadonlyMap<string, { dx: number; dy: number }>, insertEdge: string | null, detachId?: string): void {
-    this.edit((g0) => {
+    this.editLevel((g0) => {
       // Shift-drag: lift the node out of its chain first (its source feeds its former consumers, like delete-with-heal)
       let g = g0;
       const lifted = detachId ? g0.nodes.find((n) => n.id === detachId) : undefined;
@@ -922,15 +1049,15 @@ export class Editor {
   }
 
   insertOnEdge(nodeId: string, edgeId: string): void {
-    this.edit((g) => this.insertInto(g, nodeId, edgeId));
+    this.editLevel((g) => this.insertInto(g, nodeId, edgeId));
   }
 
   private insertInto(g: GraphDoc, nodeId: string, edgeId: string): GraphDoc {
     const e = g.edges.find((x) => x.id === edgeId);
     const node = g.nodes.find((n) => n.id === nodeId);
-    const def = node && this.registry.get(node.type);
+    const def = node && defOf(this.registry, node);
     if (!e || !node || !def) return g;
-    const ft = this.registry.get(g.nodes.find((n) => n.id === e.from.node)?.type ?? '')?.outputs[e.from.port]?.type;
+    const ft = defOf(this.registry, g.nodes.find((n) => n.id === e.from.node))?.outputs[e.from.port]?.type;
     if (!ft) return g;
     const inPort = inputsAccepting(def, ft).find((p) => p in def.inputs);
     if (!inPort) return g;
@@ -944,7 +1071,7 @@ export class Editor {
   addReroute(edgeId: string, at: { x: number; y: number }): void {
     const def = this.registry.get('reroute');
     if (!def) return;
-    this.edit((g) => {
+    this.editLevel((g) => {
       const e = g.edges.find((x) => x.id === edgeId);
       if (!e) return g;
       const inPort = Object.keys(def.inputs)[0];
@@ -959,9 +1086,11 @@ export class Editor {
   /* ----------------------------- clipboard -------------------------------- */
 
   copy(): void {
-    const { selection, graph } = this.state;
-    if (!selection.length) return;
-    const set = new Set(selection);
+    const { selection } = this.state;
+    const graph = this.level;
+    // the boundary of an open group is not a node that can be copied
+    const set = new Set(selection.filter((id) => !isBoundaryNode(graph.nodes.find((n) => n.id === id))));
+    if (!set.size) return;
     this.clip = {
       nodes: graph.nodes.filter((n) => set.has(n.id)).map((n) => structuredClone(n)),
       edges: graph.edges.filter((e) => set.has(e.from.node) && set.has(e.to.node)).map((e) => structuredClone(e)),
@@ -979,10 +1108,11 @@ export class Editor {
     const nodes = clip.nodes.map((n) => {
       const id = uid('n');
       map.set(n.id, id);
-      return { ...structuredClone(n), id, x: Math.round(n.x + off.x), y: Math.round(n.y + off.y), frame: undefined };
+      // a copy never shares a stored process result (bake, analysis) with the original: it starts unprocessed
+      return { ...withoutProcessResults(structuredClone(n), this.clearOf), id, x: Math.round(n.x + off.x), y: Math.round(n.y + off.y), frame: undefined };
     });
     const edges = clip.edges.map((e) => ({ id: uid('e'), from: { ...e.from, node: map.get(e.from.node)! }, to: { ...e.to, node: map.get(e.to.node)! } }));
-    this.edit((g) => ({ ...g, nodes: [...g.nodes, ...nodes], edges: [...g.edges, ...edges] }));
+    this.editLevel((g) => ({ ...g, nodes: [...g.nodes, ...nodes], edges: [...g.edges, ...edges] }));
     this.patch({ selection: nodes.map((n) => n.id), selectedFrame: null });
     if (!at) this.clip = { nodes: nodes.map((n) => ({ ...n })), edges };
   }
@@ -1004,6 +1134,167 @@ export class Editor {
     this.clip = saved ?? this.clip;
   }
 
+  /* -------------------------------- groups -------------------------------- */
+
+  /** Params patch that clears a node's stored process result (for copies), or null. */
+  private clearOf = (n: NodeInstance): Record<string, unknown> | null => {
+    if (n.type === GROUP_TYPE) return null; // withoutProcessResults drops a group's own handle
+    const def = this.registry.get(n.type);
+    return def?.process ? processParamsPatch(def, null) : null;
+  };
+
+  /**
+   * Ctrl+G: the selected nodes become one group node wired exactly like them (`kind` 'repeat': a Repeat group). One undo step. Returns the
+   * group's id, or null (a toast says why). The viewer keeps showing what it showed (a viewed node that went inside is followed by path).
+   */
+  groupNodes(kind: GroupKind = 'group', ids: readonly string[] = this.state.selection): string | null {
+    const sel = [...ids];
+    const problem = groupProblem(this.level, this.registry, sel);
+    if (problem) {
+      this.toast(problem, 'info');
+      return null;
+    }
+    let gid = '';
+    const v = this.state.viewedNodeId;
+    this.editLevel((g) => {
+      const r = makeGroup(g, this.registry, sel, { kind });
+      gid = r.group.id;
+      return r.graph;
+    });
+    if (!gid || !this.level.nodes.some((n) => n.id === gid)) return null;
+    const moved = v ? sel.find((id) => this.fullId(id) === v) : undefined;
+    this.patch({ selection: [gid], selectedFrame: null, ...(moved ? { viewedNodeId: this.fullId(gid) + PATH_SEP + moved } : {}) });
+    return gid;
+  }
+
+  /** Ctrl+Shift+G: put the selected groups' insides back in place (exposed values and wires kept). One undo step. */
+  ungroupNodes(ids: readonly string[] = this.state.selection): string[] {
+    const groups = ids.filter((id) => this.level.nodes.find((n) => n.id === id)?.type === GROUP_TYPE);
+    if (!groups.length) {
+      if (this.state.selectedFrame) this.ungroup(this.state.selectedFrame);
+      else this.toast('Select a group node to ungroup it.', 'info');
+      return [];
+    }
+    const out: string[] = [];
+    const v = this.state.viewedNodeId;
+    let viewed: string | null = null;
+    this.editLevel((g) => {
+      let next = g;
+      for (const gid of groups) {
+        const r = ungroupNode(next, gid);
+        next = r.graph;
+        out.push(...r.ids);
+        // the viewer was showing a node inside: it is now a node of this level
+        const prefix = this.fullId(gid) + PATH_SEP;
+        const inner = v && v.startsWith(prefix) ? v.slice(prefix.length) : '';
+        if (inner && !inner.includes(PATH_SEP) && r.ids.includes(inner)) viewed = this.fullId(inner);
+      }
+      return next;
+    });
+    this.patch({ selection: out, selectedFrame: null, ...(viewed ? { viewedNodeId: viewed } : {}) });
+    return out;
+  }
+
+  /** Open a group node of the shown level (double-click, Tab): the graph view shows its inside. */
+  enterGroup(id: string): void {
+    const n = this.level.nodes.find((x) => x.id === id);
+    if (n?.type !== GROUP_TYPE) return;
+    this.patch({ path: [...this.state.path, id], selection: [], selectedFrame: null, addMenu: null, contextMenu: null, socketPicker: null });
+    this.syncHeights();
+  }
+
+  /** Close open groups (Esc, the breadcrumb). `depth` = how many levels stay open (0 = the top level). The group left is selected. */
+  exitGroup(depth = this.state.path.length - 1): void {
+    const path = this.state.path;
+    if (!path.length) return;
+    const keep = Math.max(0, Math.min(path.length - 1, depth));
+    const left = path[keep];
+    this.patch({ path: path.slice(0, keep), selection: left ? [left] : [], selectedFrame: null, addMenu: null, contextMenu: null, socketPicker: null });
+    this.syncHeights();
+  }
+
+  /** Edit the level at `path` (not necessarily the shown one) as one undo step. */
+  private editAt(path: readonly string[], fn: (g: GraphDoc) => GraphDoc, key?: string): void {
+    try {
+      const root = this.state.graph;
+      const level = levelGraph(root, path);
+      const next = fn(level);
+      if (next !== level) this.commit(withLevel(root, path, next), key);
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : String(err), 'error');
+    }
+  }
+
+  /**
+   * Show an inner param on its group ("Expose on group"). `groupPath` = the full path of the group (default: the open group, for a node
+   * of the shown level). The group's value starts as the inner value.
+   */
+  exposeParam(innerId: string, param: string, label?: string, groupPath: readonly string[] = this.state.path): void {
+    if (!groupPath.length) return this.toast('Open a group (double-click it) to expose its parameters.', 'info');
+    const gid = groupPath[groupPath.length - 1];
+    this.editAt(groupPath.slice(0, -1), (g) => exposeParam(g, gid, innerId, param, this.registry, label));
+  }
+
+  /** Stop showing an exposed param (`groupId` is a node of the shown level). Its value goes back inside. */
+  unexposeParam(groupId: string, exposedId: string): void {
+    this.editLevel((g) => unexposeParam(g, groupId, exposedId));
+  }
+
+  /** Rename or reorder the exposed params of a group of the shown level. */
+  editExposed(groupId: string, patch: { rename?: Record<string, string>; order?: string[] }): void {
+    this.editLevel((g) => editExposed(g, groupId, patch), `exposed:${groupId}`);
+  }
+
+  /** Rename a port of a group of the shown level. */
+  renameGroupPort(groupId: string, dir: 'in' | 'out', port: string, name: string): void {
+    this.editLevel((g) => renameGroupPort(g, groupId, dir, port, name), `port:${groupId}:${port}`);
+  }
+
+  /** Title, colour stripe (a category key), icon and description of a group of the shown level. */
+  setGroupInfo(groupId: string, patch: { title?: string; color?: string; icon?: string; description?: string }): void {
+    this.editLevel(
+      (g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === groupId && n.type === GROUP_TYPE ? { ...n, params: { ...n.params, ...patch } } : n)) }),
+      `groupinfo:${groupId}:${Object.keys(patch).join(',')}`,
+    );
+  }
+
+  /** Remove a port of a group (`groupId` of the shown level; default: the open group) and the wires that used it, inside and outside. */
+  removeGroupPort(side: 'in' | 'out', port: string, groupId?: string): void {
+    if (groupId) return this.editAt([...this.state.path, groupId], (g) => removeBoundaryPort(g, side, port));
+    if (!this.state.path.length) return;
+    this.editLevel((g) => removeBoundaryPort(g, side, port));
+  }
+
+  /** Add a group node made elsewhere (a saved node, an imported file) at a position: an editable copy, never a live link. */
+  addGroupNode(group: NodeInstance, at: { x: number; y: number }, link?: AddMenuRequest['link']): string | null {
+    const problems = validateGroupNode(group, this.registry);
+    if (problems.length) {
+      this.toast(`This group cannot be added: ${problems[0]}.`, 'error');
+      return null;
+    }
+    const id = uid('g');
+    const node: NodeInstance = { ...withoutProcessResults(structuredClone(group), this.clearOf), id, x: Math.round(at.x), y: Math.round(at.y), frame: undefined };
+    this.editLevel((g) => {
+      let next: GraphDoc = { ...g, nodes: [...g.nodes, node] };
+      const def = defOf(this.registry, node);
+      if (link && def) {
+        // opened from a dragged wire: connect it to the first socket that fits, like any added node
+        const ports = link.side === 'out' ? inputsAccepting(def, link.type) : outputsFeeding(def, link.type);
+        for (const port of ports) {
+          const from = link.side === 'out' ? { node: link.node, port: link.port } : { node: id, port };
+          const to = link.side === 'out' ? { node: id, port } : { node: link.node, port: link.port };
+          if (!connectError(next, this.registry, from, to)) {
+            next = connect(next, this.registry, from, to);
+            break;
+          }
+        }
+      }
+      return next;
+    });
+    this.patch({ selection: [id], selectedFrame: null });
+    return id;
+  }
+
   /* -------------------------------- frames -------------------------------- */
 
   groupSelection(): void {
@@ -1011,7 +1302,7 @@ export class Editor {
     if (!selection.length) return;
     const palette = ['#5b8def', '#c77dff', '#4dd6a8', '#f2c14e', '#ef6f9c', '#58c4dd'];
     const id = uid('f');
-    this.edit((g) => {
+    this.editLevel((g) => {
       const frames = g.frames ?? [];
       const frame: FrameBox = { id, label: 'Frame', color: palette[frames.length % palette.length] };
       return { ...g, frames: [...frames, frame], nodes: g.nodes.map((n) => (selection.includes(n.id) ? { ...n, frame: id } : n)) };
@@ -1019,20 +1310,20 @@ export class Editor {
     this.patch({ selectedFrame: id, selection: [] });
   }
   ungroup(frameId: string): void {
-    this.edit((g) => ({
+    this.editLevel((g) => ({
       ...g,
       frames: (g.frames ?? []).filter((f) => f.id !== frameId),
       nodes: g.nodes.map((n) => (n.frame === frameId ? { ...n, frame: undefined } : n)),
     }));
   }
   removeFromFrame(ids: readonly string[]): void {
-    this.edit((g) => this.pruneFrames({ ...g, nodes: g.nodes.map((n) => (ids.includes(n.id) ? { ...n, frame: undefined } : n)) }));
+    this.editLevel((g) => this.pruneFrames({ ...g, nodes: g.nodes.map((n) => (ids.includes(n.id) ? { ...n, frame: undefined } : n)) }));
   }
   setNodeFrame(ids: readonly string[], frame: string): void {
-    this.edit((g) => ({ ...g, nodes: g.nodes.map((n) => (ids.includes(n.id) ? { ...n, frame } : n)) }));
+    this.editLevel((g) => ({ ...g, nodes: g.nodes.map((n) => (ids.includes(n.id) ? { ...n, frame } : n)) }));
   }
   updateFrame(id: string, patch: Partial<FrameBox>): void {
-    this.commit({ ...this.state.graph, frames: (this.state.graph.frames ?? []).map((f) => (f.id === id ? { ...f, ...patch } : f)) }, `frame:${id}:${Object.keys(patch)}`);
+    this.commitLevel({ ...this.level, frames: (this.level.frames ?? []).map((f) => (f.id === id ? { ...f, ...patch } : f)) }, `frame:${id}:${Object.keys(patch)}`);
   }
   private pruneFrames(g: GraphDoc): GraphDoc {
     const used = new Set(g.nodes.map((n) => n.frame).filter(Boolean));
@@ -1041,7 +1332,7 @@ export class Editor {
 
   autoLayout(onlySelection = false): void {
     const sel = this.state.selection;
-    this.edit((g) => autoLayout(g, this.registry, onlySelection && sel.length > 1 ? new Set(sel) : undefined));
+    this.editLevel((g) => autoLayout(g, this.registry, onlySelection && sel.length > 1 ? new Set(sel) : undefined));
     void layoutFor;
   }
 
@@ -1075,6 +1366,8 @@ export class Editor {
     if (active && g && g.schema === 'rsmps/graph' && g.version === 2) {
       this.skipSave = true;
       this.loadGraph(g);
+      // stored process results (bakes, analyses) that no node of this project references any more: copies, undone bakes
+      void this.io.processes.prune(active, g, { unreferenced: true }).catch(() => undefined);
       await this.io.projects.setActive(active);
       this.patch({ projects: list, activeProject: active });
       return;
@@ -1220,12 +1513,12 @@ export class Editor {
 
   /** One-click record source for a Timeline node: Microphone -> recordAudio or MIDI Keyboard -> recordMidi (guarded by the registry). */
   addRecordSource(nodeId: string, kind: 'audio' | 'midi'): void {
-    const node = this.state.graph.nodes.find((n) => n.id === nodeId);
+    const node = this.level.nodes.find((n) => n.id === nodeId);
     const type = kind === 'audio' ? 'microphone' : 'midi-keyboard';
     const def = this.registry.get(type);
     if (!node || !def) return this.toast(`The "${type}" node is not available.`, 'error');
     const outPort = kind === 'audio' ? 'tap' : Object.keys(def.outputs)[0];
-    this.edit((g) => {
+    this.editLevel((g) => {
       const added = addNode(g, this.registry, type, { x: node.x - 260, y: node.y + (kind === 'audio' ? 0 : 160) });
       return connect(added.graph, this.registry, { node: added.node.id, port: outPort }, { node: nodeId, port: kind === 'audio' ? 'recordAudio' : 'recordMidi' });
     });
@@ -1466,14 +1759,16 @@ export class Editor {
     let runProcesses = false;
     const pending = this.io.processes.pending(graph, outputs);
     if (pending.length) {
-      const list = pending.map((p) => `  • ${p.label} (${p.title}, ${p.state})`).join('\n');
-      const ok =
-        typeof window !== 'undefined' &&
-        window.confirm(
-          `Before exporting, ${pending.length === 1 ? 'a process has' : `${pending.length} processes have`} to run, otherwise the export would contain a stand-in instead of the real result:\n\n${list}\n\nRun ${pending.length === 1 ? 'it' : 'them'} now, then export?`,
-        );
+      // the app's own dialog (Esc or a click outside = no), not the browser's confirm
+      const ok = await this.ask({
+        title: 'Run processes first?',
+        text: `Before exporting, ${pending.length === 1 ? 'a process has' : `${pending.length} processes have`} to run, otherwise the export would contain a stand-in instead of the real result:`,
+        items: pending.map((p) => `${p.label}: ${p.title}, ${p.state}`),
+        ok: `Run ${pending.length === 1 ? 'it' : 'them'}, then export`,
+        cancel: 'Cancel',
+      });
       if (!ok) {
-        this.toast('Export cancelled: run the processes first (Process button in the inspector).', 'info');
+        this.toast('Export canceled: run the processes first (Process button in the inspector).', 'info');
         return false;
       }
       runProcesses = true;
@@ -1504,7 +1799,7 @@ export class Editor {
       setTimeout(() => this.maybeSupport('export'), 1200);
       return true;
     } catch (err) {
-      if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) this.toast('Export cancelled', 'info');
+      if (ac.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) this.toast('Export canceled', 'info');
       else this.toast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
       return false;
     } finally {
@@ -1521,6 +1816,29 @@ export class Editor {
   }
   cancelExport(): void {
     this.exportAbort?.abort();
+  }
+
+  private confirmResolve: ((ok: boolean) => void) | null = null;
+
+  /** Ask a yes / no question in the app's dialog. Resolves false when dismissed (Esc, the scrim) or when another question replaces it. */
+  ask(req: ConfirmRequest): Promise<boolean> {
+    this.confirmResolve?.(false);
+    return new Promise<boolean>((resolve) => {
+      this.confirmResolve = resolve;
+      this.patch({ confirm: req });
+    });
+  }
+  /** The dialog's answer. */
+  answer(ok: boolean): void {
+    const r = this.confirmResolve;
+    this.confirmResolve = null;
+    this.patch({ confirm: null });
+    r?.(ok);
+  }
+
+  /** "Save group as node…" for a group node (full path id). */
+  openSaveNode(groupFullId: string): void {
+    this.patch({ saveNodeTarget: groupFullId, dialog: 'saveNode', addMenu: null, contextMenu: null });
   }
 
   openSocketPicker(req: EditorState['socketPicker']): void {

@@ -4,7 +4,10 @@
  */
 import type { DragEvent as RDragEvent, MouseEvent as RMouseEvent, PointerEvent as RPointerEvent } from 'react';
 import { connectError, disconnect, inputType, outputType, wiresInto } from '../../engine/graph';
+import { defOf, GROUP_IN, GROUP_OUT, GROUP_TYPE, NEW_PORT } from '../../engine/group';
+import { NODE_FILE_EXT, NODE_FILE_MAX_BYTES } from '../../io/node-presets';
 import type { AppCtx } from '../store/context';
+import { LongPress } from '../responsive/longPress';
 import { abortAllTracking, trackPointer } from '../lib/drag';
 import {
   boundsOf,
@@ -35,7 +38,7 @@ export function createGestures(app: AppCtx) {
   const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
 
   function updateEdges(offsets: ReadonlyMap<string, { dx: number; dy: number }>) {
-    const g = ed.state.graph;
+    const g = ed.state.level;
     for (const e of g.edges) {
       if (!offsets.has(e.from.node) && !offsets.has(e.to.node)) continue;
       const ep = edgeEndpoints(g, reg, e, offsets);
@@ -105,7 +108,7 @@ export function createGestures(app: AppCtx) {
     } else if (!before.includes(id)) ed.select([id]);
     else deferSingle = before.length > 1;
 
-    const g0 = ed.state.graph;
+    const g0 = ed.state.level;
     const ids = [...ed.state.selection];
     const idSet = new Set(ids);
     const nodes = ids.map((i) => g0.nodes.find((n) => n.id === i)!).filter(Boolean);
@@ -160,12 +163,12 @@ export function createGestures(app: AppCtx) {
           const c = { x: r.x + dx + r.w / 2, y: r.y + dy + r.h / 2 };
           let best: string | null = null;
           let bestD = 28 / ctl.view.zoom;
-          const def = reg.get(single.type);
+          const def = defOf(reg, single);
           for (const [eid, pts] of polylines) {
             const ed2 = g0.edges.find((x) => x.id === eid);
             if (detach && ed2 && (ed2.from.node === single.id || ed2.to.node === single.id)) continue; // its own wires go away when it is detached
             const d = distToPolyline(c, pts);
-            if (d < bestD && def && edgeAccepts(eid, single.type)) {
+            if (d < bestD && def && edgeAccepts(eid, single)) {
               best = eid;
               bestD = d;
             }
@@ -190,10 +193,10 @@ export function createGestures(app: AppCtx) {
     );
   }
 
-  function edgeAccepts(edgeId: string, nodeType: string): boolean {
-    const g = ed.state.graph;
+  function edgeAccepts(edgeId: string, node: { type: string; params: Record<string, unknown> }): boolean {
+    const g = ed.state.level;
     const edge = g.edges.find((x) => x.id === edgeId);
-    const def = reg.get(nodeType);
+    const def = defOf(reg, node);
     if (!edge || !def || Object.keys(def.outputs).length === 0) return false;
     const ft = outputType(g, reg, edge.from.node, edge.from.port);
     return !!ft && inputsAccepting(def, ft).some((p) => p in def.inputs);
@@ -201,7 +204,7 @@ export function createGestures(app: AppCtx) {
 
   function startFrameDrag(e: RPointerEvent, frameId: string) {
     ed.selectFrame(frameId);
-    const g0 = ed.state.graph;
+    const g0 = ed.state.level;
     const members = g0.nodes.filter((n) => n.frame === frameId);
     const fr = frameRects(g0, reg).get(frameId);
     const x0 = e.clientX;
@@ -233,7 +236,7 @@ export function createGestures(app: AppCtx) {
   /* -------------------------------- wiring -------------------------------- */
 
   function startWire(e: RPointerEvent, sock: HTMLElement) {
-    const g = ed.state.graph;
+    const g = ed.state.level;
     const node = sock.dataset.node!;
     const port = sock.dataset.port!;
     const dir = sock.dataset.dir as 'in' | 'out';
@@ -257,7 +260,7 @@ export function createGestures(app: AppCtx) {
       } else fixed = { side: 'in', node, port, type: it.type };
     }
     const fnode = g.nodes.find((n) => n.id === fixed.node)!;
-    const fpos = socketWorld(fnode, layoutFor(g, fnode, reg.get(fnode.type)), fixed.side === 'out' ? 'out' : 'in', fixed.port);
+    const fpos = socketWorld(fnode, layoutFor(g, fnode, defOf(reg, fnode)), fixed.side === 'out' ? 'out' : 'in', fixed.port);
 
     // dim everything that cannot accept this wire
     const sockets = Array.from(ctl.root!.querySelectorAll<HTMLElement>('[data-sock]'));
@@ -265,6 +268,8 @@ export function createGestures(app: AppCtx) {
       const d = el.dataset.dir;
       const n = el.dataset.node!;
       const p = el.dataset.port!;
+      // the "+" socket of an open group's boundary: a new port of whatever type is dragged onto it
+      if (p === NEW_PORT) return (fixed.side === 'out' && n === GROUP_OUT && d === 'in') || (fixed.side === 'in' && n === GROUP_IN && d === 'out') ? null : 'Drop on a socket of the right side';
       if (fixed.side === 'out') {
         if (d !== 'in') return 'Drop on an input socket';
         return connectError(g, reg, { node: fixed.node, port: fixed.port }, { node: n, port: p });
@@ -329,7 +334,7 @@ export function createGestures(app: AppCtx) {
             if (ed.state.socketPicker && ed.state.socketPicker.node !== nid) ed.openSocketPicker(null);
             if (nid && nid !== fixed.node && !ed.state.socketPicker) {
               hoverTimer = setTimeout(() => {
-                if (compatibleSockets(ed.state.graph, reg, nid, { node: fixed.node, port: fixed.port }).length) ed.openSocketPicker({ node: nid, from: fixed, x: ev.clientX + 14, y: ev.clientY + 14 });
+                if (compatibleSockets(ed.state.level, reg, nid, { node: fixed.node, port: fixed.port }).length) ed.openSocketPicker({ node: nid, from: fixed, x: ev.clientX + 14, y: ev.clientY + 14 });
               }, 500);
             }
           }
@@ -379,7 +384,7 @@ export function createGestures(app: AppCtx) {
           const from = fixed.side === 'out' ? { node: fixed.node, port: fixed.port } : to;
           const dst = fixed.side === 'out' ? to : { node: fixed.node, port: fixed.port };
           const slot = target.dataset.slot !== undefined ? Number(target.dataset.slot) : undefined;
-          if (detached) ed.edit((gr) => ed.connectSlot(disconnect(gr, detached!), from, dst, slot));
+          if (detached) ed.editLevel((gr) => ed.connectSlot(disconnect(gr, detached!), from, dst, slot));
           else ed.connect(from, dst, slot);
           return;
         }
@@ -400,8 +405,14 @@ export function createGestures(app: AppCtx) {
         }
         if (pk && hit?.closest('.rs-sp')) return;
         const bodyNode = hit?.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId;
+        // dropped on the body of an open group's boundary: a new group port
+        if (!detached && ((fixed.side === 'out' && bodyNode === GROUP_OUT) || (fixed.side === 'in' && bodyNode === GROUP_IN))) {
+          if (fixed.side === 'out') ed.connect({ node: fixed.node, port: fixed.port }, { node: GROUP_OUT, port: NEW_PORT });
+          else ed.connect({ node: GROUP_IN, port: NEW_PORT }, { node: fixed.node, port: fixed.port });
+          return;
+        }
         if (fixed.side === 'out' && !detached && bodyNode && bodyNode !== fixed.node) {
-          const list = compatibleSockets(ed.state.graph, reg, bodyNode, { node: fixed.node, port: fixed.port });
+          const list = compatibleSockets(ed.state.level, reg, bodyNode, { node: fixed.node, port: fixed.port });
           if (list.length === 1) ed.connect({ node: fixed.node, port: fixed.port }, { node: bodyNode, port: list[0].port });
           else if (list.length === 0) ed.toast('Nothing on that node accepts this wire.', 'error');
           else ed.openSocketPicker({ node: bodyNode, from: fixed, x: ev.clientX + 10, y: ev.clientY + 10 });
@@ -428,7 +439,7 @@ export function createGestures(app: AppCtx) {
   function startBox(e: RPointerEvent) {
     const additive = e.shiftKey || e.ctrlKey || e.metaKey;
     const base = additive ? [...ed.state.selection] : [];
-    const rects = nodeRects(ed.state.graph, reg);
+    const rects = nodeRects(ed.state.level, reg);
     const r0 = ctl.rect();
     const x0 = e.clientX - r0.left;
     const y0 = e.clientY - r0.top;
@@ -467,7 +478,7 @@ export function createGestures(app: AppCtx) {
   /* -------------------------- right button / cutting ----------------------- */
 
   function startCut(e: RPointerEvent) {
-    const g = ed.state.graph;
+    const g = ed.state.level;
     const polys = edgePolylines(g, reg);
     const a = ctl.toWorld(e.clientX, e.clientY);
     const r0 = ctl.rect();
@@ -495,7 +506,7 @@ export function createGestures(app: AppCtx) {
         for (const [id, pts] of polys) {
           if (short ? distToPolyline(a, pts) < 8 / ctl.view.zoom : polylineCrosses(pts, a, b)) kill.push(id);
         }
-        if (kill.length) ed.edit((gr) => ({ ...gr, edges: gr.edges.filter((x) => !kill.includes(x.id)) }));
+        if (kill.length) ed.editLevel((gr) => ({ ...gr, edges: gr.edges.filter((x) => !kill.includes(x.id)) }));
       },
     );
   }
@@ -522,33 +533,43 @@ export function createGestures(app: AppCtx) {
     });
   }
 
-  /** Touch / pen: press and hold (~500 ms, without moving) opens the context menu or the add menu. */
+  /**
+   * Touch / pen: press and hold (500 ms, without moving more than 8 px: the shared `LongPress` recogniser) opens the same menu a right-click
+   * does at that point: node, wire or the add menu on the background. A second finger (pinch) or any other pointer ends the press.
+   * Parameter rows and wire taps are handled by the touch layer (src/ui/graph-touch/graphTouch.ts); this one never runs for the mouse.
+   */
   function armLongPress(e: RPointerEvent) {
     const nodeEl = (e.target as HTMLElement).closest<HTMLElement>('[data-node-id]');
     const edgeId = (e.target as HTMLElement).closest<HTMLElement>('[data-edge]')?.getAttribute('data-edge');
-    const x0 = e.clientX;
-    const y0 = e.clientY;
-    const t = window.setTimeout(() => {
-      off();
-      if (nodeEl) {
-        const id = nodeEl.dataset.nodeId!;
-        if (!ed.state.selection.includes(id)) ed.select([id]);
-        ed.openContextMenu({ clientX: x0, clientY: y0, nodeId: id });
-      } else if (edgeId) ed.openContextMenu({ clientX: x0, clientY: y0, nodeId: null, edgeId });
-      else ed.openAddMenu({ clientX: x0, clientY: y0, world: ctl.toWorld(x0, y0), context: true });
-    }, 500);
+    const lp = new LongPress({
+      onFire: (x0, y0) => {
+        off();
+        if (nodeEl) {
+          const id = nodeEl.dataset.nodeId!;
+          if (!ed.state.selection.includes(id)) ed.select([id]);
+          ed.openContextMenu({ clientX: x0, clientY: y0, nodeId: id });
+        } else if (edgeId) ed.openContextMenu({ clientX: x0, clientY: y0, nodeId: null, edgeId });
+        else ed.openAddMenu({ clientX: x0, clientY: y0, world: ctl.toWorld(x0, y0), context: true });
+      },
+    });
     const mv = (ev: PointerEvent) => {
-      if (dist(ev.clientX, ev.clientY, x0, y0) > 6) off();
+      if (ev.pointerId !== e.pointerId || !lp.move(ev.clientX, ev.clientY, ev.pointerId)) off();
+    };
+    const other = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) off();
     };
     function off() {
-      clearTimeout(t);
+      lp.cancel();
       window.removeEventListener('pointermove', mv);
       window.removeEventListener('pointerup', off);
       window.removeEventListener('pointercancel', off);
+      window.removeEventListener('pointerdown', other, true);
     }
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', off);
     window.addEventListener('pointercancel', off);
+    window.addEventListener('pointerdown', other, true);
+    lp.start(e.clientX, e.clientY, e.pointerId);
   }
 
   /* -------------------------------- dispatch ------------------------------- */
@@ -617,6 +638,16 @@ export function createGestures(app: AppCtx) {
     },
 
     onDoubleClick(e: RMouseEvent<HTMLElement>) {
+      // double-click a group node (not its title, which renames it): open it
+      const el = e.target as HTMLElement;
+      const nodeId = el.closest?.('[data-node-id]')?.getAttribute('data-node-id');
+      if (nodeId && !el.closest('.rs-node__title, [data-nodrag], input, select, button')) {
+        const n = ed.state.level.nodes.find((x) => x.id === nodeId);
+        if (n?.type === GROUP_TYPE) {
+          ed.enterGroup(nodeId);
+          return;
+        }
+      }
       const edgeId = (e.target as HTMLElement).closest?.('[data-edge]')?.getAttribute('data-edge');
       if (edgeId && reg.get('reroute')) ed.addReroute(edgeId, ctl.toWorld(e.clientX, e.clientY));
     },
@@ -652,7 +683,23 @@ export function createGestures(app: AppCtx) {
       }
       if (e.dataTransfer.files.length) {
         e.preventDefault();
-        const files = Array.from(e.dataTransfer.files);
+        const all = Array.from(e.dataTransfer.files);
+        // saved group nodes (.rsmps-node.json): validated (data only) and added as an editable copy
+        const nodeFiles = all.filter((f) => f.name.toLowerCase().endsWith(NODE_FILE_EXT));
+        let y = at.y;
+        for (const f of nodeFiles) {
+          try {
+            if (f.size > NODE_FILE_MAX_BYTES) throw new Error('This file is too large for a saved node.');
+            const parsed = io.nodePresets.parse(await f.text());
+            ed.addGroupNode(io.nodePresets.instantiate(parsed), { x: Math.round(at.x), y: Math.round(y) });
+            y += 160;
+            ed.toast(`Added "${parsed.name}"`, 'ok', [{ label: 'Keep in add menu', run: () => void io.nodePresets.importFile(f).then(() => ed.toast(`"${parsed.name}" is in the add menu under its category`, 'ok'), (err) => ed.toast(err instanceof Error ? err.message : String(err), 'error')) }]);
+          } catch (err) {
+            ed.toast(`${f.name}: ${err instanceof Error ? err.message : String(err)}`, 'error');
+          }
+        }
+        const files = all.filter((f) => !nodeFiles.includes(f));
+        if (!files.length) return;
         try {
           const infos = await io.library.add(files);
           placeAssets(infos.map((i) => i.id), at);
@@ -687,7 +734,7 @@ export function createGestures(app: AppCtx) {
 /** Frame the whole graph (or the selection) in the viewport. */
 export function frameGraph(app: AppCtx, selectionOnly = false): void {
   const { ed, io, graphCtl } = app;
-  const g = ed.state.graph;
+  const g = ed.state.level;
   const rects = nodeRects(g, io.registry);
   const sel = new Set(ed.state.selection);
   const list = [...rects].filter(([id]) => !selectionOnly || !sel.size || sel.has(id)).map(([, r]) => r);

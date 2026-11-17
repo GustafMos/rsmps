@@ -81,7 +81,7 @@ export default defineNode({
   title: 'Custom Shader',
   category: 'stylize',
   description:
-    'Write your own effect or generator in WGSL, the shader language of WebGPU (open standard, close to GLSL). Reads up to two images, four sliders and a colour; animates in a perfect loop from the loop phase. For quick experiments: ship a polished effect as a plugin.',
+    'Write your own effect or generator in WGSL, the shader language of WebGPU (open standard, close to GLSL). Reads up to two images, four sliders and a color; animates in a perfect loop from the loop phase. For quick experiments: ship a polished effect as a plugin.',
   keywords: ['shader', 'wgsl', 'code', 'glsl', 'shadertoy', 'fragment', 'program', 'script', 'custom', 'effect', 'generator', 'webgpu'],
   inputs: {
     image: { type: 'image', label: 'Image' },

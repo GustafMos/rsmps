@@ -7,8 +7,8 @@ import { useApp, useDefs, useEd } from '../store/context';
 
 export const Frames = memo(function Frames() {
   const { io } = useApp();
-  const nodes = useEd((s) => s.graph.nodes);
-  const frames = useEd((s) => s.graph.frames);
+  const nodes = useEd((s) => s.level.nodes);
+  const frames = useEd((s) => s.level.frames);
   useDefs();
   // node height depends on pinned / expanded params: recompute the outline when either changes, not only when nodes move
   const view = useSelector(nodeViewStore, (s) => s);

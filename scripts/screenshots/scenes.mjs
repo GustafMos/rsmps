@@ -1,6 +1,9 @@
 // Scene definitions for capture.mjs. A scene's `nodes` are placed at `at: [x, y]` (graph units); `edges` are
 // 'nodeKey.port' pairs; a param value '@asset:scene' is replaced by the id of the imported test image.
 
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 const SCENE = 'scripts/screenshots/assets/base-scene.png';
 
 /** A 4 s mono 16-bit WAV with a kick and hi-hat pattern, so the timeline shows a real waveform. Generated, no media used. */
@@ -266,7 +269,7 @@ export const scenes = [
       // 2. The sheets are "photographed": tilted, shrunk onto a table-coloured background, lightly noised.
       // 3. They are stored as the photos of a new Scan project; reloading makes the UI analyse and show them.
       const info = await k.js(`(async()=>{
-        const io=window.__rsmpsIo; const G=await import('/src/engine/graph.ts');
+        const io=window.__rsmpsIo; const G=window.__rsmps.graph;
         let g=G.createGraph('Print sheet');
         g={...g,project:{...g.project,width:480,height:480,fps:6,duration:2}};
         const bg=G.addNode(g,io.registry,'solid',{x:0,y:0},{color:[1,1,1,1]}); g=bg.graph;
@@ -316,6 +319,131 @@ export const scenes = [
       await k.clickText('Clean up & export', 'button,[role=tab],a', { includes: true });
       await k.sleep(4000);
       await k.shot('07-scan.png');
+    },
+  },
+
+  {
+    id: 'logofall',
+    async run(k) {
+      // A letter with a hole, falling into itself (Infinite Zoom), bundled in a Group whose letter and copy scale are exposed on the group node.
+      const ids = await k.openGraph({
+        name: 'Logo fall',
+        ui: { split: 0.54, leftOpen: false },
+        project: { width: 1280, height: 720, duration: 4, fps: 24 },
+        nodes: {
+          bg: { type: 'gradient', at: [0, 300], params: { kind: 'radial' } },
+          txt: { type: 'text', at: [0, 0], params: { text: 'O', fontSize: 760, weight: 900, color: [1, 0.86, 0.36, 1] }, label: 'Your logo here' },
+          zoom: { type: 'infinite-zoom', at: [300, 0], params: { scale: 0.32, levels: 8, speed: 1, dissolve: 0.3 } },
+          comp: { type: 'merge', at: [640, 120] },
+          glow: { type: 'bloom', at: [920, 120], params: { intensity: 0.45 } },
+          out: { type: 'image-out', at: [1200, 120], params: { name: 'logo-fall' } },
+        },
+        edges: [['txt.image', 'zoom.image'], ['zoom.image', 'comp.foreground'], ['bg.image', 'comp.background'], ['comp.image', 'glow.image'], ['glow.image', 'out.image']],
+      });
+      await k.js(`(() => {
+        const { ed } = window.__rsmps; const ids = ${JSON.stringify(ids)};
+        ed.select([ids.txt, ids.zoom]);
+        const gid = ed.groupNodes('group');
+        ed.setGroupInfo(gid, { title: 'Logo fall' });
+        ed.enterGroup(gid);
+        ed.exposeParam(ids.txt, 'text', 'Letter');
+        ed.exposeParam(ids.zoom, 'scale', 'Copy scale');
+        ed.exitGroup(0);
+        ed.select([]);
+        window.__gid = gid;
+      })()`);
+      await k.sleep(800);
+      await k.frameAll();
+      await k.sleep(400);
+      await k.frameAll();
+      await k.js('window.__rsmps.ed.select([window.__gid])');
+      await k.js('window.__rsmpsIo.player.seek(0.7)');
+      await k.settle();
+      await k.shot('08-logo-fall.png');
+    },
+  },
+
+  {
+    id: 'subtitles',
+    async run(k) {
+      const ids = await k.openGraph({
+        name: 'Subtitles on a vertical frame',
+        ui: { split: 0.62, leftOpen: false },
+        project: { width: 1080, height: 1920, duration: 4, fps: 24 },
+        nodes: {
+          bg: { type: 'gradient', at: [0, 0], params: { kind: 'linear', angle: 70 } },
+          sub: { type: 'subtitles', at: [320, 0], params: { text: '[0-1.4] Captions that keep people watching\n[1.4-2.8] Words pop in time with the voice\n[2.8-4] Style them any way you like' } },
+          comp: { type: 'merge', at: [640, 0] },
+          out: { type: 'image-out', at: [940, 0], params: { name: 'vertical-captions' } },
+        },
+        edges: [['bg.image', 'comp.background'], ['sub.image', 'comp.foreground'], ['comp.image', 'out.image']],
+      });
+      await k.selectNode(ids.sub);
+      await k.frameAll();
+      await k.js('window.__rsmpsIo.player.seek(1.9)');
+      await k.settle();
+      await k.shot('09-subtitles.png');
+    },
+  },
+
+  {
+    id: 'material2d',
+    async run(k) {
+      // A flat logo made into a bevelled gold object, lit by a Material node.
+      const ids = await k.openGraph({
+        name: 'Material 2D logo',
+        ui: { split: 0.54, leftOpen: false },
+        project: { width: 1280, height: 720, duration: 4, fps: 24 },
+        nodes: {
+          bg: { type: 'gradient', at: [0, 0], params: { kind: 'radial' } },
+          txt: { type: 'text', at: [0, 300], params: { text: 'RSMPS', fontSize: 340, weight: 900, color: [1, 1, 1, 1] } },
+          mat: { type: 'material', at: [320, 300], params: { model: 'metal', baseColor: [1, 0.76, 0.28, 1], roughness: 0.25 } },
+          m2d: { type: 'material-2d', at: [620, 120], params: { bevelWidth: 22, depth: 1.4, lightAngle: 40 } },
+          comp: { type: 'merge', at: [920, 120] },
+          out: { type: 'image-out', at: [1220, 120], params: { name: 'gold-logo' } },
+        },
+        edges: [['txt.image', 'm2d.image'], ['mat.material', 'm2d.material'], ['bg.image', 'comp.background'], ['m2d.image', 'comp.foreground'], ['comp.image', 'out.image']],
+      });
+      await k.selectNode(ids.m2d);
+      await k.frameAll();
+      await k.settle();
+      await k.shot('10-material-2d.png');
+    },
+  },
+
+  {
+    id: 'phone',
+    async run(k) {
+      // The same project in the desktop window and on a phone-sized screen, side by side.
+      const sharp = (await import('sharp')).default;
+      const ids = await k.openGraph({
+        name: 'Pixel-art pipeline',
+        ui: { split: 0.46 },
+        nodes: {
+          src: { type: 'media-in', at: [0, 0], params: { assets: '@asset:scene' } },
+          pix: { type: 'pixelate', at: [300, 0], params: { value: 135 } },
+          dit: { type: 'dither', at: [600, 0], params: { algorithm: 'bayer-4', strength: 0.6 } },
+          crt: { type: 'crt-display', at: [900, 0], params: { preset: 'consumer' } },
+          out: { type: 'image-out', at: [1200, 0], params: { name: 'phone' } },
+        },
+        edges: [['src.image', 'pix.image'], ['pix.image', 'dit.image'], ['dit.image', 'crt.image'], ['crt.image', 'out.image']],
+      }, { scene: await k.importFile(SCENE, 'image/png') });
+      void ids;
+      await k.frameAll();
+      await k.settle();
+      const desk = await k.capture();
+      const phone = await k.phone(1);
+      const dh = 880;
+      const d = await sharp(desk).resize({ height: dh }).png().toBuffer();
+      const dm = await sharp(d).metadata();
+      const p = await sharp(phone).resize({ height: dh }).png().toBuffer();
+      const pm = await sharp(p).metadata();
+      const gap = 28;
+      const out = await sharp({ create: { width: dm.width + gap + pm.width, height: dh, channels: 3, background: '#101114' } })
+        .composite([{ input: d, left: 0, top: 0 }, { input: p, left: dm.width + gap, top: 0 }]).png().toBuffer();
+      mkdirSync(k.out, { recursive: true });
+      writeFileSync(join(k.out, '11-desktop-and-phone.png'), out);
+      console.log(`  wrote 11-desktop-and-phone.png (${Math.round(out.length / 1024)} KB)`);
     },
   },
 ];

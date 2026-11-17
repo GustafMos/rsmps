@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Pixels } from '../../testing';
+import { LOOP_SEAM_OK, type Pixels } from '../../testing';
 import { harness } from '../../lib/mask-test';
 
 const W = 96;
@@ -36,12 +36,12 @@ describe('parallax', () => {
     const { bg, layers } = await scene(t);
     // A circle with one cycle is at its far point at the middle of the loop, so loopCheck sees motion there.
     const r = await t.loopCheck('parallax', { motion: 'circle', amount: 8, cycles: 1 }, { background: bg, layers } as never);
-    expect(r.seam).toBeLessThan(0.01);
+    expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion).toBeGreaterThan(0.01);
     // Sway and figure-eight also close their loop (two cycles).
     for (const motion of ['sway-h', 'sway-v', 'figure-eight', 'push']) {
       const s = await t.loopCheck('parallax', { motion, amount: 8, cycles: 2 }, { background: bg, layers } as never);
-      expect(s.seam).toBeLessThan(0.01);
+      expect(s.seam).toBeLessThan(LOOP_SEAM_OK);
     }
   });
 

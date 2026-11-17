@@ -14,7 +14,7 @@ export default defineNode({
     rotate: { type: 'number', default: 0, min: -3600, max: 3600, step: 0.5, unit: 'deg', label: 'Rotate', hint: 'Degrees, clockwise.' },
     scale: { type: 'number', default: 1, min: 0.01, max: 50, step: 0.01, label: 'Scale' },
     stretch: { type: 'vec2', default: [1, 1], min: 0.01, max: 50, step: 0.01, label: 'Stretch', hint: 'Extra width / height multiplier on top of Scale.' },
-    pivot: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: -1, max: 2, step: 0.005, label: 'Pivot', hint: 'Centre of rotation and scaling. 0.5, 0.5 is the middle.' },
+    pivot: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: -1, max: 2, step: 0.005, label: 'Pivot', hint: 'Center of rotation and scaling. 0.5, 0.5 is the middle.' },
     edge: { type: 'enum', default: 'transparent', options: EDGE_MODES, label: 'Outside the image' },
     filter: {
       type: 'enum',

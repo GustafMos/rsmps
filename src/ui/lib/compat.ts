@@ -19,7 +19,7 @@ export function describeValue(p: ParamDef, v: unknown): string {
   const val = v ?? p.default;
   if (typeof val === 'number') return String(Number(val.toFixed(3))) + (p.type === 'number' && p.unit ? ` ${p.unit}` : '');
   if (Array.isArray(val) && val.length >= 3 && typeof val[0] === 'number' && p.type === 'color') return hexOf(val as number[]).toUpperCase();
-  if (Array.isArray(val)) return `${val.length} colours`;
+  if (Array.isArray(val)) return `${val.length} colors`;
   return String(val ?? '');
 }
 

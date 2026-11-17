@@ -34,7 +34,7 @@ export default defineNode({
   id: 'palette',
   title: 'Palette',
   category: 'pixel',
-  description: 'Provides a colour palette: a built-in one, your own, or colours extracted from an image.',
+  description: 'Provides a color palette: a built-in one, your own, or colors extracted from an image.',
   keywords: ['colors', 'swatch', 'extract', 'median cut', 'kmeans', 'pico-8', 'gameboy'],
   cpu: true,
   inputs: { image: { type: 'image', label: 'Image (for extract)', lazy: true } },

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 // one harness per file: creating many exhausts the headless GPU
 let shared: ReturnType<typeof harness> | null = null;
@@ -69,7 +69,7 @@ it('scrolling loops exactly for every pattern and moves', async () => {
   const t = await H();
   for (const kind of ['checker', 'stripes', 'grid', 'dots', 'hex', 'bricks']) {
     const r = await t.loopCheck('pattern', { kind, cellSize: 10, lineWidth: 3, scrollX: 1, scrollY: 2, angle: 15 }, { size: t.solid(64, 64, [0, 0, 0, 255], 1) });
-    expect(r.seam, kind).toBeLessThan(0.01);
+    expect(r.seam, kind).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion, kind).toBeGreaterThan(0.5);
   }
 });

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { CATEGORIES, type AnyNodeDef, type Category } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NODE_W } from '../lib/layout';
@@ -8,6 +8,8 @@ import { getRecent } from '../store/editor';
 import { NODE_PREFIX, bindingsOf, eventToBinding, owners, setBindings, useKeymapVersion } from '../keymap';
 import { allCommandIds, commandLabel, nodeCommandId } from '../shortcuts';
 import { useApp, useDefs, useEd } from '../store/context';
+import { groupDefOf } from '../../engine/group';
+import type { NodePreset } from '../../io/node-presets';
 import './menus.css';
 
 /** Lower-case and fold the UK spelling, so "colour" finds "Color" and vice versa. */
@@ -49,7 +51,10 @@ export function AddMenu() {
 function AddMenuInner() {
   const { ed, io } = useApp();
   const req = useEd((s) => s.addMenu)!;
-  const defs = useDefs();
+  const regDefs = useDefs();
+  // saved group nodes (Save group as node…) sit in their category, marked with the stack glyph; adding one makes an editable copy
+  const presets = useSyncExternalStore(io.nodePresets.subscribe.bind(io.nodePresets), () => io.nodePresets.list(), () => io.nodePresets.list());
+  const defs = useMemo(() => [...regDefs, ...presets.map(presetDef)], [regDefs, presets]);
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState(0);
   const [item, setItem] = useState(0);
@@ -123,22 +128,27 @@ function AddMenuInner() {
   }, [cat, item, focus, query]);
 
   const selId = !link && ed.state.selection.length === 1 ? ed.state.selection[0] : null;
-  const selNode = selId ? ed.state.graph.nodes.find((n) => n.id === selId) : undefined;
+  const selNode = selId ? ed.state.level.nodes.find((n) => n.id === selId) : undefined;
   const selTitle = selNode ? selNode.label || ed.registry.get(selNode.type)?.title || selNode.type : '';
-  const canDrive = (def: AnyNodeDef) => !!selNode && (Object.values(def.outputs as Record<string, { type: string }>)[0]?.type === 'number');
+  const canDrive = (def: AnyNodeDef) => !isPreset(def) && !!selNode && (Object.values(def.outputs as Record<string, { type: string }>)[0]?.type === 'number');
   /** Add a number-producing node and open the socket picker on the selected node to choose which parameter it drives. */
   const drive = (def: AnyNodeDef) => {
     if (!selId) return;
     const at = { x: Math.round(req.world.x), y: Math.round(req.world.y - 14) };
     ed.openAddMenu(null);
     const nid = ed.addNodeAt(def.id, at);
-    const nn = nid ? ed.state.graph.nodes.find((n) => n.id === nid) : undefined;
+    const nn = nid ? ed.state.level.nodes.find((n) => n.id === nid) : undefined;
     const port = Object.keys(def.outputs)[0];
     if (nn) ed.openSocketPicker({ node: selId, from: { node: nn.id, port, type: 'number' }, x: req.clientX, y: req.clientY });
   };
   const choose = (def: AnyNodeDef) => {
     const at = link?.side === 'in' ? { x: req.world.x - NODE_W, y: req.world.y - 20 } : { x: req.world.x, y: req.world.y - 14 };
     ed.openAddMenu(null);
+    const preset = isPreset(def) ? presets.find((p) => PRESET_PREFIX + p.id === def.id) : undefined;
+    if (preset) {
+      ed.addGroupNode(io.nodePresets.instantiate(preset), { x: Math.round(at.x), y: Math.round(at.y) }, link);
+      return;
+    }
     const id = ed.addNodeAt(def.id, { x: Math.round(at.x), y: Math.round(at.y) }, link);
     if (id && req.insertEdge) ed.insertOnEdge(id, req.insertEdge);
   };
@@ -217,6 +227,7 @@ function AddMenuInner() {
           }}
         />
         <span className="rs-kbd">Esc</span>
+        <button className="rs-btn rs-btn--icon rs-btn--ghost rs-add__x" onClick={() => ed.openAddMenu(null)} aria-label="Close" title="Close"><Icon name="close" size={18} /></button>
       </div>
       {label && <div className="rs-add__filter rs-caps">{label}</div>}
       <div className="rs-add__body">
@@ -255,6 +266,7 @@ function AddMenuInner() {
               onClick={() => choose(d)}
             >
               <span className="rs-add__chip" style={{ background: CATEGORIES[d.category]?.color }} />
+              {isPreset(d) && <Icon name="stack" size={14} className="rs-add__stack" />}
               <span className="rs-add__item-main">
                 <span className={`rs-add__item-title${missingCapabilities(io, d).length ? ' is-unavailable' : ''}`}>{d.title}</span>
                 {searching && <span className="rs-add__item-desc">{d.description}</span>}
@@ -263,7 +275,7 @@ function AddMenuInner() {
               {missingCapabilities(io, d)[0] && <span className="rs-add__req" title={missingCapabilities(io, d)[0].explanation}>{missingCapabilities(io, d)[0].label}</span>}
               {searching && <span className="rs-add__item-cat">{CATEGORIES[d.category]?.title}</span>}
               {canDrive(d) && <span className="rs-add__drive" role="button" title={`Drive a parameter of ${selTitle}… (Shift+Enter)`} onClick={(ev) => { ev.stopPropagation(); drive(d); }}>Drive {selTitle}…</span>}
-              <span className="rs-add__assign" role="button" title="Assign a hotkey that adds this node (Ctrl+K)" onClick={(ev) => { ev.stopPropagation(); setAssign({ type: d.id }); input.current?.focus(); }}><Icon name="keyboard" size={14} /></span>
+              {!isPreset(d) && <span className="rs-add__assign" role="button" title="Assign a hotkey that adds this node (Ctrl+K)" onClick={(ev) => { ev.stopPropagation(); setAssign({ type: d.id }); input.current?.focus(); }}><Icon name="keyboard" size={14} /></span>}
             </button>
           ))}
         </div>
@@ -287,4 +299,18 @@ function AddMenuInner() {
       </div>
     </div>
   );
+}
+
+/** Saved group nodes appear in the add menu as definitions with this id prefix. */
+const PRESET_PREFIX = 'preset:';
+const isPreset = (d: AnyNodeDef) => d.id.startsWith(PRESET_PREFIX);
+const presetDefCache = new WeakMap<NodePreset, AnyNodeDef>();
+function presetDef(p: NodePreset): AnyNodeDef {
+  let d = presetDefCache.get(p);
+  if (!d) {
+    const g = groupDefOf({ type: 'group', params: p.group.params });
+    d = { ...g, id: PRESET_PREFIX + p.id, title: p.name, category: p.category, description: `${p.description || 'A saved group.'} Adds an editable copy.`, keywords: [...p.keywords, 'saved', 'group'], hidden: false };
+    presetDefCache.set(p, d);
+  }
+  return d;
 }

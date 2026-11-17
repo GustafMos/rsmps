@@ -12,6 +12,8 @@ import { bakeSelection } from './store/bake';
 import { processSelection } from './store/processes';
 import { focusMediaSearch, toggleMediaPanel } from './store/media';
 import { isPaused, togglePaused } from './safety';
+import { compareStore, patchCompare, takeSnapshot } from './store/compare';
+import { getLive } from './store/live';
 
 export interface KeyCtx {
   app: AppCtx;
@@ -64,23 +66,38 @@ export const COMMANDS: Command[] = [
     group: 'Edit',
     defaults: ['Escape'],
     run: ({ app }) => {
+      const open = !!app.ed.state.addMenu || !!app.ed.state.contextMenu;
       app.ed.openAddMenu(null);
       app.ed.openContextMenu(null);
       if (sel(app).length) app.ed.select([]);
+      else if (!open && app.ed.state.path.length) app.ed.exitGroup(); // nothing selected inside a group: Esc goes one level up
     },
   },
 
-  { id: 'graph.group', label: 'Group selection in a frame', group: 'Graph', defaults: ['Ctrl+G'], run: (c) => c.app.ed.groupSelection() },
+  { id: 'graph.makeGroup', label: 'Group the selected nodes into one node', group: 'Graph', defaults: ['Ctrl+G'], run: (c) => c.app.ed.groupNodes('group') },
+  { id: 'graph.repeat', label: 'Repeat the selected nodes (a Repeat group)', group: 'Graph', defaults: [], run: (c) => c.app.ed.groupNodes('repeat') },
   {
     id: 'graph.ungroup',
-    label: 'Ungroup the selected frame',
+    label: 'Ungroup the selected group node (or frame)',
     group: 'Graph',
     defaults: ['Ctrl+Shift+G'],
-    run: ({ app }) => app.ed.state.selectedFrame && app.ed.ungroup(app.ed.state.selectedFrame),
+    run: ({ app }) => app.ed.ungroupNodes(),
   },
+  {
+    id: 'graph.enterGroup',
+    label: 'Open the selected group',
+    group: 'Graph',
+    defaults: ['Tab'],
+    run: ({ app }) => {
+      const s = sel(app);
+      if (s.length === 1) app.ed.enterGroup(s[0]);
+    },
+  },
+  { id: 'graph.exitGroup', label: 'Close the open group (one level up)', group: 'Graph', defaults: [], run: ({ app }) => app.ed.exitGroup() },
+  { id: 'graph.group', label: 'Put the selection in a frame', group: 'Graph', defaults: ['Shift+G'], run: (c) => c.app.ed.groupSelection() },
   { id: 'graph.unframe', label: 'Remove selection from its frame', group: 'Graph', defaults: ['Ctrl+Alt+G'], run: (c) => c.app.ed.removeFromFrame(sel(c.app)) },
   { id: 'graph.frame', label: 'Frame all (or selection)', group: 'Graph', defaults: ['F', 'Home'], run: ({ app }) => frameGraph(app, sel(app).length > 0) },
-  { id: 'graph.bake', label: 'Bake selection (Cache / Bake node after it)', group: 'Graph', defaults: ['Ctrl+Shift+B'], run: ({ app }) => void bakeSelection(app) },
+  { id: 'graph.bake', label: 'Bake selection (group it and store the group outputs)', group: 'Graph', defaults: ['Ctrl+Shift+B'], run: ({ app }) => void bakeSelection(app) },
   { id: 'graph.process', label: 'Process selected nodes (run their long jobs: bake, clip analysis...)', group: 'Graph', defaults: ['Ctrl+Alt+P'], run: ({ app }) => void processSelection(app) },
   { id: 'graph.bypass', label: 'Bypass selected nodes', group: 'Graph', defaults: ['B'], run: ({ app }) => sel(app).forEach((id) => app.ed.toggleBypass(id)) },
   { id: 'graph.collapse', label: 'Collapse / expand selected nodes', group: 'Graph', defaults: ['H'], run: ({ app }) => sel(app).length && app.ed.toggleCollapse(sel(app)) },
@@ -141,6 +158,17 @@ export const COMMANDS: Command[] = [
       if (isPaused()) return app.ed.toast('Rendering is paused: resume it first.', 'info');
       if (!app.io.player.renderFullFrame()) app.ed.toast('Nothing is being viewed.', 'info');
     },
+  },
+  { id: 'view.output', label: 'Open or close the output window (second monitor)', group: 'View', defaults: ['Ctrl+Shift+O'], run: ({ app }) => getLive(app).output.toggle() },
+  { id: 'view.blackout', label: 'Blackout the output window', group: 'View', defaults: ['Alt+B'], run: ({ app }) => getLive(app).output.setBlackout() },
+  { id: 'view.freeze', label: 'Freeze the output window', group: 'View', defaults: ['Alt+F'], run: ({ app }) => getLive(app).output.setFreeze() },
+  { id: 'view.snapshot', label: 'Snapshot of the viewer (for A/B compare)', group: 'View', defaults: ['Shift+S'], run: ({ app }) => void takeSnapshot(app) },
+  {
+    id: 'view.compareHold',
+    label: 'Hold to flip between the snapshot and the live image (A/B toggle)',
+    group: 'View',
+    defaults: ['Q'],
+    run: () => { if (compareStore.get().mode === 'toggle') patchCompare({ flipped: true }); },
   },
   { id: 'view.mediaPanel', label: 'Toggle the media panel (open / fold to the side rail)', group: 'View', defaults: ['Alt+M'], run: () => toggleMediaPanel() },
   { id: 'view.mediaSearch', label: 'Focus the media search', group: 'View', defaults: ['Ctrl+Shift+F'], run: () => focusMediaSearch() },
@@ -233,6 +261,8 @@ export function useShortcuts(app: AppCtx): void {
       if (!binding) return;
       const id = buildIndex(app).get(binding);
       if (!id) return;
+      // Tab opens a group only when one group node is selected; otherwise it keeps moving the keyboard focus
+      if (id === 'graph.enterGroup' && !(ed.state.selection.length === 1 && ed.state.level.nodes.find((n) => n.id === ed.state.selection[0])?.type === 'group')) return;
       e.preventDefault();
       if (e.repeat && id !== 'play.back' && id !== 'play.fwd') return;
       const nodeType = nodeTypeOf(id);

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { sheet, writePng, type Img } from '../../lib/gen-3d-testutil';
 
 let shared: ReturnType<typeof harness> | null = null;
@@ -123,7 +123,7 @@ it('noise displacement moves the surface, loops in whole cycles and deform off i
   for (let i = 3; i < still.data.length; i += 4) diff += Math.abs(still.data[i] - noisy.data[i]);
   expect(diff / (still.data.length / 4)).toBeGreaterThan(2);
   const r = await t.loopCheck('sdf-3d', { ...base, shape2: 'off', x1: 0, size1: 0.8, dNoise: 0.25, dNoiseCycles: 1 });
-  expect(r.seam).toBeLessThan(0.05);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(0.2);
   const explicitOff = await draw({ shape2: 'off', x1: 0, size1: 0.8, dNoise: 0, dTwist: 0, dBend: 0, dMorph: 0 });
   expect(Buffer.from(explicitOff.data).equals(Buffer.from(still.data))).toBe(true);

@@ -212,7 +212,7 @@ export class PhoneScanController {
       }
     } catch (err) {
       const aborted = err instanceof Error && err.name === 'AbortError';
-      for (const b of batch) this.status({ type: 'scan-status', id: b.id, state: 'failed', note: aborted ? 'The scan was cancelled on the computer.' : `The scan failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200), retake: !aborted });
+      for (const b of batch) this.status({ type: 'scan-status', id: b.id, state: 'failed', note: aborted ? 'The scan was canceled on the computer.' : `The scan failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200), retake: !aborted });
       return;
     }
     await this.o.adopt(result, adoptFiles, mode);

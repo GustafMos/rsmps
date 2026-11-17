@@ -77,7 +77,7 @@ export async function checkGradient(t: Harness, algorithms: string[], colorSpace
       const tol = id === 'threshold' ? 0.08 : tolerance;
       if (Math.abs(got / n - want / n) >= tol) problems.push(`${id} quarter ${q}: got ${(got / n).toFixed(3)} want ${(want / n).toFixed(3)}`);
     }
-    if (bad) problems.push(`${id}: ${bad} pixels are not palette colours / lost alpha`);
+    if (bad) problems.push(`${id}: ${bad} pixels are not palette colors / lost alpha`);
   }
   return problems;
 }

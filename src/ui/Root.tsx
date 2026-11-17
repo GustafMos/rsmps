@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import * as graphModule from '../engine/graph';
 import { batchCount } from '../engine/graph';
 import type { GraphDoc } from '../engine/types';
 import { App } from './App';
@@ -12,6 +13,7 @@ import { beginSafety, installSafety, pushView, safetyStore } from './safety';
 import { installProcesses } from './store/processes';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { startUpdateCheck } from './updateNotice';
+import { NoWebGpu } from './responsive/NoWebGpu';
 
 /** A param edit whose render never finished last time (page reloaded within seconds): offer to revert it. */
 function offerRecovery(ed: Editor): void {
@@ -97,6 +99,8 @@ export function Root() {
         sync();
 
         const app: AppCtx = { io, ed, playerStore, graphCtl };
+        // Screenshot / QA scripts (scripts/screenshots) drive the editor through this handle; present only in dev and in a build made with VITE_RSMPS_QA=1.
+        if (import.meta.env.DEV || import.meta.env.VITE_RSMPS_QA) (window as unknown as { __rsmps?: unknown }).__rsmps = { io, ed, playerStore, graphCtl, graph: graphModule };
         const uninstall = installSafety(app);
         const uninstallProcesses = installProcesses(app);
         const cancelUpdate = startUpdateCheck(ed);
@@ -128,6 +132,7 @@ export function Root() {
       </div>
     );
   }
+  if (boot.status === 'error' && /webgpu|adapter|gpu/i.test(boot.message)) return <NoWebGpu message={boot.message} />;
   if (boot.status === 'error') {
     return (
       <div className="rs-boot rs-boot--error" role="alert">

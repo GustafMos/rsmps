@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { cubeMesh, textBytes, toObjText, uvSphereMesh } from '../../lib/gen-model-testutil';
 import { savePreview } from '../../lib/util-preview';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import type { Host, ImageValue } from '../../types';
 
 const files = new Map<string, ArrayBuffer>();
@@ -75,6 +75,6 @@ it('the legacy model-3d node still renders (shared renderer) and spin loops on t
   const legacy = await t.pixels((await t.run('model-3d', { model: ['c'] }, {}, { project })).image as ImageValue);
   expect(opaque(legacy)).toBeGreaterThan(200);
   const r = await t.loopCheck('object-3d', { shape: 'custom', model: ['c'], spinY: 1 });
-  expect(r.seam).toBeLessThan(0.05);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(0.5);
 });

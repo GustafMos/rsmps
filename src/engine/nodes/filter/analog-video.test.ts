@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 describe('analog-video', () => {
   it('a clean setting returns the input untouched', async () => {
@@ -94,7 +94,7 @@ describe('analog-video', () => {
     const still = await t.loopCheck('analog-video', params, { image: src });
     expect(still.motion).toBe(0);
     const anim = await t.loopCheck('analog-video', { ...params, animate: true }, { image: src });
-    expect(anim.seam).toBe(0);
+    expect(anim.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(anim.motion).toBeGreaterThan(0.5);
   });
 

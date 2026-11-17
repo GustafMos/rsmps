@@ -12,7 +12,7 @@ export default defineNode({
   title: 'Remove Printed Guide',
   category: 'color',
   description:
-    'Keep only what you drew on a rotoscope sheet: removes the printed guide picture (non-photo blue, faint or outline) from a scanned frame, using the original frame when you wire it in, otherwise colour or a threshold.',
+    'Keep only what you drew on a rotoscope sheet: removes the printed guide picture (non-photo blue, faint or outline) from a scanned frame, using the original frame when you wire it in, otherwise color or a threshold.',
   keywords: ['scan', 'rotoscope', 'guide', 'keep only what I drew', 'non-photo blue', 'dropout', 'faint', 'outline', 'ink', 'paper', 'clean', 'difference'],
   inputs: {
     image: { type: 'image', required: true, label: 'Scan' },
@@ -31,7 +31,7 @@ export default defineNode({
       ],
       label: 'Printed guide',
     },
-    blueGuide: { type: 'bool', default: false, label: 'Blue guide', hint: 'Only used with an Original frame wired in, so the guide is rebuilt in the right colour.', visibleIf: (p) => p.guide !== 'blue' },
+    blueGuide: { type: 'bool', default: false, label: 'Blue guide', hint: 'Only used with an Original frame wired in, so the guide is rebuilt in the right color.', visibleIf: (p) => p.guide !== 'blue' },
     strength: { type: 'number', default: 0.3, min: 0.05, max: 1, step: 0.01, label: 'Printed strength', hint: 'The "Guide strength" / lightness the sheet was printed with (faint and blue pictures).', group: 'Guide' },
     threshold: { type: 'number', default: 0.2, min: 0, max: 0.9, step: 0.005, label: 'Guide threshold', hint: 'Darkness below which a mark counts as guide, not drawing. Used when there is no Original frame. Faint and outline add the printed strength.', group: 'Guide' },
     softness: { type: 'number', default: 0.1, min: 0.005, max: 0.6, step: 0.005, label: 'Edge softness', group: 'Guide' },

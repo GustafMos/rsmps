@@ -13,6 +13,7 @@ import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import { errorMessage, uniqueId } from './util';
 import { BackupStore, type BackupInfo } from './backups';
 import { mirrorBackup } from './desktop-backups';
+import { parseMidiMap } from '../engine/lib/midi-map';
 
 const AUTOSAVE_DELAY_MS = 400;
 const FILE_TYPES = [{ description: 'RSMPS project', accept: { 'application/json': ['.rsmps.json', '.json'] } }];
@@ -43,6 +44,7 @@ export function parseGraph(raw: unknown): GraphDoc {
     edges: doc.edges,
     frames: Array.isArray(doc.frames) ? doc.frames : [],
     ...(doc.media && typeof doc.media === 'object' && Array.isArray(doc.media.bins) ? { media: doc.media } : {}),
+    ...(parseMidiMap(doc.midiMap)?.mappings.length ? { midiMap: parseMidiMap(doc.midiMap)! } : {}),
   };
 }
 
@@ -307,7 +309,7 @@ export class ProjectStoreImpl implements ProjectStore {
     try {
       const stored = await idbAll<StoredPreset>('presets');
       stored.sort((a, b) => a.created - b.created);
-      for (const p of stored) list.push({ id: p.id, name: p.name, builtin: false, thumbnail: this.thumbUrl(p) });
+      for (const p of stored) if (!p.id.startsWith('node:')) list.push({ id: p.id, name: p.name, builtin: false, thumbnail: this.thumbUrl(p) }); // node: = saved group nodes (io/node-presets.ts)
     } catch (err) {
       console.warn('Could not list presets:', err);
     }

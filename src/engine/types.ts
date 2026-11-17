@@ -242,6 +242,8 @@ export interface AssetsParam extends ParamBase {
   type: 'assets';
   default: string[];
   accept: 'image-video' | 'audio' | 'midi' | 'model' | 'lut' | 'splat' | 'subtitles' | 'any';
+  /** false = the node uses the whole list as ONE set (Splat from Video's photos), so it does not make the project a batch of that many items. */
+  batch?: boolean;
 }
 /** A hardware device chosen from a live list (system microphones, MIDI inputs). Value = device id; '' = system default / all. */
 export interface DeviceParam extends ParamBase {
@@ -327,8 +329,8 @@ type InValue<I extends InputDef> = I extends { multi: true }
 export type InputsOf<I extends InputSchema> = { [K in keyof I]: InValue<I[K]> };
 export type OutputsOf<O extends OutputSchema> = { [K in keyof O]?: SocketValueMap[O[K]['type']] | null };
 
-/** Host capabilities a node may depend on. See `NodeDef.requires`. */
-export type Capability = 'local-server';
+/** Host capabilities a node may depend on. See `NodeDef.requires`. 'desktop' = the packaged desktop app (it can run add-on programs). */
+export type Capability = 'local-server' | 'desktop';
 
 /** Node families, as in Blender's Add menu. The UI groups and colours nodes by category. */
 export const CATEGORIES = {
@@ -354,6 +356,14 @@ export type Category = keyof typeof CATEGORIES;
 /* ----------------------------------------------------------------------- */
 /* Contexts                                                                 */
 /* ----------------------------------------------------------------------- */
+
+/** What a node summary may know about the project clock (see lib/loop-snap.ts): lets it say "speed 2 → 3 to loop". */
+export interface LoopClockInfo {
+  loop: boolean;
+  /** Loop length in frames. */
+  frames: number;
+  fps: number;
+}
 
 /** Frame clock. Reading any field marks the node time-dependent (the kernel re-renders it per frame). */
 export interface TimeInfo {
@@ -484,6 +494,44 @@ export interface Host {
    * or null when it is idle. Optional: a host without a scheduler (tests, a plain render) answers null for every node.
    */
   processLive?(nodeId: string): ProcessLive | null;
+  /**
+   * Gaussian splat reconstruction with external programs (COLMAP + Brush add-ons), desktop app only (`desktop/addons/splat-train.mjs`,
+   * client `src/io/splat-train.ts`). Absent in the web version, the CLI and plain tests. Used by the Splat from Video node's process.
+   */
+  splatTrain?: SplatTrainHost;
+}
+
+/** Settings of one reconstruction (fixed choices only: nothing here reaches a command line as free text). */
+export interface SplatTrainSettings {
+  input: 'video' | 'photos';
+  quality: 'draft' | 'normal' | 'high';
+  matcher: 'auto' | 'sequential' | 'exhaustive';
+  solver: 'auto' | 'incremental' | 'global';
+  /** Keep the solved cameras so a re-run with other training settings skips COLMAP. */
+  keepPoses: boolean;
+}
+
+export interface SplatTrainRequest {
+  settings: SplatTrainSettings;
+  frameCount: number;
+  /** Frame `index` (0-based, in time order) as straight RGBA. Called once per frame, in order; the host encodes and sends it. */
+  frame(index: number): Promise<{ pixels: Uint8ClampedArray; width: number; height: number }>;
+  signal: AbortSignal;
+  onProgress(fraction: number, note: string): void;
+}
+
+export interface SplatTrainOutput {
+  /** The trained cloud as Brush wrote it (standard 3DGS .ply, COLMAP's frame). */
+  ply: ArrayBuffer;
+  /** The solved model (`desktop/addons/splat-train.mjs` `modelJson`): cameras, image poses (world-to-camera), a sample of sparse points, stats. */
+  model: { cameras: { id: number; model: string; width: number; height: number; params: number[] }[]; images: { name: string; q: [number, number, number, number]; t: [number, number, number]; cameraId: number }[]; points: number[]; stats: { cameras: number; points: number; parallax: number } };
+  report: Record<string, unknown>;
+}
+
+export interface SplatTrainHost {
+  /** Are the add-ons there? `missing` lists add-on ids ('colmap', 'brush'). */
+  status(): Promise<{ available: boolean; missing: string[] }>;
+  train(req: SplatTrainRequest): Promise<SplatTrainOutput>;
 }
 
 /** A live picture source for `Host.liveFrame`. */
@@ -571,8 +619,12 @@ export interface RenderCtx<P extends ParamSchema, I extends InputSchema> {
    * by the same node, params and upstream graph at the same size/quality; otherwise null. Only offered to nodes with
    * `usesPrevious: true`. The node must produce identical pixels whether or not it is given (the fold is the fallback).
    * Reading it makes the node time-dependent. The result is only valid during this render call.
+   * `wrap`: with the project's Loop on, frame 0 asks for the LAST frame of the loop (a node whose value is periodic by construction can then
+   * continue across the seam). Without it frame 0 never has a previous one (the default: other nodes count on that).
+   * `carry`: a second hidden picture the node returned under the output name `carry` last frame (see `usesPrevious`): extra state of the
+   * recursion that is not an output. null when the previous frame has none.
    */
-  previous(): ImageValue | null;
+  previous(opts?: { wrap?: boolean; carry?: boolean }): ImageValue | null;
   /** Process mode: only present on nodes whose definition has `process`. See `ProcessView`. */
   readonly process?: ProcessView;
 }
@@ -709,9 +761,15 @@ export interface ProcessCtx<P extends ParamSchema = ParamSchema> {
   yield(): Promise<void>;
   /**
    * Evaluate what is wired to input `input` of this node at any time, at a chosen size and quality (defaults: frame 0, full size, 'final').
-   * `frame` or `seconds` picks the time; `wire` picks one wire of a multi input.
+   * `frame` or `seconds` picks the time; `wire` picks one wire of a multi input; `item` picks the BATCH ITEM (default: the item the job runs for),
+   * so a job can evaluate the wired chain for every item of the set (Batch Palette, "every batch item"). Process jobs only: a render never sees other items.
    */
-  pull(input: string, at?: { frame?: number; seconds?: number; wire?: number; proxy?: number; quality?: 'preview' | 'final' }): Promise<ProcessPull>;
+  pull(input: string, at?: { frame?: number; seconds?: number; wire?: number; item?: number; proxy?: number; quality?: 'preview' | 'final' }): Promise<ProcessPull>;
+  /**
+   * Evaluate one of THIS node's own outputs live, ignoring its stored result (a group bakes its outputs this way). Same options as `pull`.
+   * Present when the host supports it (the app and the process tests do).
+   */
+  pullOutput?(output: string, at?: { frame?: number; seconds?: number; item?: number; proxy?: number; quality?: 'preview' | 'final' }): Promise<ProcessPull>;
   /** Encode a pulled picture ('lossless' = PNG, 'compressed' = high-quality WebP). */
   encodeImage(image: { texture: GPUTexture; width: number; height: number }, quality: 'lossless' | 'compressed'): Promise<Blob>;
   /**
@@ -786,8 +844,8 @@ export interface NodeDef<
   /** Stream-domain implementation (audio, MIDI). See src/engine/audio/types.ts. */
   audio?: AudioKernel;
   /** One line shown on the node body, e.g. "Bayer 8×8 · 16 colours". */
-  /** `wired` = names of this node's inputs and param sockets that currently have a wire (when the caller knows). */
-  summary?: (params: ParamsOf<P>, wired?: ReadonlySet<string>) => string;
+  /** `wired` = names of this node's inputs and param sockets that currently have a wire (when the caller knows). `clock` = the project's loop switch, length and frame rate (when the caller knows). */
+  summary?: (params: ParamsOf<P>, wired?: ReadonlySet<string>, clock?: LoopClockInfo) => string;
   /**
    * The node accepts notes played by the user. While it is selected, the UI maps the computer keyboard
    * (and an on-screen piano) to MIDI notes and sends them to it.
@@ -814,6 +872,8 @@ export interface NodeDef<
   maskable?: boolean;
   /**
    * The node may call `ctx.previous()` (its own output for frame - 1). The engine then indexes this node's results by frame.
+   * Such a node may also return an extra image under the reserved name `carry` (not declared in `outputs`, never shown or wired): it is kept
+   * with the cache entry and handed back by `ctx.previous({ carry: true })`. Feedback keeps its second window there.
    * Not combinable with `maskable` (the cached output would already be mixed).
    */
   usesPrevious?: boolean;
@@ -830,6 +890,14 @@ export interface NodeDef<
    * which the editor store and the CLI apply to `project.duration`. Receives the node's resolved params. Must be pure.
    */
   projectLength?: (params: ParamsOf<P>) => number | null;
+  /**
+   * Batch items this node creates by itself, from its resolved params (a sprite sheet that hands out one item per cell), or null when it
+   * does not set a count (then only the `assets` lists decide). Read ONLY by `batchCount` in graph.ts: the batch size is the largest of
+   * every `assets` list and every `batchSize`. Must be pure and cheap (it runs on every edit and when the viewer opens): no GPU, no
+   * host, no reading of pictures. A count that needs the picture cannot be known here; keep a visible number param the user fills in.
+   * A throw counts as null. The result is floored and clamped to 1..100000.
+   */
+  batchSize?: (params: ParamsOf<P>) => number | null;
   /**
    * Process mode: the node has a long job (analysis, bake, a model) that runs OUTSIDE the per-frame render path. Until it is done
    * `render` shows a stand-in (`ctx.process`). See docs/ENGINE.md (Pending rules, "Process mode") and src/io/processes.ts.
@@ -913,6 +981,8 @@ export interface GraphDoc {
   frames?: FrameBox[];
   /** Media panel bins of this project. */
   media?: MediaOrg;
+  /** MIDI learn: controls bound to parameters (see lib/midi-map.ts). Carried through load and save; the engine never reads it. */
+  midiMap?: import('./lib/midi-map').MidiMap;
 }
 
 export const DEFAULT_PROJECT: ProjectSettings = {

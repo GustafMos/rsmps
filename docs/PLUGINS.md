@@ -88,3 +88,21 @@ It is meant for quick experiments. The code lives in the project file as one tex
 has fixed inputs and sliders. To **ship** an effect (own name, own inputs, own labelled parameters, reuse
 across projects), turn the shader into a plugin: copy the WGSL into the `wgsl` of a `ctx.gpu.pass(...)`
 call as in the example above and give the plugin its own `params`.
+
+## Group nodes vs a plugin
+
+Most "new nodes" do not need a plugin. Select the nodes that make an effect and press **Ctrl+G**: they become one group node, wired exactly as
+before. Expose the few parameters people should touch (right-click a parameter inside the group > Expose on group, or the Exposed list in the
+inspector), give it a title, a color stripe and a description, then **Save as node...**: it appears in your add menu under the category you chose.
+**Export node file...** writes a small `.rsmps-node.json` file anyone can drop on their graph.
+
+| | Group node | Plugin |
+| --- | --- | --- |
+| Made of | existing nodes, wired | your own code (`render`, WGSL) |
+| Runs code from the file | never: the file is data, validated on import | yes: the module is loaded and run |
+| Needs | the node types it uses (a missing one is named on import) | nothing else |
+| Speed | exactly the nodes inside: a group adds no pass | whatever the code does |
+| Editing after adding | an editable copy (open it with a double-click) | change the source and reinstall |
+
+Write a plugin when no combination of nodes can do it (a new shader, a new kind of analysis). A group can contain plugin nodes; whoever opens it
+then needs that plugin installed too.

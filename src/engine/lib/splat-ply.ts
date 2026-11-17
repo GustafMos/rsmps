@@ -122,7 +122,7 @@ export function parsePly(buffer: ArrayBuffer): SplatCloud {
   }
   const hasDc = has('f_dc_0') && has('f_dc_1') && has('f_dc_2');
   const hasRgb = has('red') && has('green') && has('blue');
-  if (!hasDc && !hasRgb) throw new SplatError('This .ply has no colour (f_dc_0..2 or red/green/blue).');
+  if (!hasDc && !hasRgb) throw new SplatError('This .ply has no color (f_dc_0..2 or red/green/blue).');
   if (vertex.list) throw new SplatError('This .ply has list properties on its vertices: not a Gaussian splat file.');
   const count = vertex.count;
   if (!Number.isFinite(count) || count < 0 || count > MAX_SPLATS_IN_FILE) throw new SplatError(`This .ply claims ${count} splats, which is not plausible.`);

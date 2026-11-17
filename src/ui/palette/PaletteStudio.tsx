@@ -122,7 +122,7 @@ export function PaletteStudio() {
 
   const sendNow = async (t: PaletteTarget) => {
     ed.setParam(t.nodeId, t.key, colors);
-    ed.toast(`Sent ${colors.length} colours to ${t.label}`, 'ok');
+    ed.toast(`Sent ${colors.length} colors to ${t.label}`, 'ok');
   };
   const copy = async () => {
     try {

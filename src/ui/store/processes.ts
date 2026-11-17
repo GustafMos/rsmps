@@ -3,8 +3,14 @@
  * actions behind Process / Cancel / Clear and "Process selected nodes", and the installer that wires hints (rendering paused, dragging),
  * results of projects that were not open when a job finished, and the "ready" toast.
  * The graph is only edited when a job FINISHES (one undo step, the result handle) or is cleared; never because something changed.
+ * Every node id in this file is a FULL PATH id (`group/inner`, plain at the top level), the same id the scheduler, the engine and the viewer
+ * use; a component that holds a node of the SHOWN level converts it with `ed.fullId(levelId)`. Results are written with
+ * `withProcessResult`, which edits the nested node by path (one undo step), so a Track / Cache / Analyse node inside an open group works
+ * exactly like one at the top level.
  */
-import { processNodes, processOrder, withProcessResult } from '../../engine/process';
+import { allNodePaths, defOf, hasGroups, nodeAtPath } from '../../engine/group';
+import { processNodePaths, processOrder, withProcessResult } from '../../engine/process';
+import type { GraphDoc } from '../../engine/types';
 import type { ProcessResult } from '../../engine/types';
 import type { ProcessJob } from '../../io/api';
 import { isActiveJob } from '../lib/process';
@@ -28,8 +34,8 @@ const projectOf = (app: Pick<AppCtx, 'ed'>): string => app.ed.state.activeProjec
 
 function applyResult(app: AppCtx, project: string, nodeId: string, result: ProcessResult, quiet: boolean): void {
   const { ed, io } = app;
-  const node = ed.state.graph.nodes.find((n) => n.id === nodeId);
-  const def = node && ed.registry.get(node.type);
+  const node = nodeAtPath(ed.state.graph, nodeId);
+  const def = defOf(ed.registry, node);
   if (ed.state.activeProject !== project && ed.state.activeProject !== null) {
     stash.set(`${project}:${nodeId}`, result);
     ed.toast(`${def?.process?.title ?? 'A process'} finished in another project. Open it to use the result.`, 'info');
@@ -55,8 +61,8 @@ function applyResult(app: AppCtx, project: string, nodeId: string, result: Proce
 export async function runProcess(app: AppCtx, nodeId: string, opts: { options?: Record<string, unknown>; quiet?: boolean } = {}): Promise<boolean> {
   const { ed, io } = app;
   const graph = ed.state.graph;
-  const node = graph.nodes.find((n) => n.id === nodeId);
-  const def = node && ed.registry.get(node.type);
+  const node = nodeAtPath(graph, nodeId);
+  const def = defOf(ed.registry, node);
   if (!node || !def?.process) return false;
   const project = projectOf(app);
   if (isActiveJob(jobOf(processStore.get().jobs, project, nodeId))) return false;
@@ -67,7 +73,7 @@ export async function runProcess(app: AppCtx, nodeId: string, opts: { options?: 
   } catch (err) {
     if ((err as { name?: string })?.name === 'AbortError') {
       io.processes.dismiss(nodeId, project);
-      ed.toast(`${def.process.title} cancelled.`, 'info');
+      ed.toast(`${def.process.title} canceled.`, 'info');
     } else ed.toast(`${def.process.title} failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
     return false;
   }
@@ -89,26 +95,35 @@ export async function clearProcess(app: AppCtx, nodeId: string): Promise<void> {
   ed.edit((g) => withProcessResult(g, ed.registry, nodeId, null));
 }
 
-/** "Process selected nodes": every selected node that has a process and is not done, deepest first (a downstream process depends on an upstream one). */
+/** The document as the engine sees it (inner nodes by path); the document itself when it has no groups or the engine cannot flatten. */
+function flatDoc(app: AppCtx, graph: GraphDoc): GraphDoc {
+  const engine = app.io.engine as { flatView?: (g: GraphDoc) => { graph: GraphDoc } } | undefined;
+  return engine?.flatView && hasGroups(graph) ? engine.flatView(graph).graph : graph;
+}
+
+/**
+ * "Process selected nodes": every selected node of the SHOWN level (also inside an open group) that has a process and is not done, deepest
+ * first (a downstream process depends on an upstream one; the order is taken on the flattened document, so a wire from outside the group counts).
+ */
 export async function processSelection(app: AppCtx): Promise<void> {
   const { ed, io } = app;
-  const ids = ed.state.selection;
   const graph = ed.state.graph;
-  const mine = processNodes(graph, ed.registry, ids);
+  const mine = processNodePaths(graph, ed.registry, ed.state.selection.map((id) => ed.fullId(id)));
   if (!mine.length) {
     ed.toast('Select nodes that have a process (Cache / Bake, Track...) to process them.', 'info');
     return;
   }
-  const todo = mine.filter((n) => {
-    const st = io.processes.status(graph, n.id);
+  const todo = mine.filter((id) => {
+    const st = io.processes.status(graph, id);
     return !st || st.state !== 'done';
   });
   if (!todo.length) {
     ed.toast('Everything selected is already processed.', 'info');
     return;
   }
-  // Upstream first: an upstream result changes the signature of what is after it.
-  const order = processOrder(graph, ed.registry, todo.map((n) => n.id)).filter((id) => todo.some((n) => n.id === id));
+  // Upstream first: an upstream result changes the signature of what is after it. Nodes the flat document does not hold (groups) go last.
+  const ordered = processOrder(flatDoc(app, graph), ed.registry, todo).filter((id) => todo.includes(id));
+  const order = [...ordered, ...todo.filter((id) => !ordered.includes(id))];
   let done = 0;
   for (const id of order) {
     if (!(await runProcess(app, id, { quiet: true }))) break;
@@ -183,7 +198,7 @@ export function installProcesses(app: AppCtx): () => void {
           const result = stash.get(k);
           stash.delete(k);
           const nodeId = k.slice(`${project}:`.length);
-          if (result && ed.state.activeProject === project && ed.state.graph.nodes.some((n) => n.id === nodeId)) {
+          if (result && ed.state.activeProject === project && nodeAtPath(ed.state.graph, nodeId)) {
             ed.edit((g) => withProcessResult(g, ed.registry, nodeId, result));
             io.processes.dismiss(nodeId, project ?? undefined);
           }
@@ -199,12 +214,13 @@ export function installProcesses(app: AppCtx): () => void {
   const autoRun = () => {
     autoTimer = undefined;
     const graph = ed.state.graph;
-    for (const n of graph.nodes) {
-      if (n.bypass || !ed.registry.get(n.type)?.process?.auto) continue;
-      const job = jobOf(processStore.get().jobs, projectOf(app), n.id);
+    for (const id of allNodePaths(graph)) {
+      const n = nodeAtPath(graph, id);
+      if (!n || n.bypass || !defOf(ed.registry, n)?.process?.auto) continue;
+      const job = jobOf(processStore.get().jobs, projectOf(app), id);
       if (isActiveJob(job) || job?.state === 'failed') continue;
-      const st = io.processes.status(graph, n.id);
-      if (st && (st.state === 'none' || st.state === 'stale' || st.state === 'missing')) void runProcess(app, n.id, { quiet: true });
+      const st = io.processes.status(graph, id);
+      if (st && (st.state === 'none' || st.state === 'stale' || st.state === 'missing')) void runProcess(app, id, { quiet: true });
     }
   };
   off.push(

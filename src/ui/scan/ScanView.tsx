@@ -24,7 +24,7 @@ interface Progress {
   concurrency: number;
 }
 
-const STATE_TEXT: Record<ScanPageState, string> = { queued: 'Queued', scanning: 'Scanning…', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' };
+const STATE_TEXT: Record<ScanPageState, string> = { queued: 'Queued', scanning: 'Scanning…', done: 'Done', failed: 'Failed', cancelled: 'Canceled' };
 
 export function ScanView() {
   const { io, ed } = useApp();
@@ -158,7 +158,7 @@ export function ScanView() {
       persist();
       await attach(r);
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') ed.toast('Scan cancelled.', 'ok');
+      if (err instanceof Error && err.name === 'AbortError') ed.toast('Scan canceled.', 'ok');
       else ed.toast(`Scan failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
       setBusy(null);
@@ -425,7 +425,7 @@ function Frames({ result, defaultName, initial, onOptions, onTiming, onDone }: {
           <>
             <SelectField large value={round.mode} onChange={(v) => setRound((o) => ({ ...o, mode: v as 'append' | 'replace' }))} options={[{ value: 'append', label: 'Continue: new frames after the last' }, { value: 'replace', label: 'Redo: same frames again (ink over pencil)' }]} />
             {round.mode === 'append' && <NumberField large label="New frames" integer min={1} max={500} value={round.frames} defaultValue={12} onChange={(v) => setRound((o) => ({ ...o, frames: v }))} />}
-            <SelectField large value={round.onion} onChange={(v) => setRound((o) => ({ ...o, onion: v as 'faint' | 'blue' }))} options={[{ value: 'faint', label: 'Previous drawing faint grey' }, { value: 'blue', label: 'Previous drawing non-photo blue' }]} />
+            <SelectField large value={round.onion} onChange={(v) => setRound((o) => ({ ...o, onion: v as 'faint' | 'blue' }))} options={[{ value: 'faint', label: 'Previous drawing faint gray' }, { value: 'blue', label: 'Previous drawing non-photo blue' }]} />
             <NumberField large label="Strength %" integer min={5} max={100} value={round.strength} defaultValue={30} onChange={(v) => setRound((o) => ({ ...o, strength: v }))} />
             <button className="rs-btn rs-btn--primary" onClick={() => void printRound()}>Download sheets</button>
           </>
@@ -496,7 +496,7 @@ function Help() {
       <ol>
         <li><b>Print.</b> In an Output node choose <i>Export as: Print sheets</i>. Pick paper, frames across and down, and a frame guide (full, faded, outlines or blank).</li>
         <li><b>Print at 100% (&quot;Actual size&quot;).</b> Never fit-to-page: the markers are placed for the exact paper size.</li>
-        <li><b>Draw</b> in the frames, in any colour. Keep clear of the black <b>+</b> marks, the four square corner markers and the small data strip at the top.</li>
+        <li><b>Draw</b> in the frames, in any color. Keep clear of the black <b>+</b> marks, the four square corner markers and the small data strip at the top.</li>
         <li><b>Photograph</b> each sheet flat, in even light without hard shadows, with all four corner markers in the picture. Rotation and phone perspective are fixed automatically. Do not photograph the back of the paper.</li>
         <li><b>Add the photos here.</b> Any order. Pages that fail can be fixed by dragging the four corners and entering the paper, columns and rows you printed with.</li>
         <li><b>Add to media library.</b> The frames become an animation you can use in a Media In node. &quot;Drawing only&quot; keeps just the ink on transparent.</li>

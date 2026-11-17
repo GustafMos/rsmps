@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 let shared: ReturnType<typeof harness> | null = null;
 const H = () => (shared ??= harness());
@@ -70,11 +70,11 @@ it('same seed gives the same image, another seed another one; size scales with u
 it('animated cells loop exactly and move; motion 0 stays still', async () => {
   const t = await H();
   const r = await t.loopCheck('voronoi', { mode: 'cells', scale: 20, motion: 0.8, cycles: 3 }, { size: t.solid(64, 64, [0, 0, 0, 255], 1) });
-  expect(r.seam).toBeLessThan(0.01);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(1);
   for (const mode of ['crackle', 'distance']) {
     const m = await t.loopCheck('voronoi', { mode, scale: 20, motion: 0.8, cycles: 1 }, { size: t.solid(64, 64, [0, 0, 0, 255], 1) });
-    expect(m.seam, mode).toBeLessThan(0.01);
+    expect(m.seam, mode).toBeLessThan(LOOP_SEAM_OK);
     expect(m.motion, mode).toBeGreaterThan(0.5);
   }
   const still = await t.loopCheck('voronoi', { motion: 0 }, { size: t.solid(64, 64, [0, 0, 0, 255], 1) });

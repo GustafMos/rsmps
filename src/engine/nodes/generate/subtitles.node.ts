@@ -1,5 +1,6 @@
 import { defineNode } from '../../define';
 import { upscaleArtGrid } from '../../lib/art-grid';
+import { cyclesPerLoop, snapNote } from '../../lib/loop-snap';
 import { MAX_INSTANCES, PAGE_CUES, drawSprites, ensurePipe, getAtlas, newSprite, type Atlas, type FrameHeader, type Sprite } from '../../lib/subtitle-gpu';
 import {
   animate,
@@ -24,6 +25,16 @@ import {
 } from '../../lib/subtitle-layout';
 import { buildTrack, cueIndexAt, parseCueText, parseSubtitles, splitWords, wordTimings, type Cue, type SubTrack, type SubWord } from '../../lib/subtitles';
 import type { ColorValue } from '../../types';
+
+/**
+ * Loop snapping: a wave or float motion is in cycles per SECOND of subtitle time, which would leave a jump at the loop seam. With Loop on the
+ * rate becomes the nearest whole number of cycles over the loop's subtitle time (project length x Speed), at least one. Pure.
+ */
+export function subtitleMotionHz(p: { motion: string; motionSpeed: number; speed: number }, clock?: { loop: boolean; frames: number; fps: number }): number {
+  if (!clock?.loop || !(p.motionSpeed > 0) || (p.motion !== 'wave' && p.motion !== 'float')) return p.motionSpeed;
+  const span = (clock.frames / clock.fps) * Math.max(1e-6, p.speed);
+  return cyclesPerLoop(p.motionSpeed, span) / span;
+}
 
 const ANIM_OPTIONS = [
   { value: 'none', label: 'None' },
@@ -291,7 +302,11 @@ export default defineNode({
     threshold: { type: 'number', default: 0.5, min: 0.05, max: 0.95, step: 0.01, group: 'Pixel look', label: 'Threshold', visibleIf: (p) => p.oneBit === true },
     pixelOutline: { type: 'bool', default: false, group: 'Pixel look', label: '1 px outline', hint: 'Uses a one art-pixel outline (the stroke color) instead of the stroke width.', visibleIf: (p) => (p.pixelSize as number) > 0 },
   },
-  summary: (p) => (p.preset !== 'custom' ? String(p.preset) : `${p.mode}${p.pixelSize > 0 ? ' · pixel' : ''}`),
+  summary: (p, _wired, clock) => {
+    const base = p.preset !== 'custom' ? String(p.preset) : `${p.mode}${p.pixelSize > 0 ? ' · pixel' : ''}`;
+    const note = snapNote('motion Hz', p.motionSpeed, Math.round(subtitleMotionHz(p, clock) * 100) / 100);
+    return note && p.motion !== 'none' ? `${base} · ${note}` : base;
+  },
   async render(ctx) {
     const p = { ...ctx.params } as Record<string, unknown> & typeof ctx.params;
     const W = ctx.canvas.width;
@@ -348,6 +363,7 @@ export default defineNode({
 
     const seconds = ctx.time.seconds; // from here the node is per-frame
     const duration = Math.max(1e-3, ctx.time.duration);
+    const motionHz = subtitleMotionHz(p, { loop: ctx.time.loop, frames: Math.max(1, Math.round(duration * ctx.time.fps)), fps: ctx.time.fps });
     if (!track) {
       const key = `${duration}|${p.text}`;
       track = parsedText.get(key) ?? null;
@@ -497,7 +513,7 @@ export default defineNode({
         const o = animate(outKind, pOut, { ease, dir, t: st, seed, out: true });
         s = { alpha: s.alpha * o.alpha, dx: s.dx + o.dx, dy: s.dy + o.dy, scale: s.scale * o.scale, blur: Math.max(s.blur, o.blur), wipe: Math.min(s.wipe, o.wipe), wave: s.wave + o.wave };
       }
-      const mo = motion(p.motion as Motion, st, seed, p.motionAmount, p.motionSpeed);
+      const mo = motion(p.motion as Motion, st, seed, p.motionAmount, motionHz);
       let wipe = s.wipe;
       if (mode === 'typewriter') wipe = Math.min(wipe, typedFraction(w, st));
       if (wipe <= 0 || s.alpha <= 0) continue;
@@ -583,7 +599,7 @@ export default defineNode({
       q.alpha = d.alpha;
       q.waveAmp = d.wave;
       q.waveK = waveK / Math.max(1e-6, d.k);
-      q.wavePhase = 2 * Math.PI * p.motionSpeed * st;
+      q.wavePhase = 2 * Math.PI * motionHz * st;
       q.letter = d.letter;
       q.left = left + margin * d.k;
       q.width = Math.max(1, (c.w - 2 * margin) * d.k);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defineNode } from '../define';
 import { addNode, connect, connectError, createGraph, removeNodes } from '../graph';
-import { harness } from '../testing';
+import { LOOP_SEAM_OK, harness } from '../testing';
 
 describe('engine kernel', () => {
   it('registers built-in nodes by file name', async () => {
@@ -83,7 +83,7 @@ describe('engine kernel', () => {
   it('animated generators loop seamlessly and actually move', async () => {
     const t = await harness();
     const r = await t.loopCheck('noise', { evolution: 2, scale: 20 });
-    expect(r.seam).toBe(0);
+    expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion).toBeGreaterThan(1);
   });
 

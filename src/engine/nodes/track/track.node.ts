@@ -48,7 +48,7 @@ export default defineNode({
   },
   summary: (p) => `smooth ${p.smooth} · hold ${p.hold}f`,
   process: {
-    title: 'Analyse clip',
+    title: 'Analyze clip',
     description: 'Detect and track through the whole clip once. Afterwards tracking is instant and identical in the export.',
     standIn: 'preview',
     required: 'once-run',

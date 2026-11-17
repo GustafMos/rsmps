@@ -53,6 +53,17 @@ Options (render)
   --quiet, -q                no progress output
   --json                     machine-readable progress, one JSON object per line
   --dry-run                  validate and list what would be written, render nothing
+  Game assets (apply to every spritesheet Output; the same as the Output node's params, which --set can also reach)
+  --for <preset>             generic|godot|unity|gamemaker|rpgmaker|web: a starting point for that engine
+  --sheet-layout <x>         grid|row|column|pack      --columns <n>   --sheet-padding <n>   --extrude <n>
+  --trim                     trim transparent borders (offsets go into the metadata)
+  --pot                      power-of-two sheet sizes   --max-sheet <n>  largest page, more pages when needed
+  --sheet-meta <x>           json|aseprite|texturepacker|css|none
+  --sheet-from <clip|batch>  batch = ONE sheet from every item, one animation tag per item
+  --anim-name <name>         animation tag name (default: the source file name)
+  --pivot <x,y>              write this pivot (0..1 of the frame, y down) into the metadata
+  --bleed                    color under transparent pixels = nearest opaque color (PNG, no dark fringes when filtered)
+  --report <json|text>       write export-report.json / .txt: size, distinct colors, off-palette fraction, frames per file
   --process                  run the processes an Output needs (clip analysis...) before rendering, in memory.
                              Without it, a render that would export a stand-in fails and lists them.
 
@@ -80,6 +91,20 @@ const RENDER_SPEC: Record<string, OptionSpec> = {
   json: {},
   'dry-run': {},
   process: {},
+  for: { value: true },
+  'sheet-layout': { value: true },
+  columns: { value: true },
+  'sheet-padding': { value: true },
+  extrude: { value: true },
+  trim: {},
+  pot: {},
+  'max-sheet': { value: true },
+  'sheet-meta': { value: true },
+  'sheet-from': { value: true },
+  'anim-name': { value: true },
+  pivot: { value: true },
+  bleed: {},
+  report: { value: true },
   recursive: { alias: 'r' },
   sequence: {},
   help: { alias: 'h' },
@@ -258,6 +283,39 @@ async function cmdRender(argv: string[]): Promise<number> {
     ov.codec = CODECS[c];
   }
   if (ov.codec && !ov.kind) ov.kind = 'video';
+  const outputParams: Record<string, unknown> = {};
+  const choice = (flag: string, key: string, allowed: string[]) => {
+    const v = one(p, flag);
+    if (v === undefined) return;
+    if (!allowed.includes(v)) throw new Error(`Unknown --${flag} "${v}" (${allowed.join(', ')}).`);
+    outputParams[key] = v;
+  };
+  choice('for', 'preset', ['generic', 'godot', 'unity', 'gamemaker', 'rpgmaker', 'web']);
+  choice('sheet-layout', 'sheetLayout', ['grid', 'row', 'column', 'pack']);
+  choice('sheet-meta', 'sheetMeta', ['json', 'aseprite', 'texturepacker', 'css', 'none']);
+  choice('sheet-from', 'sheetFrom', ['clip', 'batch']);
+  const intFlag = (flag: string, key: string) => {
+    const v = numberOpt(p, flag, 0);
+    if (v !== undefined) outputParams[key] = Math.round(v);
+  };
+  intFlag('columns', 'columns');
+  intFlag('sheet-padding', 'padding');
+  intFlag('extrude', 'extrude');
+  intFlag('max-sheet', 'maxSheet');
+  if (p.flags.has('trim')) outputParams.sheetTrim = true;
+  if (p.flags.has('pot')) outputParams.powerOfTwo = true;
+  if (p.flags.has('bleed')) outputParams.bleed = true;
+  if (one(p, 'anim-name') !== undefined) outputParams.animName = one(p, 'anim-name');
+  const pivot = one(p, 'pivot');
+  if (pivot !== undefined) {
+    const xy = pivot.split(',').map(Number);
+    if (xy.length !== 2 || xy.some((n) => !Number.isFinite(n))) throw new Error('--pivot expects x,y (for example 0.5,1).');
+    outputParams.pivotOn = true;
+    outputParams.pivot = xy;
+  }
+  if (Object.keys(outputParams).length) ov.outputParams = outputParams;
+  const reportFormat = one(p, 'report');
+  if (reportFormat !== undefined && reportFormat !== 'json' && reportFormat !== 'text') throw new Error('--report expects json or text.');
   ov.quality = numberOpt(p, 'quality', 0.1);
   ov.bitrate = numberOpt(p, 'bitrate', 0.1);
 
@@ -282,6 +340,7 @@ async function cmdRender(argv: string[]): Promise<number> {
     sequenceFps: fps ?? graph.project.fps,
     dryRun: dry,
     reporter: rep,
+    report: reportFormat as 'json' | 'text' | undefined,
     processes: p.flags.has('process') ? 'run' : 'fail',
   });
 

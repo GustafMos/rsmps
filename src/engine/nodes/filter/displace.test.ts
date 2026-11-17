@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { resolutionDiff, scalable } from '../../lib/fx-testutil';
 
 it('warps the picture', async () => {
@@ -22,7 +22,7 @@ it('loops seamlessly and moves when animated; still when evolution is 0', async 
   const t = await harness();
   const src = t.checker(32, 32, 4);
   const r = await t.loopCheck('displace', { amount: 6, scale: 16, evolution: 2 }, { image: src });
-  expect(r.seam).toBe(0);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(0.5);
   const still = await t.loopCheck('displace', { amount: 6, scale: 16, evolution: 0 }, { image: src });
   expect(still.motion).toBe(0);

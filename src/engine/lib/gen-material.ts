@@ -39,10 +39,15 @@ export function materialUniforms(m: MaterialValue): Record<string, UniformValue>
 }
 
 /** The `alpha` multiplier a material contributes (opacity lives in `a.w`; per-pixel opacity is inside the generated shader). */
-export function materialWgsl(m: MaterialValue): string {
+export function materialWgsl(m: MaterialValue, opts: { mesh?: boolean; lightArgs?: boolean } = {}): string {
+  const mesh = !!opts.mesh;
+  const lightArgs = !!opts.lightArgs;
   const has = (k: keyof MaterialValue['maps']) => !!m.maps[k];
   const tri = m.flags.triplanar;
   const lines: string[] = [];
+  // Mesh mode (rasterised models): `gMeshUv` = (2u - 1, 1 - 2v, has UVs) and the surface's tangent / bitangent (`gMeshT`, `gMeshB`) are
+  // set by the caller. A model with UVs reads its maps through them; without UVs everything is the object-space (triplanar) path.
+  if (mesh) lines.push('var<private> gMeshUv: vec3f;\nvar<private> gMeshT: vec3f;\nvar<private> gMeshB: vec3f;');
 
   // --- texture lookups ---------------------------------------------------------------------------------------------
   lines.push(`
@@ -55,6 +60,7 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
     const tex = TEX_NAMES[key];
     const s = (uv: string) => `unpremul(textureSampleLevel(${tex}, smp, matUV(${uv}), 0.0))`;
     return `fn tri_${tex}(pl: vec3f, nl: vec3f) -> vec4f {
+  ${mesh ? `if (gMeshUv.z > 0.5) { return ${s('vec2f(gMeshUv.x, -gMeshUv.y)')}; }` : ''}
   ${tri ? `let w = matTriW(nl);\n  return ${s('vec2f(pl.z, -pl.y)')} * w.x + ${s('vec2f(pl.x, pl.z)')} * w.y + ${s('vec2f(pl.x, -pl.y)')} * w.z;` : `return ${s('vec2f(pl.x, -pl.y)')};`}
 }`;
   };
@@ -73,7 +79,7 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
   );
 
   // --- the model -----------------------------------------------------------------------------------------------------
-  const normalCode = has('normalMap')
+  let normalCode = has('normalMap')
     ? `{
     ${
       tri
@@ -89,6 +95,13 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
     n = normalize(u.t0 * nl2.x + u.t1 * nl2.y + u.t2 * nl2.z);
   }`
     : '';
+  if (mesh && has('normalMap')) {
+    // UV path: tangent-space normal from the model's own coordinates, applied on the world tangent / bitangent of the surface.
+    normalCode = `if (gMeshUv.z > 0.5) {
+    let tm = unpremul(textureSampleLevel(matNormal, smp, matUV(vec2f(gMeshUv.x, -gMeshUv.y)), 0.0)).rgb * 2.0 - 1.0;
+    n = normalize(n + (gMeshT * tm.x + gMeshB * tm.y) * u.mF.z);
+  } else ${normalCode}`;
+  }
   const ambCol = m.flags.envAmbient ? 'mix(vec3f(1.0), matEnvAt(n) * 1.5, u.mE.w)' : 'vec3f(1.0)';
   const banded = `var lit = diff;
   if (u.cel > 0.5) { lit = min(floor(diff * u.steps), u.steps - 1.0) / (u.steps - 1.0); }`;
@@ -166,9 +179,11 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
   alpha = alpha * line;`;
       break;
   }
+  model = model.replaceAll('u.ambient', 'amb');
   const rimOn = m.flags.rim && m.model !== 'hologram' && m.model !== 'wire' && m.model !== 'matcap';
   lines.push(`
-fn matShade(base: vec3f, n0: vec3f, rd: vec3f, ao: f32, sh: f32, pl: vec3f, nl: vec3f, scr: vec2f) -> vec4f {
+fn ${lightArgs ? 'matShadeL' : 'matShade'}(base: vec3f, n0: vec3f, rd: vec3f, ao: f32, sh: f32, pl: vec3f, nl: vec3f, scr: vec2f${lightArgs ? ', lightIn: vec3f, ambIn: f32' : ''}) -> vec4f {
+  let amb = ${lightArgs ? 'ambIn' : 'u.ambient'};
   var alb = base * u.mBase.rgb;
   var n = n0;
   var alpha = u.mA.w;
@@ -176,7 +191,7 @@ fn matShade(base: vec3f, n0: vec3f, rd: vec3f, ao: f32, sh: f32, pl: vec3f, nl: 
   ${has('colorMap') ? 'alb = alb * tri_matColor(pl, nl).rgb;' : ''}
   ${has('roughnessMap') ? 'rough = clamp(rough * luma(tri_matRough(pl, nl).rgb) * 2.0, 0.03, 1.0);' : ''}
   ${normalCode}
-  let L = normalize(u.light);
+  let L = normalize(${lightArgs ? 'lightIn' : 'u.light'});
   let V = -rd;
   let ndv = clamp(dot(n, V), 0.0, 1.0);
   let diff = max(dot(n, L), 0.0) * sh;
@@ -187,4 +202,74 @@ fn matShade(base: vec3f, n0: vec3f, rd: vec3f, ao: f32, sh: f32, pl: vec3f, nl: 
   return vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), alpha);
 }`);
   return lines.join('\n');
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------- */
+/* Rasterised users (custom models, 3D Array cards): the SAME `matShade` above, fed from a uniform buffer + texture group.     */
+/* ------------------------------------------------------------------------------------------------------------------------- */
+
+/** Binding numbers of the material group of a rasterised shader. */
+export const MAT_BINDING = { buffer: 0, colorMap: 1, normalMap: 2, roughnessMap: 3, emissionMap: 4, matcap: 5, environment: 6, background: 7, sampler: 8 } as const;
+const MAT_MAP_KEYS = ['colorMap', 'normalMap', 'roughnessMap', 'emissionMap', 'matcap', 'environment', 'background'] as const;
+const MAT_BUF_VEC4 = 12;
+
+/**
+ * WGSL of a material for a rasteriser: the declarations of its group, the private `u` that `matShade` reads (filled by `matSetup`
+ * from the buffer plus the camera and surface frame the caller knows) and `matShade` itself (`materialWgsl`). Needs PRELUDE.
+ * `mesh` adds the model-UV path (`gMeshUv`, `gMeshT`, `gMeshB`).
+ */
+export function materialRasterWgsl(m: MaterialValue, group: number, mesh: boolean): string {
+  const decl = MAT_MAP_KEYS.filter((k) => m.maps[k])
+    .map((k) => `@group(${group}) @binding(${MAT_BINDING[k]}) var ${TEX_NAMES[k]}: texture_2d<f32>;`)
+    .join('\n');
+  return /* wgsl */ `
+struct MatU {
+  light: vec3f, ambient: f32, cel: f32, steps: f32,
+  camRight: vec3f, camUp: vec3f, camFwd: vec3f, t0: vec3f, t1: vec3f, t2: vec3f,
+  mBase: vec4f, mA: vec4f, mB: vec4f, mC: vec4f, mD: vec4f, mE: vec4f, mF: vec4f, skyT: vec4f, skyH: vec4f, skyB: vec4f,
+};
+var<private> u: MatU;
+struct MatBuf { v: array<vec4f, ${MAT_BUF_VEC4}> };
+@group(${group}) @binding(${MAT_BINDING.buffer}) var<uniform> mb: MatBuf;
+@group(${group}) @binding(${MAT_BINDING.sampler}) var smp: sampler;
+${decl}
+fn matSetup(cr: vec3f, cu: vec3f, cf: vec3f, t0: vec3f, t1: vec3f, t2: vec3f) {
+  u.mBase = mb.v[0]; u.mA = mb.v[1]; u.mB = mb.v[2]; u.mC = mb.v[3]; u.mD = mb.v[4]; u.mE = mb.v[5]; u.mF = mb.v[6];
+  u.skyT = mb.v[7]; u.skyH = mb.v[8]; u.skyB = mb.v[9];
+  u.light = mb.v[10].xyz; u.ambient = mb.v[10].w; u.cel = mb.v[11].x; u.steps = mb.v[11].y;
+  u.camRight = cr; u.camUp = cu; u.camFwd = cf; u.t0 = t0; u.t1 = t1; u.t2 = t2;
+}
+${materialWgsl(m, { mesh })}`;
+}
+
+/** The uniform buffer contents (48 floats) for `materialRasterWgsl`. `viewSize` = (width, height) of the render target (glass reads the background by screen position). */
+export function materialRasterData(m: MaterialValue, o: { light: readonly number[]; ambient: number; cel: boolean; steps: number; width: number; height: number }): Float32Array<ArrayBuffer> {
+  const d = new Float32Array(MAT_BUF_VEC4 * 4);
+  d.set([...m.base, 1, ...m.a, ...m.b, ...m.c, ...m.d, ...m.e, ...m.f, ...m.skyTop, 1, ...m.skyHorizon, 1, ...m.skyBottom, 1, o.light[0], o.light[1], o.light[2], o.ambient, o.cel ? 1 : 0, Math.max(2, Math.round(o.steps)), o.width, o.height]);
+  return d;
+}
+
+export const MATERIAL_RASTER_BYTES = MAT_BUF_VEC4 * 16;
+
+/** Bind group layout for one material structure (create it once per pipeline). */
+export function materialRasterLayout(device: GPUDevice, m: MaterialValue): GPUBindGroupLayout {
+  const entries: GPUBindGroupLayoutEntry[] = [
+    { binding: MAT_BINDING.buffer, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+    { binding: MAT_BINDING.sampler, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+  ];
+  for (const k of MAT_MAP_KEYS) if (m.maps[k]) entries.push({ binding: MAT_BINDING[k], visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } });
+  return device.createBindGroupLayout({ entries });
+}
+
+/** Bind group for a material's pictures + uniform buffer. `view` is `gpu.view`. */
+export function materialRasterGroup(device: GPUDevice, layout: GPUBindGroupLayout, m: MaterialValue, buffer: GPUBuffer, sampler: GPUSampler, view: (t: GPUTexture) => GPUTextureView): GPUBindGroup {
+  const entries: GPUBindGroupEntry[] = [
+    { binding: MAT_BINDING.buffer, resource: { buffer, size: MATERIAL_RASTER_BYTES } },
+    { binding: MAT_BINDING.sampler, resource: sampler },
+  ];
+  for (const k of MAT_MAP_KEYS) {
+    const img = m.maps[k];
+    if (img) entries.push({ binding: MAT_BINDING[k], resource: view(img.texture) });
+  }
+  return device.createBindGroup({ layout, entries });
 }

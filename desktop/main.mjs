@@ -162,6 +162,7 @@ async function handleInternal(request, rel, url) {
   if (rel === '/__rsmps/backups' || rel.startsWith('/__rsmps/backups/')) return handleBackups(request, rel, url);
   if (rel === '/__rsmps/addons' || rel.startsWith('/__rsmps/addons/')) return handleAddons(request, rel);
   if (rel === '/__rsmps/export/ffmpeg' || rel.startsWith('/__rsmps/export/ffmpeg/')) return handleExport(request, rel);
+  if (rel === '/__rsmps/splat-train' || rel.startsWith('/__rsmps/splat-train/')) return handleSplatTrain(request, rel, url);
   return new Response('Not found', { status: 404 });
 }
 
@@ -211,7 +212,7 @@ async function loadPhone() {
 
 // ---- official add-ons and ffmpeg export (desktop/addons/) ---------------------------------------------------------------------
 
-/** @type {null | { mgr: any, exporter: any, mod: any, prep?: any, bad?: any }} */
+/** @type {null | { mgr: any, exporter: any, mod: any, splat?: any, prep?: any, bad?: any }} */
 let addons = null;
 const smokeFfmpeg = option('smoke-ffmpeg');
 const smokeExportOut = join(tmpdir(), 'rsmps-smoke-export.mov');
@@ -240,7 +241,16 @@ async function loadAddons() {
         return r.canceled ? null : r.filePath;
       },
     });
-    addons = { mgr, exporter, mod, prep, bad, badCatalogue: bad && mod.parseCatalogue(bad.catalogue, { allowLocalHttp: true }), platformKey };
+    // Splat from Video: COLMAP (the CUDA build when installed) then Brush, as child processes; work folders under the app data folder
+    const splat = mod.createSplatTrainService({
+      root: join(app.getPath('userData'), 'splat-train'),
+      tools: async () => {
+        const cuda = await mgr.binary('colmap-cuda');
+        const colmap = cuda ?? (await mgr.binary('colmap'));
+        return { colmap: colmap ? { path: colmap, gpu: !!cuda } : null, brush: await mgr.binary('brush') };
+      },
+    });
+    addons = { mgr, exporter, mod, splat, prep, bad, badCatalogue: bad && mod.parseCatalogue(bad.catalogue, { allowLocalHttp: true }), platformKey };
     return addons;
   } catch (err) {
     addons = null;
@@ -265,7 +275,7 @@ async function confirmInstall(info) {
     type: 'question',
     title: 'Install add-on',
     message: `Download ${info.name} ${d.version}?`,
-    detail: [info.title, '', `Licence: ${d.license.name}`, `Source: ${d.source.name}`, `Downloaded from: ${d.host}`, `Size: about ${d.sizeLabel}`, '', 'RSMPS does not include or host this program. The file is checked against a known checksum before it is used. You can remove it again at any time.'].join('\n'),
+    detail: [info.title, '', `Licence: ${d.license.name}`, `Source: ${d.source.name}`, `Downloaded from: ${d.host}`, `Size: about ${d.sizeLabel}`, ...(info.notice ? ['', info.notice] : []), '', 'RSMPS does not include or host this program. The file is checked against a known checksum before it is used. You can remove it again at any time.'].join('\n'),
     buttons: ['Download and install', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
@@ -285,7 +295,7 @@ async function handleAddons(request, rel) {
   if (!action) return request.method === 'GET' ? json(info) : new Response('Method not allowed', { status: 405 });
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
   if (action === 'install') {
-    if (!info.download) return json({ ...info, error: 'No download is offered for this platform. Use Locate to pick an FFmpeg you already have.' }, 400);
+    if (!info.download) return json({ ...info, error: `No download is offered for this platform. Use Locate to pick ${info.name} if you already have it.` }, 400);
     if (info.state === 'installing') return json(info);
     if (!(await confirmInstall(info))) return json({ ...info, declined: true });
     void mgr.install(id);
@@ -301,7 +311,8 @@ async function handleAddons(request, rel) {
   }
   if (action === 'locate') {
     // Only a native file dialog can name the program to run; the renderer never supplies a path.
-    const r = await dialog.showOpenDialog(win ?? undefined, { title: 'Choose your FFmpeg program', properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : [] });
+    if (!info.canLocate) return json({ ...info, error: 'This add-on cannot be located.' }, 400);
+    const r = await dialog.showOpenDialog(win ?? undefined, { title: `Choose your ${info.name} program`, properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : [] });
     if (r.canceled || !r.filePaths[0]) return json({ ...(await mgr.get(id)), canceled: true });
     try {
       await mgr.locate(id, r.filePaths[0]);
@@ -333,6 +344,39 @@ async function handleExport(request, rel) {
     return new Response('Not found', { status: 404 });
   } catch (err) {
     if (err instanceof mod.ExportError) return json({ error: err.message }, err.status);
+    return json({ error: String(err?.message ?? err) }, 500);
+  }
+}
+
+// ---- Splat from Video (desktop/addons/splat-train.mjs) ---------------------------------------------------------------------------
+
+const SPLAT_MAX_FRAME = 24 * 1024 * 1024;
+
+/** Same origin checks as every /__rsmps endpoint (handleInternal). Frames arrive one per request; results are read back, then disposed. */
+async function handleSplatTrain(request, rel, url) {
+  if (!addons?.splat) return json({ error: 'Splat from Video is not available in this build.' }, 503);
+  const { splat, mod } = addons;
+  const parts = rel.split('/').slice(3); // after /__rsmps/splat-train
+  try {
+    if (parts.length === 0) return request.method === 'GET' ? json(await splat.status()) : new Response('Method not allowed', { status: 405 });
+    if (parts[0] === 'start') return request.method === 'POST' ? json(splat.create()) : new Response('Method not allowed', { status: 405 });
+    const [id, action, what] = parts;
+    if (!action) return request.method === 'GET' ? json(splat.get(id)) : new Response('Method not allowed', { status: 405 });
+    if (action === 'result' && request.method === 'GET') {
+      const body = splat.result(id, what);
+      return new Response(body, { headers: { 'content-type': what === 'ply' ? 'application/octet-stream' : 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+    }
+    if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+    if (action === 'frame') {
+      if (Number(request.headers.get('content-length') ?? 0) > SPLAT_MAX_FRAME) return json({ error: 'A frame must be at most 24 MB.' }, 413);
+      return json(splat.addFrame(id, url.searchParams.get('name') ?? '', await readBody(request)));
+    }
+    if (action === 'run') return json(splat.run(id, await readJson(request)));
+    if (action === 'cancel') return json(splat.cancel(id));
+    if (action === 'dispose') return json(await splat.dispose(id));
+    return new Response('Not found', { status: 404 });
+  } catch (err) {
+    if (err instanceof mod.SplatTrainError) return json({ error: err.message }, err.status);
     return json({ error: String(err?.message ?? err) }, 500);
   }
 }
@@ -402,7 +446,11 @@ app.on('certificate-error', (event, wc, url, _error, certificate, callback) => {
 
 app.on('web-contents-created', (_e, contents) => {
   contents.on('will-attach-webview', (e) => e.preventDefault());
-  contents.setWindowOpenHandler(({ url }) => {
+  contents.setWindowOpenHandler(({ url, frameName, features }) => {
+    // The output window (performance mode): the app's own blank popup, opened by the main window only. Nothing else may open a window.
+    if (frameName === 'rsmps-output' && (url === 'about:blank' || url === '') && contents === win?.webContents) {
+      return { action: 'allow', overrideBrowserWindowOptions: outputWindowOptions(String(features ?? '')) };
+    }
     openExternalSafe(url);
     return { action: 'deny' };
   });
@@ -420,6 +468,29 @@ app.on('web-contents-created', (_e, contents) => {
 });
 
 // ---- window ------------------------------------------------------------------------------------------------------
+
+/** Where the output window opens: `display=auto` = the first display that is not the main window's, `display=N` = the Nth display. */
+function outputWindowOptions(features) {
+  const want = /(?:^|,)display=(auto|d)/.exec(features)?.[1] ?? 'auto';
+  const displays = screen.getAllDisplays();
+  const current = win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay();
+  let d = current;
+  if (want === 'auto') d = displays.find((x) => x.id !== current.id) ?? current;
+  else if (displays[Number(want) - 1]) d = displays[Number(want) - 1];
+  const b = d.workArea;
+  return {
+    x: b.x + 40,
+    y: b.y + 40,
+    width: Math.max(320, Math.min(1280, b.width - 80)),
+    height: Math.max(200, Math.min(720, b.height - 80)),
+    minWidth: 320,
+    minHeight: 200,
+    autoHideMenuBar: true,
+    backgroundColor: '#000000',
+    title: 'RSMPS Output',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+  };
+}
 
 const statePath = () => join(app.getPath('userData'), 'window-state.json');
 
@@ -747,6 +818,7 @@ if (gotLock) {
   app.on('before-quit', () => {
     void phone?.stop();
     void addons?.exporter.disposeAll();
+    void addons?.splat?.disposeAll(); // kills a running COLMAP / Brush and deletes its work folder
   });
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

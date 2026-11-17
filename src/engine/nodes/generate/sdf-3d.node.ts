@@ -62,7 +62,7 @@ for (let i = 1; i <= SLOTS; i++) {
         { value: 'intersect', label: 'Intersect' },
       ],
     };
-    slotParams[`smooth${i}`] = { type: 'number', default: d.sm, min: 0, max: 3, step: 0.01, label: 'Smoothness', group: g, hint: 'Blend radius with the shapes before. Colours blend too. Scaled by Gooeyness.', visibleIf: on };
+    slotParams[`smooth${i}`] = { type: 'number', default: d.sm, min: 0, max: 3, step: 0.01, label: 'Smoothness', group: g, hint: 'Blend radius with the shapes before. Colors blend too. Scaled by Gooeyness.', visibleIf: on };
   }
   slotParams[`x${i}`] = { type: 'number', default: d.x, min: -10, max: 10, step: 0.01, label: 'Position X', group: g, visibleIf: on };
   slotParams[`y${i}`] = { type: 'number', default: 0, min: -10, max: 10, step: 0.01, label: 'Position Y', group: g, visibleIf: on };

@@ -120,14 +120,14 @@ function Extract({ onColors }: { onColors: (c: RGB[]) => void }) {
   };
   return (
     <div className="rs-ps__card">
-      <div className="rs-caps">Extract dominant colours</div>
+      <div className="rs-caps">Extract dominant colors</div>
       <div className="rs-ps__row">
         <SelectField large value={src} onChange={setSrc} options={[{ value: 'viewer', label: 'Current viewer frame' }, ...assets.map((a) => ({ value: a.id, label: a.name }))]} />
         <SelectField large value={mood} onChange={(v) => setMood(v as Mood)} options={MOODS.map((m) => ({ value: m.id, label: m.label }))} />
       </div>
-      <NumberField large label="Colours" integer min={2} max={16} value={n} defaultValue={6} onChange={setN} />
+      <NumberField large label="Colors" integer min={2} max={16} value={n} defaultValue={6} onChange={setN} />
       <button className="rs-btn rs-btn--primary" onClick={run} disabled={busy}>{busy ? 'Extracting…' : 'Extract palette'}</button>
-      <p className="rs-ps__hint">Clusters a 128px downscale in OKLab. Moods bias which pixels count: colourful favours saturated, bright and dark favour lightness, muted favours greys, deep favours dark saturated.</p>
+      <p className="rs-ps__hint">Clusters a 128px downscale in OKLab. Moods bias which pixels count: colorful favors saturated, bright and dark favour lightness, muted favours grays, deep favours dark saturated.</p>
     </div>
   );
 }
@@ -163,8 +163,8 @@ function Access({ colors }: { colors: RGB[] }) {
           </div>
         ))}
       </div>
-      <p className="rs-ps__hint">Each cell shows the second colour as text on the first, with its ratio. 4.5 and above passes AA for normal text, 7 passes AAA, 3 passes AA for large text.</p>
-      <div className="rs-caps">Colour-vision simulation</div>
+      <p className="rs-ps__hint">Each cell shows the second color as text on the first, with its ratio. 4.5 and above passes AA for normal text, 7 passes AAA, 3 passes AA for large text.</p>
+      <div className="rs-caps">Color-vision simulation</div>
       {[{ id: 'normal' as const, label: 'Normal vision' }, ...kinds].map((k) => (
         <div key={k.id} className="rs-ps__cvd">
           <span>{k.label}</span>
@@ -186,10 +186,10 @@ function ImportExport({ colors, onColors }: { colors: RGB[]; onColors: (c: RGB[]
   const ext = EXPORT_FORMATS.find((f) => f.id === fmt)!.ext;
   const doImport = (t: string) => {
     const c = parsePalette(t);
-    if (!c.length) return ed.toast('No colours found in that text.', 'error');
+    if (!c.length) return ed.toast('No colors found in that text.', 'error');
     onColors(c);
     setText('');
-    ed.toast(`Imported ${c.length} colours`, 'ok');
+    ed.toast(`Imported ${c.length} colors`, 'ok');
   };
   return (
     <div className="rs-ps__grid2">

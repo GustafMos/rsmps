@@ -205,8 +205,8 @@ function SectionHead({ section: s, collapsed, filtering, renaming, actions }: { 
         <button
           className="rs-media__dot"
           style={{ background: binColor(s.color ?? 0) }}
-          title="Change the bin colour"
-          aria-label={`Change colour of ${s.label}`}
+          title="Change the bin color"
+          aria-label={`Change color of ${s.label}`}
           onClick={(e) => { e.stopPropagation(); actions.onRecolor(s.binId!); }}
         />
       )}

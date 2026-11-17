@@ -122,6 +122,6 @@ export function parseObj(buf: ArrayBuffer): ParsedModel {
     triangleCount: idx.length / 3,
     hasUVs,
     hasColors: false,
-    notes: ['Materials (.mtl) are ignored: the model uses one grey material.'],
+    notes: ['Materials (.mtl) are ignored: the model uses one gray material.'],
   };
 }

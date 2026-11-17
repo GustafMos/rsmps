@@ -12,11 +12,11 @@ import { shallowArrayEqual } from '../store/createStore';
  */
 export function LayerList({ nodeId, port, type, variant }: { nodeId: string; port: string; type: SocketType; variant: 'node' | 'inspector' }) {
   const { ed, io } = useApp();
-  const edges = useEd((s) => wiresInto(s.graph, nodeId, port), shallowArrayEqual);
+  const edges = useEd((s) => wiresInto(s.level, nodeId, port), shallowArrayEqual);
   const names = useEd(
     (s) =>
-      wiresInto(s.graph, nodeId, port).map((e) => {
-        const src = s.graph.nodes.find((n) => n.id === e.from.node);
+      wiresInto(s.level, nodeId, port).map((e) => {
+        const src = s.level.nodes.find((n) => n.id === e.from.node);
         const def = src && io.registry.get(src.type);
         if (!src) return '(missing node)';
         const base = src.label || def?.title || src.type;

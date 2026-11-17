@@ -55,39 +55,103 @@ describe('feedback', () => {
     expect(lit).toBeGreaterThan(8);
   });
 
-  it('costs one pass per frame while playing forward, and a bounded fold after a jump', async () => {
+  /** Passes of this node and input evaluations per frame while playing frames 0..frames-1 forward on one engine. */
+  async function playCost(K: number, frames: number, project: Record<string, unknown>) {
     const spy = { n: 0 };
     const t = await harness([movingSquareSource('fb-sq', spy)]);
-    const K = 4;
-    const { graph, node } = sourceChain(t, 'fb-sq', 'feedback', { memory: K }, { loop: false, duration: 10, ...P });
+    const { graph, node } = sourceChain(t, 'fb-sq', 'feedback', { memory: K }, { duration: 100, ...P, ...project });
     const pass = vi.spyOn(t.gpu, 'pass');
-    const perFrame: number[] = [];
+    const passes: number[] = [];
     const sources: number[] = [];
-    for (let f = 0; f <= 12; f++) {
+    for (let f = 0; f < frames; f++) {
       pass.mockClear();
       const before = spy.n;
       await t.evalGraph(graph, node, { seconds: f / 10 });
       sources.push(spy.n - before);
-      perFrame.push(pass.mock.calls.filter((c) => c[0].label === 'feedback').length);
+      passes.push(pass.mock.calls.filter((c) => c[0].label === 'feedback').length);
     }
-    // on chain frames the source renders once (never re-pulled), the node does exactly one pass for every frame that continues the chain
-    for (let f = 0; f <= 12; f++) {
-      if (f % K !== 0 || f === K) expect(sources[f], `source renders at frame ${f}`).toBe(1);
-      expect(sources[f]).toBeLessThanOrEqual(2 * K);
+    return { t, graph, node, spy, pass, passes, sources };
+  }
+
+  it('forward playback costs a constant 2 passes and 1 input evaluation per frame: no restart spike over 4K frames', async () => {
+    for (const K of [4, 24]) {
+      const { passes, sources, pass } = await playCost(K, 4 * K + 3, { loop: false });
+      expect(passes[0], 'the first frame is one copy').toBe(1);
+      const rest = passes.slice(1);
+      expect(Math.max(...rest), `K=${K}: no spike (before: 2K+1 = ${2 * K + 1} every K frames)`).toBe(2);
+      expect(Math.min(...rest)).toBe(2);
+      expect(sources.every((n) => n === 1), 'the input is evaluated once per frame, never re-pulled').toBe(true);
+      pass.mockRestore();
     }
-    // frames that start a new window (f = 0 and f = 2K, ...) rebuild from the fold; all others are 1 pass
-    expect(perFrame.slice(0, 1)).toEqual([1]);
-    for (let f = 1; f <= 12; f++) if (f % K !== 0 || f === K) expect(perFrame[f], `frame ${f}`).toBe(1);
-    // a window restart costs at most 2K+1 passes (amortised below 2.5 passes per frame)
-    expect(Math.max(...perFrame)).toBeLessThanOrEqual(2 * K + 1);
-    expect(perFrame.reduce((a, b) => a + b, 0) / perFrame.length).toBeLessThan(2.5);
-    // scrubbing far away rebuilds from the fold: bounded by 2K+1 passes and 2K pulls
+  });
+
+  it('a jump rebuilds the trail once (bounded), then forward playback is constant again', async () => {
+    const K = 4;
+    const { t, graph, node, spy, pass } = await playCost(K, 3, { loop: false });
     pass.mockClear();
     const before = spy.n;
-    await t.evalGraph(graph, node, { seconds: 0.99 }); // frame 9: previous (8) is cached? it is not, 12 was the last
-    const passes = pass.mock.calls.filter((c) => c[0].label === 'feedback').length;
-    expect(passes).toBeLessThanOrEqual(2 * K + 1);
+    await t.evalGraph(graph, node, { seconds: 2.7 }); // frame 27: far from anything cached
+    const cold = pass.mock.calls.filter((c) => c[0].label === 'feedback').length;
+    expect(cold).toBeLessThanOrEqual(3 * K + 2);
     expect(spy.n - before).toBeLessThanOrEqual(2 * K + 1);
+    for (let f = 28; f < 28 + 3 * K; f++) {
+      pass.mockClear();
+      await t.evalGraph(graph, node, { seconds: f / 10 });
+      expect(pass.mock.calls.filter((c) => c[0].label === 'feedback').length, `frame ${f}`).toBe(2);
+    }
+    pass.mockRestore();
+  });
+
+  it('with Loop on the wrap is as cheap as any other frame, and played frames equal cold ones across the seam (K does not divide N)', async () => {
+    const K = 4;
+    const N = 14; // 3 epochs: [0,4) [4,8) [8,14)
+    const project = { loop: true, duration: N / 10 };
+    const params = { memory: K, decay: 0.85, zoom: 1.05, rotate: 3, shiftX: 1, hueShift: 8, blur: 1 };
+    const spy = { n: 0 };
+    const play = await harness([movingSquareSource('fb-sq', spy)]);
+    const a = sourceChain(play, 'fb-sq', 'feedback', params, { ...project, ...P });
+    const pass = vi.spyOn(play.gpu, 'pass');
+    const played: Uint8ClampedArray[] = [];
+    const passes: number[] = [];
+    for (let lap = 0; lap < 2; lap++) {
+      for (let f = 0; f < N; f++) {
+        pass.mockClear();
+        const px = await bytes(play, await play.evalGraph(a.graph, a.node, { seconds: f / 10 }));
+        passes.push(pass.mock.calls.filter((c) => c[0].label === 'feedback').length);
+        if (lap === 1) expect(Buffer.from(px).equals(Buffer.from(played[f])), `lap 2 frame ${f} equals lap 1`).toBe(true);
+        else played.push(new Uint8ClampedArray(px));
+      }
+    }
+    pass.mockRestore();
+    // lap 1 starts cold (frame 0 folds the previous epoch around the seam); from then on every frame, wrap included, is 2 passes
+    expect(passes.slice(1).every((n) => n === 2), passes.join(',')).toBe(true);
+    for (const f of [0, 1, 3, 4, 7, 8, 11, 13]) {
+      const cold = await harness([movingSquareSource('fb-sq')]);
+      const b = sourceChain(cold, 'fb-sq', 'feedback', params, { ...project, ...P });
+      const px = await bytes(cold, await cold.evalGraph(b.graph, b.node, { seconds: f / 10 }));
+      expect(Buffer.from(px).equals(Buffer.from(played[f])), `frame ${f} cold == warm`).toBe(true);
+    }
+  });
+
+  it('the loop seam closes (frame N is frame 0, the wrap step is no bigger than the others)', async () => {
+    const t = await harness([movingSquareSource('fb-sq', { n: 0 }, { speed: 2 })]);
+    for (const [frames, memory] of [[16, 4], [16, 5], [32, 24], [32, 7]]) {
+      const r = await t.loopCheck('feedback', { memory, decay: 0.9, zoom: 1 }, { image: { node: 'fb-sq' } }, { frames, size: 32, exact: true });
+      expect(r.exactDiff, r.text).toBe(0);
+      expect(r.motion, r.text).toBeGreaterThan(0);
+    }
+  });
+
+  it('a static input costs nothing after warm-up: no input evaluation, no pass', async () => {
+    const spy = { n: 0 };
+    const t = await harness([stillSource('fb-still', spy)]);
+    const { graph, node } = sourceChain(t, 'fb-still', 'feedback', { memory: 6 }, { loop: false, duration: 4, ...P });
+    const pass = vi.spyOn(t.gpu, 'pass');
+    await t.evalGraph(graph, node, { seconds: 0 });
+    pass.mockClear();
+    for (let f = 1; f < 20; f++) await t.evalGraph(graph, node, { seconds: f / 10 });
+    expect(pass.mock.calls.filter((c) => c[0].label === 'feedback').length).toBe(0);
+    expect(spy.n).toBe(1);
     pass.mockRestore();
   });
 

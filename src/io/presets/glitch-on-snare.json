@@ -1,0 +1,97 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Glitch on snare",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 8,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop a clip with sound here"
+    },
+    {
+      "id": "beat",
+      "type": "beat-detect",
+      "x": 260,
+      "y": 260,
+      "params": {}
+    },
+    {
+      "id": "gl",
+      "type": "glitch",
+      "x": 520,
+      "y": 0,
+      "params": {
+        "preset": "custom",
+        "rate": 0,
+        "calm": 1,
+        "intensity": 1.2
+      }
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 780,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "audio"
+      },
+      "to": {
+        "node": "beat",
+        "port": "audio"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "beat",
+        "port": "snare"
+      },
+      "to": {
+        "node": "gl",
+        "port": "trigger"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "gl",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "gl",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

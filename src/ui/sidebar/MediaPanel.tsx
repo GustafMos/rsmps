@@ -139,7 +139,7 @@ export function MediaPanel({ busy, pick, importFiles }: Props) {
       items: [
         { label: 'Rename bin', icon: 'rename', onClick: () => setMedia({ renamingBin: id }) },
         { label: 'Select its media', icon: 'check', disabled: !s.items.length, onClick: () => setSel({ ids: new Set(s.items.map((a) => a.id)), anchor: s.items[0]?.id ?? null, cursor: s.items[0]?.id ?? null }) },
-        { label: 'Next colour', icon: 'palette', onClick: () => recolor(id) },
+        { label: 'Next color', icon: 'palette', onClick: () => recolor(id) },
         { sep: true },
         { label: 'Delete bin (the media stays, unsorted)', icon: 'trash', onClick: () => editOrg(app, (o) => deleteBin(o, id)) },
       ],

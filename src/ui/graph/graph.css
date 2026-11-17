@@ -72,3 +72,14 @@
 @media (pointer: coarse) { .rs-seltb__btn { width: 36px; height: 36px; } }
 .rs-presetrow { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); margin-top: var(--s-3); pointer-events: auto; }
 .rs-presetrow__btns { display: flex; flex-wrap: wrap; gap: var(--s-1); justify-content: center; max-width: 520px; }
+
+/* Breadcrumb of open groups (top left of the graph view). */
+.rs-graph__crumbs {
+  position: absolute; left: var(--s-2); top: 52px; z-index: 6; display: flex; align-items: center; gap: 2px; max-width: calc(100% - 16px);
+  padding: 2px 4px; background: var(--bg-2); border-radius: var(--r); box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-hard-sm);
+  font-size: var(--fs-sm); color: var(--text-dim); overflow: hidden; white-space: nowrap;
+}
+.rs-graph__crumbsep { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.rs-graph__crumb { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; background: transparent; border: 0; border-radius: var(--r); color: inherit; font: inherit; overflow: hidden; text-overflow: ellipsis; }
+button.rs-graph__crumb:hover { background: var(--bg-4); color: var(--text); }
+.rs-graph__crumb.is-here { color: var(--text); font-weight: 600; }

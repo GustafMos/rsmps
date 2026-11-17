@@ -1,11 +1,11 @@
 // Regenerates the UI screenshots in docs/screenshots/.
 //
-//   npm run dev                                   (in another terminal: the dev server on :5173)
-//   npx electron scripts/screenshots/capture.mjs  (all scenes)
-//   npx electron scripts/screenshots/capture.mjs --only hero,audio
-//   npx electron scripts/screenshots/capture.mjs --url http://localhost:5173 --out docs/screenshots
+//   VITE_RSMPS_QA=1 npx vite build --outDir <dir> --emptyOutDir      (a build that exposes window.__rsmpsIo / window.__rsmps: no dev server needed)
+//   npx electron scripts/screenshots/capture.mjs --dist <dir>        (all scenes)
+//   npx electron scripts/screenshots/capture.mjs --dist <dir> --only hero,audio
+//   npx electron scripts/screenshots/capture.mjs --url http://localhost:5173 --out docs/screenshots     (a running dev server instead of --dist)
 //
-// It opens the dev server in a hidden Electron window (1600x1000, scale factor 1) that uses its own in-memory session
+// With --dist the built folder is served from a throw-away static server on a random port. It opens the app in a hidden Electron window (1600x1000, scale factor 1) that uses its own in-memory session
 // partition, so your browser's saved projects and library are never touched and nothing built here leaks into your app.
 // Every scene builds a demo graph with the engine's own helpers (src/engine/graph.ts), stores it as a project, reloads
 // the page so the real UI shows it, and saves the window as a PNG. Test media comes from test-assets/ (read in this
@@ -19,16 +19,29 @@
 //   addmenu    05-add-menu.png   the add-node menu with its categories
 //   palette    06-palette.png    Palette Studio
 //   scan       07-scan.png       Scan tab, stage 2, from pages exported by the app's own exporter
-import { app, BrowserWindow, session } from 'electron';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import electron from 'electron';
+import { spawnSync } from 'node:child_process';
+import http from 'node:http';
+import { mkdirSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// ELECTRON_RUN_AS_NODE (set by some shells and agent hosts) makes Electron behave as plain node: 'electron' is then just a path and
+// nothing opens, so the script silently does nothing. Start the real Electron again without it.
+if (typeof electron === 'string') {
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const r = spawnSync(electron, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], { env, stdio: 'inherit' });
+  process.exit(r.status ?? 1);
+}
+const { app, BrowserWindow, session } = electron;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..', '..');
 const argv = process.argv.slice(1);
 const arg = (name, d) => { const i = argv.indexOf('--' + name); return i >= 0 ? argv[i + 1] : d; };
-const URL_ = arg('url', 'http://localhost:5173');
+const DIST = arg('dist', '') ? resolve(root, arg('dist', '')) : null;
+let URL_ = arg('url', 'http://localhost:5173');
 const OUT = resolve(root, arg('out', 'docs/screenshots'));
 const ONLY = arg('only', '') ? arg('only', '').split(',') : null;
 const W = 1600, H = 1000;
@@ -38,6 +51,18 @@ app.commandLine.appendSwitch('enable-features', 'Vulkan');
 app.commandLine.appendSwitch('force-device-scale-factor', '1');
 app.commandLine.appendSwitch('high-dpi-support', '1');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.wasm': 'application/wasm', '.ttf': 'font/ttf', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.map': 'application/json', '.onnx': 'application/octet-stream' };
+function serve(dist) {
+  const server = http.createServer((req, res) => {
+    const path = decodeURIComponent((req.url ?? '/').split('?')[0]);
+    let file = join(dist, path === '/' ? 'index.html' : path);
+    if (!file.startsWith(dist)) { res.writeHead(403).end(); return; }
+    try { if (statSync(file).isDirectory()) file = join(file, 'index.html'); res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' }).end(readFileSync(file)); }
+    catch { res.writeHead(404).end('not found'); }
+  });
+  return new Promise((ok) => server.listen(0, '127.0.0.1', () => ok({ server, port: server.address().port })));
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PARTITION = 'rsmps-screenshots'; // no "persist:" prefix: memory only
@@ -64,7 +89,7 @@ const kit = {
   },
   async load() {
     await win.loadURL(URL_ + '/');
-    await kit.waitFor('!!window.__rsmpsIo', 60000, '__rsmpsIo');
+    await kit.waitFor('!!window.__rsmpsIo && !!window.__rsmps', 60000, '__rsmpsIo (build with VITE_RSMPS_QA=1 or use the dev server)');
   },
   /** Add a file from test-assets/ (or generated bytes) to the page's library; returns the asset id. */
   async importFile(rel, mime) {
@@ -80,7 +105,7 @@ const kit = {
   async openGraph(spec, assetIds = {}) {
     await js(`(async()=>{
       const io=window.__rsmpsIo;
-      const G=await import('/src/engine/graph.ts');
+      const G=window.__rsmps.graph;
       const spec=${JSON.stringify(spec)}; const assets=${JSON.stringify(assetIds)};
       let g=G.createGraph(spec.name);
       if(spec.project) g={...g,project:{...g.project,...spec.project}};
@@ -167,6 +192,52 @@ const kit = {
   },
   /** Type text into the focused field. */
   async type(text) { win.webContents.insertText(text); await sleep(150); },
+  /** The window as a PNG buffer (what shot() writes), without writing a file. */
+  async capture() {
+    win.webContents.invalidate();
+    await sleep(900);
+    win.webContents.invalidate();
+    await sleep(400);
+    return (await win.webContents.capturePage()).toPNG();
+  },
+  /**
+   * The app in a second, phone-sized window (touch emulation, 390x844 at 2x, Android Chrome user agent) that shares the session of the main
+   * window, so it opens the project the scene stored. `tab` = 1 View, 2 Graph, 3 Inspector, 4 Media. Returns a PNG buffer.
+   */
+  async phone(tab = 1) {
+    // The main window itself is switched to a phone (a second window would start in safe mode: the first one has not shut down cleanly).
+    const w = win;
+    const dbg = w.webContents.debugger;
+    dbg.attach('1.3');
+    const cdp = (m, prm = {}) => dbg.sendCommand(m, prm);
+    const wjs = (code) => w.webContents.executeJavaScript(code, true);
+    try {
+      await js('window.__rsmpsIo.projects.flush && window.__rsmpsIo.projects.flush()').catch(() => undefined);
+      await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true, screenOrientation: { type: 'portraitPrimary', angle: 0 } });
+      await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5, configuration: 'mobile' });
+      await cdp('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36', platform: 'Android' });
+      await w.webContents.reload();
+      await kit.waitFor("!!document.querySelector('.rs-pshell') && !!window.__rsmpsIo", 60000, 'phone shell');
+      await sleep(1500);
+      await kit.waitFor("document.querySelectorAll('[data-node-id]').length > 0 || true", 5000).catch(() => undefined);
+      await wjs(`(() => { const ed = window.__rsmps?.ed; if (!ed) return; const o = ed.state.graph.nodes.find((n) => n.type === 'image-out'); if (o) ed.setViewed(o.id); })()`).catch(() => undefined);
+      w.webContents.invalidate();
+      await w.webContents.capturePage();
+      await wjs(`document.querySelector('.rs-tabbar__btn:nth-child(${tab})')?.click()`);
+      await wjs('window.__rsmpsIo.player.seek(0.5)').catch(() => undefined);
+      await sleep(4000);
+      if (process.env.SHOT_LOG) console.log('  [phone]', await wjs(`JSON.stringify({ viewed: window.__rsmps?.ed.state.viewedNodeId, size: window.__rsmpsIo?.player.getState().imageSize, err: [...(window.__rsmpsIo?.player.getState().errors ?? [])], banner: document.body.innerText.slice(0, 200) })`));
+      w.webContents.invalidate();
+      await sleep(500);
+      w.webContents.invalidate();
+      return (await w.webContents.capturePage()).toPNG();
+    } finally {
+      await cdp('Emulation.clearDeviceMetricsOverride').catch(() => undefined);
+      await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }).catch(() => undefined);
+      await cdp('Emulation.setUserAgentOverride', { userAgent: '' }).catch(() => undefined);
+      dbg.detach();
+    }
+  },
   async shot(file) {
     mkdirSync(OUT, { recursive: true });
     win.webContents.invalidate();
@@ -185,6 +256,8 @@ const kit = {
 };
 
 async function main() {
+  let staticServer = null;
+  if (DIST) { const { server, port } = await serve(DIST); staticServer = server; URL_ = 'http://127.0.0.1:' + port; }
   const { scenes } = await import(pathToFileURL(join(here, 'scenes.mjs')).href);
   const ses = session.fromPartition(PARTITION);
   win = new BrowserWindow({
@@ -214,7 +287,9 @@ async function main() {
   await ses.clearStorageData();
   await ses.clearCache();
   win.destroy();
+  staticServer?.close();
   app.exit(failed ? 1 : 0);
 }
 
+app.on('window-all-closed', () => undefined);
 app.whenReady().then(main).catch((e) => { console.error(e); app.exit(1); });

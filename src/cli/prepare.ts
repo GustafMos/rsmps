@@ -4,6 +4,7 @@ import type { Registry } from '../engine/define';
 import { setParam, withEffectiveDuration } from '../engine/graph';
 import { DEFAULT_PROJECT, type GraphDoc, type NodeInstance, type ParamDef } from '../engine/types';
 import { expandInputs } from './media';
+import { parseMidiMap } from '../engine/lib/midi-map';
 
 /** Parse and normalise a graph document (same rules as the app's project loader, without its browser imports). */
 export function parseGraph(raw: unknown): GraphDoc {
@@ -21,6 +22,7 @@ export function parseGraph(raw: unknown): GraphDoc {
     edges: doc.edges,
     frames: Array.isArray(doc.frames) ? doc.frames : [],
     ...(doc.media && typeof doc.media === 'object' && Array.isArray(doc.media.bins) ? { media: doc.media } : {}),
+    ...(parseMidiMap(doc.midiMap)?.mappings.length ? { midiMap: parseMidiMap(doc.midiMap)! } : {}),
   };
 }
 

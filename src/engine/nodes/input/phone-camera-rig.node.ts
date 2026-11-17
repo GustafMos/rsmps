@@ -18,7 +18,7 @@ export default defineNode({
     yaw: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.1, unit: 'deg', label: 'Yaw', hint: 'Wire Phone Motion → Yaw.' },
     pitch: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.1, unit: 'deg', label: 'Pitch', hint: 'Wire Phone Motion → Pitch. Held within ±89.5° so the horizon never flips.' },
     roll: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.1, unit: 'deg', label: 'Roll', hint: 'Wire Phone Motion → Roll.' },
-    posX: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'Move X', group: 'Position', hint: 'Wire Phone Motion → Position X (metres). Scaled by "Scene units per metre".' },
+    posX: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'Move X', group: 'Position', hint: 'Wire Phone Motion → Position X (meters). Scaled by "Scene units per meter".' },
     posY: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'Move Y', group: 'Position' },
     posZ: { type: 'number', default: 0, min: -1000000, max: 1000000, step: 0.01, label: 'Move Z', group: 'Position' },
     moveScale: { type: 'number', default: 1, min: -1000, max: 1000, step: 0.05, label: 'Units per meter', group: 'Position' },

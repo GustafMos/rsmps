@@ -21,7 +21,7 @@ export default defineNode({
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     model: { type: 'assets', default: [], accept: 'model', label: '3D model', hint: 'A .glb, .gltf or .obj file. With several files, each batch item uses its own.' },
-    autoFit: { type: 'bool', default: true, label: 'Fit to view', hint: 'Centre the model and scale it to fill the same space as the 3D Object shapes.', group: 'Object' },
+    autoFit: { type: 'bool', default: true, label: 'Fit to view', hint: 'Center the model and scale it to fill the same space as the 3D Object shapes.', group: 'Object' },
     posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move X', group: 'Object', hint: 'Scene units.' },
     posY: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Y', hint: 'Up is positive.', group: 'Object' },
     posZ: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Z', hint: 'Away from the camera is positive.', group: 'Object' },
@@ -55,7 +55,7 @@ export default defineNode({
       ],
     },
     baseColor: { type: 'color', default: [0.8, 0.8, 0.85, 1], label: 'Tint / color', group: 'Look', visibleIf: (p) => p.colorMode !== 'model' },
-    nearestTexture: { type: 'bool', default: false, label: 'Crisp texture', group: 'Look', hint: 'Nearest-neighbour texture sampling, for pixel-art textures.' },
+    nearestTexture: { type: 'bool', default: false, label: 'Crisp texture', group: 'Look', hint: 'Nearest-neighbor texture sampling, for pixel-art textures.' },
     backFaces: { type: 'bool', default: false, label: 'Show back faces', group: 'Look', hint: 'Draw both sides of every triangle, not only the ones the file marks double-sided.' },
     wireframe: { type: 'bool', default: false, label: 'Wireframe overlay', group: 'Look', hint: 'Limited to 300,000 triangles.' },
     wireColor: { type: 'color', default: [0, 0, 0, 0.6], label: 'Wireframe color', group: 'Look', visibleIf: (p) => p.wireframe === true },

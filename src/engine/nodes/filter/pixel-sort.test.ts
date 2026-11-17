@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 const lcg = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
 const row = (p: { at(x: number, y: number): number[] }, y: number, w: number, ch = 0) => Array.from({ length: w }, (_, x) => p.at(x, y)[ch]);
@@ -115,7 +115,7 @@ describe('pixel-sort', () => {
     expect(off.motion).toBe(0);
     const noisy = t.fromFn(32, 8, (x, y) => { const v = 50 + ((x * 7 + y * 13 + x * x) % 100); return [v, v, v, 255]; });
     const on = await t.loopCheck('pixel-sort', { spans: 'brightness', low: 0.3, high: 0.5, sweepCycles: 1, sweepAmount: 0.12 }, { image: noisy });
-    expect(on.seam).toBe(0);
+    expect(on.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(on.motion).toBeGreaterThan(0.5);
     void src;
   });

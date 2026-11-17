@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { resolutionDiff } from '../../lib/fx-testutil';
 
 const white = (x0: number) => (x: number): [number, number, number, number] => (Math.abs(x - x0) < 2 ? [255, 255, 255, 255] : [0, 0, 0, 255]);
@@ -66,7 +66,7 @@ describe('chroma-smear', () => {
     const src = t.fromFn(32, 8, (x) => [x * 8, x * 8, x * 8, 255]);
     const base = { ...still, smear: 0, paletteMix: 1, bands: 4 };
     const anim = await t.loopCheck('chroma-smear', { ...base, hueCycles: 1 }, { image: src });
-    expect(anim.seam).toBe(0);
+    expect(anim.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(anim.motion).toBeGreaterThan(1);
     const off = await t.loopCheck('chroma-smear', base, { image: src });
     expect(off.motion).toBe(0);

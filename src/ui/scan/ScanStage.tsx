@@ -51,7 +51,7 @@ export function ScanQuickSettings() {
       )}
       {lv && (
         <>
-          <div className="rs-quick__f"><NumberField label="Paper white" min={0.3} max={1} step={0.01} value={Number(lv.params.inWhite ?? 1)} defaultValue={1} onChange={(v) => ed.setParam(lv.id, 'inWhite', v)} title="Lower this to turn grey paper white" /></div>
+          <div className="rs-quick__f"><NumberField label="Paper white" min={0.3} max={1} step={0.01} value={Number(lv.params.inWhite ?? 1)} defaultValue={1} onChange={(v) => ed.setParam(lv.id, 'inWhite', v)} title="Lower this to turn gray paper white" /></div>
           <div className="rs-quick__f"><NumberField label="Ink black" min={0} max={0.7} step={0.01} value={Number(lv.params.inBlack ?? 0)} defaultValue={0} onChange={(v) => ed.setParam(lv.id, 'inBlack', v)} title="Raise this to make lines darker" /></div>
         </>
       )}

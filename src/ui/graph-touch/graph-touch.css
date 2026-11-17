@@ -1,0 +1,14 @@
+/*
+ * Touch rules for graph elements, kept out of src/ui/graph/*. Only adds rules, and only under touch / small-screen conditions.
+ * The sockets' look does not change; their hit areas grow (invisible padding, see responsive.css for the pointer: coarse sizes).
+ */
+@media (pointer: coarse) {
+  /* sockets that cannot take the pending wire dim; the ones that can are enlarged (the app's own [data-ok] styling does the rest) */
+  .rs-graph.is-tapwire .rs-sock[data-dim] { opacity: 0.2; }
+  .rs-graph.is-tapwire .rs-sock[data-ok] { box-shadow: 0 0 0 3px var(--select); }
+  /* selection toolbar buttons and node header buttons: thumb sized where they are screen-space */
+  .rs-graph .rs-seltb .rs-seltb__btn, .rs-graph .rs-seltb .rs-btn { min-width: var(--touch); width: var(--touch); height: var(--touch); }
+  .rs-graph__crumb { min-height: 40px; }
+  .rs-frame__head { min-height: 32px; }
+}
+html[data-vp='phone'] .rs-seltb { max-width: calc(100vw - 16px); overflow-x: auto; }

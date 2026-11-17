@@ -1,9 +1,12 @@
 import { defineNode } from '../../define';
+import { snapMultiple, snapNote, wholeCycles } from '../../lib/loop-snap';
 import { cameraBasis, PROJECTION_ID } from '../../lib/gen-camera';
 import { GEN_HASH_WGSL } from '../../lib/gen-common';
 import { rad, rgba4 } from '../../lib/copy-wgsl';
 import { PRELUDE } from '../../gpu/prelude';
-import type { CameraValue, NodeGpu } from '../../types';
+import { LIGHT_PARAMS, lightVector } from '../../lib/gen-3d';
+import { materialKey, materialRasterData, materialRasterGroup, materialRasterLayout, materialRasterWgsl, MATERIAL_RASTER_BYTES } from '../../lib/gen-material';
+import type { CameraValue, MaterialValue, NodeGpu } from '../../types';
 
 /**
  * 3D Array: the input picture as textured cards instanced in 3D, one instanced draw call.
@@ -16,14 +19,25 @@ import type { CameraValue, NodeGpu } from '../../types';
  * fewer cards) to keep their edges smooth.
  *
  * Travel along Z wraps: card slot s = (index - travel * phase) mod count, so with whole spacings per loop the picture is identical at the
- * loop point and the stream never ends. Colours are attached to the card ("by copy", loops when the colour period divides the travel) or to
- * the depth on screen ("by depth", always loops).
+ * loop point and the stream never ends. Colours are attached to the card ("by copy") or to the depth on screen ("by depth", always loops).
+ * One-click looping (Loop on): by-copy colours would only close when their period divides the travel, so the colour index of a card moves
+ * toward the index of the slot it ends the loop in (see `array3dLoop`); cards that pick a sprite-sheet cell cannot blend, so the travel is
+ * rounded to whole rings instead. With Loop off nothing changes.
  */
 export const MAX_CARDS = 20_000;
+
+/** Effective travel (whole spacings per loop) for the project clock. Pure. */
+export function array3dLoop(p: { layout: string; travel: number; countZ: number; sheetColumns: number; sheetRows: number }, loop: boolean): { travel: number; blend: boolean; notes: string[] } {
+  if (!loop || p.travel === 0 || p.layout === 'ring') return { travel: p.travel, blend: false, notes: [] };
+  let travel = wholeCycles(p.travel);
+  if (p.sheetColumns * p.sheetRows > 1) travel = snapMultiple(travel, Math.round(p.countZ));
+  const n = snapNote('travel', p.travel, travel);
+  return { travel, blend: true, notes: n ? [n] : [] };
+}
 const MAX_MSAA_BYTES = 700 * 1024 * 1024;
 const LAYOUT = { grid: 0, tunnel: 1, ring: 2, helix: 3 } as const;
 
-const SHADER = /* wgsl */ `
+const shader = (m: MaterialValue | null): string => /* wgsl */ `
 ${PRELUDE}
 ${GEN_HASH_WGSL}
 struct Fr {
@@ -42,6 +56,7 @@ struct Fr {
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var smpL: sampler;
 @group(0) @binding(3) var smpN: sampler;
+${m ? materialRasterWgsl(m, 1, false) : ''}
 
 fn pmodf(a: f32, b: f32) -> f32 { return a - b * floor(a / b); }
 fn pmodi(a: i32, b: i32) -> i32 { let m = max(b, 1); return ((a % m) + m) % m; }
@@ -88,6 +103,9 @@ struct VOut {
   @location(1) @interpolate(flat) cardInfo: vec4f,   // card index (colour), depth position 0..1, 0, 0
   @location(2) @interpolate(flat) sheet: vec4f,  // sheet offset xy, scale zw
   @location(3) dist: f32,
+  @location(4) wpos: vec3f,
+  @location(5) @interpolate(flat) rgt: vec3f,
+  @location(6) @interpolate(flat) upv: vec3f,
 };
 
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
@@ -152,9 +170,19 @@ struct VOut {
   var o: VOut;
   o.clip = project(wp);
   o.uv = uvq;
-  o.cardInfo = vec4f(f32(select(i, iz, lay == 3)), zn, 0.0, 0.0);
+  // colour index of the card; with a looping travel it moves toward the index of the slot the card ends the loop in (no pop at the wrap)
+  var cidx = f32(select(i, iz, lay == 3));
+  if (fr.p6.w > 0.5 && lay != 2) {
+    let stride = select(select(cxn, cxn * cyn, lay == 0), 1, lay == 3);
+    let tz = pmodi(iz - i32(round(fr.p6.y)), czn);
+    cidx = mix(cidx, cidx + f32((tz - iz) * stride), smoothstep(0.6667, 1.0, fr.p6.z));
+  }
+  o.cardInfo = vec4f(cidx, zn, 0.0, 0.0);
   o.sheet = sheet;
   o.dist = length(wp - fr.camPos.xyz);
+  o.wpos = wp;
+  o.rgt = rgt;
+  o.upv = upv;
   return o;
 }
 
@@ -188,6 +216,18 @@ struct FOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
   let grad = mix(fr.tintA.rgb, fr.tintB.rgb, g);
   if (fr.p5.z > 1.5) { rgb = grad; } else if (fr.p5.z > 0.5) { rgb = rgb * grad; }
   var a = c.a;
+${m ? `
+  {
+    // Lit card: its own flat normal (two sided), the Material's model and, when wired, its normal map.
+    var V = normalize(fr.camPos.xyz - i.wpos);
+    if (i32(fr.camPos.w) == 0) { V = -fr.camFwd.xyz; }
+    var nn = normalize(cross(i.rgt, i.upv));
+    if (dot(nn, V) < 0.0) { nn = -nn; }
+    matSetup(fr.camRight.xyz, fr.camUp.xyz, fr.camFwd.xyz, i.rgt, i.upv, nn);
+    let ms = matShade(rgb, nn, -V, 1.0, 1.0, vec3f(i.uv.x * 2.0 - 1.0, 1.0 - i.uv.y * 2.0, 0.0), vec3f(0.0, 0.0, 1.0), i.clip.xy / mb.v[11].zw);
+    rgb = ms.rgb;
+    a = a * ms.a;
+  }` : ''}
   if (fr.fog.z > 0.5) {
     let f = saturate((i.dist - fr.fog.x) / max(fr.fog.y - fr.fog.x, 0.0001));
     rgb = mix(rgb, fr.fogC.rgb, f);
@@ -205,17 +245,26 @@ struct FOut { @location(0) color: vec4f, @builtin(sample_mask) mask: u32 };
 interface Pipe {
   pipeline: GPURenderPipeline;
   layout: GPUBindGroupLayout;
+  matLayout: GPUBindGroupLayout | null;
   linear: GPUSampler;
   nearest: GPUSampler;
   groups: WeakMap<GPUBuffer, WeakMap<GPUTexture, GPUBindGroup>>;
 }
-const pipes = new WeakMap<GPUDevice, Promise<Pipe>>();
+const pipes = new WeakMap<GPUDevice, Map<string, Promise<Pipe>>>();
+const MAX_PIPES = 12;
+/** Number of pipelines created so far (tests: moving a slider must not add one). */
+export const array3dDebug = { pipelines: 0 };
 
-function getPipe(device: GPUDevice): Promise<Pipe> {
-  let p = pipes.get(device);
+/** One pipeline per material STRUCTURE (none = the unlit cards); every number is a uniform. */
+function getPipe(device: GPUDevice, m: MaterialValue | null): Promise<Pipe> {
+  let byKey = pipes.get(device);
+  if (!byKey) pipes.set(device, (byKey = new Map()));
+  const key = m ? materialKey(m) : 'none';
+  let p = byKey.get(key);
   if (!p) {
+    array3dDebug.pipelines++;
     p = (async () => {
-      const module = device.createShaderModule({ label: 'array-3d', code: SHADER });
+      const module = device.createShaderModule({ label: 'array-3d', code: shader(m) });
       const info = await module.getCompilationInfo();
       const errors = info.messages.filter((m) => m.type === 'error');
       if (errors.length) throw new Error(`array-3d shader failed to compile: ${errors.map((e) => `line ${e.lineNum}: ${e.message}`).join('; ')}`);
@@ -227,9 +276,10 @@ function getPipe(device: GPUDevice): Promise<Pipe> {
           { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         ],
       });
+      const matLayout = m ? materialRasterLayout(device, m) : null;
       const pipeline = device.createRenderPipeline({
         label: 'array-3d',
-        layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+        layout: device.createPipelineLayout({ bindGroupLayouts: matLayout ? [layout, matLayout] : [layout] }),
         vertex: { module, entryPoint: 'vs' },
         fragment: { module, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
         primitive: { topology: 'triangle-list', cullMode: 'none' },
@@ -239,13 +289,21 @@ function getPipe(device: GPUDevice): Promise<Pipe> {
       return {
         pipeline,
         layout,
+        matLayout,
         linear: device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' }),
         nearest: device.createSampler({ magFilter: 'nearest', minFilter: 'nearest', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' }),
         groups: new WeakMap(),
       };
     })();
-    pipes.set(device, p);
-    p.catch(() => pipes.delete(device));
+    byKey.set(key, p);
+    const entry = p;
+    p.catch(() => {
+      if (byKey!.get(key) === entry) byKey!.delete(key);
+    });
+    while (byKey.size > MAX_PIPES) byKey.delete(byKey.keys().next().value as string);
+  } else {
+    byKey.delete(key);
+    byKey.set(key, p);
   }
   return p;
 }
@@ -271,9 +329,9 @@ export default defineNode({
   title: '3D Array',
   category: 'generate',
   description:
-    'Your picture as cards in 3D space: a grid, a tunnel of rings receding away, a carousel ring or a helix. Cards can stream towards the camera forever (they wrap round), fade into fog, and change hue or colour from card to card. Uses the same Camera node as 3D Object. One draw call, up to 20,000 cards.',
+    'Your picture as cards in 3D space: a grid, a tunnel of rings receding away, a carousel ring or a helix. Cards can stream towards the camera forever (they wrap round), fade into fog, and change hue or color from card to card. Uses the same Camera node as 3D Object. One draw call, up to 20,000 cards.',
   keywords: ['instances', 'cloner', 'cards', 'depth', 'tunnel', 'parallax', '3d grid', '3d array', 'array', 'duplicate', 'carousel', 'helix', 'ring', 'fly through', 'infinite', 'wall of images', 'billboards'],
-  inputs: { image: { type: 'image', required: true, label: 'Picture' }, camera: { type: 'camera', label: 'Camera' } },
+  inputs: { image: { type: 'image', required: true, label: 'Picture' }, camera: { type: 'camera', label: 'Camera' }, material: { type: 'material', label: 'Material' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     layout: {
@@ -310,7 +368,7 @@ export default defineNode({
     travel: { type: 'number', default: 0, min: -32, max: 32, step: 1, integer: true, unit: 'cycles', label: 'Travel', hint: 'Whole spacings the stream moves per loop along Z (helix: up). Cards wrap round so it never ends. 0 = still.', group: 'Motion', visibleIf: (p) => p.layout !== 'ring' },
     orbit: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Turn', hint: 'Spins the ring / tunnel / helix about its axis.', group: 'Motion', visibleIf: (p) => p.layout !== 'grid' },
     doubleSided: { type: 'bool', default: true, label: 'Show card backs', hint: 'Backs show the picture mirrored.' },
-    crisp: { type: 'bool', default: false, label: 'Crisp', hint: 'Nearest-neighbour when a card is shown larger than its picture.' },
+    crisp: { type: 'bool', default: false, label: 'Crisp', hint: 'Nearest-neighbor when a card is shown larger than its picture.' },
     colourBy: {
       type: 'enum',
       default: 'copy',
@@ -337,7 +395,7 @@ export default defineNode({
     tintA: { type: 'color', default: [1, 0.3, 0.2, 1], label: 'Near color', hint: 'Color of the near (first) card.', group: 'Color per card', visibleIf: (p) => p.tintMode !== 'off' },
     tintB: { type: 'color', default: [0.2, 0.5, 1, 1], label: 'Far color', hint: 'Color of the far (last) card.', group: 'Color per card', visibleIf: (p) => p.tintMode !== 'off' },
     fog: { type: 'bool', default: false, label: 'Depth fog', group: 'Fog' },
-    fogColor: { type: 'color', default: [0, 0, 0, 1], label: 'Fog color', hint: 'With transparency in the colour, far cards fade out instead of fading to a colour.', group: 'Fog', visibleIf: (p) => p.fog === true },
+    fogColor: { type: 'color', default: [0, 0, 0, 1], label: 'Fog color', hint: 'With transparency in the color, far cards fade out instead of fading to a color.', group: 'Fog', visibleIf: (p) => p.fog === true },
     fogStart: { type: 'number', default: 4, min: 0, max: 500, step: 0.1, label: 'Fog starts', hint: 'Distance from the camera.', group: 'Fog', visibleIf: (p) => p.fog === true },
     fogEnd: { type: 'number', default: 14, min: 0.1, max: 500, step: 0.1, label: 'Fully fogged at', group: 'Fog', visibleIf: (p) => p.fog === true },
     sheetColumns: { type: 'number', default: 1, min: 1, max: 64, step: 1, integer: true, label: 'Sheet columns', hint: 'The picture is a sheet of equal sprites: each card shows one.', group: 'Sprite sheet' },
@@ -353,10 +411,16 @@ export default defineNode({
       group: 'Sprite sheet',
     },
     seed: { type: 'number', default: 1, min: 0, max: 9999, step: 1, integer: true, label: 'Seed', group: 'Sprite sheet' },
+    lightAzimuth: { ...LIGHT_PARAMS.lightAzimuth, hint: 'Only used while a Material is wired: it lights every card, with the normal of each card (and the normal map of the Material).' },
+    lightElevation: LIGHT_PARAMS.lightElevation,
+    ambient: LIGHT_PARAMS.ambient,
+    cel: LIGHT_PARAMS.cel,
+    celSteps: LIGHT_PARAMS.celSteps,
   },
-  summary: (p) => {
+  summary: (p, _wired, clock) => {
     const n = p.layout === 'grid' ? p.countX * p.countY * p.countZ : p.layout === 'tunnel' ? p.countX * p.countZ : p.layout === 'ring' ? p.countX * p.countY : p.countZ;
-    return `${p.layout} · ${n} cards${p.travel ? ` · travel ${p.travel}/loop` : ''}`;
+    const a = array3dLoop(p, !!clock?.loop);
+    return `${p.layout} · ${n} cards${a.travel ? ` · travel ${a.travel}/loop` : ''}${a.notes.length ? ` · ${a.notes.join(', ')}` : ''}`;
   },
   async render(ctx) {
     const p = ctx.params;
@@ -384,6 +448,7 @@ export default defineNode({
     const cardH = cardW * cellAspect;
     const moving = p.travel !== 0 || p.orbit !== 0;
     const phase = moving ? ctx.time.phase : 0;
+    const al = array3dLoop(p, p.travel !== 0 && ctx.time.loop);
 
     const cam =
       ctx.in.camera ??
@@ -418,17 +483,18 @@ export default defineNode({
       LAYOUT[layout], cx, cy, cz,
       p.spacingX, p.spacingY, p.spacingZ, cardW,
       cardH, p.radius, rad(p.stepRotate), rad(p.cardRoll),
-      p.travel * phase, Math.PI * 2 * p.orbit * phase, p.alignRing ? 1 : 0, p.doubleSided ? 1 : 0,
+      al.travel * phase, Math.PI * 2 * p.orbit * phase, p.alignRing ? 1 : 0, p.doubleSided ? 1 : 0,
       sheetC, sheetR, sheetC * sheetR > 1 ? (p.vary === 'random' ? 2 : 1) : 0, p.seed,
       p.hueStep / 360, p.brightnessStep, tintMode, p.colourBy === 'depth' ? 1 : 0,
       ...rgba4(p.tintA),
       ...rgba4(p.tintB),
       ...fc,
       p.fogStart, Math.max(p.fogEnd, p.fogStart + 0.01), p.fog ? 1 : 0, p.crisp ? 1 : 0,
-      total, 0, 0, 0,
+      total, al.travel, phase, al.blend ? 1 : 0,
     ]);
 
-    const pipe = await getPipe(device);
+    const mat = ctx.in.material;
+    const pipe = await getPipe(device, mat);
     const image = gpu.alloc(W, H, out.unit ?? 1);
     const ubo = gpu.scratch(data.byteLength, GPUBufferUsage.UNIFORM, 'array-3d frame');
     device.queue.writeBuffer(ubo, 0, data);
@@ -449,6 +515,7 @@ export default defineNode({
     }
     const msaa = gpu.scratchTexture({ width: W, height: H, format: 'rgba8unorm', sampleCount: 4, usage: GPUTextureUsage.RENDER_ATTACHMENT, label: 'array-3d msaa' });
     const depth = gpu.scratchTexture({ width: W, height: H, format: 'depth24plus', sampleCount: 4, usage: GPUTextureUsage.RENDER_ATTACHMENT, label: 'array-3d depth' });
+    let matBuf: GPUBuffer | null = null;
     const enc = device.createCommandEncoder({ label: 'array-3d' });
     const rp = enc.beginRenderPass({
       colorAttachments: [{ view: gpu.view(msaa), resolveTarget: gpu.view(image.texture), loadOp: 'clear', storeOp: 'discard', clearValue: [0, 0, 0, 0] }],
@@ -456,12 +523,19 @@ export default defineNode({
     });
     rp.setPipeline(pipe.pipeline);
     rp.setBindGroup(0, group);
+    if (mat && pipe.matLayout) {
+      const mbuf = gpu.scratch(MATERIAL_RASTER_BYTES, GPUBufferUsage.UNIFORM, 'array-3d material frame');
+      device.queue.writeBuffer(mbuf, 0, materialRasterData(mat, { light: lightVector(p), ambient: p.ambient, cel: p.cel, steps: p.celSteps, width: W, height: H }));
+      rp.setBindGroup(1, materialRasterGroup(device, pipe.matLayout, mat, mbuf, pipe.linear, (t) => gpu.view(t)));
+      matBuf = mbuf;
+    }
     rp.draw(6 * sub * sub, total); // the one draw call
     rp.end();
     device.queue.submit([enc.finish()]);
     gpu.releaseScratchTexture(msaa);
     gpu.releaseScratchTexture(depth);
     gpu.releaseScratch(ubo);
+    if (matBuf) gpu.releaseScratch(matBuf);
     return { image };
   },
 });

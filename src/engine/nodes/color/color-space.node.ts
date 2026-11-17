@@ -7,8 +7,8 @@ export default defineNode({
   title: 'Color Space',
   category: 'color',
   description:
-    'Converts the picture\'s values between colour spaces: sRGB, linear light, gamma 2.2 / 2.4, Display P3, Rec.2020 and the log curves Cineon, S-Log3, LogC3, V-Log, ACEScct and DaVinci Intermediate. Use it to feed a log LUT or to grade in linear.',
-  keywords: ['grade', 'color space', 'colour space', 'colorspace', 'transform', 'convert', 'linear', 'gamma', 'p3', 'display p3', 'rec2020', 'rec 2020', 'rec709', 'rec.709', 'log', 'cineon', 's-log3', 'slog3', 'logc', 'logc3', 'v-log', 'vlog', 'acescct', 'davinci intermediate', 'oetf', 'eotf', 'gamut'],
+    'Converts the picture\'s values between color spaces: sRGB, linear light, gamma 2.2 / 2.4, Display P3, Rec.2020 and the log curves Cineon, S-Log3, LogC3, V-Log, ACEScct and DaVinci Intermediate. Use it to feed a log LUT or to grade in linear.',
+  keywords: ['grade', 'color space', 'color space', 'colorspace', 'transform', 'convert', 'linear', 'gamma', 'p3', 'display p3', 'rec2020', 'rec 2020', 'rec709', 'rec.709', 'log', 'cineon', 's-log3', 'slog3', 'logc', 'logc3', 'v-log', 'vlog', 'acescct', 'davinci intermediate', 'oetf', 'eotf', 'gamut'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,

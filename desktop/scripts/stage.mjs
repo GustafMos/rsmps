@@ -19,7 +19,7 @@ cpSync(join(root, 'desktop', 'main.mjs'), join(stage, 'main.mjs'));
 cpSync(join(root, 'desktop', 'backups.mjs'), join(stage, 'backups.mjs')); // imported by main.mjs
 cpSync(join(root, 'desktop', 'crash.mjs'), join(stage, 'crash.mjs'));
 cpSync(join(root, 'desktop', 'build', 'phone-server.mjs'), join(stage, 'phone-server.mjs'));
-cpSync(join(root, 'desktop', 'build', 'addons.mjs'), join(stage, 'addons.mjs'));
+cpSync(join(root, 'desktop', 'build', 'addons.mjs'), join(stage, 'addons.mjs')); // add-on manager, FFmpeg export and the splat-train pipeline (bundled)
 cpSync(join(root, 'desktop', 'build', 'icon-256.png'), join(stage, 'icon.png')); // window icon (Windows/Linux)
 
 writeFileSync(
@@ -68,6 +68,7 @@ const parts = [
   'RSMPS itself is MIT licensed (see LICENSE). The application also contains the software below.',
   'Electron and Chromium licences ship next to this file (LICENSE.electron.txt, LICENSES.chromium.html).',
   'FFmpeg is NOT distributed with RSMPS. The optional FFmpeg add-on is downloaded by the user on request from its upstream source; its licence is shown before the download.',
+  'COLMAP (BSD-3-Clause) and Brush (Apache-2.0) are NOT distributed with RSMPS either. The optional add-ons for Splat from Video are downloaded by the user on request from their GitHub releases; their licences are shown before the download.',
   '',
 ];
 const list = [...seen.values()].sort((a, b) => a.p.name.localeCompare(b.p.name));

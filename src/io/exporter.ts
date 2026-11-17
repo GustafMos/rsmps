@@ -34,7 +34,8 @@ import { fitAudio } from './audio-util';
 import { conformImage, enlargeNearest } from './frame-gpu';
 import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
 import { encodeWav } from './wav';
-import { OffscreenPresenter, frameFromCanvas, presentToBlob } from './encode';
+import { OffscreenPresenter, presentToBlob, presentToFrame } from './encode';
+import { choosePipeline, fileTimestamps, isReordered, sourceOptions } from './encode-order';
 import { GpuWatch, scopeMessage } from './gpu-watch';
 import type { EvalResult } from '../engine/engine';
 import { SILENT_TRACKS, type SignalRouter } from './signals';
@@ -42,7 +43,11 @@ import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { imageExtension, resolvePattern, sanitizeFileName, sequencePattern, uniqueName, type NameTokens } from './naming';
 import { exportPrint, readPrintParams, type PrintParams } from './print/export';
-import { layoutSheet, sheetMetadata } from './spritesheet';
+import { layoutSheet } from './spritesheet';
+import { encodePngRgba } from './png-encode';
+import { writeSheetMeta } from './spritesheet-meta';
+import { bleedTransparent, buildSheets, type Bitmap } from './spritesheet-pack';
+import { buildOfLayout, buildOptionsOf, needsCpuSheet, readSheetParams, tagsOfClips, type SheetParams } from './spritesheet-params';
 import { isDesktop, type FfmpegExportClient } from './desktop';
 import { ffmpegFallbackCodec, ffmpegMissingMessage, ffmpegOnlyCodec, videoRoute, type FfmpegCodec } from './export-codecs';
 import { savedEntry, streamToFfmpeg } from './export-ffmpeg';
@@ -84,11 +89,15 @@ interface OutParams {
   quality: number;
   codec: string;
   bitrate: number;
+  /** Every frame is a key frame (intra-only): bigger files, but VJ software and editors loop and scrub them frame-exactly. */
+  allKeys: boolean;
   scale: number;
   columns: number;
   padding: number;
   pixelSize: number;
   exportArtSize: boolean;
+  /** Sprite sheet and game export settings (the "For" preset already applied). */
+  sheet: SheetParams;
   print: PrintParams;
 }
 
@@ -103,6 +112,8 @@ interface Job {
   label: string;
   /** Set by sequence / spritesheet exports that deliver art-size frames. */
   artMode?: boolean;
+  /** Sprite sheet from all batch items: the items that feed this one sheet. */
+  sheetItems?: number[];
 }
 
 interface Run {
@@ -205,13 +216,17 @@ export class ExporterImpl implements Exporter {
     for (const item of items) {
       for (const out of outs) {
         const params = this.readParams(out);
+        // One sheet for the whole batch: only the first item makes the job, it renders every item.
+        const sheetAll = params.kind === 'spritesheet' && params.sheet.from === 'batch';
+        if (sheetAll && item !== items[0]) continue;
         const sourceName = this.sourceName(graph, out.id, item) ?? graph.name ?? 'output';
         const upstreamVideo = this.firstAssetOfKind(graph, out.id, item, 'video') !== null;
         let weight = 1;
         if (params.kind === 'sequence' || params.kind === 'video' || params.kind === 'spritesheet') weight = frames;
         else if (params.kind === 'print') weight = Math.max(1, Math.ceil(frames / params.print.step));
         else if (params.kind === 'auto') weight = upstreamVideo ? frames : 1;
-        jobs.push({ out, params, item, itemCount, sourceName, weight, label: `${out.label || sanitizeFileName(sourceName)}${itemCount > 1 ? ` #${item + 1}` : ''}` });
+        if (sheetAll) weight *= items.length;
+        jobs.push({ out, params, item, itemCount, sourceName: sheetAll ? graph.name || 'sheet' : sourceName, weight, label: `${out.label || sanitizeFileName(sourceName)}${itemCount > 1 && !sheetAll ? ` #${item + 1}` : ''}`, sheetItems: sheetAll ? items : undefined });
       }
     }
 
@@ -332,11 +347,13 @@ export class ExporterImpl implements Exporter {
       quality: Math.min(1, Math.max(0.1, num(p.quality, 0.92))),
       codec: typeof p.codec === 'string' ? p.codec : 'avc',
       bitrate: Math.max(0.5, num(p.bitrate, 12)),
+      allKeys: p.allKeys === true,
       scale: Math.max(1, Math.round(num(p.scale, 1))),
       pixelSize: readFrameParams(p).pixelSize,
       exportArtSize: p.exportArtSize === true,
       columns: Math.max(0, Math.round(num(p.columns, 0))),
       padding: Math.max(0, Math.round(num(p.padding, 0))),
+      sheet: readSheetParams(p),
       print: readPrintParams(p),
     };
   }
@@ -616,6 +633,12 @@ export class ExporterImpl implements Exporter {
     gpu.retain(img.texture);
     const comp = this.compose(img, p.scale, false);
     try {
+      if (p.sheet.bleedStills && p.imageFormat === 'png') {
+        // The canvas path is premultiplied and loses the colour under alpha 0: read straight pixels, bleed, write the PNG ourselves.
+        const px = await gpu.read(comp.drawable as ImageValue, true);
+        bleedTransparent(px, comp.drawable.width, comp.drawable.height);
+        return new Blob([(await encodePngRgba(px, comp.drawable.width, comp.drawable.height)) as BlobPart], { type: 'image/png' });
+      }
       const mime = MIME[p.imageFormat];
       // present() and convertToBlob() must run in the same task: no await between them.
       return await presentToBlob(this.presenter(p.imageFormat === 'jpeg'), comp.drawable, mime, p.imageFormat === 'png' ? undefined : p.quality);
@@ -667,6 +690,81 @@ export class ExporterImpl implements Exporter {
 
   private async exportSheet(job: Job, run: Run): Promise<ExportedFile[]> {
     job.artMode = job.params.exportArtSize;
+    if (needsCpuSheet(job.params.sheet)) return this.exportSheetCpu(job, run);
+    return this.exportSheetGrid(job, run);
+  }
+
+  /** Layouts the GPU copy cannot do (row, packed, trim, extrude, power of two, pages, bleed, a whole batch): frames are read back and assembled by spritesheet-pack. */
+  private async exportSheetCpu(job: Job, run: Run): Promise<ExportedFile[]> {
+    const { gpu } = this.d;
+    const graph = run.req.graph;
+    const project = graph.project;
+    const sp = job.params.sheet;
+    const frames = totalFramesOf(project);
+    const itemList = job.sheetItems ?? [job.item];
+    const home = job.item;
+    const bitmaps: Bitmap[] = [];
+    const clips: { name: string; frames: number }[] = [];
+    let bytes = 0;
+    try {
+      for (const item of itemList) {
+        job.item = item;
+        const name = sp.animName && itemList.length === 1 ? sp.animName : sanitizeFileName(this.sourceName(graph, job.out.id, item) ?? job.sourceName);
+        clips.push({ name: sp.animName && itemList.length > 1 ? `${sp.animName}_${name}` : name, frames });
+        for (let f = 0; f < frames; f++) {
+          throwIfAborted(run.req.signal);
+          const img = await this.renderFrame(job, run, f);
+          gpu.retain(img.texture);
+          const comp = this.compose(img, job.params.scale, false);
+          try {
+            const data = await gpu.read(comp.drawable as ImageValue, true);
+            bytes += data.byteLength;
+            if (bytes > 1.5e9) throw new Error('The frames of this spritesheet need more than 1.5 GB of memory. Use fewer frames or a smaller size.');
+            bitmaps.push({ width: comp.drawable.width, height: comp.drawable.height, data });
+          } finally {
+            comp.release();
+            gpu.release(img.texture);
+          }
+          run.progress((bitmaps.length / (frames * itemList.length)) * 0.9, `Sheet · frame ${bitmaps.length}/${frames * itemList.length}`);
+          await yieldToEventLoop();
+        }
+      }
+    } finally {
+      job.item = home;
+    }
+    const build = buildSheets(bitmaps, buildOptionsOf(sp));
+    const maxDim = gpu.device.limits.maxTextureDimension2D;
+    for (const pg of build.pages) if (pg.width > maxDim || pg.height > maxDim) run.warnings.push(`${job.label}: a sheet page is ${pg.width}x${pg.height}, larger than this GPU's texture limit (${maxDim}); engines may refuse it.`);
+    const base = resolvePattern(job.params.name, this.tokens(job, build.pages[0].width, build.pages[0].height));
+    const files: ExportedFile[] = [];
+    const imageNames: string[] = [];
+    for (const pg of build.pages) {
+      const png = await encodePngRgba(pg.data, pg.width, pg.height);
+      const name = this.claim(run, `${base}${pg.index ? `_${pg.index + 1}` : ''}.png`);
+      imageNames.push(name);
+      files.push({ name, blob: new Blob([png as BlobPart], { type: 'image/png' }) });
+      await yieldToEventLoop();
+    }
+    const fps = project.fps;
+    const meta = writeSheetMeta(sp.meta, {
+      baseName: sanitizeFileName(base),
+      images: imageNames,
+      build,
+      durationsMs: bitmaps.map(() => 1000 / fps),
+      tags: tagsOfClips(clips),
+      fps,
+      loop: project.loop,
+      padding: sp.padding,
+      extrude: sp.extrude,
+      pivot: sp.pivot,
+    });
+    for (const m of meta) files.push({ name: this.claim(run, `${base}${m.suffix}.${m.ext}`), blob: new Blob([m.text], { type: m.ext === 'css' ? 'text/css' : 'application/json' }) });
+    run.progress(1, imageNames[0]);
+    return files;
+  }
+
+  /** The plain grid: frames are copied texture to texture on the GPU, no readback. */
+  private async exportSheetGrid(job: Job, run: Run): Promise<ExportedFile[]> {
     const { gpu } = this.d;
     const graph = run.req.graph;
     const project = graph.project;
@@ -723,12 +821,23 @@ export class ExporterImpl implements Exporter {
       const png = await this.presenterBlob(sheet, 'image/png');
       const base = resolvePattern(job.params.name, this.tokens(job, layout.width, layout.height));
       const imageName = this.claim(run, `${base}.png`);
-      const jsonName = this.claim(run, `${base}.json`);
-      const meta = sheetMetadata(layout, imageName, project.fps, project.loop);
+      const sp = job.params.sheet;
+      const metaFiles = writeSheetMeta(sp.meta, {
+        baseName: sanitizeFileName(base),
+        images: [imageName],
+        build: buildOfLayout(layout),
+        durationsMs: Array.from({ length: frames }, () => 1000 / project.fps),
+        tags: tagsOfClips([{ name: sp.animName || sanitizeFileName(job.sourceName), frames }]),
+        fps: project.fps,
+        loop: project.loop,
+        padding: layout.padding,
+        extrude: 0,
+        pivot: sp.pivot,
+      });
       run.progress(1, imageName);
       return [
         { name: imageName, blob: png },
-        { name: jsonName, blob: new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' }) },
+        ...metaFiles.map((m) => ({ name: this.claim(run, `${base}${m.suffix}.${m.ext}`), blob: new Blob([m.text], { type: m.ext === 'css' ? 'text/css' : 'application/json' }) })),
       ];
     } finally {
       if (sheet) gpu.release((sheet as { texture: GPUTexture }).texture);
@@ -847,6 +956,8 @@ export class ExporterImpl implements Exporter {
     let chosen: { codec: VideoCodec; webm: boolean } | null = null;
     let outW = 0;
     let outH = 0;
+    /** Whole frames added to every timestamp so the file starts at 0 (measured per browser and codec). */
+    let shiftFrames = 0;
 
     const pushAudioUpTo = async (seconds: number, all = false) => {
       if (!pcm || !audioSource) return;
@@ -882,8 +993,18 @@ export class ExporterImpl implements Exporter {
             const fallback = ffmpegFallbackCodec(job.params.codec);
             if (fallback && !(await canEncodeVideo(job.params.codec as VideoCodec, { width, height, frameRate: fps, quality }).catch(() => false)) && (await this.ffmpegReady())) throw new FfmpegFallback(fallback);
             chosen = await this.pickCodec(job.params.codec, width, height, fps, quality);
+            if (chosen.codec !== job.params.codec) run.warnings.push(`${job.label}: this browser cannot encode ${String(job.params.codec).toUpperCase()}; the video was written as ${chosen.codec.toUpperCase()} instead.`);
             output = new Output({ format: chosen.webm ? new WebMOutputFormat() : new Mp4OutputFormat(), target: new BufferTarget() });
-            videoSource = new VideoSampleSource({ codec: chosen.codec, quality });
+            // Frame order and timing are MEASURED, not assumed (see encode-order.ts): a few tiny frames go through this exact pipeline
+            // first, and the export then uses settings that keep frames in order and start the file at time 0.
+            const pick = await choosePipeline(chosen, { width, height, fps }, job.params.allKeys, undefined, (codec) =>
+              VideoEncoder.isConfigSupported({ codec, width, height, framerate: fps, bitrate: job.params.bitrate * 1_000_000, avc: { format: 'avc' } })
+                .then((r) => r.supported === true)
+                .catch(() => false),
+            );
+            shiftFrames = pick.shiftFrames;
+            if (pick.note) run.warnings.push(`${job.label}: ${pick.note}`);
+            videoSource = new VideoSampleSource({ codec: chosen.codec, quality, ...sourceOptions(pick.options, fps) });
             output.addVideoTrack(videoSource, { frameRate: fps });
             pcm = await this.videoAudio(job, run, frames / fps);
             if (pcm) {
@@ -900,8 +1021,7 @@ export class ExporterImpl implements Exporter {
             await output.start();
           }
           // present() and VideoFrame creation must happen in the same task.
-          const canvas = presenter.present(comp.drawable);
-          const vf = frameFromCanvas(canvas, { timestamp: Math.round((f / fps) * 1e6), duration: Math.round(1e6 / fps) });
+          const vf = await presentToFrame(presenter, comp.drawable, { timestamp: Math.round(((f + shiftFrames) / fps) * 1e6), duration: Math.round(1e6 / fps) });
           const sample = new VideoSample(vf);
           try {
             await videoSource!.add(sample);
@@ -921,6 +1041,18 @@ export class ExporterImpl implements Exporter {
       await output.finalize();
       const buffer = (output.target as BufferTarget).buffer;
       if (!buffer) throw new Error('Video encoding produced no data.');
+      // Last line of defense for every codec: look at the file that was written. Anything off is reported, never silent.
+      try {
+        const stamps = await fileTimestamps(buffer);
+        if (stamps.length) {
+          const firstFrame = Math.round(Math.min(...stamps) * fps);
+          if (stamps.length !== frames) run.warnings.push(`${job.label}: the video holds ${stamps.length} frames, ${frames} were rendered. Export again; if it repeats, use VP9 or an image sequence.`);
+          else if (isReordered(stamps)) run.warnings.push(`${job.label}: this video stores its frames out of order (the encoder used B-frames). Some players and VJ software stutter on such files, especially at the loop point. Turn on "All key frames" on the Output, or choose VP9 or AV1.`);
+          else if (firstFrame !== 0) run.warnings.push(`${job.label}: the video starts ${Math.abs(firstFrame)} frame${Math.abs(firstFrame) === 1 ? '' : 's'} ${firstFrame < 0 ? 'early' : 'late'}, so a player may drop or hold a frame at the loop point. Choose VP9 or AV1 on the Output, or export an image sequence.`);
+        }
+      } catch {
+        /* the check is advisory: an unreadable file is reported by the player that opens it */
+      }
       output = null;
       const ext = chosen.webm ? 'webm' : 'mp4';
       const mime = chosen.webm ? 'video/webm' : 'video/mp4';

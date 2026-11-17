@@ -1,5 +1,25 @@
 import { defineNode } from '../../define';
+import { cyclesPerLoop, snapNote, wholeCycles } from '../../lib/loop-snap';
 import { mod } from '../../lib/util-time';
+
+/**
+ * Loop snapping (Loop on): the footage must come back to its start exactly when the project does, so the speed is a whole number (an even
+ * one for ping-pong: there and back) and the stop-motion rate is a whole number of held frames per loop. Never 0 unless typed as 0.
+ * Repeat off (hold the last frame) and Loop off are left alone. Pure: the node, its summary and the tests share it.
+ */
+export function retimeLoop(
+  p: { speed: number; pingPong: boolean; repeat: boolean; holdFps: number },
+  clock?: { loop: boolean; frames: number; fps: number },
+): { speed: number; holdFps: number; notes: string[] } {
+  if (!clock?.loop) return { speed: p.speed, holdFps: p.holdFps, notes: [] };
+  let speed = p.speed;
+  if (p.pingPong) speed = 2 * wholeCycles(p.speed / 2);
+  else if (p.repeat) speed = wholeCycles(p.speed);
+  let holdFps = p.holdFps;
+  if (holdFps > 0) holdFps = cyclesPerLoop(holdFps, clock.frames / clock.fps) / (clock.frames / clock.fps);
+  const notes = [snapNote('speed', p.speed, speed), snapNote('hold fps', p.holdFps, holdFps)].filter(Boolean);
+  return { speed, holdFps, notes };
+}
 
 export default defineNode({
   id: 'retime',
@@ -16,20 +36,22 @@ export default defineNode({
     repeat: { type: 'bool', default: true, label: 'Repeat', hint: 'Off holds the last frame instead of starting over.' },
     holdFps: { type: 'number', default: 0, min: 0, max: 120, step: 1, unit: 'hz', label: 'Stop-motion fps', hint: 'Show a new frame only this many times per second. 0 = off.' },
   },
-  summary: (p) => {
-    const bits = [`${p.speed}×`];
+  summary: (p, _wired, clock) => {
+    const r = retimeLoop(p, clock);
+    const bits = [`${r.speed}×`];
     if (p.reverse) bits.push('reverse');
     if (p.pingPong) bits.push('ping-pong');
-    if (p.holdFps > 0) bits.push(`${p.holdFps} fps`);
-    return bits.join(' · ');
+    if (r.holdFps > 0) bits.push(`${Math.round(r.holdFps * 100) / 100} fps`);
+    return [...bits, ...r.notes].join(' · ');
   },
   async render(ctx) {
     const p = ctx.params;
     if (p.speed === 1 && !p.reverse && !p.pingPong && p.holdFps <= 0 && p.repeat) return { image: ctx.in.image };
     const { duration, fps } = ctx.time;
+    const r = retimeLoop(p, { loop: ctx.time.loop, frames: Math.max(1, Math.round(duration * fps)), fps });
     let t = ctx.time.seconds;
-    if (p.holdFps > 0) t = Math.floor(t * p.holdFps + 1e-6) / p.holdFps;
-    const x = t * p.speed;
+    if (r.holdFps > 0) t = Math.floor(t * r.holdFps + 1e-6) / r.holdFps;
+    const x = t * r.speed;
     let s: number;
     if (p.pingPong) {
       const m = mod(x, duration * 2);

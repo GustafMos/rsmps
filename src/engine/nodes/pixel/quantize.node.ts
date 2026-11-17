@@ -9,7 +9,7 @@ export default defineNode({
   id: 'quantize',
   title: 'Quantize',
   category: 'pixel',
-  description: 'Replaces every colour with the nearest colour of the wired palette. No dithering: hard, clean colour steps. Follows the pixel grid of a (masked) Pixelate; set Pixel size to work on chunky art pixels.',
+  description: 'Replaces every color with the nearest color of the wired palette. No dithering: hard, clean color steps. Follows the pixel grid of a (masked) Pixelate; set Pixel size to work on chunky art pixels.',
   keywords: ['palette', 'posterize', 'reduce colors', 'snap', 'indexed'],
   inputs: {
     image: { type: 'image', required: true, label: 'Image' },
@@ -21,7 +21,7 @@ export default defineNode({
     fallback: FALLBACK_PARAM,
     pixelSize: PIXEL_SIZE_PARAM,
     colorSpace: { type: 'enum', default: 'oklab', options: SPACE_OPTIONS, label: 'Match in' },
-    strength: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Strength', hint: '0 keeps the original colours, 1 snaps fully to the palette.' },
+    strength: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Strength', hint: '0 keeps the original colors, 1 snaps fully to the palette.' },
   },
   summary: (p, wired) => `${p.colorSpace === 'oklab' ? 'OKLab' : p.colorSpace === 'linear' ? 'Linear' : 'RGB'} · ${Math.round(p.strength * 100)}% · ${paletteSummary(!!wired?.has('palette'), p.fallback)}`,
   render(ctx) {

@@ -57,7 +57,7 @@ export default defineNode({
         { value: 'override', label: 'One flat color' },
       ],
     },
-    autoFit: { type: 'bool', default: true, label: 'Fit to view', group: 'Custom model', hint: 'Centre the model and scale it to fill the same space as the primitives.', visibleIf: (p) => p.shape === 'custom' },
+    autoFit: { type: 'bool', default: true, label: 'Fit to view', group: 'Custom model', hint: 'Center the model and scale it to fill the same space as the primitives.', visibleIf: (p) => p.shape === 'custom' },
     shading: {
       type: 'enum',
       default: 'smooth',
@@ -70,7 +70,7 @@ export default defineNode({
         { value: 'unlit', label: 'Unlit' },
       ],
     },
-    nearestTexture: { type: 'bool', default: false, label: 'Crisp texture', group: 'Custom model', hint: 'Nearest-neighbour texture sampling, for pixel-art textures.', visibleIf: (p) => p.shape === 'custom' },
+    nearestTexture: { type: 'bool', default: false, label: 'Crisp texture', group: 'Custom model', hint: 'Nearest-neighbor texture sampling, for pixel-art textures.', visibleIf: (p) => p.shape === 'custom' },
     backFaces: { type: 'bool', default: false, label: 'Show back faces', group: 'Custom model', hint: 'Draw both sides of every triangle, not only the ones the file marks double-sided.', visibleIf: (p) => p.shape === 'custom' },
     wireframe: { type: 'bool', default: false, label: 'Wireframe overlay', group: 'Custom model', hint: 'Limited to 300,000 triangles.', visibleIf: (p) => p.shape === 'custom' },
     wireColor: { type: 'color', default: [0, 0, 0, 0.6], label: 'Wireframe color', group: 'Custom model', visibleIf: (p) => p.shape === 'custom' && p.wireframe === true },
@@ -119,8 +119,8 @@ export default defineNode({
     if (p.shape === 'custom') {
       // Same renderer as the legacy 3D Model node (lib/model-render.ts): imported mesh, same camera and lighting params.
       // Deform runs in its vertex shader. The depth output is not produced for custom models (rasterised, no ray distance).
-      // (a Material input is not applied to custom models yet)
-      return { image: await renderModel(ctx, p, size, ctx.in.camera, null, hasDf ? { p: dp, map: feat.map ? ctx.in.displaceMap : null } : null), depth: null };
+      // A wired Material is applied in the rasteriser's fragment stage (the model's own UVs when it has them, triplanar otherwise).
+      return { image: await renderModel(ctx, p, size, ctx.in.camera, null, hasDf ? { p: dp, map: feat.map ? ctx.in.displaceMap : null } : null, mat), depth: null };
     }
     const spinning = p.spinX !== 0 || p.spinY !== 0 || p.spinZ !== 0;
     const phase = spinning || deformAnimated(dp) ? ctx.time.phase : 0;

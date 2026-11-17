@@ -21,8 +21,10 @@
 import type { Registry } from '../engine/define';
 import { resolveNodeParams, type Engine, type EvalRequest, type EvalResult } from '../engine/engine';
 import type { Gpu } from '../engine/gpu/gpu';
+import { resolveParams } from '../engine/audio/params';
 import { batchCount } from '../engine/graph';
-import { pendingProcesses, processOrder, withProcessResult, type PendingProcess, type ProcessStatus } from '../engine/process';
+import { pendingProcesses, processLabel, processOrder, processResultOf, withProcessResult, type PendingProcess, type ProcessStatus } from '../engine/process';
+import { defOf, groupData, GROUP_MAX_DEPTH, GROUP_TYPE, hasGroups, localId, nodeAtPath, PATH_SEP } from '../engine/group';
 import type {
   AnyNodeDef,
   AssetInfo,
@@ -97,7 +99,7 @@ interface Rec {
   lastYield: number;
 }
 
-const abortError = (msg = 'The process was cancelled.') => new DOMException(msg, 'AbortError');
+const abortError = (msg = 'The process was canceled.') => new DOMException(msg, 'AbortError');
 const isAbortLike = (e: unknown) => (e as { name?: string } | null)?.name === 'AbortError';
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -329,9 +331,14 @@ export function itemDependent(graph: GraphDoc, registry: Registry, fromNode: str
     const def = node && registry.get(node.type);
     if (node && def) {
       if (node.type === 'item') return true;
+      try {
+        if ((def.batchSize?.(resolveParams(def, node.params) as never) ?? 1) > 1) return true; // a node that hands out its own items (Sprite Sheet In)
+      } catch {
+        /* a throwing batchSize counts as none, like batchCount */
+      }
       for (const [key, p] of Object.entries(def.params as Record<string, { type: string }>)) {
         const v = node.params[key];
-        if (p.type === 'assets' && Array.isArray(v) && v.length > 1) return true;
+        if (p.type === 'assets' && (p as { batch?: boolean }).batch !== false && Array.isArray(v) && v.length > 1) return true;
       }
     }
     for (const e of graph.edges) if (e.to.node === id) stack.push(e.from.node);
@@ -424,7 +431,8 @@ class Stager {
 /* ------------------------------------------------------------------------------------------------------------------------------ */
 
 export interface ProcessRuntimeDeps {
-  engine: Pick<Engine, 'processStatus' | 'processSignature'>;
+  /** `flatView` (optional): how the engine sees a document with groups; needed for processes inside groups and for baking groups. */
+  engine: Pick<Engine, 'processStatus' | 'processSignature'> & Partial<Pick<Engine, 'flatView'>>;
   gpu: Gpu;
   registry: Registry;
   gate: { evaluateHeld(req: EvalRequest): Promise<EvalResult>; drop(res: EvalResult): void; exclusive<T>(fn: () => T | Promise<T>): Promise<T> };
@@ -507,7 +515,8 @@ export class ProcessRuntime implements ProcessApi {
     return this.d.engine.processStatus(graph, nodeId);
   }
   pending(graph: GraphDoc, outputs: string[] = []): PendingProcess[] {
-    return pendingProcesses(graph, this.d.registry, (id) => this.d.engine.processStatus(graph, id), outputs);
+    const flat = this.d.engine.flatView;
+    return pendingProcesses(graph, this.d.registry, (id) => this.d.engine.processStatus(graph, id), outputs, flat && hasGroups(graph) ? (g) => flat.call(this.d.engine, g).graph : undefined);
   }
 
   live(nodeId: string): ProcessLive | null {
@@ -531,17 +540,47 @@ export class ProcessRuntime implements ProcessApi {
     for (const o of owners) await this.d.library.removeOwned(o);
   }
 
-  /** Remove stored data of a project whose process nodes no longer exist. Returns how many owners were removed. */
-  async prune(projectId: string, graph: GraphDoc): Promise<number> {
-    const alive = new Set(graph.nodes.filter((n) => !!this.d.registry.get(n.type)?.process).map((n) => n.id));
+  /**
+   * Remove stored data of a project whose process nodes no longer exist (at any depth inside groups). Returns how many owners were removed.
+   * `unreferenced`: also remove data that no node's result handle points at any more (a duplicate never shares it, an undone bake left
+   * it behind). Call that on project LOAD only, never right after a delete: undo must be able to bring the node and its result back.
+   */
+  async prune(projectId: string, graph: GraphDoc, opts: { unreferenced?: boolean } = {}): Promise<number> {
+    const alive = new Set<string>();
+    const referenced = new Set<string>();
+    const walk = (nodes: NodeInstance[], prefix: string, depth: number) => {
+      for (const n of nodes) {
+        const def = defOf(this.d.registry, n);
+        if (def?.process) {
+          alive.add(prefix + n.id);
+          alive.add(n.id);
+          const h = processResultOf(n, def);
+          if (h) for (const it of Object.values(h.items)) referenced.add(it.id);
+        }
+        if (n.type === GROUP_TYPE && depth < GROUP_MAX_DEPTH) walk(groupData(n).nodes, prefix + n.id + PATH_SEP, depth + 1);
+      }
+    };
+    walk(graph.nodes, '', 0);
     const prefix = `${BAKE_OWNER}${projectId}:`;
+    const assets = this.d.library.list({ includeHidden: true }) as (AssetInfo & { owner?: string })[];
+    const used = new Set<string>();
+    for (const a of assets) if (a.owner?.startsWith(prefix) && referenced.has(a.id)) used.add(a.owner);
     const dead = new Set<string>();
-    for (const a of this.d.library.list({ includeHidden: true }) as (AssetInfo & { owner?: string })[]) {
+    for (const a of assets) {
       const o = a.owner;
-      if (o?.startsWith(prefix) && !alive.has(o.slice(prefix.length))) dead.add(o);
+      if (!o?.startsWith(prefix)) continue;
+      const node = o.slice(prefix.length);
+      if (!alive.has(node) && !alive.has(localId(node))) dead.add(o);
+      else if (opts.unreferenced && !used.has(o) && !this.isBusy(projectId, node)) dead.add(o);
     }
     for (const o of dead) await this.d.library.removeOwned(o);
     return dead.size;
+  }
+
+  /** A job of this node is running, or finished in this session and its result may not be written into the graph yet (another tab was open). */
+  private isBusy(projectId: string, nodeId: string): boolean {
+    const j = this.scheduler.find(projectId, nodeId);
+    return !!j && (j.state === 'queued' || j.state === 'running' || j.state === 'paused' || j.state === 'done');
   }
 
   async runPending(graph: GraphDoc, outputs: string[], hooks: ProcessRunPendingHooks = {}): Promise<GraphDoc> {
@@ -550,7 +589,9 @@ export class ProcessRuntime implements ProcessApi {
     for (let guard = 0; guard < 200; guard++) {
       const pend = this.pending(g, outputs).filter((p) => !done.has(p.node));
       if (!pend.length) break;
-      const order = processOrder(g, this.d.registry, pend.map((p) => p.node)).filter((id) => pend.some((p) => p.node === id));
+      // Pending ids are paths of the flattened document: order them there (an inner node's inputs may come from outside its group).
+      const flatDoc = hasGroups(g) && this.d.engine.flatView ? this.d.engine.flatView(g).graph : g;
+      const order = processOrder(flatDoc, this.d.registry, pend.map((p) => p.node)).filter((id) => pend.some((p) => p.node === id));
       const next = pend.find((p) => p.node === (order[0] ?? pend[0].node)) ?? pend[0];
       const total = done.size + pend.length;
       hooks.onProgress?.({ fraction: done.size / total, label: `${next.title}: ${next.label}` });
@@ -568,17 +609,18 @@ export class ProcessRuntime implements ProcessApi {
   }
 
   async run(graph: GraphDoc, nodeId: string, opts: ProcessRunOptions = {}): Promise<ProcessResult> {
-    const node = graph.nodes.find((n) => n.id === nodeId);
-    const def = node && this.d.registry.get(node.type);
+    // `nodeId` may be a path inside groups; a group's process is its bake.
+    const node = nodeAtPath(graph, nodeId);
+    const def = defOf(this.d.registry, node);
     if (!node || !def?.process) throw new Error('This node has no process to run.');
     const projectId = opts.projectId ?? this.active ?? (await this.d.activeProject?.()) ?? 'project';
     const { done } = this.scheduler.enqueue<ProcessResult>({
       project: projectId,
       node: nodeId,
       title: def.process.title,
-      label: node.label || def.title,
+      label: processLabel(graph, this.d.registry, nodeId),
       gpu: def.process.gpu !== false,
-      run: (ctl) => this.execute(graph, node, def, projectId, opts, ctl),
+      run: (ctl) => this.execute(graph, { ...node, id: nodeId }, def, projectId, opts, ctl),
     });
     const onAbort = () => this.scheduler.cancelNode(projectId, nodeId);
     if (opts.signal) {
@@ -640,8 +682,12 @@ export class ProcessRuntime implements ProcessApi {
     const itemCount = batchCount(graph, registry);
     const item = Math.min(Math.max(0, opts.item ?? 0), itemCount - 1);
     const signature = this.d.engine.processSignature(graph, nodeId) ?? '';
+    // With groups, a node's wires are those of the flattened document (an inner node's inputs may come from outside its group).
+    const flatGraph = hasGroups(graph) && this.d.engine.flatView ? this.d.engine.flatView(graph).graph : graph;
     const params = resolveNodeParams(def, node.params);
     const stager = new Stager();
+    let live: GraphDoc | null = null;
+    const liveGraph = () => (live ??= withProcessResult(graph, registry, nodeId, null));
     const open = new Set<ProcessPull>();
     const startedAt = Date.now();
     const heavy = pdef.gpu !== false;
@@ -660,7 +706,7 @@ export class ProcessRuntime implements ProcessApi {
       duration: project.duration,
       loop: project.loop,
       canvas: { width: project.width, height: project.height },
-      item: { index: item, count: itemCount, dependent: itemCount > 1 && itemDependent(graph, registry, nodeId) },
+      item: { index: item, count: itemCount, dependent: itemCount > 1 && this.dependsOnItem(flatGraph, node, nodeId, liveGraph) },
       signature,
       host: this.d.host ?? (library as unknown as Host),
       gpu: { device: gpu.device, read: (img, straight) => gpu.read(img, straight) },
@@ -680,7 +726,7 @@ export class ProcessRuntime implements ProcessApi {
         if (heavy && !releaseHold) releaseHold = this.holdPlayer();
       },
       pull: async (input, at) => {
-        const edge = graph.edges.filter((e) => e.to.node === nodeId && e.to.port === input)[at?.wire ?? 0];
+        const edge = flatGraph.edges.filter((e) => e.to.node === nodeId && e.to.port === input)[at?.wire ?? 0];
         if (!edge) {
           const empty: ProcessPull = { value: null, errors: new Map(), release: () => undefined };
           return empty;
@@ -691,11 +737,25 @@ export class ProcessRuntime implements ProcessApi {
           node: edge.from.node,
           port: edge.from.port,
           seconds,
-          item,
+          item: at?.item === undefined ? item : Math.min(Math.max(0, Math.floor(at.item)), itemCount - 1),
           itemCount,
           proxy: at?.proxy ?? 1,
           quality: at?.quality ?? 'final',
         });
+        const handle: ProcessPull = {
+          value: res.value,
+          errors: res.errors,
+          release: () => {
+            if (open.delete(handle)) gate.drop(res);
+          },
+        };
+        open.add(handle);
+        return handle;
+      },
+      pullOutput: async (output, at) => {
+        // Live, as if nothing were stored: the node's own result handle is cleared in the evaluated copy (a group then expands).
+        const seconds = at?.frame !== undefined ? at.frame / project.fps : (at?.seconds ?? 0);
+        const res = await gate.evaluateHeld({ graph: liveGraph(), node: nodeId, port: output, seconds, item: at?.item === undefined ? item : Math.min(Math.max(0, Math.floor(at.item)), itemCount - 1), itemCount, proxy: at?.proxy ?? 1, quality: at?.quality ?? 'final' });
         const handle: ProcessPull = {
           value: res.value,
           errors: res.errors,
@@ -728,6 +788,17 @@ export class ProcessRuntime implements ProcessApi {
       releaseHold?.();
       if (heavy) await this.endHeavy();
     }
+  }
+
+  /** Does what feeds this node (a group: what feeds its outputs) differ between batch items? */
+  private dependsOnItem(flatGraph: GraphDoc, node: NodeInstance, nodeId: string, liveGraph: () => GraphDoc): boolean {
+    const { registry, engine } = this.d;
+    if (node.type !== GROUP_TYPE || !engine.flatView) return itemDependent(flatGraph, registry, nodeId);
+    const view = engine.flatView(liveGraph());
+    return groupData(node).outputs.some((o) => {
+      const src = view.outputs.get(`${nodeId}:${o.id}`);
+      return !!src && itemDependent(view.graph, registry, src.node);
+    });
   }
 
   /** Write everything the job staged to the library, under the node's owner. Replaces the previous result in place (same asset ids). */

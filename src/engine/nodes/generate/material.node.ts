@@ -8,7 +8,7 @@ export default defineNode({
   title: 'Material',
   category: 'generate',
   description:
-    'A surface look for 3D nodes: matte, clay, plastic, metal, glass, toon, emissive, hologram, matcap or wireframe grid, with optional colour, normal, roughness and emission pictures and an environment. Wire it into the Material input of 3D Object, Image to 3D or SDF 3D; one Material can feed several objects. Without it they keep their plain look.',
+    'A surface look for 3D nodes: matte, clay, plastic, metal, glass, toon, emissive, hologram, matcap or wireframe grid, with optional color, normal, roughness and emission pictures and an environment. Wire it into the Material input of 3D Object (shapes and imported models), 3D Array, Image to 3D, SDF 3D or Material 2D (the same look on a flat picture); one Material can feed several nodes. Without it they keep their plain look.',
   keywords: ['shader', 'surface', 'pbr', 'metal', 'glass', 'toon', 'matcap', 'texture', 'look', 'plastic', 'clay', 'hologram', 'wireframe', 'emissive', 'glow', 'reflection', '3d'],
   inputs: {
     colorMap: { type: 'image', label: 'Color map' },
@@ -39,7 +39,7 @@ export default defineNode({
         { value: 'wire', label: 'Wire grid' },
       ],
     },
-    baseColor: { type: 'color', default: [0.9, 0.9, 0.95, 1], label: 'Color', hint: 'The surface colour. On SDF 3D and Image to 3D it multiplies the shapes’ / picture’s own colours; 3D Object ignores its own Colour while a Material is wired. Multiplies the colour map too.' },
+    baseColor: { type: 'color', default: [0.9, 0.9, 0.95, 1], label: 'Color', hint: 'The surface color. On SDF 3D and Image to 3D it multiplies the shapes’ / picture’s own colors; 3D Object ignores its own Color while a Material is wired. Multiplies the color map too.' },
     roughness: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Roughness', group: 'Surface', visibleIf: (p) => ['plastic', 'metal', 'pbr', 'glass'].includes(p.model as string) },
     metallic: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Metallic', group: 'Surface', visibleIf: (p) => p.model === 'pbr' },
     specular: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Specular', group: 'Surface', visibleIf: (p) => ['plastic', 'metal', 'pbr', 'glass', 'toon'].includes(p.model as string) },

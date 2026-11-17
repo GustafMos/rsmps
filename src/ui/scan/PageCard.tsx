@@ -22,7 +22,7 @@ const STATUS_TEXT = { ok: 'Aligned', warning: 'Usable, with warnings', failed: '
 function describe(p: ScanPageReport): string[] {
   const out = [...p.warnings];
   if (p.status === 'failed' && !p.warnings.length) out.push('The four corner markers were not all found. Drag the corners by hand below.');
-  if (p.marksExpected > 0 && p.marksFound < p.marksExpected) out.push(`${p.marksExpected - p.marksFound} of ${p.marksExpected} "+" marks were not found; their positions were estimated from the neighbours.`);
+  if (p.marksExpected > 0 && p.marksFound < p.marksExpected) out.push(`${p.marksExpected - p.marksFound} of ${p.marksExpected} "+" marks were not found; their positions were estimated from the neighbors.`);
   if (!p.used) out.push('This photo is not used: it duplicates a better photo of the same page or belongs to another printed set.');
   return out;
 }
@@ -142,7 +142,7 @@ function ManualFix({ page, result, onResult, onManual }: { page: ScanPageReport;
       onResult(await result.reanalyzePage(page.index, manual));
       onManual?.(page.index, manual);
     } catch (err) {
-      ed.toast(`Could not re-analyse: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      ed.toast(`Could not re-analyze: ${err instanceof Error ? err.message : String(err)}`, 'error');
     } finally {
       setBusy(false);
     }
@@ -181,7 +181,7 @@ function ManualFix({ page, result, onResult, onManual }: { page: ScanPageReport;
         <NumberField label="Frame rate" integer min={1} max={120} value={fps} defaultValue={12} onChange={setFps} />
         <NumberField label="Total frames" integer min={1} max={9999} value={totalFrames} defaultValue={columns * rows} onChange={setTotalFrames} />
       </div>
-      <button className="rs-btn rs-btn--primary" onClick={apply} disabled={busy || (!useCorners && !useLayout)}>{busy ? 'Working…' : 'Re-analyse this page'}</button>
+      <button className="rs-btn rs-btn--primary" onClick={apply} disabled={busy || (!useCorners && !useLayout)}>{busy ? 'Working…' : 'Re-analyze this page'}</button>
     </div>
   );
 }

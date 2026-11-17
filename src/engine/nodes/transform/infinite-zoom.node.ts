@@ -1,6 +1,7 @@
 import { defineNode } from '../../define';
 import { COPY_COMMON_WGSL, rad } from '../../lib/copy-wgsl';
 import { genPaletteTexture } from '../../lib/gen-common';
+import { closeSequence, closingDrift, closingTurns, snapNote, stretchedStep, stretchedTurns, wholeCycles } from '../../lib/loop-snap';
 
 /**
  * Infinite Zoom (Droste): the picture holds a smaller copy of itself, which holds a smaller copy, forever, and the camera falls in.
@@ -10,10 +11,70 @@ import { genPaletteTexture } from '../../lib/gen-common';
  * t = speed * phase is the (fractional) depth travelled. Because every layer depends on (k - t) only, frame t + 1 is frame t with the layers
  * renumbered, which is why a whole number of levels per loop is seamless for any picture. The outermost layer dissolves over one level of
  * travel so nothing pops when it leaves; layers deeper than `levels` fade in the same way. Colours attached to a copy (palette index = k)
- * loop when speed is a multiple of the palette length; colours fixed to the screen depth (index = k - t) loop at any speed.
+ * loop when the travel is a multiple of the palette length; colours fixed to the screen depth (index = k - t) loop at any speed.
+ * One-click looping (Loop on): the colours of attached copies are closed with the travel by `zoomLoop` below, whatever the speed and the
+ * palette length: by default the colour index drifts by the remainder over the loop ("Drift"), or the travel is rounded to a multiple of
+ * the palette ("Snap travel"), or the palette is stretched so its period divides the travel ("Stretch palette"). The hue step closes the
+ * same way. With Loop off nothing changes.
  * One fragment pass, a bounded loop over levels, front to back, stops when opaque.
  */
 const MAX_LEVELS = 64;
+
+export interface ZoomLoop {
+  /** Levels travelled per loop (signed; a whole number with Loop on). */
+  travel: number;
+  /** Palette index of an attached copy k is k * idxStep + palDrift * phase. */
+  idxStep: number;
+  palDrift: number;
+  /** Hue (turns) of an attached copy k is k * hueTurns + hueDrift * phase. */
+  hueTurns: number;
+  hueDrift: number;
+  /** Short notes for the node summary. */
+  notes: string[];
+  /** The project loops (and the node moves). */
+  loop: boolean;
+}
+
+/** Effective travel and colour closing for the project clock. Pure. With Loop off (or no clock) everything is as typed. */
+export function zoomLoop(p: { speed: number; recolor: string; palette: unknown[]; attached: boolean; hueStep: number; colorLoop?: string }, clock?: { loop: boolean }): ZoomLoop {
+  const plain: ZoomLoop = { travel: p.speed, idxStep: 1, palDrift: 0, hueTurns: p.hueStep / 360, hueDrift: 0, notes: [], loop: false };
+  if (!clock?.loop || p.speed === 0) return plain;
+  let travel = wholeCycles(p.speed, true);
+  const notes: string[] = [];
+  const usePal = p.recolor !== 'off';
+  const hue = p.hueStep / 360;
+  if (!p.attached || (!usePal && hue === 0)) {
+    const n = snapNote('speed', p.speed, travel);
+    return { ...plain, travel, notes: n ? [n] : [], loop: true };
+  }
+  const len = usePal ? Math.max(1, p.palette.length) : 1;
+  const mode = p.colorLoop ?? 'drift';
+  let snapped = false;
+  if (mode === 'snap' && usePal) {
+    const c = closeSequence(travel, len);
+    travel = c.travel;
+    snapped = c.snapped;
+  }
+  const n = snapNote('speed', p.speed, travel);
+  if (n) notes.push(n);
+  let idxStep = 1;
+  let palDrift = 0;
+  let hueTurns = hue;
+  let hueDrift = 0;
+  if (usePal && len > 1) {
+    if (mode === 'stretch') idxStep = stretchedStep(travel, len);
+    else if (!snapped) palDrift = closingDrift(travel, len);
+    if (idxStep !== 1) notes.push('palette stretched to loop');
+    if (palDrift !== 0) notes.push(`colors drift ${Math.round(palDrift * 100) / 100}/loop to close`);
+  }
+  if (hue !== 0) {
+    if (mode === 'stretch') hueTurns = stretchedTurns(travel, hue);
+    else hueDrift = closingTurns(travel, hue);
+    if (hueTurns !== hue) notes.push(`hue step ${Math.round(p.hueStep * 10) / 10} → ${Math.round(hueTurns * 3600) / 10}° to loop`);
+    if (hueDrift !== 0) notes.push(`hue drifts ${Math.round(hueDrift * 3600) / 10}°/loop`);
+  }
+  return { travel, idxStep, palDrift, hueTurns, hueDrift, notes, loop: true };
+}
 
 const wgsl = (hasInner: boolean, usePal: boolean) => /* wgsl */ `
 ${COPY_COMMON_WGSL}
@@ -32,9 +93,11 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   var acc = vec4f(0.0);
   let lv = u.levels;
   let hS = u.srcSize * 0.5;
-  for (var k = 0; k < ${MAX_LEVELS + 2}; k++) {
-    let fk = f32(k);
-    if (fk > lv + 1.0) { break; }
+  // The visible layers are those with depth kd = k - t in (-1, levels + 1): k runs from floor(t) up to levels + 1 + t, so a rising (negative)
+  // travel and the deep end of a falling one are drawn too, which is what lets any whole travel close the loop.
+  for (var n = 0; n < ${MAX_LEVELS + 4}; n++) {
+    let fk = u.k0 + f32(n);
+    if (fk > u.kEnd) { break; }
     let kd = fk - u.t;
     var wt = saturate(lv + 1.0 - kd);
     if (kd < 0.0) { wt = wt * smoothstep(0.0, 1.0, saturate((kd + 1.0) / max(u.dissolve, 0.001))); }
@@ -54,10 +117,10 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     var rgb = t.rgb;
     if (u.recolor > 0.5) {
       var col = vec3f(1.0);
-      ${usePal ? 'col = select(palFlow(idx), palAtK(i32(fk)), u.attached > 0.5);' : ''}
+      ${usePal ? 'col = select(palFlow(idx), palFlow(fk * u.idxStep + u.palDrift * u.ph), u.attached > 0.5);' : ''}
       rgb = select(rgb * col, col, u.recolor > 1.5);
     }
-    rgb = hueShift(rgb, u.hueStep * idx);
+    rgb = hueShift(rgb, select(u.hueStep * kd, u.hueTurns * fk + u.hueDrift * u.ph, u.attached > 0.5));
     let a = t.a * cov * wt * pow(max(1.0 - u.fade, 0.0), max(kd, 0.0));
     let layer = vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)) * a, a);
     acc = acc + layer * (1.0 - acc.a);
@@ -80,7 +143,7 @@ export default defineNode({
     scale: { type: 'number', default: 0.35, min: 0.02, max: 0.95, step: 0.005, label: 'Copy scale', hint: 'Fraction of the one before. For a perfectly clean tunnel the copy should fit inside the hole it sits in.' },
     rotatePerLevel: { type: 'number', default: 0, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Turn per level', hint: 'Each nested copy is turned by this much (clockwise).' },
     levels: { type: 'number', default: 8, min: 0, max: MAX_LEVELS, softMax: 24, step: 1, integer: true, label: 'Levels shown', hint: 'How many nested copies are visible. More only costs time where the copies are still large and see-through.' },
-    speed: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Levels per loop', hint: 'Whole levels travelled each loop; 0 = still. Positive falls in.' },
+    speed: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Levels per loop', hint: 'Whole levels traveled each loop; 0 = still. Positive falls in.' },
     spiral: { type: 'number', default: 0, min: -4, max: 4, step: 0.05, label: 'Spiral twist', hint: 'Twists the picture continuously with depth (log-polar). 1 = a full extra turn per level.' },
     dissolve: { type: 'number', default: 0.25, min: 0.02, max: 1, step: 0.01, label: 'Outer dissolve', hint: 'How much of a level’s travel the outermost copy takes to dissolve as it leaves the frame (keeps the loop clean for any picture).', group: 'Depth' },
     fade: { type: 'number', default: 0, min: 0, max: 0.9, step: 0.01, label: 'Fade per level', hint: 'Share of opacity lost at each level of depth.', group: 'Depth' },
@@ -106,11 +169,27 @@ export default defineNode({
       ],
       group: 'Depth',
     },
-    palette: { type: 'palette', default: [[1, 0.3, 0.2], [0.2, 0.55, 1]], label: 'Level colors', hint: 'Level 1 takes the first colour, level 2 the second, and so on, round and round.', group: 'Color', visibleIf: (p) => p.recolor !== 'off' },
-    attached: { type: 'bool', default: true, label: 'Colors attached', hint: 'On: a copy keeps its colour as it grows (loops when Levels fallen is a multiple of the palette length). Off: colours belong to the depth on screen, so they flow and always loop.', group: 'Color', visibleIf: (p) => p.recolor !== 'off' || p.hueStep !== 0 },
+    palette: { type: 'palette', default: [[1, 0.3, 0.2], [0.2, 0.55, 1]], label: 'Level colors', hint: 'Level 1 takes the first color, level 2 the second, and so on, round and round.', group: 'Color', visibleIf: (p) => p.recolor !== 'off' },
+    attached: { type: 'bool', default: true, label: 'Colors attached', hint: 'On: a copy keeps its color as it grows. With Loop on the colors are closed for you, whatever the levels per loop and the palette length (see Close colors). Off: colors belong to the depth on screen, so they flow and always loop.', group: 'Color', visibleIf: (p) => p.recolor !== 'off' || p.hueStep !== 0 },
+    colorLoop: {
+      type: 'enum',
+      default: 'drift',
+      label: 'Close colors',
+      hint: 'How attached colors loop when the levels per loop is not a multiple of the palette length (or the hue step does not come round). Drift lets the colors cycle slowly while falling. Snap travel rounds the levels per loop to a multiple of the palette. Stretch palette changes the color step per level. Only with Loop on.',
+      options: [
+        { value: 'drift', label: 'Drift' },
+        { value: 'snap', label: 'Snap travel' },
+        { value: 'stretch', label: 'Stretch palette' },
+      ],
+      group: 'Color',
+      visibleIf: (p) => p.attached === true && (p.recolor !== 'off' || p.hueStep !== 0),
+    },
     hueStep: { type: 'number', default: 0, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Hue step', hint: 'Hue shift per level.', group: 'Color' },
   },
-  summary: (p) => `${p.levels} levels · ×${p.scale}${p.speed ? ` · ${p.speed > 0 ? 'falling' : 'rising'} ${Math.abs(p.speed)}/loop` : ''}`,
+  summary: (p, _wired, clock) => {
+    const z = zoomLoop(p, clock);
+    return `${p.levels} levels · ×${p.scale}${z.travel ? ` · ${z.travel > 0 ? 'falling' : 'rising'} ${Math.abs(z.travel)}/loop` : ''}${z.notes.length ? ` · ${z.notes.join(', ')}` : ''}`;
+  },
   render(ctx) {
     const p = ctx.params;
     const src = ctx.in.image;
@@ -128,7 +207,9 @@ export default defineNode({
     const fixedPt: [number, number] = [(num[0] * den[0] + num[1] * den[1]) / dd, (num[1] * den[0] - num[0] * den[1]) / dd];
     const usePal = p.recolor !== 'off';
     const pal = usePal ? genPaletteTexture(ctx.gpu, p.palette as [number, number, number][]) : null;
-    const t = p.speed !== 0 ? p.speed * ctx.time.phase : 0;
+    const z = p.speed !== 0 ? zoomLoop(p, { loop: ctx.time.loop }) : zoomLoop(p, undefined);
+    const phase = p.speed !== 0 ? ctx.time.phase : 0;
+    const t = z.travel !== 0 ? z.travel * phase : 0;
     const image = ctx.gpu.pass({
       label: 'infinite-zoom',
       size: src,
@@ -139,6 +220,10 @@ export default defineNode({
         lnS: Math.log(sigma),
         rho,
         t,
+        // Loop on: draw every visible depth (also the deep end of a falling travel and the outer layers of a rising one), which is what lets
+        // the last frame be followed by the first. Loop off keeps the original range.
+        k0: z.loop ? Math.floor(t) - 1 : 0,
+        kEnd: z.loop ? p.levels + 1 + t : p.levels + 1,
         levels: p.levels,
         spiral: p.spiral,
         dissolve: p.dissolve,
@@ -147,6 +232,11 @@ export default defineNode({
         palN: pal ? pal.count : 1,
         attached: p.attached,
         hueStep: p.hueStep / 360,
+        hueTurns: z.hueTurns,
+        hueDrift: z.hueDrift,
+        idxStep: z.idxStep,
+        palDrift: z.palDrift,
+        ph: phase,
         smoothTex: p.filter === 'smooth',
       },
       wgsl: wgsl(!!inner, usePal),

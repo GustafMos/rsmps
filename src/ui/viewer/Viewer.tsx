@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { nodeAtPath } from '../../engine/group';
 import { useSelector } from '../store/createStore';
 import { watchStore } from '../watchdog';
 import { batchCount } from '../../engine/graph';
@@ -9,16 +10,20 @@ import { missingCapabilities } from '../lib/requirements';
 import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { safetyStore } from '../safety';
+import { getLive } from '../store/live';
 import { PaintOverlay } from './PaintOverlay';
 import { PointsOverlay } from './PointsOverlay';
 import { FrameControl, useFrameMenuItems } from './FrameControl';
 import { Loupe } from './Loupe';
+import { CompareBar, CompareOverlay, CompareStrip } from './CompareUi'; // snapshots + A/B compare
 import './viewer.css';
 
 type Bg = 'checker' | 'dark' | 'light';
 
 export function Viewer() {
   const { io, ed } = useApp();
+  const live = getLive({ io, ed });
+  const outOpen = useSelector(live.output.store, (s) => s.open);
   const box = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const backing = useRef<HTMLDivElement>(null); // transparency checker: screen-space, so its squares keep one on-screen size at any zoom
@@ -47,7 +52,8 @@ export function Viewer() {
   const playing = usePlayer((s) => s.playing);
   const errors = usePlayer((s) => s.errors);
   const viewedId = useEd((s) => s.viewedNodeId);
-  const viewedNode = useEd((s) => s.graph.nodes.find((n) => n.id === s.viewedNodeId));
+  // the viewed node may be inside a group (its id is then a path: group/inner)
+  const viewedNode = useEd((s) => (s.viewedNodeId ? (nodeAtPath(s.graph, s.viewedNodeId) ?? undefined) : undefined));
   const canFull = !!viewedNode && !renderPaused;
   const item = useEd((s) => s.item);
   const count = useEd((s) => batchCount(s.graph, ed.registry));
@@ -306,8 +312,17 @@ export function Viewer() {
         >
           <Icon name="pin" /> Keep this look
         </button>
+        <button
+          className={`rs-btn rs-btn--ghost${outOpen ? ' is-on' : ''}`}
+          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); live.ui.set((s) => ({ ...s, outputMenu: { x: r.left, y: r.bottom + 2 } })); }}
+          aria-haspopup="menu"
+          title="Output window for a projector or second monitor, blackout and freeze, MIDI mappings (Ctrl+Shift+O opens it)"
+        >
+          <Icon name="maximize" /> Output
+        </button>
       </div>
 
+      <CompareBar />
       <FrameControl frame={level < 2} pix={level < 1} />
       <div className="rs-viewer__tools rs-viewer__chip" data-nodrag>
         <button className={`rs-btn rs-btn--ghost rs-viewer__fitbtn${fit ? ' is-on' : ''}`} onClick={() => setFitMode(true)} title="Fit to window (F or 0)"><Icon name="fit" /> Fit</button>
@@ -315,7 +330,7 @@ export function Viewer() {
         {level < 1 && (
           <>
             <button className={`rs-btn rs-btn--ghost${snap ? ' is-on' : ''}`} onClick={() => { snapRef.current = !snap; setSnap(!snap); apply(); }} title="Snap Fit to whole-pixel zoom (1×, 2×, 3×…) when the image is smaller than the pane">1:n</button>
-            <button className={`rs-btn rs-btn--ghost${loupe || zHeld ? ' is-on' : ''}`} onClick={() => setLoupe((l) => ((l + 1) % 3) as 0 | 1 | 2)} title="Magnifier: off → 200% → 100% (or hold Z)">{loupe === 2 ? '🔍 2×' : loupe === 1 ? '🔍 1×' : '🔍'}</button>
+            <button className={`rs-btn rs-btn--ghost${loupe || zHeld ? ' is-on' : ''}`} onClick={() => setLoupe((l) => ((l + 1) % 3) as 0 | 1 | 2)} title="Magnifier: off → 200% → 100% (or hold Z)"><Icon name="search" />{loupe === 2 ? ' 2×' : loupe === 1 ? ' 1×' : ''}</button>
           </>
         )}
         <span className="rs-viewer__zoom rs-num" title={fit ? 'Fitted to the pane' : 'Manual zoom'}>{fit ? `Fit · ${zoomPct}%` : `${zoomPct}%`}</span>
@@ -338,6 +353,7 @@ export function Viewer() {
       <div ref={backing} className="rs-viewer__backing" style={{ visibility: imageSize ? 'visible' : 'hidden' }} />
       <div ref={stage} className="rs-viewer__stage" style={{ width: iw, height: ih, visibility: imageSize ? 'visible' : 'hidden' }}>
         <canvas ref={canvas} className="rs-viewer__canvas" style={{ width: iw, height: ih }} />
+        <CompareOverlay stage={stage} box={box} />
       </div>
 
       {emptyMsg && (
@@ -372,6 +388,7 @@ export function Viewer() {
           <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => { setHintOff(true); try { localStorage.setItem('rsmps.ui.zoomHint', '9'); } catch { /* ignore */ } }} title="Do not show again"><Icon name="close" size={12} /></button>
         </div>
       )}
+      <CompareStrip />
       {pointsNode && <PointsOverlay nodeId={pointsNode.id} stage={stage} />}
       {paint && <PaintOverlay nodeId={paint.id} stage={stage} />}
 

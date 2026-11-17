@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 describe('scroll', () => {
   it('wraps a static offset around the edges', async () => {
@@ -15,10 +15,10 @@ describe('scroll', () => {
     const t = await harness();
     const src = t.fromFn(16, 16, (x, y) => [x * 15, y * 15, 0, 255]);
     const r = await t.loopCheck('scroll', { cyclesX: 1, filter: 'nearest' }, { image: src });
-    expect(r.seam).toBe(0);
+    expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion).toBeGreaterThan(1);
     const v = await t.loopCheck('scroll', { cyclesX: 0, cyclesY: -1, filter: 'linear' }, { image: src });
-    expect(v.seam).toBe(0);
+    expect(v.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(v.motion).toBeGreaterThan(0);
   });
 

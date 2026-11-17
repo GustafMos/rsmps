@@ -637,8 +637,11 @@ export interface ProcessApi {
   setActiveProject(projectId: string | null): void;
   /** Reasons to hold jobs back: 'paused' (rendering paused / safe mode), 'interacting' (dragging). Playback is read from the player. */
   setHint(name: 'paused' | 'interacting', on: boolean): void;
-  /** Remove stored data of a project whose process nodes no longer exist. */
-  prune(projectId: string, graph: GraphDoc): Promise<number>;
+  /**
+   * Remove stored data of a project whose process nodes no longer exist (at any depth inside groups). `unreferenced`: also data no node's
+   * result handle points at (a copy's, an undone bake's); only on project LOAD, never after a delete (undo must still work).
+   */
+  prune(projectId: string, graph: GraphDoc, opts?: { unreferenced?: boolean }): Promise<number>;
   /** How many GPU-heavy jobs may run at once (default 1). */
   setConcurrency(gpu: number): void;
 }
@@ -651,6 +654,8 @@ export interface Io {
   exporter: Exporter;
   plugins: PluginManager;
   projects: ProjectStore;
+  /** Saved group nodes ("Save group as node…", `.rsmps-node.json` files): data only, added to graphs as editable copies. */
+  nodePresets: import('./node-presets').NodePresetApi;
   /** Print-and-scan-back: photos of printed sheets to an animation asset. */
   scan: ScanApi;
   audio: AudioApi;

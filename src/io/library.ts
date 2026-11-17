@@ -533,6 +533,8 @@ export class Library implements MediaLibrary {
   processLive(nodeId: string): import('../engine/types').ProcessLive | null {
     return this.liveProcess?.(nodeId) ?? null;
   }
+  /** Set by createIo in the desktop app: Splat from Video's COLMAP + Brush pipeline (engine `Host.splatTrain`); undefined on the web. */
+  splatTrain?: import('../engine/types').SplatTrainHost;
 
   async removeOwned(owner: string): Promise<void> {
     for (const a of [...this.infos.values()]) if ((a as LibraryAsset).owner === owner) await this.remove(a.id);

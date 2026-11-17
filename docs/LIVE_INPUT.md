@@ -11,6 +11,18 @@ appear in the list only after that. The stream opens when the first frame is req
 using the same camera and resolution, and is closed about 5 seconds after nothing asks for it (and when you switch
 project). Camera access needs a secure page: `https://` or `http://localhost`.
 
+## Stop-motion capture
+
+File > Stop-motion capture... opens a camera panel for frame-by-frame animation. Start the camera, press **Capture** (or Space / Enter; browsers do not hand volume keys to web pages, so
+a Bluetooth remote only works when it sends one of those keys). The last 1 to 3 pictures are laid over the live view as an **onion skin** (opacity slider; "Ghost difference" shows only what
+changed). The filmstrip lets you reorder, duplicate and delete drawings and give one drawing a longer hold; "Shoot on" sets ones, twos or threes for all. **Capture every N s** takes
+timelapse pictures on a fixed grid. "Lock exposure and focus" asks the camera for manual exposure and focus (only some cameras allow it from a browser; the panel says what the camera offers).
+Where the browser has ImageCapture the still is the camera's full-resolution photo, otherwise the current video frame. **Save to library** stores a picture sequence at the project frame rate
+(holds are baked in); **Save and open** also opens it in a new project (Media In to Output). Everything stays on your computer.
+
+Not done yet: the phone as the capture rig (a `stopmotion` phone mode next to camera, scan and controller, with the onion skin shown on the phone). The pure transfer state it needs (chunks, acks,
+size checks) is already in `src/io/stopmotion.ts` (`FrameTransfer`) and tested; the phone page and the link negotiation are not written. Until then use the Phone Camera node to see the phone live.
+
 ## URL / Stream
 
 | Type | What it is | How it is read |
@@ -241,3 +253,68 @@ and is never stored unless you record it into a take. Nothing is sent to any oth
 
 The iOS permission prompt, the actual sensor values and signs on a given phone (iOS and Android report acceleration with gravity with opposite signs), compass-corrected yaw on iPhone, landscape
 rotation, the touch pad feel and multi-touch limits, location, the AR toggle, and how the 3D Object follows the phone visually (the maths is tested; a mirrored axis is fixed with *Invert*).
+
+## MIDI learn: any setting from a knob, fader or pad
+
+Right-click any number, switch or choice, in the inspector or on a node, and pick **MIDI learn**. Move a knob, push a fader, press a pad or bend the wheel on any connected controller: the
+next message binds to that setting. A small orange dot on the setting shows that it is mapped and pulses as the control moves. **Unlearn MIDI** removes it. **MIDI mappings...** (the same menu,
+or the **Output** button in the viewer) lists every mapping and edits it:
+
+| Column | What it does |
+| --- | --- |
+| Low / High | The value at the bottom and top of the control. Defaults to the setting's usual range (not its extreme limits). Low above High turns the control around. |
+| Curve | Linear, Exponential (fine control at the bottom) or Logarithmic (fine control at the top). |
+| Invert | Flips the control. On a switch it makes a momentary pad turn the switch off while held. |
+| Buttons | For switches and choices. Toggle: each press flips it. Momentary: on while held. Step through: each press moves to the next option of a choice and wraps. |
+| Takeover | **Pick up** (default): after the setting was changed by hand, by undo or by another control, a knob does nothing until it passes the setting's value, so there is no jump. **Jump**: the setting follows the control at once. |
+
+Several controls can drive one setting and one control can drive several settings. A mapping is stored in the project (`midiMap`, next to the media bins), is undone with the project,
+and the mapped value is written into the setting itself, so a saved project, an export and the command line see exactly what you played. A sweep of a knob is one undo step.
+A setting that a wire already drives ignores its mapping. Mappings of nodes inside a group wait until you open that group.
+
+**Record automation** (mapping dialog, or the setting's menu): the project loops, you play the control for one pass of the loop, and the movement becomes a **Keyframes** node wired to the
+setting, simplified to a handful of keys, so a performance becomes editable keyframes.
+
+**Permissions.** MIDI uses the browser's own permission: the first MIDI learn asks. If it was blocked, allow MIDI for the site (the lock icon in the address bar, Site settings) and try again.
+The desktop app already grants MIDI to its own window. Projects that have mappings listen again by themselves only when the browser already allows MIDI, so opening a project never shows a surprise prompt.
+No hardware was available while this was written: it is tested with simulated messages (byte decoding, matching, curves, takeover, buttons, undo, recording and storage are unit tests).
+
+## Output window (performance mode)
+
+**Output** in the viewer bar (or Ctrl+Shift+O, rebindable under Keyboard shortcuts) opens a second window that shows only the picture, with no interface. Drag it to the projector or second monitor
+and press **F** or double-click for full screen (Esc leaves it); the cursor hides after 2 seconds. The main window keeps everything. In the window:
+
+| Key | |
+| --- | --- |
+| F or double-click | Full screen |
+| B (Alt+B in the main window) | Blackout |
+| Space (Alt+F in the main window) | Freeze the picture |
+| 1 / 2 / 3 | Fit / Fill / Pixels 1:1 |
+
+The Output menu also sets nearest-neighbour scaling (on by default, right for pixel art), the background color, a clean feed (no on-screen hint at all) and, in the desktop app, which display it opens
+on (automatic = the first display that is not the main window's). **It shows what the player renders, so the playback proxy applies**: the output is as sharp as the viewer's Preview percentage.
+Pause and use Full res, or lower the proxy, when you need the sharpest still. Keep the main window visible (not minimised): the picture is drawn by it.
+
+How the picture gets there: the viewer's canvas is captured into a video in the popup (`captureStream`), so no JavaScript touches a frame and a frame is only sent when the player drew one, at the cost of about one
+frame of latency. If the browser gives no picture that way within 1.5 seconds it switches to copying the canvas every animation frame, which has no extra latency but costs a copy. If the browser blocks the window,
+allow pop-ups for the site (the icon at the right of the address bar) and press Output again. Not tested on a real second monitor or projector.
+
+## Beat Detect: live and analysed
+
+**Beat Detect** (Math and utility) turns a sound into numbers: `Hit` (a pulse that jumps to 1 on every sharp sound and fades over *Pulse ms*), `Beat pulse`, `Beat ramp` (0 to 1 through each beat),
+`Bar ramp` (through each bar, *Beats per bar*), `Tempo` (BPM), `Kick`, `Snare`, `Hat` (hits in the low, mid and high band), `Loudness` and `Beat count` (a whole number that grows by one per beat: wire it into a Switch
+index or a Frame Interleave to step through pictures). Wire any sound into its Sound input. Because the audio engine only runs a node that has something wired in, **the Sound input must be wired in both modes**.
+
+* **Live** (microphone, phone audio, or any file you did not analyse): a causal detector. It reports hits about 15 to 30 ms after they sound and locks onto the tempo after about 4 to 5 seconds of steady music.
+  The grid then runs ahead of the sound (negative *Offset ms* pre-compensates a slow display). It follows slow tempo changes, and lets go of the tempo after about 4 seconds without a beat.
+* **Analysed** (a sound file): choose the file under *Sound file*, press **Analyse sound file** in the inspector. The whole file is listened to once, hits and a beat grid are stored in the node, and the outputs are
+  then a pure function of the time: exact, with look-ahead, identical in every export, and correct after seeking. Wire the same file (an Audio File, or a Media In) into the Sound input. Nudges for the analysed grid:
+  *Offset ms*, *Fixed tempo* (a steady grid at that BPM on the first analysed beat), *Double time*, *Half time*, and *Snap to loop*: with Loop on, if the loop is within 0.12 of a beat of a whole number of beats, the
+  beats are made to divide the loop exactly (off by default; it also makes the grid steady).
+  Sound that only exists as the output of the audio graph (a mixed Audio Timeline) cannot be analysed ahead of time: a process job can read a file or a recorded take, not the rendered graph. Use Live for those, or record the take.
+
+Exports do not need the analysis: they replay the audio graph offline and the detector gives the same numbers on every run. Analysing makes them exact and better than the live detector.
+
+Right-click a number setting and pick **React to sound** to wire it in one step: Loudness, Beat pulse, Kick, Snare, Hat, Any hit or Beat ramp go through one shared Beat Detect and a **Remap Range** node into the setting. The setting's
+current value is the value at silence (the look does not jump); the Remap's *To max* is how far it goes. It is one undo step; **Stop reacting** removes the wiring and restores the value. The presets
+Pulse with the beat, Glitch on snare, Hue cycle per bar, Strobe cut on beats and Zoom punch per beat show it ready made.

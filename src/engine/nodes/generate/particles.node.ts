@@ -60,6 +60,31 @@ const LAYER_WEIGHT = [0.5, 0.3, 0.2];
 const LAYER_SIZE = [0.6, 1, 1.5];
 const LAYER_SPEED = [0.5, 1, 1.6];
 
+/**
+ * Loop snapping (Loop on). A layer's grid drifts by whole cells per loop, so a screen position sees the cell n cells further along at the end of the
+ * loop. Particle properties are hashed from the cell, so they must come from the cell's identity MODULO that drift, or the picture at the end of the loop
+ * is a different random scatter from the one at the start (the seam the old loop test could not see). A drift of n = g * m cells (m primitive) leaves
+ * the lattice Z^2 / <n> = Z x Z_g: the key of a cell is (d, s mod g) with d = cross(m, cell) and s = cross(cell, w), where cross(m, w) = 1.
+ * Returns [mx, my, wx, wy] and g (g = 0: no drift, key = the cell itself). Pure.
+ */
+export function driftKey(nx: number, ny: number): { m: [number, number, number, number]; g: number } {
+  const g = gcd(Math.abs(nx), Math.abs(ny));
+  if (g === 0) return { m: [0, 0, 0, 0], g: 0 };
+  const mx = nx / g;
+  const my = ny / g;
+  // extended Euclid: mx * a + my * b = 1  ->  w = (-b, a) has cross(m, w) = mx * a + my * b = 1
+  let [r0, r1, a0, a1, b0, b1] = [mx, my, 1, 0, 0, 1];
+  while (r1 !== 0) {
+    const q = Math.trunc(r0 / r1);
+    [r0, r1] = [r1, r0 - q * r1];
+    [a0, a1] = [a1, a0 - q * a1];
+    [b0, b1] = [b1, b0 - q * b1];
+  }
+  const sgn = r0 < 0 ? -1 : 1; // r0 = +-1
+  return { m: [mx, my, -b0 * sgn, a0 * sgn], g };
+}
+const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+
 export default defineNode({
   id: 'particles',
   title: 'Particles',
@@ -122,6 +147,11 @@ export default defineNode({
       }
       return [cell, nx * cell, ny * cell, LAYER_SIZE[i]];
     });
+    // Loop on: the random properties of a particle come from its cell modulo the layer's drift (see driftKey); Loop off hashes the cell itself, as before.
+    const keys = layers.map((l, i) => {
+      const k = driftKey(Math.round(l[1] / l[0]), Math.round(l[2] / l[0]));
+      return ctx.time.loop ? k : { m: [0, 0, 0, 0] as [number, number, number, number], g: 0 };
+    });
 
     const soft = r.forceSoft ? true : r.forceHard ? false : p.soft;
     const colA = p.presetColors ? r.a : rgba(p.colorA);
@@ -133,6 +163,10 @@ export default defineNode({
         l0: layers[0],
         l1: layers[1],
         l2: layers[2],
+        k0: keys[0].m,
+        k1: keys[1].m,
+        k2: keys[2].m,
+        gs: [keys[0].g, keys[1].g, keys[2].g],
         phase,
         cycles,
         seed: p.seed,
@@ -161,7 +195,7 @@ ${GEN_HASH_WGSL}
 
 fn cvr(d: f32, w: f32) -> f32 { return clamp(0.5 - d / w, 0.0, 1.0); }
 
-fn layer(px: vec2f, L: vec4f, li: i32, acc: vec4f) -> vec4f {
+fn layer(px: vec2f, L: vec4f, K: vec4f, gk: f32, li: i32, acc: vec4f) -> vec4f {
   let C = L.x;
   let q = px - L.yz * u.phase;          // the layer's grid drifts by whole cells per loop
   let ci = vec2i(floor(q / C));
@@ -171,12 +205,19 @@ fn layer(px: vec2f, L: vec4f, li: i32, acc: vec4f) -> vec4f {
   for (var j = -1; j <= 1; j++) {
     for (var i = -1; i <= 1; i++) {
       let cc = ci + vec2i(i, j);
-      let h0 = rnd4(cc.x, cc.y, salt);
+      var kx = cc.x;
+      var ky = cc.y;
+      if (gk > 0.5) {
+        let gi = i32(gk + 0.5);
+        kx = i32(K.x) * cc.y - i32(K.y) * cc.x;
+        ky = ((cc.x * i32(K.w) - cc.y * i32(K.z)) % gi + gi) % gi;
+      }
+      let h0 = rnd4(kx, ky, salt);
       let tt = u.phase * u.cycles + h0.x;
       let life = fract(tt);
       var lifeId = 0;
       if (u.respawn > 0.5) { lifeId = i32(floor(tt) % u.cycles); }
-      let h1 = rnd4(cc.x + lifeId * 7919, cc.y - lifeId * 104729, salt + 5000);
+      let h1 = rnd4(kx + lifeId * 7919, ky - lifeId * 104729, salt + 5000);
 
       let ang = u.ang + (h1.z - 0.5) * u.spread;
       let dv = vec2f(cos(ang), sin(ang));
@@ -254,9 +295,9 @@ fn layer(px: vec2f, L: vec4f, li: i32, acc: vec4f) -> vec4f {
 
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
   var c = vec4f(0.0);
-  c = layer(px, u.l0, 0, c);
-  c = layer(px, u.l1, 1, c);
-  c = layer(px, u.l2, 2, c);
+  c = layer(px, u.l0, u.k0, u.gs.x, 0, c);
+  c = layer(px, u.l1, u.k1, u.gs.y, 1, c);
+  c = layer(px, u.l2, u.k2, u.gs.z, 2, c);
   return c;
 }`,
     });

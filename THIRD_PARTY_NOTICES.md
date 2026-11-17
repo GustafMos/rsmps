@@ -11,12 +11,58 @@ PixelArtify Studio's own source is MIT licensed (see `LICENSE`). The project dep
 | react-dom | ^19.1.0 | MIT | <https://github.com/facebook/react> |
 | fflate | ^0.8.2 | MIT | <https://github.com/101arrowz/fflate> |
 | sharp | ^0.35.5 | Apache-2.0 | <https://github.com/lovell/sharp> |
+| onnxruntime-web | 1.31.1 | MIT | <https://github.com/microsoft/onnxruntime> |
 
 `sharp` bundles libvips, which is LGPL-2.1-or-later. See the sharp and libvips distributions for their notices and source links.
 
 ### Mediabunny (MPL-2.0)
 
 Mediabunny is used unmodified as a dependency. Its source is available at the link above. MPL-2.0 is file-level copyleft: it does not relicense PixelArtify Studio's own files. If you modify Mediabunny files and distribute them, you must make those modified files available under MPL-2.0.
+
+### ONNX Runtime Web (MIT)
+
+ONNX Runtime Web runs the optional AI Depth model. Its JavaScript and WebAssembly files are copied unmodified into the build under `ort/` and are loaded only when AI Depth is used.
+
+```
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Optional AI model (not included, downloaded only on request)
+
+| Model | License | Source |
+| --- | --- | --- |
+| Depth Anything V2 Small (ONNX export by onnx-community, pinned revision `4472b7362082ad9968fee890ca0f1e5aca36b93d`) | Apache-2.0 | <https://huggingface.co/onnx-community/depth-anything-v2-small> |
+
+Depth Anything V2 Small © the Depth Anything authors, Apache-2.0 (<https://huggingface.co/depth-anything/Depth-Anything-V2-Small>). The model file is not part of RSMPS, is never bundled and is never downloaded unless you press Download in Plugins > AI models. It runs on your own computer and nothing is uploaded. The larger Depth Anything V2 models (Base, Large, Giant) are licensed CC-BY-NC and are deliberately not offered.
+
+## Optional add-on programs for Splat from Video (desktop app)
+
+| Program | Version | License | Project |
+| --- | --- | --- | --- |
+| COLMAP (Windows no-CUDA, Windows CUDA, macOS arm64 builds) | 4.2.1 | BSD-3-Clause; the release archives also contain third-party libraries under their own licences (Qt LGPL-3.0, Boost, Ceres, OpenImageIO, ONNX Runtime; NVIDIA CUDA runtime in the CUDA build) | <https://colmap.github.io/license.html> |
+| Brush | 0.3.0 | Apache-2.0 | <https://github.com/ArthurBrussee/brush> |
+
+Neither program is part of RSMPS or bundled with it. They are downloaded from their GitHub releases only when the user presses Install in Plugins > Official add-ons (pinned URL, size and SHA-256; the licence is shown first), or the user locates a copy they already have. They run as **separate executables** started with argument arrays (`child_process.spawn`, no shell); nothing is linked into RSMPS's MIT code. Not used, for licence reasons: the INRIA 3DGS reference code (non-commercial), OpenSplat (AGPL), gsplat (needs Python / PyTorch), VGGT / MASt3R (gated or non-commercial weights).
 
 ## Optional dependency (CLI video)
 

@@ -16,6 +16,8 @@ export function BakePanel({ node }: { node: NodeInstance }) {
   const app = useApp();
   const { io } = app;
   const graph = useEd((s) => s.graph);
+  const fullId = useEd((s) => (s.path.length ? [...s.path, node.id].join('/') : node.id));
+  const inGroup = fullId !== node.id;
   useSelector(processStore, (s) => s.jobs); // re-render when a bake's state changes
   const [quality, setQuality] = useState<BakeQuality>(getBakeQuality());
   return (
@@ -24,9 +26,9 @@ export function BakePanel({ node }: { node: NodeInstance }) {
       runLabel="Bake"
       rerunLabel="Re-bake"
       options={() => ({ quality })}
-      stateText={() => bakeStatusOf(graph, node, statusDeps(app, graph, bakeJobOf(app, node.id))).text}
+      stateText={() => (inGroup ? null : bakeStatusOf(graph, node, statusDeps(app, graph, bakeJobOf(app, fullId))).text)}
       facts={() => {
-        const info = io.bake.info(node.id);
+        const info = io.bake.info(fullId);
         return info ? `${info.frames} frames · ${info.width}×${info.height} · ${formatBytes(info.bytes)} stored · ${info.quality}${info.item !== null ? ` · batch item ${info.item + 1} only` : ''}` : null;
       }}
       hint="Baking renders the whole project length at full size. Lossless bakes are always used by exports; a compressed bake only when you allow it below."

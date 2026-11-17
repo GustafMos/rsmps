@@ -41,7 +41,7 @@ export default defineNode({
   title: 'Compression Artifacts',
   category: 'filter',
   description:
-    'Heavy JPEG-style damage: visible 8x8 blocks, ringing around edges and smeared colour. Runs a real DCT / quantise / inverse DCT round trip with the standard JPEG tables, optionally with 4:2:0 chroma subsampling, and can repeat it to mimic a picture saved over and over.',
+    'Heavy JPEG-style damage: visible 8x8 blocks, ringing around edges and smeared color. Runs a real DCT / quantise / inverse DCT round trip with the standard JPEG tables, optionally with 4:2:0 chroma subsampling, and can repeat it to mimic a picture saved over and over.',
   keywords: ['jpeg', 'compression', 'blocky', 'dct', 'artifacts', 'low quality', 'macroblock', 'degrade', 'ringing', 'deep fried', 'generation loss', 'chroma subsampling'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
@@ -50,7 +50,7 @@ export default defineNode({
     quality: { type: 'number', default: 12, min: 1, max: 100, step: 1, integer: true, label: 'Quality', hint: 'JPEG quality: 100 = almost lossless, 10 = very blocky, 1 = destroyed.' },
     generations: { type: 'number', default: 1, min: 1, max: 12, softMax: 4, step: 1, integer: true, label: 'Generations', hint: 'How many times the picture is saved again. Each one costs three passes over the picture.' },
     shiftGrid: { type: 'bool', default: true, label: 'Shift grid', hint: 'Like a picture cropped or resized between saves: the blocks of each generation fall in different places, so the damage piles up instead of settling.', visibleIf: (p) => (p.generations as number) > 1 },
-    chroma: { type: 'bool', default: true, label: 'Chroma smear', hint: 'Colour is stored at half resolution (16 x 16 pixel blocks), which smears and bleeds colour like a real JPEG.' },
+    chroma: { type: 'bool', default: true, label: 'Chroma smear', hint: 'Color is stored at half resolution (16 x 16 pixel blocks), which smears and bleeds color like a real JPEG.' },
   },
   summary: (p) => `quality ${p.quality}${p.generations > 1 ? ` × ${p.generations}` : ''}`,
   render(ctx) {

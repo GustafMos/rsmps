@@ -31,7 +31,7 @@ export class PoolUnavailableError extends Error {
 }
 
 export class PoolAbortError extends Error {
-  constructor(message = 'The scan was cancelled.') {
+  constructor(message = 'The scan was canceled.') {
     super(message);
     this.name = 'AbortError';
   }

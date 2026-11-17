@@ -28,6 +28,133 @@
           "verified": true
         }
       }
+    },
+    {
+      "id": "colmap",
+      "name": "COLMAP",
+      "title": "Camera solving for Splat from Video (via COLMAP)",
+      "description": "Finds where the camera was for every frame of a clip or photo set (structure from motion). Used by the Splat from Video node, together with Brush. Runs on the processor; this build has no NVIDIA acceleration. RSMPS does not include COLMAP.",
+      "group": "splat-train",
+      "notice": "A large third-party program that runs on your computer (about 230 MB unpacked). The Windows build is not code-signed, so your antivirus may scan or question it the first time it runs.",
+      "homepage": "https://colmap.github.io",
+      "binary": { "win32": "colmap.exe", "default": "colmap" },
+      "probe": { "args": ["version"], "pattern": "^COLMAP (\\S+)" },
+      "bringYourOwn": {
+        "win32": "Download COLMAP 4.x for Windows from github.com/colmap/colmap/releases yourself, unpack it and press Locate to pick bin\\colmap.exe.",
+        "darwin": "Install COLMAP yourself (for example: brew install colmap) and press Locate to pick the colmap program.",
+        "linux": "COLMAP publishes no Linux download. Install it with your package manager (for example: sudo apt install colmap) or build it, then press Locate to pick the colmap program."
+      },
+      "builds": {
+        "win32-x64": {
+          "version": "4.2.1",
+          "format": "zip",
+          "url": "https://github.com/colmap/colmap/releases/download/4.2.1/colmap-x64-windows-nocuda.zip",
+          "sha256": "c493d88cb4a43f21afba42cb55bf786e5434a0420e73db0ba1454c5d8b3686ae",
+          "size": 127731595,
+          "extract": { "binary": "bin/colmap.exe", "tree": ["bin/", "plugins/"], "exclude": ["_test.exe"] },
+          "license": { "name": "BSD-3-Clause (COLMAP); the archive also contains third-party libraries under their own licences (for example Qt under LGPL-3.0, Boost, Ceres, OpenImageIO, ONNX Runtime)", "url": "https://colmap.github.io/license.html" },
+          "source": { "name": "COLMAP releases on GitHub (ETH Zurich and UNC Chapel Hill)", "url": "https://github.com/colmap/colmap/releases/tag/4.2.1", "host": "github.com" },
+          "hashSource": "SHA-256 shown by GitHub for the release asset (digest field of release 4.2.1). Recomputed from a download of the URL above on 2026-11-16: the hash and the size match. The archive has no LICENSE file: the licence is on the COLMAP website. The archive also holds 148 *_test.exe programs, which are not unpacked.",
+          "verified": true
+        },
+        "darwin-arm64": {
+          "version": "4.2.1",
+          "format": "zip",
+          "url": "https://github.com/colmap/colmap/releases/download/4.2.1/colmap-arm64-macos.zip",
+          "sha256": "1fe9d65bddd61e0598f3087641cb14c4d4d4c74529e9f58911e8a5238a140a04",
+          "size": 83073913,
+          "extract": { "binary": "bin/colmap", "tree": ["bin/", "lib/", "share/", "plugins/"], "exclude": ["_test"] },
+          "license": { "name": "BSD-3-Clause (COLMAP); the archive also contains third-party libraries under their own licences", "url": "https://colmap.github.io/license.html" },
+          "source": { "name": "COLMAP releases on GitHub (ETH Zurich and UNC Chapel Hill)", "url": "https://github.com/colmap/colmap/releases/tag/4.2.1", "host": "github.com" },
+          "hashSource": "SHA-256 shown by GitHub for the release asset (digest field of release 4.2.1); the size is the asset's Content-Length. NOT downloaded or run by the maintainer: the folder layout inside the archive (bin/colmap) is assumed from the Windows build. If the program is not found the install stops with a clear error and nothing is kept.",
+          "verified": false
+        }
+      }
+    },
+    {
+      "id": "colmap-cuda",
+      "name": "COLMAP (NVIDIA)",
+      "title": "Faster camera solving on NVIDIA graphics cards (COLMAP with CUDA)",
+      "description": "The same COLMAP with NVIDIA CUDA acceleration for feature extraction and matching. Only useful with an NVIDIA graphics card; much larger download. When both are installed, Splat from Video uses this one.",
+      "group": "splat-train",
+      "notice": "A large third-party program that runs on your computer (about 415 MB download). It is not code-signed. It needs an NVIDIA graphics card with a current driver.",
+      "homepage": "https://colmap.github.io",
+      "binary": { "win32": "colmap.exe", "default": "colmap" },
+      "probe": { "args": ["version"], "pattern": "^COLMAP (\\S+)" },
+      "locate": false,
+      "bringYourOwn": {
+        "win32": "Install the COLMAP add-on instead, or locate a COLMAP you already have there.",
+        "darwin": "Not available on macOS. Use the COLMAP add-on.",
+        "linux": "Not available here. Use the COLMAP add-on (Locate)."
+      },
+      "builds": {
+        "win32-x64": {
+          "version": "4.2.1",
+          "format": "zip",
+          "url": "https://github.com/colmap/colmap/releases/download/4.2.1/colmap-x64-windows-cuda.zip",
+          "sha256": "e9c5cbd84c2ea986d2e970a2473fc2d2e6b34a2cdcf5d3df2765c319a63af881",
+          "size": 414666626,
+          "extract": { "binary": "bin/colmap.exe", "tree": ["bin/", "plugins/"], "exclude": ["_test.exe"] },
+          "license": { "name": "BSD-3-Clause (COLMAP); the archive also contains third-party libraries under their own licences, including NVIDIA CUDA runtime libraries", "url": "https://colmap.github.io/license.html" },
+          "source": { "name": "COLMAP releases on GitHub (ETH Zurich and UNC Chapel Hill)", "url": "https://github.com/colmap/colmap/releases/tag/4.2.1", "host": "github.com" },
+          "hashSource": "SHA-256 shown by GitHub for the release asset (digest field of release 4.2.1); the size is the asset's Content-Length. NOT downloaded or run by the maintainer (the no-CUDA build was tested instead); the layout is assumed to match the no-CUDA build.",
+          "verified": false
+        }
+      }
+    },
+    {
+      "id": "brush",
+      "name": "Brush",
+      "title": "Gaussian splat training for Splat from Video (via Brush)",
+      "description": "Trains the Gaussian splats from the frames and the cameras COLMAP found. Runs on your graphics card (NVIDIA, AMD, Intel or Apple). RSMPS does not include Brush.",
+      "group": "splat-train",
+      "notice": "A large third-party program that runs on your computer and uses your graphics card. The Windows build is not code-signed.",
+      "homepage": "https://github.com/ArthurBrussee/brush",
+      "binary": { "win32": "brush_app.exe", "default": "brush_app" },
+      "probe": { "args": ["--version"], "pattern": "^brush\\S* (\\S+)" },
+      "bringYourOwn": {
+        "win32": "Download Brush 0.3 from github.com/ArthurBrussee/brush/releases yourself and press Locate to pick brush_app.exe.",
+        "darwin": "Download Brush 0.3 from github.com/ArthurBrussee/brush/releases yourself and press Locate to pick brush_app.",
+        "linux": "Download Brush 0.3 from github.com/ArthurBrussee/brush/releases yourself and press Locate to pick brush_app."
+      },
+      "builds": {
+        "win32-x64": {
+          "version": "0.3.0",
+          "format": "zip",
+          "url": "https://github.com/ArthurBrussee/brush/releases/download/v0.3.0/brush-app-x86_64-pc-windows-msvc.zip",
+          "sha256": "b68e3e9cf052d51bf3ee30776fa5a364de7f2ba13b58443128ff797bb7bcfcd6",
+          "size": 158791348,
+          "extract": { "binary": "brush_app.exe", "extra": ["LICENSE", "README.md"] },
+          "license": { "name": "Apache-2.0", "url": "https://github.com/ArthurBrussee/brush/blob/main/LICENSE" },
+          "source": { "name": "Brush releases on GitHub (Arthur Brussee)", "url": "https://github.com/ArthurBrussee/brush/releases/tag/v0.3.0", "host": "github.com" },
+          "hashSource": "SHA-256 published next to the asset (brush-app-x86_64-pc-windows-msvc.zip.sha256, release v0.3.0), equal to GitHub's digest. Recomputed from a download of the URL above on 2026-11-16: the hash and the size match; the archive holds brush_app.exe, LICENSE, README.md and CHANGELOG.md.",
+          "verified": true
+        },
+        "darwin-arm64": {
+          "version": "0.3.0",
+          "format": "tar.xz",
+          "url": "https://github.com/ArthurBrussee/brush/releases/download/v0.3.0/brush-app-aarch64-apple-darwin.tar.xz",
+          "sha256": "65b2631398c839be3c1d4d7160fe2326389dec87830aac0710985e6690a1048c",
+          "size": 41447012,
+          "extract": { "binary": "brush-app-aarch64-apple-darwin/brush_app", "extra": [] },
+          "license": { "name": "Apache-2.0", "url": "https://github.com/ArthurBrussee/brush/blob/main/LICENSE" },
+          "source": { "name": "Brush releases on GitHub (Arthur Brussee)", "url": "https://github.com/ArthurBrussee/brush/releases/tag/v0.3.0", "host": "github.com" },
+          "hashSource": "SHA-256 published next to the asset (.sha256 file, release v0.3.0), equal to GitHub's digest; size = the asset's Content-Length. NOT downloaded or run by the maintainer; the release's dist-manifest.json lists brush_app in the archive (the manager also finds it one folder away from the pinned path).",
+          "verified": false
+        },
+        "linux-x64": {
+          "version": "0.3.0",
+          "format": "tar.xz",
+          "url": "https://github.com/ArthurBrussee/brush/releases/download/v0.3.0/brush-app-x86_64-unknown-linux-gnu.tar.xz",
+          "sha256": "4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20",
+          "size": 44242224,
+          "extract": { "binary": "brush-app-x86_64-unknown-linux-gnu/brush_app", "extra": [] },
+          "license": { "name": "Apache-2.0", "url": "https://github.com/ArthurBrussee/brush/blob/main/LICENSE" },
+          "source": { "name": "Brush releases on GitHub (Arthur Brussee)", "url": "https://github.com/ArthurBrussee/brush/releases/tag/v0.3.0", "host": "github.com" },
+          "hashSource": "SHA-256 published next to the asset (.sha256 file, release v0.3.0), equal to GitHub's digest; size = the asset's Content-Length. NOT downloaded or run by the maintainer; the release's dist-manifest.json lists brush_app in the archive (the manager also finds it one folder away from the pinned path).",
+          "verified": false
+        }
+      }
     }
   ]
 }

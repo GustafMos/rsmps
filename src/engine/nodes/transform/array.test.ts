@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { defineNode } from '../../define';
 import { addNode, connect, createGraph } from '../../graph';
 import { seamRatio } from '../../lib/copy-testutil';
-import { harness } from '../../testing';
+import array from './array.node';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 
 const RED: [number, number, number, number] = [255, 0, 0, 255];
 const BLUE: [number, number, number, number] = [0, 0, 255, 255];
@@ -126,9 +127,14 @@ describe('array', () => {
     const c = await seamRatio(t, 'array', { mode: 'infinite', columns: 2, rows: 2, spacing: [0, 0], scrollX: 2, hueStep: 30, tintMode: 'multiply', outputSize: 'input' }, { image: src });
     expect(c.wrap).toBeLessThan(c.max * 1.2 + 0.5);
     expect(c.motion).toBeGreaterThan(0.5);
-    // scrolling one cell with a 2-copy colour period is NOT a loop: the colours swap
-    const bad = await seamRatio(t, 'array', { mode: 'infinite', columns: 2, rows: 1, spacing: [0, 0], scrollX: 1, hueStep: 90, outputSize: 'input' }, { image: src });
-    expect(bad.wrap).toBeGreaterThan(bad.max * 1.5);
+    // scrolling one cell with a 2-copy colour period: with Loop on the colours are closed for the user (their index moves toward the cell the copy ends in)
+    const params = { mode: 'infinite', columns: 2, rows: 1, spacing: [0, 0], scrollX: 1, hueStep: 90, outputSize: 'input' };
+    const fixed = await seamRatio(t, 'array', params, { image: src });
+    expect(fixed.seam, fixed.text).toBeLessThan(LOOP_SEAM_OK);
+    expect(fixed.motion).toBeGreaterThan(1);
+    // ... and with Loop OFF nothing is done for them: the colours still swap at the seam
+    const bad = await t.loopCheck('array', params, { image: src }, { frames: 16, fps: 8, size: 48, project: { loop: false } });
+    expect(bad.seam, bad.text).toBeGreaterThan(2);
   });
 
   it('copies shown a different moment: time slices cycle through earlier frames', async () => {
@@ -173,5 +179,28 @@ describe('array', () => {
     await t.run('array', { mode: 'radial', count: 77777, radius: 0.41, scale: 0.37, hueStep: 3 }, { image: src });
     await t.run('array', { mode: 'linear', count: 9, distance: [13, 5], stepScale: 1.1 }, { image: src });
     expect(t.gpu.stats().objects.pipelinesCreated - s2.pipelinesCreated).toBe(0);
+  });
+
+  it('Loop on closes scrolling cases that cannot loop by themselves, and says so', async () => {
+    const t = await harness();
+    const src = t.fromFn(16, 16, (x, y) => [x * 15, y * 15, 40, 255]);
+    const cases: Record<string, Record<string, unknown>> = {
+      'finite grid scrolls like a conveyor': { mode: 'grid', columns: 4, rows: 2, scrollX: 1, outputSize: 'input' },
+      'brick offset with an odd vertical scroll': { mode: 'infinite', columns: 3, rows: 3, spacing: [0, 0], scrollY: 1, stagger: 0.5, outputSize: 'input' },
+      'mirrored tiles with an odd horizontal scroll': { mode: 'infinite', columns: 3, rows: 3, spacing: [0, 0], scrollX: 1, mirror: 'x', outputSize: 'input' },
+      'jitter rides on the copy': { mode: 'infinite', columns: 3, rows: 3, spacing: [0, 0], scrollX: 1, jitterPos: 20, outputSize: 'input' },
+      'brightness steps': { mode: 'grid', columns: 3, rows: 3, scrollX: 2, brightnessStep: 0.1, outputSize: 'input' },
+    };
+    for (const [name, params] of Object.entries(cases)) {
+      const r = await seamRatio(t, 'array', params, { image: src }, 24);
+      expect(r.seam, `${name}: ${r.text}`).toBeLessThan(LOOP_SEAM_OK);
+      expect(r.motion, name).toBeGreaterThan(0.5);
+    }
+    const off = await t.loopCheck('array', cases['finite grid scrolls like a conveyor'], { image: src }, { frames: 24, fps: 8, size: 48, project: { loop: false } });
+    expect(off.seam, off.text).toBeGreaterThan(2); // Loop off: the finite grid just leaves, unchanged
+    const def = array;
+    const p = { ...Object.fromEntries(Object.entries(def.params).map(([k, d]) => [k, (d as { default: unknown }).default])), mode: 'infinite', columns: 3, rows: 3, scrollX: 1, jitterPos: 20 } as never;
+    expect(def.summary!(p, undefined, { loop: true, frames: 24, fps: 8 })).toContain('scroll X 1 → 3 to loop');
+    expect(def.summary!(p, undefined, { loop: false, frames: 24, fps: 8 })).not.toContain('to loop');
   });
 });

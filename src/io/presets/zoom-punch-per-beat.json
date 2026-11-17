@@ -1,0 +1,117 @@
+{
+  "schema": "rsmps/graph",
+  "version": 2,
+  "name": "Zoom punch per beat",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24,
+    "duration": 8,
+    "loop": true,
+    "lengthMode": "relative",
+    "referenceSide": 1080
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "media-in",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "label": "Drop a clip with sound here"
+    },
+    {
+      "id": "beat",
+      "type": "beat-detect",
+      "x": 260,
+      "y": 260,
+      "params": {}
+    },
+    {
+      "id": "ramp",
+      "type": "remap",
+      "x": 520,
+      "y": 300,
+      "params": {
+        "fromMin": 0,
+        "fromMax": 1,
+        "toMin": 1.18,
+        "toMax": 1,
+        "clamp": true
+      },
+      "label": "Settle through the beat"
+    },
+    {
+      "id": "xf",
+      "type": "transform",
+      "x": 780,
+      "y": 0,
+      "params": {}
+    },
+    {
+      "id": "out",
+      "type": "image-out",
+      "x": 1040,
+      "y": 0,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "src",
+        "port": "audio"
+      },
+      "to": {
+        "node": "beat",
+        "port": "audio"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "beat",
+        "port": "phase"
+      },
+      "to": {
+        "node": "ramp",
+        "port": "value"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "ramp",
+        "port": "value"
+      },
+      "to": {
+        "node": "xf",
+        "port": "scale"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "src",
+        "port": "image"
+      },
+      "to": {
+        "node": "xf",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "xf",
+        "port": "image"
+      },
+      "to": {
+        "node": "out",
+        "port": "image"
+      }
+    }
+  ],
+  "frames": []
+}

@@ -5,7 +5,7 @@ export default defineNode({
   id: 'solid',
   title: 'Solid Color',
   category: 'generate',
-  description: 'A flat colour filling the whole frame (or the size of a connected image).',
+  description: 'A flat color filling the whole frame (or the size of a connected image).',
   keywords: ['color', 'colour', 'fill', 'flat', 'background'],
   inputs: { size: { type: 'image', label: 'Size from' } },
   outputs: { image: { type: 'image', label: 'Image' } },

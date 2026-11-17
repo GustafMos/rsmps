@@ -6,7 +6,7 @@ export default defineNode({
   id: 'frame-blend',
   title: 'Frame Blend',
   category: 'time',
-  description: 'Motion-blur style smoothing: averages each frame with its neighbours in time. In a looping project the neighbours wrap around the loop.',
+  description: 'Motion-blur style smoothing: averages each frame with its neighbors in time. In a looping project the neighbors wrap around the loop.',
   keywords: ['motion blur', 'temporal', 'smooth', 'average', 'shutter', 'blur frames', 'interpolate'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

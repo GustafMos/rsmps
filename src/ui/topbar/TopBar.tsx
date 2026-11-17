@@ -5,10 +5,12 @@ import pkg from '../../../package.json';
 import { enabledOutputs } from '../../engine/graph';
 import { resolveActiveOutput } from '../store/editor';
 import { useApp, useEd } from '../store/context';
-import { toggleMediaPanel, useMedia } from '../store/media';
+import { usePanelToggles } from '../responsive/TabletDrawer';
 import { reloadInSafeMode } from '../safety';
 import { isDesktop } from '../../io/desktop';
 import { checkNow } from '../updateNotice';
+import { addCurrent } from '../store/queue';
+import { openFeature } from '../store/features';
 import './topbar.css';
 import '../scan/scan.css';
 
@@ -20,8 +22,7 @@ export function TopBar() {
   const canRedo = useEd((s) => s.canRedo);
   const mode = useEd((s) => s.mode);
   const enabledCount = useEd((s) => enabledOutputs(s.graph, io.registry).length);
-  const mediaOpen = !useMedia((s) => s.collapsed);
-  const rightOpen = useEd((s) => s.prefs.rightOpen);
+  const { mediaOpen, inspectorOpen: rightOpen, toggleMedia, toggleInspector, openInspector } = usePanelToggles(); // desktop: fold the media rail / hide the inspector; tablet: open the drawers
 
   // Non-personal technical context only: no project name, file names or graph contents.
   const [gpu, setGpu] = useState('unknown');
@@ -47,13 +48,17 @@ export function TopBar() {
     { label: 'New project (new tab)', onClick: () => void ed.newProjectTab(), shortcut: 'Ctrl+Alt+T' },
     { label: 'New scan (photos of printed sheets)', onClick: () => void ed.newScanTab() },
     { label: 'Print blank sheets…', onClick: () => ed.openDialog('blankSheets') },
+    { label: 'New from template…', onClick: () => openFeature('templates') },
     { label: 'Open file in a new tab…', onClick: open, shortcut: 'Ctrl+O' },
     { label: 'Save…', onClick: save, shortcut: 'Ctrl+S' },
     { sep: true },
     { label: 'Presets…', onClick: () => ed.openDialog('presets') },
     { label: 'Save as preset…', onClick: () => ed.openDialog('savePreset') },
+    { label: 'Share this look…', onClick: () => openFeature('share') },
+    { label: 'Render queue…', onClick: () => openFeature('queue') },
+    { label: 'Stop-motion capture…', onClick: () => openFeature('stopmotion') },
     { sep: true },
-    { label: 'Project settings', onClick: () => { ed.select([]); ed.setPrefs({ rightOpen: true }); } },
+    { label: 'Project settings', onClick: () => { ed.select([]); openInspector(); } },
     { label: 'Backups…', onClick: () => ed.openDialog('backups') },
     { label: 'Reload in safe mode (rendering paused)', onClick: () => reloadInSafeMode(app) },
     { label: 'Palette Studio…', onClick: () => { ed.studioTarget = null; ed.openDialog('palette'); } },
@@ -69,8 +74,10 @@ export function TopBar() {
     },
     { label: `Memory in use: ${mb} MB (this tab only)`, disabled: true },
     { label: 'Keyboard shortcuts', onClick: () => ed.openDialog('shortcuts'), shortcut: '?' },
-    { label: 'Customise shortcuts…', onClick: () => ed.openDialog('keymap') },
+    { label: 'Customize shortcuts…', onClick: () => ed.openDialog('keymap') },
     { label: 'About RSMPS…', onClick: () => ed.openDialog('about') },
+    { label: 'Report a bug…', onClick: () => window.open(bugUrl, '_blank', 'noopener') }, // also in the menu: the top bar hides its link buttons on narrow windows
+    { label: 'Support (Ko-fi)…', onClick: () => window.open('https://ko-fi.com/ripscorpy', '_blank', 'noopener') },
     ...(isDesktop() ? [{ label: 'Check for updates…', onClick: () => void checkNow(ed) }] : []),
   ];
 
@@ -112,12 +119,12 @@ export function TopBar() {
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }}
       />
       <div className="rs-top__spacer" />
-      <button className={`rs-btn rs-btn--icon rs-btn--ghost${mediaOpen ? ' is-on' : ''}`} onClick={toggleMediaPanel} title="Toggle media panel: open it, or fold it to a slim rail" aria-label="Toggle media panel"><Icon name="folder" /></button>
-      <button className={`rs-btn rs-btn--icon rs-btn--ghost${rightOpen ? ' is-on' : ''}`} onClick={() => ed.setPrefs({ rightOpen: !rightOpen })} title="Toggle inspector" aria-label="Toggle inspector"><Icon name="menu" /></button>
+      <button className={`rs-btn rs-btn--icon rs-btn--ghost${mediaOpen ? ' is-on' : ''}`} onClick={toggleMedia} title="Toggle media panel: open it, or fold it to a slim rail" aria-label="Toggle media panel"><Icon name="folder" /></button>
+      <button className={`rs-btn rs-btn--icon rs-btn--ghost${rightOpen ? ' is-on' : ''}`} onClick={toggleInspector} title="Toggle inspector" aria-label="Toggle inspector"><Icon name="menu" /></button>
       <div className="rs-top__sep" />
       <button className="rs-btn rs-btn--ghost rs-top__link" onClick={open} title="Open file in a new tab (Ctrl+O)" aria-label="Open"><Icon name="open" /><span className="rs-top__label">Open</span></button>
       <button className="rs-btn rs-btn--ghost rs-top__link" onClick={save} title="Save (Ctrl+S)" aria-label="Save"><Icon name="save" /><span className="rs-top__label">Save</span></button>
-      <button className="rs-btn rs-btn--ghost rs-top__link" onClick={() => { ed.studioTarget = null; ed.openDialog('palette'); }} title="Palette Studio: build palettes from colour harmonies or images" aria-label="Palettes"><Icon name="palette" /><span className="rs-top__label">Palettes</span></button>
+      <button className="rs-btn rs-btn--ghost rs-top__link" onClick={() => { ed.studioTarget = null; ed.openDialog('palette'); }} title="Palette Studio: build palettes from color harmonies or images" aria-label="Palettes"><Icon name="palette" /><span className="rs-top__label">Palettes</span></button>
       <button className="rs-btn rs-btn--ghost rs-top__link" onClick={() => ed.openDialog('plugins')} title="Plugins" aria-label="Plugins"><Icon name="puzzle" /><span className="rs-top__label">Plugins</span></button>
       <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.openDialog('shortcuts')} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><Icon name="help" /></button>
       <div className="rs-top__sep" />
@@ -137,6 +144,9 @@ export function TopBar() {
           { label: 'Spritesheet', onClick: () => ed.exportAs('spritesheet') },
           { sep: true },
           { label: 'Export…', onClick: () => ed.openDialog('export'), shortcut: 'Ctrl+E' },
+          { sep: true },
+          { label: 'Add to render queue', onClick: () => { if (addCurrent(app)) { ed.toast('Added to the render queue.', 'ok'); openFeature('queue'); } } },
+          { label: 'Render queue…', onClick: () => openFeature('queue') },
         ]}><Icon name="chevronDown" size={12} /></MenuButton>
       </div>
     </header>

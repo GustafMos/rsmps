@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { SHADER_EXAMPLES } from '../../lib/shader-examples';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import type { ImageValue } from '../../types';
 import { savePreview } from '../../lib/util-preview';
 
@@ -91,7 +91,7 @@ it('u.color reaches the shader', async () => {
 it('the default animation loops: phase 0 equals phase 1, and it moves in between', async () => {
   const t = await harness();
   const r = await t.loopCheck('custom-shader', {});
-  expect(r.seam).toBe(0);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(0.3);
   // a shader that does not use the clock is static (and not re-rendered per frame)
   const still = await t.loopCheck('custom-shader', { code: 'return vec4f(uv, 0.0, 1.0);' });

@@ -1,5 +1,5 @@
 import { defineNode } from '../../define';
-import { wholeCyclePoses } from '../../lib/boil';
+import { cyclePose, epochCount } from '../../lib/loop-snap';
 import { loopFrame } from '../../lib/fx-util';
 
 export default defineNode({
@@ -52,9 +52,9 @@ export default defineNode({
     // pose of the boil: depends only on (frame mod poses), so the pattern repeats exactly; read the clock only when boiling
     let pose = 0;
     if (p.boil > 0) {
+      // Loop snapping: the pose is the epoch (a hold of boilHold frames, the last one shortened) mod the pose count, so any loop length closes.
       const total = Math.max(1, Math.round(ctx.time.duration * ctx.time.fps));
-      const poses = wholeCyclePoses(total, p.boilPoses);
-      pose = Math.floor(loopFrame(ctx.time, p.boilHold) / p.boilHold) % poses;
+      pose = cyclePose(Math.floor(loopFrame(ctx.time, p.boilHold) / p.boilHold), epochCount(total, p.boilHold), p.boilPoses);
     }
     const ca = src.width / src.height;
     const ta = tex.width / tex.height;

@@ -9,6 +9,7 @@ import { Gpu } from './gpu/gpu';
 import { clampProxy, proxySize } from './lib/proxy-size';
 import { stableStringify } from './lib/stable-json';
 import { deriveProcessStatus, isServable, placeholderCard, PLACEHOLDER_STEPS, processDataPresent, processResultOf, type ProcessStatus } from './process';
+import { defOf, flattenGraph, groupData, groupDefOf, GROUP_TYPE, hasGroups, localId, nodeAtPath, PATH_SEP, resolveFlatTarget, storedCount, type FlatView } from './group';
 import type {
   AnyNodeDef,
   CanvasInfo,
@@ -140,6 +141,42 @@ interface Scope {
   /** The node and output port this evaluation was asked for (feeds `ctx.wants`). */
   rootNode?: string;
   rootPort?: string;
+  /** The document as the caller gave it (with groups); `graph` is its flattened form. */
+  root?: GraphDoc;
+  /** Static node results seen in this evaluation (memo key, cache key): kept for the per-node fast path once the evaluation ended without errors. Shared with sub-scopes. */
+  staticNew?: [string, string][];
+}
+
+/** Node and inbound-wire maps of a graph, built once per graph object (the cache-hit path then does no O(nodes) work to start). */
+const indexMemo = new WeakMap<GraphDoc, { nodes: Map<string, NodeInstance>; inbound: Map<string, Edge[]> }>();
+function graphIndex(graph: GraphDoc): { nodes: Map<string, NodeInstance>; inbound: Map<string, Edge[]> } {
+  const hit = indexMemo.get(graph);
+  if (hit) return hit;
+  const inbound = new Map<string, Edge[]>();
+  for (const e of graph.edges) {
+    const list = inbound.get(e.to.node);
+    if (list) list.push(e);
+    else inbound.set(e.to.node, [e]);
+  }
+  const idx = { nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound };
+  indexMemo.set(graph, idx);
+  return idx;
+}
+
+/** What, besides the frame, decides an evaluation's result (the fast path's key). */
+function fastKeyOf(req: EvalRequest): string {
+  return `${req.node}|${req.port ?? ''}|${req.item ?? 0}/${req.itemCount ?? 1}|${clampProxy(req.proxy ?? 1)}|${req.quality ?? 'preview'}|${req.canvas ? `${req.canvas.width}x${req.canvas.height}` : ''}`;
+}
+
+/** A graph with a process node may change its result without changing (process state, progress): no fast path for it. Memoised per graph. */
+const processMemo = new WeakMap<GraphDoc, boolean>();
+function hasProcessNodes(graph: GraphDoc, registry: Registry): boolean {
+  let v = processMemo.get(graph);
+  if (v === undefined) {
+    v = graph.nodes.some((n) => !!defOf(registry, n)?.process);
+    processMemo.set(graph, v);
+  }
+  return v;
 }
 
 function hash(str: string): string {
@@ -295,103 +332,275 @@ export class Engine {
     this.gpu.advance();
     this.evictTimed();
     this.evict();
-    const { graph } = req;
-    const project = graph.project;
+    // Structural fast path: the same document object asked for the same thing, and last time everything it depends on was static (no
+    // clock, no item, no process state): the result is the same for every frame, so nothing upstream is walked at all.
+    const fastReq = fastKeyOf(req);
+    const fast = this.staticRoot;
+    if (fast && fast.graph === req.graph && fast.req === fastReq) {
+      const entry = this.cache.get(fast.entry);
+      if (entry) {
+        entry.lastUsed = this.tick;
+        this.gpu.fence();
+        return { value: entry.outputs[fast.port] ?? null, errors: new Map(), timings: new Map() };
+      }
+    }
+    const root = req.graph;
+    const project = root.project;
     const proxy = clampProxy(req.proxy ?? 1);
     const frame = Math.max(0, Math.round((req.seconds ?? 0) * project.fps));
     const frame0 = req.canvas ?? project;
     const { width: cw, height: ch } = proxySize(frame0, proxy);
-    const inbound = new Map<string, Edge[]>();
-    for (const e of graph.edges) {
-      const list = inbound.get(e.to.node);
-      if (list) list.push(e);
-      else inbound.set(e.to.node, [e]);
-    }
-    const scope: Scope = {
-      graph,
-      nodes: new Map(graph.nodes.map((n) => [n.id, n])),
-      inbound,
-      seconds: frame / project.fps,
-      frame,
-      item: req.item ?? 0,
-      itemCount: req.itemCount ?? 1,
-      proxy,
-      quality: req.quality ?? 'preview',
-      canvas: { width: cw, height: ch, unit: this.unitFor(graph, cw, ch, proxy) },
-      memo: new Map(),
-      stack: new Set(),
-      errors: new Map(),
-      timings: new Map(),
-      fullCanvas: { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) },
-      sigMemo: new Map(),
-      fullSigMemo: new Map(),
-      frame0: { width: frame0.width, height: frame0.height },
-      proxies: new Map(),
+    const fullCanvas = { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) };
+    const makeScope = (graph: GraphDoc): Scope => {
+      const idx = graphIndex(graph);
+      const scope: Scope = {
+        graph,
+        nodes: idx.nodes,
+        inbound: idx.inbound,
+        seconds: frame / project.fps,
+        frame,
+        item: req.item ?? 0,
+        itemCount: req.itemCount ?? 1,
+        proxy,
+        quality: req.quality ?? 'preview',
+        canvas: { width: cw, height: ch, unit: this.unitFor(graph, cw, ch, proxy) },
+        memo: new Map(),
+        stack: new Set(),
+        errors: new Map(),
+        timings: new Map(),
+        fullCanvas,
+        sigMemo: new Map(),
+        fullSigMemo: new Map(),
+        frame0: { width: frame0.width, height: frame0.height },
+        proxies: new Map(),
+        root,
+        staticNew: [],
+      };
+      scope.proxies.set(proxy, scope);
+      return scope;
     };
-    scope.proxies.set(proxy, scope);
 
-    const node = scope.nodes.get(req.node);
-    scope.rootNode = req.node;
-    scope.rootPort = req.port ?? (node ? Object.keys(this.registry.get(node.type)?.outputs ?? {})[0] : undefined);
+    // Groups: evaluate the flattened document (docs/ENGINE.md, "Group nodes"). A document without groups is used as it is (one lookup).
+    let view: FlatView | null = null;
+    let graph = root;
+    let counted = false;
+    const pre = { errors: new Map<string, string>(), timings: new Map<string, number>() };
+    if (hasGroups(root)) {
+      view = this.flatView(root, req.canvas, req.item ?? 0);
+      const opaque = this.opaqueOf(view);
+      // Repeat groups whose count is wired: evaluate the count, then unroll that many passes (bounded rounds: counts may depend on counts).
+      const counts = new Map<string, number>();
+      for (let round = 0; round < 8 && view.dynamic.length; round++) {
+        const sc = makeScope(view.graph);
+        for (const d of view.dynamic) {
+          let n = storedCount(groupData(nodeAtPath(root, d.path) ?? { params: {} }));
+          if (d.source) {
+            const r = await this.evalNode(d.source.node, sc, true);
+            const v = r?.outputs[d.source.port];
+            if (typeof v === 'number' && Number.isFinite(v)) n = Math.max(1, Math.round(v));
+          }
+          counts.set(d.path, n);
+        }
+        sc.errors.forEach((v, k) => pre.errors.set(k, v));
+        sc.timings.forEach((v, k) => pre.timings.set(k, (pre.timings.get(k) ?? 0) + v));
+        view = flattenGraph(root, { opaque, counts: new Map(counts) });
+        counted = true;
+      }
+      graph = view.graph;
+    }
+    const scope = makeScope(graph);
+    pre.errors.forEach((v, k) => scope.errors.set(k, v));
+    pre.timings.forEach((v, k) => scope.timings.set(k, v));
+
+    let target: { node: string; port: string | undefined } | null = { node: req.node, port: req.port };
+    if (view) target = resolveFlatTarget(view, req.node, req.port, () => undefined);
+    const node = target && target.node ? scope.nodes.get(target.node) : undefined;
+    let made: { result: NodeResult; port: string } | null = null;
+    scope.rootNode = node?.id;
+    scope.rootPort = target?.port ?? (node ? Object.keys(defOf(this.registry, node)?.outputs ?? {})[0] : undefined);
     let value: Value | null = null;
     if (!node) {
-      scope.errors.set(req.node, 'Node not found');
+      // A group output with nothing wired to it inside is simply empty.
+      if (!target || target.node !== '') scope.errors.set(req.node, 'Node not found');
     } else {
-      const def = this.registry.get(node.type);
+      const def = defOf(this.registry, node);
       const result = await this.evalNode(node.id, scope);
       if (def && result) {
-        const port = req.port ?? Object.keys(def.outputs)[0];
+        const port = target?.port ?? Object.keys(def.outputs)[0];
         value = port ? (result.outputs[port] ?? null) : null;
+        if (port) made = { result, port };
         // Output-category nodes have no outputs: hand back what arrives on their first input.
         if (!port) {
           const firstIn = Object.keys(def.inputs)[0];
-          const edge = firstIn ? (inbound.get(node.id) ?? []).find((e) => e.to.port === firstIn) : undefined;
+          const edge = firstIn ? (scope.inbound.get(node.id) ?? []).find((e) => e.to.port === firstIn) : undefined;
           if (edge) {
             const up = await this.evalNode(edge.from.node, scope);
             value = up?.outputs[edge.from.port] ?? null;
+            if (up) made = { result: up, port: edge.from.port };
           }
         }
       }
     }
+    this.staticRoot = null;
+    // (a wired Repeat count is evaluated outside the final scope: its time dependence is not in `tv`, so no fast path then)
+    if (made && !counted && !made.result.tv && !scope.errors.size && this.cache.has(made.result.key) && !hasProcessNodes(graph, this.registry)) {
+      this.staticRoot = { graph: req.graph, req: fastReq, entry: made.result.key, port: made.port };
+    }
+    // Per-node fast path: remember which node results were static in a clean evaluation of this document (see `staticNodes`).
+    if (scope.staticNew?.length && !scope.errors.size && !hasProcessNodes(graph, this.registry)) {
+      let m = this.staticNodes.get(graph);
+      if (!m) this.staticNodes.set(graph, (m = new Map()));
+      for (const [k, v] of scope.staticNew) m.set(k, v);
+    }
+    if (view) this.liftGroupErrors(view, scope.errors);
     this.gpu.fence();
     return { value, errors: scope.errors, timings: scope.timings };
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------------------------ */
+  /* Groups                                                                                                                         */
+  /* ------------------------------------------------------------------------------------------------------------------------------ */
+
+  /**
+   * The document as the engine evaluates it: flattened, with every baked group that may serve its stored outputs kept as one node
+   * (Repeat counts that are wired stay unresolved here). The same view the export gate, the process runtime and `processStatus` use, so
+   * they all agree with the render path. A document without groups is returned as it is.
+   */
+  flatView(graph: GraphDoc, canvas?: { width: number; height: number }, item = 0): FlatView {
+    const full = flattenGraph(graph);
+    if (!full.grouped || !full.baked.length) return full;
+    const frame0 = canvas ?? graph.project;
+    const opaque = new Set<string>();
+    for (const path of full.baked) {
+      if (path.split(PATH_SEP).some((p) => p.startsWith('~'))) continue; // a group inside a Repeat pass is never served from a bake
+      const st = this.groupStatus(graph, path, canvas);
+      if (!st || st.state !== 'done' || !st.result) continue;
+      const meta = st.result.meta as { canvas?: string; item?: number | null };
+      if (meta.canvas && meta.canvas !== `${Math.round(frame0.width)}x${Math.round(frame0.height)}`) continue; // another frame size: lay out again, live
+      if (typeof meta.item === 'number' && meta.item !== item) continue; // baked for one batch item only
+      opaque.add(path);
+    }
+    // Inside an opaque group nothing is evaluated: only the outermost opaque groups matter.
+    for (const p of [...opaque]) for (const q of opaque) if (p !== q && p.startsWith(q + PATH_SEP)) opaque.delete(p);
+    return opaque.size ? flattenGraph(graph, { opaque }) : full;
+  }
+
+  private opaqueOf(view: FlatView): Set<string> {
+    return new Set(view.opaque);
+  }
+
+  /** Errors inside a group also show on the group (and on every group around it); passes of a Repeat show on the Repeat. */
+  private liftGroupErrors(view: FlatView, errors: Map<string, string>): void {
+    view.errors.forEach((msg, path) => errors.has(path) || errors.set(path, msg));
+    const reverse = new Map<string, string>();
+    view.alias.forEach((flat, logical) => reverse.set(flat, logical));
+    for (const [id, msg] of [...errors]) {
+      if (!id.includes(PATH_SEP)) continue;
+      const logical = reverse.get(id);
+      if (logical && !errors.has(logical)) errors.set(logical, msg);
+      const parts = id.split(PATH_SEP);
+      for (let i = parts.length - 1; i > 0; i--) {
+        const anc = parts.slice(0, i).filter((p) => !p.startsWith('~')).join(PATH_SEP);
+        if (!anc || anc === id) continue;
+        if (!errors.has(anc)) errors.set(anc, `Inside: ${msg}`);
+      }
+    }
+  }
+
+  private sigScopes = new WeakMap<GraphDoc, Map<string, Scope>>();
+
+  /** A signature-only scope of a graph at a frame size, kept per (graph object, size): its structural memo survives between calls. */
+  private sigScope(graph: GraphDoc, canvas?: { width: number; height: number }): Scope {
+    const frame0 = canvas ?? graph.project;
+    const key = `${Math.round(frame0.width)}x${Math.round(frame0.height)}`;
+    let m = this.sigScopes.get(graph);
+    const hit = m?.get(key);
+    if (hit) return hit;
+    const s = this.miniScope(graph, canvas);
+    if (!m) {
+      m = new Map();
+      this.sigScopes.set(graph, m);
+    }
+    m.set(key, s);
+    return s;
+  }
+
+  /**
+   * The signature of a group's bake: the structure of everything that feeds each of its outputs in the fully expanded document (inner
+   * nodes, inner params, exposed values, outer inputs, project settings, frame size). Taken on the expanded document, so baking a group
+   * before it does not make this one stale (the baked picture is the same).
+   */
+  groupSignature(graph: GraphDoc, path: string, canvas?: { width: number; height: number }): string {
+    const full = flattenGraph(graph);
+    const node = nodeAtPath(graph, path);
+    if (!node || node.type !== GROUP_TYPE) return '';
+    const scope = this.sigScope(full.graph, canvas);
+    const parts = groupData(node).outputs.map((o) => {
+      const ref = full.outputs.get(`${path}:${o.id}`);
+      return `${o.id}=${ref ? `${ref.port}:${this.structSig(ref.node, scope, new Set(), true, scope.fullSigMemo)}` : ref === null ? 'none' : 'unexpanded'}`;
+    });
+    return hash(`group|${parts.join('|')}`);
+  }
+
+  /** Process status of a group (its bake), by path. */
+  private groupStatus(graph: GraphDoc, path: string, canvas?: { width: number; height: number }): ProcessStatus | null {
+    const node = nodeAtPath(graph, path);
+    if (!node || node.type !== GROUP_TYPE) return null;
+    const handle = processResultOf(node, groupDefOf(node));
+    return deriveProcessStatus({
+      handle,
+      hasData: !handle || processDataPresent(handle, this.host),
+      current: this.groupSignature(graph, path, canvas),
+      live: this.host.processLive?.(path) ?? null,
+      standIn: 'bypass',
+    });
   }
 
   /**
    * The signature a Cache / Bake node sees for `ctx.inputSignature`, computed without evaluating anything: structure of everything
    * upstream of an output port (types, stored params, wiring, project settings, frame size). `canvas` = the frame size at proxy 1
-   * (default: the project canvas).
+   * (default: the project canvas). `node` may be a path inside groups, or a group (its output `port`).
    */
   signatureOf(graph: GraphDoc, node: string, port: string, canvas?: { width: number; height: number }): string {
-    const inbound = new Map<string, Edge[]>();
-    for (const e of graph.edges) {
-      const list = inbound.get(e.to.node);
-      if (list) list.push(e);
-      else inbound.set(e.to.node, [e]);
+    let g = graph;
+    let id = node;
+    let p = port;
+    if (hasGroups(graph)) {
+      const view = this.flatView(graph, canvas);
+      g = view.graph;
+      const t = resolveFlatTarget(view, node, port, () => undefined);
+      if (!t || !t.node) return '';
+      id = t.node;
+      p = t.port ?? port;
     }
-    const frame0 = canvas ?? graph.project;
-    const fullCanvas = { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) };
-    const scope = { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas, sigMemo: new Map(), fullSigMemo: new Map() } as unknown as Scope;
-    return `${port}:${this.structSig(node, scope, new Set(), true)}`;
+    const scope = this.miniScope(g, canvas);
+    return `${p}:${this.structSig(id, scope, new Set(), true)}`;
   }
 
   private miniScope(graph: GraphDoc, canvas?: { width: number; height: number }): Scope {
-    const inbound = new Map<string, Edge[]>();
-    for (const e of graph.edges) {
-      const list = inbound.get(e.to.node);
-      if (list) list.push(e);
-      else inbound.set(e.to.node, [e]);
-    }
+    const idx = graphIndex(graph);
     const frame0 = canvas ?? graph.project;
     const fullCanvas = { width: Math.max(1, Math.round(frame0.width)), height: Math.max(1, Math.round(frame0.height)) };
-    return { graph, nodes: new Map(graph.nodes.map((n) => [n.id, n])), inbound, canvas: fullCanvas, fullCanvas, sigMemo: new Map(), fullSigMemo: new Map() } as unknown as Scope;
+    return { graph, nodes: idx.nodes, inbound: idx.inbound, canvas: fullCanvas, fullCanvas, sigMemo: new Map(), fullSigMemo: new Map(), root: graph } as unknown as Scope;
   }
 
   /**
    * Process mode: the state of a node's process for this graph (never evaluates anything). Null for a node without `process`.
    * Same function the render path uses for the cache key, so the UI, the export gate and the scheduler all agree with the engine.
+   * `nodeId` may be a path inside groups; a group's own process is its bake.
    */
   processStatus(graph: GraphDoc, nodeId: string, canvas?: { width: number; height: number }): ProcessStatus | null {
+    if (hasGroups(graph)) {
+      const target = nodeAtPath(graph, nodeId);
+      if (target?.type === GROUP_TYPE) return this.groupStatus(graph, nodeId, canvas);
+      const view = this.flatView(graph, canvas);
+      const scope = this.miniScope(view.graph, canvas);
+      (scope as { root?: GraphDoc }).root = graph;
+      const node = scope.nodes.get(view.alias.get(nodeId) ?? nodeId);
+      const def = defOf(this.registry, node);
+      if (!node || !def?.process) return null;
+      return this.processStatusFor(node, def, scope);
+    }
     const scope = this.miniScope(graph, canvas);
     const node = scope.nodes.get(nodeId);
     const def = node && this.registry.get(node.type);
@@ -405,6 +614,8 @@ export class Engine {
   }
 
   private processStatusFor(node: NodeInstance, def: AnyNodeDef, scope: Scope): ProcessStatus {
+    // A baked group kept as one node: its status is that of its bake (signature of the expanded document).
+    if (node.type === GROUP_TYPE) return this.groupStatus(scope.root ?? scope.graph, node.id, scope.fullCanvas) ?? deriveProcessStatus({ handle: null, hasData: true, current: '', live: null, standIn: 'bypass' });
     const pdef = def.process!;
     const edges = scope.inbound.get(node.id) ?? [];
     const memo = scope.fullSigMemo;
@@ -525,8 +736,26 @@ export class Engine {
     return Math.min(width, height) / Math.max(1, p.referenceSide);
   }
 
+  /** See the structural fast path in `evaluateNow`. Reset whenever the cache is (assets changed, device lost). */
+  private staticRoot: { graph: GraphDoc; req: string; entry: string; port: string } | null = null;
+
+  /**
+   * Per-node form of the same idea, for ANIMATED graphs: per document object (immutable in the editor), the cache key of every node whose result
+   * was static (no clock, no item beyond the key, no process state) the last time a whole evaluation of that document finished without errors,
+   * by (node, item, quality, canvas, proxy, lite). A static node found here whose entry is still cached is returned as it is: nothing upstream of it
+   * is walked, hashed or looked up, so a frame costs O(time-varying nodes + their direct static inputs) instead of O(every upstream node).
+   * Never used with process nodes in the document (their state is part of every key), for nodes with optional outputs (what is wanted depends on
+   * the evaluation's target) or for results that are not in the cache (bypass, empty). A different document object has no entries; `clear` and
+   * `forgetAll` (assets changed, device lost) drop them all, like the cache itself.
+   */
+  private staticNodes = new WeakMap<GraphDoc, Map<string, string>>();
+  /** Cache hits served by the per-node fast path (tests and the debug overlay). */
+  staticNodeHits = 0;
+
   /** Drop every cached result (e.g. after assets changed on disk). */
   clear(opts: { demote?: boolean } = {}): void {
+    this.staticRoot = null;
+    this.staticNodes = new WeakMap();
     for (const entry of this.cache.values()) {
       if (opts.demote && this.demote(entry)) continue;
       this.releaseEntry(entry);
@@ -681,12 +910,36 @@ export class Engine {
     const memoKey = `${id}@${scope.frame}${lite ? '~' : ''}`;
     const existing = scope.memo.get(memoKey);
     if (existing) return existing;
-    const promise = this.evalNodeInner(id, scope, lite).catch((err) => {
-      scope.errors.set(id, err instanceof Error ? err.message : String(err));
-      return null;
-    });
+    const known = this.staticNodes.get(scope.graph);
+    const sKey = scope.staticNew ? `${id}|${scope.item}/${scope.itemCount}|${scope.quality}|${scope.canvas.width}x${scope.canvas.height}|${scope.fullCanvas.width}x${scope.fullCanvas.height}|${scope.proxy}|${lite ? 1 : 0}` : '';
+    if (known && sKey) {
+      const entry = this.cache.get(known.get(sKey) ?? '');
+      if (entry && !entry.tv) {
+        entry.lastUsed = this.tick;
+        this.staticNodeHits++;
+        const hit = Promise.resolve<NodeResult | null>({ key: entry.key, outputs: entry.outputs, tv: false });
+        scope.memo.set(memoKey, hit);
+        return hit;
+      }
+    }
+    const promise = this.evalNodeInner(id, scope, lite).then(
+      (r) => {
+        if (sKey && r && !r.tv && this.cache.has(r.key) && !this.staticOptional(scope, id)) scope.staticNew!.push([sKey, r.key]);
+        return r;
+      },
+      (err) => {
+        scope.errors.set(id, err instanceof Error ? err.message : String(err));
+        return null;
+      },
+    );
     scope.memo.set(memoKey, promise);
     return promise;
+  }
+
+  /** Nodes with optional outputs (and process nodes) are never taken by the per-node fast path: what they produce depends on the evaluation's target / their process state. */
+  private staticOptional(scope: Scope, id: string): boolean {
+    const def = defOf(this.registry, scope.nodes.get(id));
+    return !def || !!def.optionalOutputs?.length || !!def.process;
   }
 
   /** Key of a node's CPU-only results: everything that decides them (structure upstream, frame, item, quality), no evaluation needed. */
@@ -701,7 +954,7 @@ export class Engine {
   private async evalNodeInner(id: string, scope: Scope, lite = false): Promise<NodeResult | null> {
     const node = scope.nodes.get(id);
     if (!node) return null;
-    const def = this.registry.get(node.type);
+    const def = defOf(this.registry, node);
     if (!def) {
       scope.errors.set(id, `Unknown node type "${node.type}" (missing plugin?)`);
       return null;
@@ -747,7 +1000,7 @@ export class Engine {
           lazyWired.add(edge.to.port);
           continue;
         }
-        const upDef = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '');
+        const upDef = defOf(this.registry, scope.nodes.get(edge.from.node));
         const fromType = upDef?.outputs[edge.from.port]?.type;
         const up = await this.evalNode(edge.from.node, scope, !!fromType && !isTextureSocket(fromType));
         if (up?.tv) {
@@ -861,11 +1114,14 @@ export class Engine {
         (selfBase ??= `${this.structSig(id, scope, new Set())}|u${ref.unit}|${scope.canvas.width}x${scope.canvas.height}|${scope.quality}|${scope.item}/${scope.itemCount}`);
       const ctx = {
         inputVaries: (input: string) => tvPorts.has(input),
-        previous: () => {
-          if (!def.usesPrevious || scope.frame < 1) return null;
+        previous: (opts?: { wrap?: boolean; carry?: boolean }) => {
+          if (!def.usesPrevious) return null;
           used.time = true;
-          const hit = this.cache.get(this.selfIndex.get(`${selfBaseOf()}@${scope.frame - 1}`) ?? '');
-          const v = hit ? Object.values(hit.outputs).find(isTextured) : null;
+          // frame 0 of a loop has a previous one only when the node asks (`wrap`): the last frame of the loop.
+          const before = scope.frame >= 1 ? scope.frame - 1 : opts?.wrap && project.loop && totalFrames > 1 ? totalFrames - 1 : -1;
+          if (before < 0) return null;
+          const hit = this.cache.get(this.selfIndex.get(`${selfBaseOf()}@${before}`) ?? '');
+          const v = hit ? (opts?.carry ? hit.outputs.carry : Object.entries(hit.outputs).find(([k, x]) => k !== 'carry' && isTextured(x))?.[1]) : null;
           if (!hit || !v || !isTextured(v) || v.kind !== 'image') return null;
           hit.lastUsed = this.tick;
           this.gpu.retain(v.texture);
@@ -880,7 +1136,8 @@ export class Engine {
         item: itemInfo,
         host: this.host,
         quality: scope.quality,
-        nodeId: id,
+        // Seed base: the id the node has in its own level, so grouping a node never changes its look (docs/ENGINE.md, "Group nodes").
+        nodeId: localId(id),
         proxy: scope.proxy,
         wants: (output: string) => !optional.includes(output) || wantedSet.has(output),
         unitFor: (w: number, h: number) => this.unitFor(scope.graph, w, h, scope.proxy),
@@ -901,7 +1158,7 @@ export class Engine {
           const base = at?.proxy === undefined ? scope : this.scopeAt(scope, at.proxy);
           const sub: Scope = { ...base, frame, seconds: frame / project.fps };
           if (frame !== scope.frame) this.widenAllowance(edge.from.node, Math.abs(scope.frame - frame) + 1);
-          const pulledType = this.registry.get(scope.nodes.get(edge.from.node)?.type ?? '')?.outputs[edge.from.port]?.type;
+          const pulledType = defOf(this.registry, scope.nodes.get(edge.from.node))?.outputs[edge.from.port]?.type;
           const up = await this.evalNode(edge.from.node, sub, !!pulledType && !isTextureSocket(pulledType));
           if (up?.tv) tvPorts.add(input);
           if (!timed && up?.tv) used.time = true;
@@ -985,7 +1242,7 @@ export class Engine {
     const p = scope.graph.project;
     // Media a node reads: a replaced file under the same id (different size or length) changes the signature too.
     let media = '';
-    const def = this.registry.get(node.type);
+    const def = defOf(this.registry, node);
     if (def) {
       for (const [key, pd] of Object.entries(def.params as Record<string, ParamDef>)) {
         const v = node.params[key];
@@ -1039,7 +1296,7 @@ export class Engine {
 
   private checkOutputs(def: AnyNodeDef, outputs: Record<string, Value | null>): void {
     for (const [name, v] of Object.entries(outputs)) {
-      const odef = def.outputs[name];
+      const odef = def.outputs[name] ?? (name === 'carry' && def.usesPrevious ? { type: 'image' as const } : undefined); // `carry`: see NodeDef.usesPrevious
       if (!odef) throw new Error(`render() returned unknown output "${name}"`);
       if (v === null || v === undefined) continue;
       const kind = typeof v === 'number' ? 'number' : Array.isArray(v) ? 'color' : (v as { kind: string }).kind;
@@ -1099,6 +1356,8 @@ export class Engine {
 
   /** Drop every cached result without touching the GPU: used after a device loss, when all textures are already invalid. */
   forgetAll(): void {
+    this.staticRoot = null;
+    this.staticNodes = new WeakMap();
     this.cache.clear();
     this.cacheBytes = 0;
     this.reads.clear();

@@ -24,7 +24,7 @@ export async function pickFromViewer(io: Io): Promise<RGB | null> {
     const label = document.createElement('div');
     label.style.cssText = 'position:fixed;display:none;z-index:2001;pointer-events:none;font:600 12px ui-monospace,Consolas,monospace;padding:2px 6px;background:#000;color:#fff;border:1px solid #fff';
     const hint = document.createElement('div');
-    hint.textContent = 'Click the viewer image to pick a colour. Esc cancels.';
+    hint.textContent = 'Click the viewer image to pick a color. Esc cancels.';
     hint.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:2001;padding:6px 12px;background:#17191d;color:#ecedf0;border:1px solid #3d424b;font:12px system-ui;pointer-events:none';
     document.body.append(shield, loupe, label, hint);
     const lctx = loupe.getContext('2d')!;

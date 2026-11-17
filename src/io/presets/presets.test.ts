@@ -14,7 +14,7 @@ function testSource(holder: { image: ImageValue | null }) {
     category: 'input',
     description: 'test',
     inputs: {},
-    outputs: { image: { type: 'image' } },
+    outputs: { image: { type: 'image' }, audio: { type: 'audio' } },
     params: { assets: { type: 'assets', default: [], accept: 'any' } },
     render: () => ({ image: holder.image }),
   });

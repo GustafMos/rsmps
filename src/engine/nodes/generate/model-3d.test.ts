@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { addNode, connect, createGraph } from '../../graph';
 import { cubeMesh, meshGlb, meshGltf, quadMesh, textBytes, toObjText, uvSphereMesh } from '../../lib/gen-model-testutil';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import type { Host, ImageValue } from '../../types';
 
 const files = new Map<string, ArrayBuffer>();
@@ -217,7 +217,7 @@ it('spin loops exactly (whole turns) and moves; still by default', async () => {
   files.set('m', meshGlb(cubeMesh(0.5, red)));
   files.set('m', meshGlb({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2], uint16: true, material: red }));
   const r = await t.loopCheck('model-3d', { ...BASE, backFaces: true, spinZ: 1, spinX: 2 });
-  expect(r.seam).toBeLessThan(0.05);
+  expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
   expect(r.motion).toBeGreaterThan(1);
   const still = await t.loopCheck('model-3d', { ...BASE, backFaces: true, rotY: 30 });
   expect(still.motion).toBe(0);

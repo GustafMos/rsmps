@@ -100,7 +100,9 @@ Exemplars to copy from (read the one closest to your node first):
    project duration) with whole-number `cycles` params: `sin(phase * TAU * cycles)`,
    `fract(phase * cycles)`, `loopNoise(p, phase, speed)`. Never animate from `ctx.time.seconds`
    or `frame` (only source/time nodes that read footage may use seconds). Read `ctx.time` only when
-   actually animating: reading it makes the node re-render every frame.
+   actually animating: reading it makes the node re-render every frame. With Loop on the user must never have to "do the math":
+   a rate that is not a whole number of cycles, a period that does not divide the loop, a sequence that does not come round
+   (palette length, hue step) is closed FOR them. See "Loop snapping" under Pending rules and `lib/loop-snap.ts`.
 6. **Do not implement masking or mix.** Set `maskable: true`.
 7. **No CPU pixel loops** unless there is no GPU formulation; then set `cpu: true`, use
    `ctx.gpu.read` / `ctx.gpu.upload`, and keep it to analysis on small images where possible.
@@ -136,8 +138,7 @@ it('vignette darkens corners, not the centre', async () => {
 
 Each node needs at least: (a) it does what it says on a small synthetic image (assert pixels),
 (b) alpha/transparent input survives where relevant, (c) for anything with a length: same result at
-2× resolution with `unit` 2 (see `kernel.test.ts`), (d) for anything animated: `t.loopCheck` gives
-`seam === 0` and `motion > 0`. Shader compile errors surface as test failures, so a passing test
+2× resolution with `unit` 2 (see `kernel.test.ts`), (d) for anything animated: `t.loopCheck` renders every frame of a loop and compares the step across the wrap (last frame to first) with the ordinary steps: `seam <= LOOP_SEAM_OK` and `motion > 0` (an `exact` option also reports `exactDiff`, 0 = periodic bit for bit), with values that are awkward (a rate of 0.37, a period that does not divide the length, a 5-colour palette at speed 2), and add the node to the table in `__tests__/loop-audit.test.ts`. Shader compile errors surface as test failures, so a passing test
 also proves the WGSL is valid.
 
 ## Time, batch, proxy
@@ -292,9 +293,16 @@ where cache nodes go to bake a whole group.
   define the result as a pure fold over a bounded window of input frames that depends only on the frame number, and set `usesPrevious: true`.
   `ctx.previous()` then returns this node's own first image output for frame - 1 when the engine still holds it (same node, params, upstream
   structure, size, quality, item), else null. Use it only where the fold satisfies `out[f] = step(in[f], out[f-1])` exactly, so cache and fold give
-  identical pixels (test it: play forward on one engine, compare with a cold engine per frame). Make the window restart on frame-number boundaries
-  (`start(f) = (floor(f / K) - 1) * K`), not sliding, or the identity breaks. Do not combine with `maskable` (the cached result is already mixed), and
-  skip `previous()` when any param socket varies with time (`ctx.inputVaries(param)`). Index: `Engine.selfIndex`, bounded to 512 entries.
+  identical pixels (test it: play forward on one engine, compare with a cold engine per frame). A window must not slide, and it must not RESTART
+  with a cold fold during playback (that is a periodic stutter: up to 2K + 1 passes once per K frames): keep TWO staggered windows instead (Feedback:
+  epochs of K frames; A = the fold from the start of the PREVIOUS epoch, the output, B = the fold from the start of the current epoch; at an epoch start
+  A continues from B's state and B starts over), so forward playback is a constant 2 passes per frame and a cold evaluation reproduces it bit for bit
+  (it folds A and B from their own starts, sharing every pulled frame). The second window travels in a hidden image the render returns under the reserved
+  name `carry` (not in `outputs`, never shown or wired; kept with the cache entry) and is read back with `ctx.previous({ carry: true })`.
+  `ctx.previous({ wrap: true })` makes frame 0 of a looping project see the LAST frame (default: frame 0 has none, other nodes rely on that); a node whose epoch
+  schedule is periodic in the loop length (the last epoch takes the remainder, `epochs = floor(N / K)`) then continues across the seam with no cold fold, and frame N is frame 0.
+  Do not combine with `maskable` (the cached result is already mixed), and
+  skip `previous()` when any param socket (or a wired Warp picture) varies with time (`ctx.inputVaries(param)`). Index: `Engine.selfIndex`, bounded to 512 entries.
 - **`ctx.inputVaries(input)`** says whether an input changes with time (`false` = a still: same picture every frame). Use it to skip pulls and
   not read `ctx.time` at all for static inputs, which keeps the node's own result static and cached. Valid after evaluation (normal inputs) or
   after the first `pull` (lazy inputs).
@@ -307,10 +315,46 @@ where cache nodes go to bake a whole group.
   reach it (the cell it falls in plus a small neighbourhood, composited back to front) instead of drawing every copy. The neighbourhood size and every other number are uniforms,
   never WGSL text, so cost does not grow with the copy count and dragging a slider compiles nothing. Where exact inversion is impossible the node says so (Array with per-copy
   steps is exact up to 25 copies per axis, local beyond). Shared maths lives in `lib/copy-wgsl.ts`.
-- **A loop test must look across the wrap.** The clock wraps (`phase` of the last frame + 1 is 0), so `t.loopCheck` returns `seam = 0` for anything. Use `seamRatio`
-  from `lib/copy-testutil.ts`: it renders every frame of a short loop and compares the step across the wrap with the ordinary steps.
+- **A loop test must look across the wrap.** The clock wraps (`phase` of the last frame + 1 is 0), so comparing frame 0 with "frame N" compares a frame with itself and proves
+  nothing (the old `loopCheck` did exactly that, so many "loops seamlessly" tests were vacuous). `t.loopCheck(type, params, inputs, opts)` in `testing.ts` is now THE loop test
+  (`seamRatio` in `lib/copy-testutil.ts` is the same call with the older argument order). It renders frames 0..N-1 of a loop of N frames with Loop on and returns
+  `wrap` (frame N-1 -> 0), the ordinary steps (`typical` = median, `max`, `mean`, `steps`), `seam = wrap / max(largest ordinary step, floor)` (a loop is `seam <= LOOP_SEAM_OK`),
+  `motion` (largest difference between frame 0 and any other frame: a still picture must not pass), `worst` (the worst frame pair, `from -> to`, flagged when it is the wrap) and a
+  one-line `text` for assertion messages. Pictures, numbers and vectors are measured (`port` picks the output). `exact: true` also evaluates frame N and beyond and reports
+  `exactDiff` (0 = periodic bit for bit). Inputs may be `{ node: 'id', params }` (a registered node, e.g. a moving test source) as well as still pictures. A node that cuts by
+  design (key frames, interleaved sources, a field order) is asserted with `exact` only. `__tests__/loop-audit.test.ts` is the table of every animated node with awkward values
+  at 24, 37 and 96 frames, and writes the inventory `loop-audit.tsv` to the OS temp dir; `AUDIT_LOOP_OFF=1` runs the same table with Loop off to show what snapping fixes.
+  `__tests__/loop-off.test.ts` holds checksums recorded before the snapping work: with Loop off the same params give the same pixels.
 - **Whole levels / cells / spacings per loop.** Infinite Zoom (levels), Array (cells), 3D Array (spacings) take integer `cycles` params. A per-copy colour that travels with the copy
-  only loops when its period divides the travel; offer a "colour follows the depth on screen" option so the loop can never break.
+  only loops when its period divides the travel: with Loop on this is now closed for the user (see "Loop snapping"); "colour follows the depth on screen" still always loops.
+
+- **Loop snapping** (`lib/loop-snap.ts`; pure, unit-tested; every node uses it instead of ad-hoc rounding). One-click looping: with the project's Loop switch on, an animated node repeats
+  exactly over the project length whatever numbers the user typed. With Loop off every function returns its input and nothing changes (there is a checksum test). The rules:
+  1. **Rates per loop**: rounded to the nearest whole number of cycles (half away from zero), never to 0 unless the user's value is 0 (0 < |v| < 1 goes to +-1): `wholeCycles(rate, loop)`.
+     A socket can feed a fraction into an integer param; `wholeCycles` makes that safe. **Rates per second** (Subtitles motion Hz, Retime stop-motion fps): `cyclesPerLoop(rate, loopSeconds)` /
+     `hzForLoop`, the nearest whole number of cycles that fits the loop, same minimum.
+  2. **Periods in frames** ("every N frames", hold, key frame, boil poses): `epochOf(frame, frames, period)` shortens the LAST epoch so the sequence restarts exactly at frame 0, or
+     `snapPeriod(frames, period)` takes the nearest divisor of the frame count. A hash per frame uses the frame index modulo the loop (`loopFrame`, `loopFrameOf`). A cycle of poses is
+     `cyclePose(epoch, epochs, poses)`: any pose count closes over any length (a prime loop length no longer collapses the boil to one pose).
+  3. **Compound things close TOGETHER.** A spatial or temporal cycle with a discrete sequence riding on it (palette length x levels travelled, hue step x travel, copy colour steps x scroll,
+     brick offset x scroll, mirror flips x scroll) must have the combined state at frame N equal frame 0. In order of preference: (a) `closeSequence` rounds the travel to a multiple of the
+     sequence (within +-50% of what was asked), (b) the sequence DRIFTS by the remainder over the loop (`closingDrift`, `closingTurns`: a colour index `k + drift * phase`), (c) the sequence is
+     STRETCHED so its period divides the travel (`stretchedStep`, `stretchedTurns`). Things that are picked, not blended (jitter, sprite sheet cells, time slices) cannot drift: the scroll is
+     rounded to whole tiles with `snapMultiple`. Per node: **Infinite Zoom** has `colorLoop`: Drift (default; `zoomLoop`), Snap travel, Stretch palette, for the palette AND the hue step;
+     the layer range also follows the travel (a rising travel and the deep end of a falling one are drawn) so any whole travel closes. **Array**: colour steps ride on a copy index that moves
+     toward the index of the cell the copy ends the loop in; a finite scrolled Grid wraps inside its own box; an odd vertical scroll with a brick offset slides alternate rows sideways; an odd
+     horizontal scroll with mirroring turns the copies over (`arrayLoop`). **3D Array**: the card colour index moves toward the slot index (`array3dLoop`). **Kaleidoscope** log-polar: Spiral twist
+     x Fall gets a slow extra turn that makes it a whole number of arms; a fractional mirror Scroll is rounded (`kaleidoscopeLoop`). **Retime**: speed is a whole number (even for ping-pong),
+     stop-motion fps a whole number of held frames per loop (`retimeLoop`). **Subtitles**: wave / float Hz (`subtitleMotionHz`). **Particles**: a layer's grid drifts by whole cells per loop, so the random properties of a particle are hashed from its cell MODULO that drift (`driftKey`: the lattice Z^2 / <n> is Z x Z_g), otherwise the end of the loop is a different scatter from the start (found by the new loop test; Loop off hashes the cell itself as before).
+  4. **Nodes that pull other times** (Echo, Feedback, Frame Blend, Slit Scan, Time Displace, Motion Smear, Time Offset, Loop, Retime, Rgb Delay, Feedback Trail, Datamosh, Array time slices) wrap the
+     pulled time modulo the loop when Loop is on (`wrapSeconds`, `pullFrames`, `pullSliceFrames`). Phase-driven noise is periodic by construction (`loopNoise` walks a circle, speed is only its radius).
+  5. **Discontinuous by design** (Frame Interleave, Motion Smear key frames, Digital Glitch events, Media Timeline edits, interlace field order): the SEQUENCE still closes (frames are wrapped
+     before the pattern is read, epochs restart at frame 0) even though the content cuts; an odd loop length cannot alternate fields perfectly and shows one held field at the seam.
+  6. **Visibility.** When snapping changes what the user typed the node's `summary(params, wired, clock)` says so briefly ("speed 2 → 3 to loop", "colors drift 1/loop to close"). `clock` is
+     `{ loop, frames, fps }` (`LoopClockInfo`), passed by the node view; a caller without it gets the plain summary. The notes come from the same pure function the render uses.
+  7. **Cost.** Snapping is arithmetic on uniforms: no pass, no texture, no new shader per value (test: pipelines created stay 0 while Loop and numbers change).
+  Not auto-looped, listed in the audit test: live input (phone motion / camera, webcam, URL streams, audio / MIDI bridges) and recorded takes (they have their own loop blend), footage readers
+  (Media In, Sprite Sheet In: their own Loop option), analysis frozen at one frame, a Cache serving a bake, Custom Shader (the user's WGSL).
 - **A node that draws geometry itself** (3D Array) creates its pipeline once per device (WeakMap, like `model-render.ts`), draws with `instance_index` and no instance buffer, uses
   the pooled scratch buffers / textures, caches its bind group per (uniform buffer, texture), and refuses counts above a stated cap with a readable error.
 - **Per-copy time offset** needs no lazy input: `ctx.pull('image', { seconds })` works on a normal required input (as in Frame Echo). Bind a fixed number of slices (8) and pull each
@@ -348,6 +392,7 @@ where cache nodes go to bake a whole group.
   SDF 3D. There is deliberately no standalone Displace 3D node: nodes pass pictures and cameras, not meshes, so there is nothing for it to deform. Amounts are scene units;
   animated parts take whole `cycles`. Raymarched members shorten the march step by `deformStepScale`, because a deformed distance is no longer exact.
 - **A value type that carries pictures (`material`)**: `MaterialValue` is plain numbers plus optional `ImageValue`s. The kernel identifies it in cache keys by the key of the node
+- **One BRDF, many users (`lib/gen-material.ts`).** `matShade` is generated once per material STRUCTURE and called by every user: the raymarched nodes (`materialWgsl`), the rasterised ones (custom models in `model-render.ts`, 3D Array cards: `materialRasterWgsl` / `materialRasterData` / `materialRasterLayout` / `materialRasterGroup`, one pipeline pair per structure, every number in a 12-vec4 uniform buffer) and flat pictures (Material 2D: `materialWgsl(m, { lightArgs: true })`, so a second light is one more call, not a second shader). Rasterised users add `{ mesh: true }` for the model's own UVs (`gMeshUv`, tangent frame from screen derivatives). A new user supplies its own surface normal, view ray and object-space position; it never copies the lighting. The height fields of flat pictures (bevel from a jump-flood distance field, brightness, a height picture, a wired normal map) live in `lib/gen-surface2d.ts` and are shared by Material 2D and Normal Map; normal maps are OpenGL (green up) everywhere unless a node says otherwise.
   that made it (never by stringifying it) and keeps its pictures alive (`retain`/`release`) for as long as that node's cache entry lives, exactly like an image output.
 - **Small signed distance fields of a picture on the GPU** (`lib/gen-sdf2d.ts`): jump flooding on a grid of at most 512 cells (about 2 + log2(grid) tiny passes, recycled as they go),
   r = signed distance in grid cells (negative inside). A blocky variant reads the occupancy grid for exact staircase edges (pixel art), a smooth variant blurs the lattice out of
@@ -422,5 +467,69 @@ where cache nodes go to bake a whole group.
   along the capture ray in scene units, a = hit mask; wire the SAME 3D Camera into Capture camera). Without a Depth input the depth is a labelled guess (flat card, brightness, centre bulge).
 
 - **Depth conventions live in `lib/depth.ts`.** Picture depth (a depth map): r = g = b = d in 0..1, WHITE = NEAR, alpha 1; read by Picture to Splats (default "White = near"), Depth Slice, Lens Blur (focus depth on the same scale) and Image to 3D relief, written by Depth from Picture (`depth-estimate`, rgba16float). Scene depth (the 3D family's `depth` output, previous rule): distance in scene units + hit alpha. `pictureToScene` / `sceneToPicture` and the WGSL `DEPTH_WGSL` convert with a near and a far distance (picture 1 = near units, picture 0 = far units); the Depth Convert node (`depth-convert`) exposes them. A new depth producer or consumer uses these, it does not invent a third convention.
+- **AI Depth = a process node with an optional model, one seam, 16 bit.** `depth-ai` (src/engine/nodes/layers) is a process node (stand-in `preview` = the shared Depth from Picture estimate in `lib/depth-heuristic.ts`, `required: 'once-run'`, never `auto`). The engine has no model and no network: the job asks `getDepthAiService()` (`lib/depth-ai-bridge.ts`), which the app installs at start (`src/io/depth-ai.ts`: one onnxruntime-web session, WebGPU with a CPU fallback, serialised, released when idle or on device loss) and the command line and tests do not (a test injects a fake). The model file lives in `src/io/models.ts` (catalogue `src/io/model-catalogue.ts`: pinned URL, size, SHA-256, licence; IndexedDB; downloaded only by a user's button). The runtime files are copied to `ort/` by `vite-plugins/ort-files.ts` and imported by URL on first use, so they cost nothing until then. The model's output is relative, so the job aligns each frame to the previous one by robust least squares on the unchanged pixels and maps the clip with one range (`lib/depth-ai-math.ts`); the result is ONE `u16` array (`store.array`: 16 bit, because the sequence store encodes 8-bit pictures) at the model's output size, enlarged on the GPU when shown. Display params (levels, invert) are outside the process signature.
 - **Depth from Picture = fixed-range cues, one frozen measurement.** Every cue maps a FIXED range to 0..1 (nothing is normalised by the frame's min / max), so video cannot flicker. The only per-picture analyses are memoised pure functions keyed by (node id, `inputSignature`, moment, settings), like automatic white balance: the subject colour models (`lib/mask-subject-gpu.ts`: `analyseSubject` reads one 128 px thumbnail, `subjectScore` is pure GPU and is the same code Subject Mask runs) and, with *Stabilize*, the depth range. A still picture is analysed once and cached by the engine; a moving one is analysed at *Analyze at* and scored on the GPU every frame, with no readback in the per-frame path (a test counts `gpu.read` calls).
 - **Edge-aware work at reduced size.** The depth is computed at a quarter / half / full of the picture (`quality`), smoothed with a separable cross-bilateral filter guided by the work-size picture compared in a square-root (perceptual) space so dark edges count, and enlarged with a 3x3 joint-bilateral upsample against the full-size picture. Feature averages (`blurDown`) are made at a reduced size in rgba16float (an rgba8 intermediate would quantise small ratios). A node whose inputs share a name with a param (here `subject`) must rename the input: the registry refuses a name that is both.
+
+- **Game assets (sprite sheets, tiles, shared palettes).** Sprite Sheet In is a footage-like source: it slices a sheet once (the analysis is memoised by sheet identity and slicing settings, never per frame; wired sheets are keyed by `ctx.inputSignature`) and reads the clock only when it has more than one cell to play (`as: items` reads the batch item instead and stays static). Pure slicing, ordering, timeline and metadata reading live in `lib/sprite-sheet.ts`; sheet assembly (layout, trim, shelf packing, extrude, power of two, pages, bleed) in `io/spritesheet-pack.ts`, the metadata writers in `io/spritesheet-meta.ts`, the "For" presets in `io/spritesheet-presets.ts`, the Output params in `io/spritesheet-params.ts` (read by the app exporter and the CLI alike), and the straight-alpha PNG writer (the canvas path is premultiplied and loses the color under alpha 0) in `io/png-encode.ts`. A RENDER cannot read other batch items, but a process job can: `ProcessCtx.pull(input, { item })` evaluates the wired chain for any item, so a palette over a whole set is a process job (`batch-palette`: its own file list, sampled clip frames, and / or "Every batch item" = the wired chain for every item, effects included; at most 1200 pictures). A render-time `ctx.pull({ item })` is deliberately NOT offered: the node cache key would have to contain every item. `batchCount` is the largest of every `assets` list and every `NodeDef.batchSize(params)` (pure, params only, null = none): Sprite Sheet In "Batch items" sets the batch size itself (grid columns x rows or the metadata's frames, after the Animation / Frames / Order selection, times the number of sheet files; item = sheet x cells + cell). Grids by cell size and gap detection need the picture, which a params-only function cannot read: the visible number `Items per sheet` carries the count there (0 = unknown, the batch then comes from the file lists, the `Count` output says how many cells were found). `itemDependent` also counts a node whose `batchSize` is above 1. Pixel look nodes (Pixel Outline, Pixel Cleanup, Sprite Shadow, Palette Lock, Make Seamless) wrap their work in `withArtGrid` and use integer texel maths (`textureLoad`), so results are exact and cell-aligned. Number outputs that need a readback (Palette Lock `offPalette`, `colors`) are `optionalOutputs` read from a point-sampled copy of at most 128 pixels, or exactly in report mode, and only when wired. Autotile tables and the WGSL that composes a tile from five pieces are in `lib/autotile.ts` (Autotile and Tileset Map share them).
+
+- **Group nodes (macros) are flattened, never evaluated** (`engine/group.ts`). A group is a node of type `group` whose params hold a sub-graph (`GroupData`: `kind` 'group' | 'repeat',
+  `nodes`, `edges`, `inputs` / `outputs` (`GroupPort`: id, name, socket type), `exposed`, title / color / icon / description). Inner wires reach the group's ports through two pseudo nodes:
+  a wire FROM `@in` port X is "what arrives on input X", a wire TO `@out` port Y is "what output Y gives". Keeping them as ordinary wires keeps the order of `multi` inputs exact.
+  `flattenGraph(graph, { opaque, counts })` (pure, memoised per document object and options) turns the document into a plain graph: inner ids become PATHS (`groupId/innerId`; nested
+  `outer/inner/node`), exposed values are written into the inner params, a wire into an exposed socket is re-targeted to the inner param, a bypassed group passes its first input of each
+  output's type through. `Engine.evaluate` flattens a document that has a group at its top level (one check per top-level node otherwise, no allocation) and resolves `EvalRequest.node`
+  through it, so a group id evaluates the group's first (or the requested) output and a path id evaluates an inner node. Consequences, all tested in `__tests__/groups.test.ts`: a group boundary
+  adds no node, no pass, no copy and no cache miss (same renders as the flat graph; cache keys never contain node ids); `EvalResult.timings` and `errors` use flat ids (paths), and an error
+  inside is ALSO reported on the group and every group around it (`Inside: ...`); `ctx.nodeId` is the node's LOCAL id (the last path segment), so grouping never changes a seed and so a look
+  (two copies of one group share seeds); masks, the art grid, lazy inputs and `ctx.pull` options work unchanged because they work on the flat graph. Nesting is capped at `GROUP_MAX_DEPTH` (8);
+  deeper groups are kept as one node that says why, and a wiring loop between groups (only possible in a damaged file) is reported, not followed. Everything that takes a node id in the engine
+  and the process layer (`processStatus`, `processSignature`, `signatureOf`, `ProcessRuntime.run`, `withProcessResult`) accepts a path. A group's ports and params come from its own params:
+  use `defOf(registry, node)` instead of `registry.get(node.type)` wherever a node's sockets matter (the registered `group` definition is only a placeholder). Exposed params carry a JSON
+  snapshot of the inner param's definition, so a group's definition needs no registry and a saved group describes itself. Audio and MIDI nodes cannot go in a group (the stream graph is
+  compiled from the top level; `groupProblem` refuses them, and Output nodes, with a message).
+- **Repeat groups** (`kind: 'repeat'`) are unrolled by the flattening: pass i of N gets ids `repeatId/~i/innerId`. The carried input (`GroupPort.loop`, else the first image input) of pass i > 0
+  is the first image output of pass i - 1 (`mode: 'chain'`, out = f(f(f(x)))); in `mode: 'accumulate'` every pass gets the ORIGINAL input and the passes are merged in order by real Merge
+  nodes (`repeatId/~acc<i>`, blend = the group's `blend`, opacity = `opacity`, a wired opacity reaches every Merge), first pass at the bottom. An `iteration` node inside gets its pass written
+  into its hidden `iter` param (outputs index, fraction 0..1, count), so every pass has its own cache entries and an edit that leaves early passes unchanged re-renders only the later ones;
+  static inputs stay cached. Cost is exactly N x the inside (no hidden passes). `count` (default 4, softMax 16, hard cap `REPEAT_MAX` 64) may be wired: the engine evaluates the count source
+  first, then unrolls that many passes (a wired value above the cap is clamped and reported on the group); an animated count unrolls per frame (the flattening is memoised per count). The plain
+  path `repeatId/innerId` resolves to the last pass (viewer, errors). Known limit: a process node downstream of a Repeat whose count is wired compares its signature against the unexpanded
+  Repeat node (it is stable, but not the same string as with a fixed count).
+- **Bake a group (cache region).** A group's process (`groupDefOf(...).process`, title Bake, stand-in `bypass`, `required: 'never'`) renders every frame of its OUTPUTS live
+  (`ProcessCtx.pullOutput`, which evaluates the node's own output with its result handle cleared) and stores pictures and masks as sequences (`out:<port>`, lossless) and numbers / colours as one
+  JSON array. Its signature is `Engine.groupSignature`: the structure of what feeds each output in the fully expanded document (inner nodes and params, exposed values, outer inputs, project,
+  frame size), so any change inside or before it makes it stale and baking another group before it does not. Done (and made for this frame size and batch item), the group is kept as ONE node
+  by the flattening (`opaque`) and serves the store: nothing inside or before it is evaluated. Stale, missing or not baked, it is evaluated live; it never re-bakes by itself. A group inside a
+  Repeat pass is never served from a bake. "Bake selection" (Ctrl+Shift+B) groups the selection and bakes the group; a selected group or Cache / Bake node is baked as it is, and Cache / Bake
+  nodes keep working exactly as before.
+- **A copy never shares a stored result.** Duplicate, paste, a saved node and an imported file strip the result handle of the node and of everything inside it (`withoutProcessResults`): the
+  stored data is owned by the original node (`bake:<project>:<node id or path>`). Stored data no node references any more is removed when a project is LOADED
+  (`processes.prune(id, graph, { unreferenced: true })`), never right after a delete, so undo can bring a node back with its result.
+- **Saved group nodes are data only** (`io/node-presets.ts`, `io.nodePresets`): a `.rsmps-node.json` file is `{ schema: 'rsmps/node', version: 1, name, category, keywords, description, group }`,
+  at most 2 MB, every node type inside must exist, nesting within the cap; nothing in it is run as code. Adding one makes an editable copy, never a live link.
+
+- **External programs are a Host service, never engine code** (Splat from Video; `Host.splatTrain`, `SplatTrainHost` in types.ts). A process that needs a program on the user's
+  computer asks the host for a narrow, typed service (here: `status()` and `train({ settings, frameCount, frame(i), signal, onProgress })`); the desktop app implements it over
+  `/__rsmps/splat-train` (client `io/splat-train.ts`, main-process module `desktop/addons/splat-train.mjs`), the web build and the CLI leave it undefined and the node says so
+  (`requires: ['desktop']`, the new `'desktop'` capability). Settings are fixed choices; the main process builds every argument array itself, never runs a shell, keeps every path
+  inside the job folder, kills the whole process tree on cancel and deletes the work folder when the result was read. The add-ons the service needs are found through the add-on
+  manager only (pinned, hash-checked, user-installed or user-located); a node never downloads anything.
+- **Reconstructed scenes are stored in the tool's frame.** COLMAP's world is right-handed with no gravity; this tool's world is y-up and the mirror convention (`cameraBasis`:
+  right x up = forward). `lib/colmap.ts` maps one onto the other with M = Ry(heading) F Q (Q: estimated up -> +y, from the cameras' right axes; F = diag(1, 1, -1); det M = -1),
+  moves the splats with it (`transformCloud`: covariances through M R with one axis flipped, degree-1 SH as a direction) and writes them with `comment up +y`. The solved cameras
+  become a camera path in the same frame (`PathKey`: position + the proper rotation [right, up, forward]); a node's Camera output carries them through the node's own object
+  transform (`cameraThroughXform` in `lib/splat-scene.ts`), so wiring it back into the node's Camera input shows the original shot. Tested against COLMAP's recorded solve of a
+  scene with known cameras (`colmap.test.ts`: no mirror, up within 0.5 degrees, axes within 0.5 degrees).
+- **An `assets` param with `batch: false`** is one set used by the node (Splat from Video's photos), not one file per batch item: `batchCount` and `itemDependent` skip it.
+- **Splat look defaults follow standard trainers.** "Fade tiny splats" (Mip-Splatting opacity compensation) is OFF by default in Gaussian Splat and Splat from Video: Brush and the
+  original 3DGS train without it, and turning it on for their files cost 2.6 dB PSNR on held-out views. Trainers are run with spherical harmonics degree 1 because the renderer
+  draws degree 1 only (degree 3 trained and then cut to 1 measured 0.7 dB worse).
+- **Per-node structural fast path.** `Engine.staticNodes` (per document OBJECT, a WeakMap) remembers, after every error-free evaluation, which node results were static (no clock, no process state)
+  by (node, item, quality, canvas, proxy, lite) -> cache key. A static node found there whose entry is still cached is returned without walking, hashing or looking up anything upstream of it,
+  so an animated frame costs O(time-varying nodes + their direct static inputs) instead of O(every upstream node) (500 nodes, 20 animated: 7.2 -> about 4 ms per frame, most of the rest is the animated passes).
+  Not used with process nodes in the document, for nodes with optional outputs, or for results that are not cached (bypass, empty); `clear()` and `forgetAll()` (assets changed, device lost) drop it with the cache;
+  an edit is a new document object and starts empty. Test: `__tests__/static-walk.test.ts`.
+- **Process panels work on full path ids** (`ui/store/processes.ts`): `runProcess / cancelProcess / clearProcess` take the id the scheduler and the engine use (`group/inner`); a component holding a node of the SHOWN level converts it with
+  `ed.fullId(levelId)`. `processSelection` maps the shown level's selection to paths and orders them on the flattened document; results are written with `withProcessResult` (one undo step), auto processes and the
+  stash for other projects look nodes up by path, and job labels read "Group name › Node" (`processLabel`).

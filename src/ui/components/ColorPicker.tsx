@@ -267,8 +267,8 @@ export function ColorPicker({ value, onChange, alpha, extra, onCommit, onCancel 
         </div>
       )}
       <div className="rs-cp__row">
-        <div className="rs-cp__ba" title="Click the left half to revert to the original colour">
-          <button className="rs-cp__before rs-swatch" style={{ ['--c' as string]: css(before.current, before.current[3]) }} onClick={() => { const b = before.current; ed.beginHold(); setRgb([b[0], b[1], b[2]], b[3]); ed.endHold(); }} aria-label="Original colour (click to revert)" />
+        <div className="rs-cp__ba" title="Click the left half to revert to the original color">
+          <button className="rs-cp__before rs-swatch" style={{ ['--c' as string]: css(before.current, before.current[3]) }} onClick={() => { const b = before.current; ed.beginHold(); setRgb([b[0], b[1], b[2]], b[3]); ed.endHold(); }} aria-label="Original color (click to revert)" />
           <span className="rs-cp__after rs-swatch" style={{ ['--c' as string]: css(rgb, a) }} />
         </div>
         <div className="rs-cp__modes" role="tablist">
@@ -276,8 +276,8 @@ export function ColorPicker({ value, onChange, alpha, extra, onCommit, onCancel 
             <button key={m} className={m === mode ? 'is-on' : ''} role="tab" aria-selected={m === mode} onClick={() => setMode(m)}>{m}</button>
           ))}
         </div>
-        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={eyedrop} title="Pick a colour from the viewer image"><Icon name="eyedrop" /></button>
-        {window.EyeDropper && <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={nativeDrop} title="Pick a colour from anywhere on screen"><Icon name="focus" /></button>}
+        <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={eyedrop} title="Pick a color from the viewer image"><Icon name="eyedrop" /></button>
+        {window.EyeDropper && <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={nativeDrop} title="Pick a color from anywhere on screen"><Icon name="focus" /></button>}
       </div>
 
       {mode === 'HEX' && (
@@ -285,7 +285,7 @@ export function ColorPicker({ value, onChange, alpha, extra, onCommit, onCancel 
           className="rs-input rs-mono rs-cp__hex"
           value={hexDraft ?? hexShown}
           spellCheck={false}
-          aria-label="Hex colour"
+          aria-label="Hex color"
           onFocus={(e) => e.currentTarget.select()}
           onChange={(e) => {
             setHexDraft(e.target.value);
@@ -372,7 +372,7 @@ export function ColorPopover({ anchor, value, onChange, onClose, alpha = true, e
   }, [onChange, onClose]);
 
   return (
-    <FloatingPanel id="colour-picker" title="Colour" onClose={commit} onEscape={cancel} anchor={anchor} session compact defaultSize={{ w: 240, h: 372 }} minSize={{ w: 240, h: 100 }}>
+    <FloatingPanel id="colour-picker" title="Color" onClose={commit} onEscape={cancel} anchor={anchor} session compact defaultSize={{ w: 240, h: 372 }} minSize={{ w: 240, h: 100 }}>
       <ColorPicker value={value} onChange={wrapped} alpha={alpha} extra={extra} onCommit={commit} onCancel={cancel} />
     </FloatingPanel>
   );

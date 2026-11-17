@@ -7,12 +7,12 @@ export default defineNode({
   category: 'mask',
   description:
     'Selects pixels by explicit hue, saturation and lightness ranges with soft edges, like the HSL qualifier of a grading app. The matte comes out as a Mask: wire it into any node\'s Mask input to limit it to "the blue of the sea". Turn on the preview to see what is selected.',
-  keywords: ['qualifier', 'key', 'colour key', 'color key', 'hsl', 'hue', 'select', 'matte', 'isolate', 'secondary', 'grade', 'chroma key', 'pick colour', 'range'],
+  keywords: ['qualifier', 'key', 'color key', 'color key', 'hsl', 'hue', 'select', 'matte', 'isolate', 'secondary', 'grade', 'chroma key', 'pick color', 'range'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { mask: { type: 'mask', label: 'Matte' }, preview: { type: 'image', label: 'Preview' } },
   params: {
     hueCenter: { type: 'number', default: 220, min: 0, max: 360, step: 1, unit: 'deg', label: 'Hue', group: 'Hue', hint: 'HSL hue of the encoded picture: 0 red, 60 yellow, 120 green, 180 cyan, 240 blue, 300 magenta.' },
-    hueWidth: { type: 'number', default: 30, min: 0, max: 180, step: 0.5, unit: 'deg', label: 'Hue width', group: 'Hue', hint: 'Half-width of the fully selected hue band. 180 turns the hue test off. Greys (no hue) are never selected while the test is on.' },
+    hueWidth: { type: 'number', default: 30, min: 0, max: 180, step: 0.5, unit: 'deg', label: 'Hue width', group: 'Hue', hint: 'Half-width of the fully selected hue band. 180 turns the hue test off. Grays (no hue) are never selected while the test is on.' },
     hueSoft: { type: 'number', default: 15, min: 0, max: 90, step: 0.5, unit: 'deg', label: 'Hue softness', group: 'Hue' },
     satLow: { type: 'number', default: 0, min: 0, max: 1, step: 0.005, label: 'Saturation low', group: 'Saturation' },
     satHigh: { type: 'number', default: 1, min: 0, max: 1, step: 0.005, label: 'Saturation high', group: 'Saturation' },

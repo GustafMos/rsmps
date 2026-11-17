@@ -6,7 +6,7 @@ export default defineNode({
   id: 'mosaic',
   title: 'Mosaic',
   category: 'pixel',
-  description: 'Paints flat blocks on the image and keeps its size and resolution (no art grid; use Pixelate for a real low-resolution pixel-art image). Each block becomes one flat colour.',
+  description: 'Paints flat blocks on the image and keeps its size and resolution (no art grid; use Pixelate for a real low-resolution pixel-art image). Each block becomes one flat color.',
   keywords: ['pixelate', 'blocks', 'tiles', 'censor'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

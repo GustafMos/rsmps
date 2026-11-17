@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import { resolutionDiff } from '../../lib/fx-testutil';
 
 const ramp = (w: number) => (x: number): [number, number, number, number] => {
@@ -79,10 +79,10 @@ describe('contour-lines', () => {
     const t = await harness();
     const src = t.fromFn(64, 16, ramp(64));
     const r = await t.loopCheck('contour-lines', { ...base, count: 4, cycles: 1 }, { image: src });
-    expect(r.seam).toBeLessThan(0.01);
+    expect(r.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(r.motion).toBeGreaterThan(1);
     const w = await t.loopCheck('contour-lines', { ...base, count: 4, wobble: 8, wobbleEvolution: 2 }, { image: src });
-    expect(w.seam).toBeLessThan(0.01);
+    expect(w.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(w.motion).toBeGreaterThan(0.5);
   });
 

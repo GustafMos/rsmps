@@ -6,6 +6,7 @@
  */
 import type { Registry } from '../engine/define';
 import { upstream } from '../engine/graph';
+import { groupData, GROUP_MAX_DEPTH, GROUP_TYPE, PATH_SEP, updateNodeAtPath } from '../engine/group';
 import type { GraphDoc } from '../engine/types';
 
 export const LIVE_TICK_PARAM = 'liveTick';
@@ -13,15 +14,21 @@ export const LIVE_TICK_PARAM = 'liveTick';
 /** Ids of the nodes in `graph` whose type declares the live tick param. */
 export function liveNodeIds(graph: GraphDoc, registry: Registry): Set<string> {
   const ids = new Set<string>();
-  for (const n of graph.nodes) {
-    if (registry.get(n.type)?.params[LIVE_TICK_PARAM]) ids.add(n.id);
-  }
+  // live nodes inside groups count too (by path: group/inner)
+  const walk = (nodes: GraphDoc['nodes'], prefix: string, depth: number) => {
+    for (const n of nodes) {
+      if (registry.get(n.type)?.params[LIVE_TICK_PARAM]) ids.add(prefix + n.id);
+      if (n.type === GROUP_TYPE && depth < GROUP_MAX_DEPTH) walk(groupData(n).nodes, prefix + n.id + PATH_SEP, depth + 1);
+    }
+  };
+  walk(graph.nodes, '', 0);
   return ids;
 }
 
 /** True when a live node feeds `nodeId` (or is it). */
 export function feedsFromLive(graph: GraphDoc, nodeId: string | null, live: Set<string>): boolean {
   if (!nodeId || live.size === 0) return false;
+  for (const id of live) if (id.includes(PATH_SEP)) return true; // inside a group: assume it feeds what is shown
   for (const id of upstream(graph, nodeId)) if (live.has(id)) return true;
   return false;
 }
@@ -29,5 +36,7 @@ export function feedsFromLive(graph: GraphDoc, nodeId: string | null, live: Set<
 /** Copy of the graph where every live node carries `tick`. Other nodes keep their identity. */
 export function stampLive(graph: GraphDoc, live: Set<string>, tick: number): GraphDoc {
   if (live.size === 0) return graph;
-  return { ...graph, nodes: graph.nodes.map((n) => (live.has(n.id) ? { ...n, params: { ...n.params, [LIVE_TICK_PARAM]: String(tick) } } : n)) };
+  let g: GraphDoc = { ...graph, nodes: graph.nodes.map((n) => (live.has(n.id) ? { ...n, params: { ...n.params, [LIVE_TICK_PARAM]: String(tick) } } : n)) };
+  for (const id of live) if (id.includes(PATH_SEP)) g = updateNodeAtPath(g, id, (n) => ({ ...n, params: { ...n.params, [LIVE_TICK_PARAM]: String(tick) } }));
+  return g;
 }

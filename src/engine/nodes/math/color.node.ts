@@ -4,7 +4,7 @@ export default defineNode({
   id: 'color',
   title: 'Color',
   category: 'math',
-  description: 'A single colour you can wire into any colour setting.',
+  description: 'A single color you can wire into any color setting.',
   keywords: ['constant', 'swatch', 'colour', 'rgb'],
   inputs: {},
   outputs: { color: { type: 'color', label: 'Color' } },

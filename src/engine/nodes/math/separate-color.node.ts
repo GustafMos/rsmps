@@ -4,7 +4,7 @@ export default defineNode({
   id: 'separate-color',
   title: 'Separate Color',
   category: 'math',
-  description: 'Split a colour into red, green, blue and alpha numbers (0..1).',
+  description: 'Split a color into red, green, blue and alpha numbers (0..1).',
   keywords: ['rgb', 'split', 'channels', 'break', 'extract'],
   inputs: { color: { type: 'color', required: true, label: 'Color' } },
   outputs: {

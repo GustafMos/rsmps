@@ -1,7 +1,8 @@
 // Bundles the desktop main process's helper modules with esbuild, so the packaged app needs no node_modules and the shared
 // logic exists once:
 //   desktop/build/phone-server.mjs  desktop/phone/ + vite-plugins/phone-session.ts + ws + selfsigned
-//   desktop/build/addons.mjs        desktop/addons/ + src/cli/encode.ts (codec argument sets, VideoWriter) + fflate
+//   desktop/build/addons.mjs        desktop/addons/ (manager, FFmpeg export, splat-train pipeline) + src/cli/encode.ts (codec argument sets,
+//                                   VideoWriter) + src/engine/lib/colmap.ts (COLMAP model reader) + fflate
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';

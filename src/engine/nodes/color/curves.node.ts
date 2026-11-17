@@ -7,15 +7,15 @@ import type { CurveValue } from '../../types';
 const flat = (): CurveValue => ({ keys: [{ t: 0, v: 0.5, interp: 'linear' }, { t: 0.999, v: 0.5, interp: 'linear' }] });
 const flatLoop = (): CurveValue => ({ keys: [{ t: 0, v: 0.5, interp: 'smooth' }] });
 
-const HUE_HINT = 'The horizontal axis is the colour wheel (0 = red, 1/6 yellow, 1/3 green, 1/2 cyan, 2/3 blue, 5/6 magenta) and wraps around: red is both ends. Vertical: 0.5 = no change. ';
+const HUE_HINT = 'The horizontal axis is the color wheel (0 = red, 1/6 yellow, 1/3 green, 1/2 cyan, 2/3 blue, 5/6 magenta) and wraps around: red is both ends. Vertical: 0.5 = no change. ';
 
 export default defineNode({
   id: 'curves',
   title: 'Curves',
   category: 'color',
   description:
-    'Master, red, green and blue curves, plus the colourist curves Hue vs Hue, Hue vs Sat, Hue vs Lum, Lum vs Sat and Sat vs Sat, all in one pass from small lookup textures.',
-  keywords: ['grade', 'curves', 'rgb curves', 'master', 'tone curve', 'hue vs hue', 'hue vs sat', 'hue vs lum', 'lum vs sat', 'sat vs sat', 'colour curves', 'color curves', 'resolve', 'contrast', 's-curve'],
+    'Master, red, green and blue curves, plus the colorist curves Hue vs Hue, Hue vs Sat, Hue vs Lum, Lum vs Sat and Sat vs Sat, all in one pass from small lookup textures.',
+  keywords: ['grade', 'curves', 'rgb curves', 'master', 'tone curve', 'hue vs hue', 'hue vs sat', 'hue vs lum', 'lum vs sat', 'sat vs sat', 'color curves', 'color curves', 'resolve', 'contrast', 's-curve'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
@@ -25,10 +25,10 @@ export default defineNode({
     green: { type: 'curve', default: presetLinear(), min: 0, max: 1, label: 'Green', group: 'RGB' },
     blue: { type: 'curve', default: presetLinear(), min: 0, max: 1, label: 'Blue', group: 'RGB' },
     hueVsHue: { type: 'curve', default: flatLoop(), min: 0, max: 1, label: 'Hue vs Hue', group: 'Color', hint: HUE_HINT + 'The full height is +/- 180 degrees of hue shift (done in OKLab, lightness constant).' },
-    hueVsSat: { type: 'curve', default: flatLoop(), min: 0, max: 1, label: 'Hue vs Sat', group: 'Color', hint: HUE_HINT + 'Saturation multiplier = 2 x value: 0 removes the colour, 1 doubles it.' },
-    hueVsLum: { type: 'curve', default: flatLoop(), min: 0, max: 1, label: 'Hue vs Lum', group: 'Color', hint: HUE_HINT + 'Shifts OKLab lightness by up to +/- 0.5 for that hue. Greys are not affected.' },
+    hueVsSat: { type: 'curve', default: flatLoop(), min: 0, max: 1, label: 'Hue vs Sat', group: 'Color', hint: HUE_HINT + 'Saturation multiplier = 2 x value: 0 removes the color, 1 doubles it.' },
+    hueVsLum: { type: 'curve', default: flatLoop(), min: 0, max: 1, label: 'Hue vs Lum', group: 'Color', hint: HUE_HINT + 'Shifts OKLab lightness by up to +/- 0.5 for that hue. Grays are not affected.' },
     lumVsSat: { type: 'curve', default: flat(), min: 0, max: 1, label: 'Lum vs Sat', group: 'Color', hint: 'Horizontal: OKLab lightness 0..1. Vertical: 0.5 = no change, saturation multiplier = 2 x value.' },
-    satVsSat: { type: 'curve', default: flat(), min: 0, max: 1, label: 'Sat vs Sat', group: 'Color', hint: 'Horizontal: HSV saturation 0..1. Vertical: 0.5 = no change, saturation multiplier = 2 x value. Pull the right end down to tame the most saturated colours.' },
+    satVsSat: { type: 'curve', default: flat(), min: 0, max: 1, label: 'Sat vs Sat', group: 'Color', hint: 'Horizontal: HSV saturation 0..1. Vertical: 0.5 = no change, saturation multiplier = 2 x value. Pull the right end down to tame the most saturated colors.' },
   },
   summary: (p) => `${p.master.keys.length}+${p.red.keys.length}+${p.green.keys.length}+${p.blue.keys.length} points`,
   render(ctx) {

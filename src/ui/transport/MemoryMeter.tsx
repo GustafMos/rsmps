@@ -97,9 +97,9 @@ function MemoryPopover({ x, y, onClose, anchor }: { x: number; y: number; onClos
           </span>
         ))}
       </div>
-      <label className="rs-mem__budget" title="How much graphics memory the app may use before it starts giving caches back. Higher keeps more results ready; too high can make the GPU run out of memory.">
+      <label className="rs-mem__budget" title="How much graphics memory the app may use before it starts giving caches back. Higher keeps more results ready; too high can make the GPU run out of memory. Browsers cannot report how much graphics memory a card has, so set this below your card's size (for example 6 to 8 GB on a 10 GB card) and leave room for other programs.">
         <span>GPU budget {mb(budget)}</span>
-        <input type="range" min={256} max={4096} step={64} value={Math.round(budget / MB)} onChange={(e) => { const v = Number(e.target.value) * MB; setBudget(v); io.memoryBudget.set(v); }} aria-label="GPU memory budget" />
+        <input type="range" min={256} max={24576} step={128} value={Math.min(24576, Math.round(budget / MB))} onChange={(e) => { const v = Number(e.target.value) * MB; setBudget(v); io.memoryBudget.set(v); }} aria-label="GPU memory budget" />
       </label>
       <div className="rs-caps">System RAM for caches</div>
       <div className="rs-num">{mb(ramUsed)} of {mb(ram)}</div>

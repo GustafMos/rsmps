@@ -65,3 +65,8 @@
 .rs-support__btns { display: flex; gap: var(--s-2); }
 .rs-support__x { flex: none; width: 24px; min-width: 24px; height: 24px; }
 .rs-toast__n { color: var(--text-dim); font-weight: 600; }
+
+/* Labelled fields in small dialogs (Save group as node). */
+.rs-dlg__field { display: flex; flex-direction: column; gap: 4px; margin-top: var(--s-2); font-size: var(--fs-sm); color: var(--text-dim); }
+.rs-dlg__field .rs-input { width: 100%; min-height: var(--ctl-h); }
+ul.rs-dlg__list { margin: var(--s-2) 0 0; padding-left: 18px; font-size: var(--fs-sm); }

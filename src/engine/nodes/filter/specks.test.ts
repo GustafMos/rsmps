@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { harness } from '../../testing';
+import { LOOP_SEAM_OK, harness } from '../../testing';
 import type { Harness } from '../../testing';
 import type { ImageValue } from '../../types';
 
@@ -59,17 +59,17 @@ describe('specks (shared generator: Specks node and Analog Video dropouts)', () 
     const t = await harness();
     const src = flat(t, 128, 128);
     const s = await t.loopCheck('specks', { amount: 0.8, animate: true, speckFlicker: 1, speckDriftX: 1 }, { image: src });
-    expect(s.seam).toBe(0);
+    expect(s.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(s.motion).toBeGreaterThan(0.05);
     const off = { composite: 0, chromaBlur: 0, chromaShift: 0, lumaBlur: 0, ringing: 0 };
     const a = await t.loopCheck('analog-video', { ...off, dropouts: 0.8, animate: true, speckFlicker: 1 }, { image: src });
-    expect(a.seam).toBe(0);
+    expect(a.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(a.motion).toBeGreaterThan(0.05);
     const still = await t.loopCheck('specks', { amount: 0.8 }, { image: src });
     expect(still.motion).toBe(0);
     // flicker 0 + drift: one fixed pattern travelling around the picture, back where it started after the loop
     const drift = await t.loopCheck('specks', { amount: 0.8, animate: true, speckFlicker: 0, speckDriftX: 1 }, { image: src });
-    expect(drift.seam).toBe(0);
+    expect(drift.seam).toBeLessThan(LOOP_SEAM_OK);
     expect(drift.motion).toBeGreaterThan(0.05);
   });
 

@@ -4,7 +4,7 @@ export default defineNode({
   id: 'halftone',
   title: 'Halftone',
   category: 'stylize',
-  description: 'Print-style dots whose size follows the image brightness: single ink, or cyan/magenta/yellow/black like a colour press.',
+  description: 'Print-style dots whose size follows the image brightness: single ink, or cyan/magenta/yellow/black like a color press.',
   keywords: ['dots', 'print', 'comic', 'newspaper', 'cmyk', 'pop art', 'screen'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

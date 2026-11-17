@@ -65,7 +65,7 @@ export default defineNode({
         { value: 'soft', label: 'Soft' },
       ],
       label: 'Enlarge with',
-      hint: 'Smooth is the enlarging the viewer does to the playback preview (bilinear), so with the same percentage the export looks like that preview. Sharp pixels is nearest-neighbour (what the viewer shows when zoomed to 100 % or more).',
+      hint: 'Smooth is the enlarging the viewer does to the playback preview (bilinear), so with the same percentage the export looks like that preview. Sharp pixels is nearest-neighbor (what the viewer shows when zoomed to 100 % or more).',
     },
     match: {
       type: 'bool',

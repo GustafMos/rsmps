@@ -115,7 +115,7 @@ export function ColorField({ value, onChange, label, large }: { value: ColorValu
   const css = `rgba(${Math.round(value[0] * 255)},${Math.round(value[1] * 255)},${Math.round(value[2] * 255)},${value[3]})`;
   return (
     <>
-      <button ref={btn} type="button" className={`rs-color${large ? ' rs-color--lg' : ''}`} data-nodrag onClick={() => setOpen((o) => !o)} title="Edit colour" aria-haspopup="dialog" aria-expanded={open}>
+      <button ref={btn} type="button" className={`rs-color${large ? ' rs-color--lg' : ''}`} data-nodrag onClick={() => setOpen((o) => !o)} title="Edit color" aria-haspopup="dialog" aria-expanded={open}>
         <span className="rs-swatch" style={{ ['--c' as string]: css }} />
         {label && <span className="rs-color__label">{label}</span>}
         <span className="rs-color__hex rs-mono">{hexOf(value).toUpperCase()}</span>

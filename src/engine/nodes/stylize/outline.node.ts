@@ -4,7 +4,7 @@ export default defineNode({
   id: 'outline',
   title: 'Sprite Outline',
   category: 'stylize',
-  description: 'Draws an outline around the opaque shape of a sprite, based on its alpha: outside, inside or centred on the edge.',
+  description: 'Draws an outline around the opaque shape of a sprite, based on its alpha: outside, inside or centerd on the edge.',
   keywords: ['stroke', 'border', 'edge', 'sticker', 'contour', 'silhouette', 'sprite'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

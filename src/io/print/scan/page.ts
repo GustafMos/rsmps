@@ -639,7 +639,7 @@ export function scanPage(photo: RasterImage, fileName: string, index: number, op
         report.corners = cornersObject(hyps[0]);
         return fail(
           report,
-          'The four corner markers were found but the data strip could not be read and no regular grid of + marks could be recognised. Enter the page layout by hand (paper, columns, rows).',
+          'The four corner markers were found but the data strip could not be read and no regular grid of + marks could be recognized. Enter the page layout by hand (paper, columns, rows).',
           { corners: report.corners },
         );
       }

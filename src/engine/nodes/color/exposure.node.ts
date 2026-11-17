@@ -24,7 +24,7 @@ export default defineNode({
         { value: 'reinhard', label: 'Extended Reinhard' },
         { value: 'hable', label: 'Filmic Hable' },
       ],
-      hint: 'Per-channel curves applied to the exposed LINEAR values. Extended Reinhard: x(1 + x/W^2)/(1 + x). Hable: the Uncharted 2 curve normalised so the white point maps to 1. These are simple documented curves, NOT ACES or AgX. They darken the mid-tones: add exposure to compensate.',
+      hint: 'Per-channel curves applied to the exposed LINEAR values. Extended Reinhard: x(1 + x/W^2)/(1 + x). Hable: the Uncharted 2 curve normalized so the white point maps to 1. These are simple documented curves, NOT ACES or AgX. They darken the mid-tones: add exposure to compensate.',
     },
     whitePoint: { type: 'number', default: 4, min: 1, max: 16, step: 0.1, label: 'White point', hint: 'The linear value that maps to white.', visibleIf: (p) => p.tonemap !== 'none' },
   },

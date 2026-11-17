@@ -53,10 +53,10 @@ export function assembleScan(input: PageScan[]): AssembledScan {
     const prev = byIndex.get(keyOf(p));
     if (!prev) byIndex.set(keyOf(p), p);
     else if (p.quality < prev.quality) {
-      R(prev).warnings.push(`Page ${idx + 1} was photographed twice; this photo was ignored in favour of "${R(p).fileName}".`);
+      R(prev).warnings.push(`Page ${idx + 1} was photographed twice; this photo was ignored in favor of "${R(p).fileName}".`);
       byIndex.set(keyOf(p), p);
     } else {
-      R(p).warnings.push(`Page ${idx + 1} was photographed twice; this photo was ignored in favour of "${R(prev).fileName}".`);
+      R(p).warnings.push(`Page ${idx + 1} was photographed twice; this photo was ignored in favor of "${R(prev).fileName}".`);
     }
   }
   // Later rounds replace earlier ones; within a round pages go by index.

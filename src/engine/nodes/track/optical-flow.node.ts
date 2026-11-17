@@ -6,7 +6,7 @@ export default defineNode({
   title: 'Optical Flow',
   category: 'track',
   description:
-    'Measures how every part of the picture moved since the previous frame (pyramidal Lucas-Kanade on the GPU). Outputs a flow image for other nodes (red/green = motion as a fraction of the picture size per frame, right and down positive) and a colour picture of it: hue = direction, brightness = speed. Needs moving footage; a still picture has no motion.',
+    'Measures how every part of the picture moved since the previous frame (pyramidal Lucas-Kanade on the GPU). Outputs a flow image for other nodes (red/green = motion as a fraction of the picture size per frame, right and down positive) and a color picture of it: hue = direction, brightness = speed. Needs moving footage; a still picture has no motion.',
   keywords: ['motion', 'flow', 'vectors', 'motion vectors', 'lucas kanade', 'movement', 'direction', 'velocity', 'displacement'],
   usesPrevious: true,
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
@@ -28,7 +28,7 @@ export default defineNode({
     levels: { type: 'number', default: FLOW_DEFAULTS.levels, min: 1, max: 6, softMax: 4, step: 1, integer: true, label: 'Pyramid levels', group: 'Quality', hint: 'Each level doubles the largest motion that can be followed (about 2 texels x 2^levels at flow resolution).' },
     iterations: { type: 'number', default: FLOW_DEFAULTS.iterations, min: 1, max: 6, softMax: 3, step: 1, integer: true, label: 'Level iterations', group: 'Quality', hint: 'Solver passes per level. Cost = levels x iterations small passes.' },
     window: { type: 'number', default: FLOW_DEFAULTS.window, min: 1, max: 6, softMax: 4, step: 1, integer: true, label: 'Window radius', group: 'Quality', hint: 'Larger = smoother, more stable flow in flat areas, softer edges.' },
-    visScale: { type: 'number', default: 4, min: 0.1, max: 200, softMax: 20, step: 0.1, unit: 'px', label: 'Full-scale speed', group: 'Preview', hint: 'Motion of this many pixels per frame shows at full brightness in the colour wheel.' },
+    visScale: { type: 'number', default: 4, min: 0.1, max: 200, softMax: 20, step: 0.1, unit: 'px', label: 'Full-scale speed', group: 'Preview', hint: 'Motion of this many pixels per frame shows at full brightness in the color wheel.' },
   },
   summary: (p) => `${p.levels} levels x ${p.iterations} · ${Math.round(p.resolution * 100)}%`,
   async render(ctx) {

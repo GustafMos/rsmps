@@ -1,0 +1,18 @@
+.rs-live__banner {
+  position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 900;
+  display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-4);
+  background: var(--bg-2); border: 1px solid #ff9f1c; border-radius: 8px; color: var(--text);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .45); font-size: var(--fs-sm);
+}
+.rs-live__banner .rs-live__pulse { width: 9px; height: 9px; border-radius: 50%; background: #ff9f1c; animation: rs-live-pulse 1s ease-in-out infinite; }
+@keyframes rs-live-pulse { 50% { opacity: .25; } }
+.rs-live__status { color: var(--text-dim); font-size: var(--fs-sm); }
+.rs-live__table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.rs-live__table th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 2px 6px; white-space: nowrap; }
+.rs-live__table td { padding: 3px 6px; vertical-align: middle; border-top: 1px solid var(--bg-3); }
+.rs-live__table input.rs-input { width: 64px; }
+.rs-live__table select.rs-input { width: auto; }
+.rs-live__bar { width: 70px; height: 6px; background: var(--bg-0); border-radius: 3px; overflow: hidden; }
+.rs-live__bar > span { display: block; height: 100%; background: #ff9f1c; }
+.rs-live__src { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rs-live__choices { display: flex; flex-direction: column; gap: var(--s-2); }

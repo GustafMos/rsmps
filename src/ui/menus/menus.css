@@ -65,3 +65,4 @@
 .rs-menu__item > span:first-of-type { flex: none; }
 .rs-add__ctx { display: flex; gap: var(--s-1); padding: var(--s-1) var(--s-2); border-top: 1px solid var(--line); }
 .rs-add__ctx .rs-btn { flex: 1; justify-content: center; gap: var(--s-1); }
+.rs-add__stack { flex: none; color: var(--text-dim); }

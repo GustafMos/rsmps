@@ -5,12 +5,15 @@ import type { ImageValue } from '../../types';
 /**
  * Video feedback: out[n] = over(in[n], T(out[n-1])), T = warp + zoom + rotate + shift + hue + blur + gain.
  *
- * Nodes are stateless, so the recursion is a BOUNDED FOLD that is a pure function of the frame number:
- * out[f] folds the input frames start(f)..f, starting from transparent, where start(f) = (floor(f / K) - 1) * K (clamped at 0
- * when the project does not loop). The trail therefore remembers K to 2K frames, and out[f] = step(in[f], out[f-1]) whenever
- * start(f) == start(f-1). That identity is what the kernel seam `ctx.previous()` exploits: playing forward costs ONE pass and
- * ONE input evaluation per frame; after a scrub (previous frame not cached) the same pixels come from the fold, which costs up
- * to 2K passes and pulls. Results are identical either way (tested), so the cache is purely an optimisation.
+ * Nodes are stateless, so the recursion is a BOUNDED FOLD that is a pure function of the frame number: with K = Memory, time is cut into
+ * epochs of K frames and out[f] folds the input frames from the start of the PREVIOUS epoch up to f, starting from transparent (the trail
+ * remembers K to 2K frames). With Loop on the epochs are those of the loop (the last one takes the remainder) and the fold wraps around the
+ * seam, so frame N is frame 0 exactly.
+ * Playing forward is one constant cost with no restarts: the node keeps TWO windows, A (the output) and B (the one that starts with the
+ * current epoch), as the picture and a hidden `carry` picture of its cache entry. Each frame both advance one pass (2 passes, one input
+ * evaluation); at an epoch start A continues from B's state and B starts over (also 2 passes). `ctx.previous({ wrap: true })` and
+ * `previous({ carry: true })` give last frame's states; they are the same pixels the fold produces (bit for bit, tested), so the
+ * cache is purely an optimisation. After a scrub the fold costs up to ~3K passes and up to 2K input evaluations once.
  * A still input needs no pulls and no clock: the fold of identical frames, K passes, cached like any static result.
  */
 export default defineNode({
@@ -36,7 +39,7 @@ export default defineNode({
       step: 1,
       integer: true,
       label: 'Memory',
-      hint: 'In frames. Trail memory is this many to twice this many frames. Cost: playing forward = 1 pass and 1 input evaluation per frame (the previous result is reused). The first frame after a jump in time rebuilds the trail from up to 2x this many frames (that many passes and input evaluations). A still input needs no input evaluations at all.',
+      hint: 'In frames. Trail memory is this many to twice this many frames. Cost: playing forward is always 2 passes and 1 input evaluation per frame, with no hiccups. The first frame after a jump in time rebuilds the trail once from up to 2x this many frames. A still input needs no input evaluations at all.',
     },
     decay: { type: 'number', default: 0.92, min: 0, max: 1, step: 0.005, label: 'Gain per frame', hint: 'How much of the previous result survives each frame. 1 never fades.' },
     zoom: { type: 'number', default: 1.02, min: 0.8, max: 1.25, step: 0.001, label: 'Zoom per frame', hint: 'Above 1 the trail grows outward, below 1 it sinks into a tunnel.' },
@@ -121,27 +124,53 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
 
     const t = ctx.time;
     const total = Math.max(1, Math.round(t.duration * t.fps));
-    const f = t.loop ? mod(t.frame, total) : Math.max(0, t.frame);
-    const start = (g: number) => (t.loop ? (Math.floor(g / K) - 1) * K : Math.max(0, (Math.floor(g / K) - 1) * K));
+    const loop = t.loop;
+    const f = loop ? mod(t.frame, total) : Math.max(0, t.frame);
 
-    // A wired number that moves with time changes the recursion itself: the cached previous frame would be stale.
-    const paramsMove = Object.keys(p).some((k) => ctx.inputVaries(k as never));
-    const chain = f > 0 && start(f) === start(f - 1) && !paramsMove;
-    const prev = chain ? ctx.previous() : null;
-    if (prev && prev.width === src.width && prev.height === src.height) return { image: step(src, prev) };
+    // Epochs of K frames (with Loop on: floor(N / K) of them, the last one takes the remainder, so the schedule is periodic in N and the loop closes).
+    // The output is the fold of the PREVIOUS epoch's start up to f (window A, K to 2K frames); window B starts with the current epoch and becomes
+    // the output at the next one. Both advance one pass per frame, so playing forward costs a constant 2 passes and no restart ever happens.
+    const epochs = loop ? Math.max(1, Math.floor(total / K)) : Infinity;
+    const epochOf = (g: number) => Math.min(epochs - 1, Math.floor(g / K));
+    const e = epochOf(f);
+    const aStart = loop ? (e >= 1 ? (e - 1) * K : (epochs - 1) * K - total) : Math.max(0, (e - 1) * K);
+    const bStart = e * K;
+    // A new epoch begins at f (or the loop wraps): A continues from B's state of f - 1, B starts over.
+    const restart = loop ? f === 0 || epochOf(f - 1) !== e : f > 0 && epochOf(f - 1) !== e;
 
-    let acc: ImageValue | null = null;
-    for (let g = start(f); g <= f; g++) {
+    // A wired number (or a warp picture) that moves with time changes the recursion itself: a cached previous frame would be stale.
+    const paramsMove = Object.keys(p).some((k) => ctx.inputVaries(k as never)) || ctx.inputVaries('warp');
+    const fits = (v: ImageValue | null): v is ImageValue => !!v && v.width === src.width && v.height === src.height;
+    if (!paramsMove && (loop ? total > 1 : f > 0)) {
+      const prevB = ctx.previous({ wrap: true, carry: true });
+      const prevA = restart ? null : ctx.previous({ wrap: true });
+      if (fits(prevB) && (restart || fits(prevA))) {
+        const a = step(src, restart ? prevB : prevA);
+        const b = step(src, restart ? null : prevB);
+        return { image: a, carry: b } as never;
+      }
+    }
+
+    // From scratch: the same folds, A from its start and B from its own, sharing every pulled frame.
+    const share = aStart === bStart;
+    let accA: ImageValue | null = null;
+    let accB: ImageValue | null = null;
+    for (let g = aStart; g <= f; g++) {
       let frame: ImageValue = src;
       if (g !== f) {
-        const at = t.loop ? mod(g, total) : g;
+        const at = loop ? mod(g, total) : g;
         const v = (await ctx.pull('image', { seconds: at / t.fps })) as ImageValue | null;
-        if (v && v.width === src.width && v.height === src.height) frame = v;
+        if (fits(v)) frame = v;
       }
-      const next: ImageValue = step(frame, acc);
-      if (acc) gpu.recycle(acc);
-      acc = next;
+      const nextA: ImageValue = step(frame, accA);
+      if (accA) gpu.recycle(accA);
+      accA = nextA;
+      if (!share && g >= bStart) {
+        const nextB: ImageValue = step(frame, accB);
+        if (accB) gpu.recycle(accB);
+        accB = nextB;
+      }
     }
-    return { image: acc as ImageValue };
+    return { image: accA as ImageValue, carry: (share ? accA : accB) as ImageValue } as never;
   },
 });
