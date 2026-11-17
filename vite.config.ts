@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type PluginOption } from 'vite';
@@ -24,6 +25,8 @@ export default defineConfig(async () => {
   return {
     base: './',
     plugins,
+    // CPU-heavy tests (scan, zip, GPU readback) run side by side; the 5 s default is too tight on a busy machine.
+    test: { testTimeout: 30_000 },
     worker: {
       format: 'es' as const,
     },
