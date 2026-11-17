@@ -8,6 +8,8 @@ import { useSelector } from '../store/createStore';
 import { useApp, useEd } from '../store/context';
 import { dismissStart, featureStore, openFeature } from '../store/features';
 import { importSharedFile } from '../share/ShareDialogs';
+import { safetyStore } from '../safety';
+import type { IconName } from '../components/Icon';
 import { templateThumb } from './thumbs';
 import scanExample1 from '../../../docs/screenshots/scan-example-1.webp';
 import scanExample2 from '../../../docs/screenshots/scan-example-2.webp';
@@ -31,20 +33,30 @@ export async function openTemplate(app: ReturnType<typeof useApp>, t: Template):
   if (blank && before && ed.state.activeProject !== before) await ed.closeTab(before).catch(() => undefined);
 }
 
+/** The icon a template's group shows on its tile while there is no picture (yet). */
+const GROUP_ICON: Record<string, IconName> = { 'Pixel art': 'grid', 'Video art': 'video', '3D': 'cube', 'Paper & scan': 'image', 'Audio-reactive': 'audio', Color: 'palette', Captions: 'file' };
+
 function Tile({ t, onOpen }: { t: Template; onOpen: () => void }) {
   const app = useApp();
-  const [src, setSrc] = useState<string | null>(null);
+  const noRender = useSelector(safetyStore, (s) => s.paused);
+  // undefined: the picture is on its way; null: there is none (needs media, safe mode, could not render)
+  const [src, setSrc] = useState<string | null | undefined>(undefined);
   useEffect(() => {
+    if (noRender) {
+      setSrc((p) => p ?? null); // safe mode: nothing renders, so no thumbnail is asked for
+      return;
+    }
     let live = true;
     const id = setTimeout(() => void templateThumb(app, t).then((u) => live && setSrc(u)), 400);
     return () => {
       live = false;
       clearTimeout(id);
     };
-  }, [app, t]);
+  }, [app, t, noRender]);
+  const state = src ? 'ready' : src === undefined && !t.needs ? 'wait' : 'none';
   return (
     <button className="rs-tile" onClick={onOpen} title={t.description}>
-      <div className="rs-tile__img">{src ? <img src={src} alt="" /> : <Icon name={t.needs ? 'video' : 'image'} size={28} />}</div>
+      <div className={`rs-tile__img is-${state}`}>{src ? <img src={src} alt="" /> : <Icon name={GROUP_ICON[t.group] ?? 'image'} size={28} />}</div>
       <div className="rs-tile__title">{t.title}</div>
       <div className="rs-tile__desc">{t.description}</div>
       {t.needs && <div className="rs-tile__needs">{NEEDS_TEXT[t.needs]}</div>}

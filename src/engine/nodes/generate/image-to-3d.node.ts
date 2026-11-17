@@ -61,7 +61,7 @@ export default defineNode({
     silhouette: {
       type: 'enum',
       default: 'auto',
-      label: 'Silhouette edges',
+      label: 'Edge style',
       group: 'Solid',
       options: [
         { value: 'auto', label: 'Automatic' },

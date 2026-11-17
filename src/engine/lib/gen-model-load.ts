@@ -9,6 +9,6 @@ export function parseModelBytes(buf: ArrayBuffer): ParsedModel {
   if (head[0] === 0x67 && head[1] === 0x6c && head[2] === 0x54 && head[3] === 0x46) return parseGltf(buf);
   const firstText = new TextDecoder().decode(head).trimStart()[0];
   if (firstText === '{') return parseGltf(buf);
-  if (head.some((b) => b === 0)) throw new ModelError('Unrecognised 3D file. Supported formats: .glb, .gltf (self-contained) and .obj.');
+  if (head.some((b) => b === 0)) throw new ModelError('Unrecognized 3D file. Supported formats: .glb, .gltf (self-contained) and .obj.');
   return parseObj(buf);
 }

@@ -42,7 +42,7 @@ export default defineNode({
         { value: 'stretch', label: 'Stretch' },
         { value: 'actual', label: 'Actual size' },
       ],
-      label: 'Foreground size',
+      label: 'Top size',
     },
   },
   summary: (p) => `${p.mode} · ${Math.round(p.opacity * 100)}%`,

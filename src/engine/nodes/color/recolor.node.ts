@@ -7,7 +7,7 @@ export default defineNode({
   title: 'Recolor',
   category: 'color',
   description:
-    'Replaces colors outright. Fill turns everything into one color and keeps the shape (a black logo becomes white). Ink is for artwork without transparency: it treats the paper color as background and recolours the ink. Swap replaces one picked color by another. Duotone maps dark to one color and light to another.',
+    'Replaces colors outright. Fill turns everything into one color and keeps the shape (a black logo becomes white). Ink is for artwork without transparency: it treats the paper color as background and recolors the ink. Swap replaces one picked color by another. Duotone maps dark to one color and light to another.',
   keywords: ['recolor', 'recolour', 'colorize', 'fill', 'logo', 'white', 'black', 'replace color', 'replace color', 'silhouette', 'tint', 'swap', 'invert logo', 'one color', 'duotone', 'paper', 'knockout', 'key'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

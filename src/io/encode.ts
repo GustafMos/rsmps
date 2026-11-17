@@ -228,3 +228,21 @@ export async function imageToBlob(
 ): Promise<Blob> {
   return presentToBlob(presenter ?? new OffscreenPresenter(gpu, mime === 'image/jpeg'), image, mime, quality);
 }
+
+let avifProbe: Promise<boolean> | null = null;
+
+/** True when this browser can encode AVIF stills (`convertToBlob` returns PNG when it cannot). Asked once; the Output node hides AVIF otherwise. */
+export function canEncodeAvif(): Promise<boolean> {
+  avifProbe ??= (async () => {
+    try {
+      if (typeof OffscreenCanvas === 'undefined') return false;
+      const c = new OffscreenCanvas(2, 2);
+      if (!c.getContext('2d')) return false;
+      const blob = await c.convertToBlob({ type: 'image/avif', quality: 0.5 });
+      return blob.type === 'image/avif' && blob.size > 0;
+    } catch {
+      return false;
+    }
+  })();
+  return avifProbe;
+}

@@ -1084,6 +1084,46 @@ ${VERTEX}`;
   }
 
   /**
+   * Premultiplied RGBA as half-float bits (`Uint16Array`, width*height*4, row after row) with the precision of the engine's own working
+   * format: an rgba16float image is copied as is (values above 1.0 survive), an rgba8unorm image is converted up on the GPU. Rows of the
+   * copy are padded to 256 bytes and unpadded here. Values are in the engine's working encoding (sRGB-encoded); convert them for linear formats.
+   */
+  async readFloat(image: { texture: GPUTexture; width: number; height: number }): Promise<Uint16Array> {
+    const { width, height } = image;
+    let texture = image.texture;
+    if (texture.format !== 'rgba16float') {
+      texture = this.pass({
+        label: 'read-float-convert',
+        size: { width, height },
+        format: 'rgba16float',
+        textures: { src: { texture } },
+        wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smpNearest, uv, 0.0); }',
+      }).texture;
+    }
+    const bytesPerRow = Math.ceil((width * 8) / 256) * 256;
+    const buffer = this.scratch(bytesPerRow * height, GPUBufferUsage.MAP_READ, 'readback-float');
+    const encoder = this.device.createCommandEncoder();
+    encoder.copyTextureToBuffer({ texture }, { buffer, bytesPerRow, rowsPerImage: height }, [width, height]);
+    this.device.queue.submit([encoder.finish()]);
+    this.counters.submits++;
+    if (texture !== image.texture) {
+      this.retain(texture);
+      this.release(texture);
+    }
+    try {
+      await buffer.mapAsync(GPUMapMode.READ, 0, bytesPerRow * height);
+      const mapped = new Uint16Array(buffer.getMappedRange(0, bytesPerRow * height));
+      const out = new Uint16Array(width * height * 4);
+      const rowHalves = bytesPerRow / 2;
+      for (let y = 0; y < height; y++) out.set(mapped.subarray(y * rowHalves, y * rowHalves + width * 4), y * width * 4);
+      buffer.unmap();
+      return out;
+    } finally {
+      this.releaseScratch(buffer);
+    }
+  }
+
+  /**
    * Small lookup texture from float data. Cached by content: palettes and kernels are identical from frame to frame, so
    * they are uploaded once (and kept until the cache cap or a trim drops them) instead of once per render.
    */

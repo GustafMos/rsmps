@@ -5,7 +5,7 @@ export default defineNode({
   id: 'gradient-map',
   title: 'Gradient Map',
   category: 'color',
-  description: 'Recolours the image by mapping its brightness through a palette: darkest pixels take the first color, brightest the last.',
+  description: 'Recolors the image by mapping its brightness through a palette: darkest pixels take the first color, brightest the last.',
   keywords: ['duotone', 'tritone', 'palette', 'recolor', 'false color', 'heatmap'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

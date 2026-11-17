@@ -20,7 +20,7 @@ const KINDS = [
   { value: 'video', label: 'Video (MP4)' },
   { value: 'image', label: 'Still image' },
   { value: 'sequence', label: 'Image sequence' },
-  { value: 'spritesheet', label: 'Spritesheet' },
+  { value: 'spritesheet', label: 'Sprite sheet' },
 ];
 
 /** Two-click clean-up: edits the key params of the ready-made chain, found by the labels it was created with. */

@@ -6,7 +6,7 @@ export default defineNode({
   title: 'Line Art',
   category: 'filter',
   description:
-    'Turns a cleaned drawing into crisp, solid line art. Lines are found against the local paper brightness (so uneven light does not matter), can be made thicker or thinner, smoothed to remove jagged edges and recoloured. Filled color areas can be kept.',
+    'Turns a cleaned drawing into crisp, solid line art. Lines are found against the local paper brightness (so uneven light does not matter), can be made thicker or thinner, smoothed to remove jagged edges and recolored. Filled color areas can be kept.',
   keywords: ['ink', 'lineart', 'threshold', 'adaptive threshold', 'trace', 'outline', 'bitmap', 'crisp', 'sketch', 'thicken', 'thin', 'jaggies', 'clean'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

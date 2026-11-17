@@ -72,6 +72,8 @@ export interface AddonInfo {
   /** Add-ons that belong together (COLMAP and Brush: 'splat-train'). */
   group?: string;
   installed: { source: 'download' | 'custom' | 'system'; version: string; path: string } | null;
+  /** FFmpeg only: which optional encoders the installed build has (dxv, hap, prores_ks...). Absent = not asked / unknown. */
+  encoders?: string[];
   progress?: { phase: 'downloading' | 'verifying' | 'extracting'; received: number; total: number };
   error?: string;
 }
@@ -97,6 +99,8 @@ export interface FfmpegExportInfo {
   source: string | null;
   version: string | null;
   codecs: ExportCodecInfo[];
+  /** Optional encoders the installed FFmpeg has; null = unknown (no FFmpeg, or it could not be asked). */
+  encoders: string[] | null;
   active: boolean;
 }
 
@@ -106,6 +110,8 @@ export interface ExportStartRequest {
   fps: number;
   codec: string;
   bitrateMbps?: number;
+  /** Every frame a key frame (formats with a bitrate only). */
+  allKeys?: boolean;
   audio?: { sampleRate: number; channels: number };
   name?: string;
 }
@@ -126,8 +132,35 @@ export interface ExportFinishReply {
   frames?: number;
 }
 
+export interface FileSinkStart {
+  /** File name without extension, offered in the Save dialog. */
+  name: string;
+  ext: string;
+}
+
+export interface FileSinkReply {
+  /** False when the user closed the Save dialog. */
+  saved: boolean;
+  id?: string;
+  path?: string;
+}
+
 /** The FFmpeg export half of the client: what the exporter needs (and what tests fake). */
 export interface FfmpegExportClient {
+  /**
+   * Big outputs that the app writes itself (HAP...): ask where to save (native dialog), then write chunks at positions straight into that
+   * file, so a multi-gigabyte export never sits in memory. Absent in fakes and in the web version.
+   */
+  fileStart?(req: FileSinkStart, signal?: AbortSignal): Promise<FileSinkReply>;
+  /** `at` = byte position; chunks may be written in any order (the muxer patches its header at the end). */
+  fileWrite?(id: string, at: number, data: Uint8Array, signal?: AbortSignal): Promise<void>;
+  fileFinish?(id: string): Promise<{ path: string; bytes: number }>;
+  /** Never throws; deletes the partial file. */
+  fileCancel?(id: string): Promise<void>;
+  /** One picture through FFmpeg (DPX, JPEG 2000): straight RGBA in, the finished file out. */
+  convertStill?(codec: string, rgba: ArrayBufferView, width: number, height: number, signal?: AbortSignal): Promise<Uint8Array>;
+  /** Sound through FFmpeg (MP3, Opus, Vorbis, ALAC, AAC): interleaved f32 PCM in, the finished file out. */
+  convertAudio?(codec: string, pcm: ArrayBufferView, sampleRate: number, channels: number, signal?: AbortSignal): Promise<Uint8Array>;
   info(): Promise<FfmpegExportInfo>;
   start(req: ExportStartRequest, signal?: AbortSignal): Promise<ExportStartReply>;
   audio(id: string, pcm: ArrayBufferView, signal?: AbortSignal): Promise<void>;
@@ -210,6 +243,7 @@ export function parseAddon(raw: unknown): AddonInfo {
     installed: inst ? { source: (['download', 'custom', 'system'] as const).find((s) => s === inst.source) ?? 'custom', version: str(inst.version), path: str(inst.path) } : null,
     ...(prog ? { progress: { phase: phases.find((p) => p === prog.phase) ?? 'downloading', received: num(prog.received), total: num(prog.total) } } : {}),
     ...(typeof o.error === 'string' && o.error ? { error: o.error } : {}),
+    ...(Array.isArray(o.encoders) ? { encoders: o.encoders.filter((x): x is string => typeof x === 'string') } : {}),
   };
 }
 
@@ -230,6 +264,7 @@ export function parseExportInfo(raw: unknown): FfmpegExportInfo {
     source: typeof o.source === 'string' ? o.source : null,
     version: typeof o.version === 'string' ? o.version : null,
     codecs: (Array.isArray(o.codecs) ? o.codecs : []).map(obj).filter((c) => typeof c.id === 'string').map((c) => ({ id: str(c.id), label: str(c.label), ext: str(c.ext), alpha: c.alpha === true, even: c.even === true, audio: c.audio !== false })),
+    encoders: Array.isArray(o.encoders) ? o.encoders.filter((x): x is string => typeof x === 'string') : null,
     active: o.active === true,
   };
 }
@@ -327,5 +362,47 @@ export class DesktopClient implements FfmpegExportClient {
     } catch {
       /* the export is gone either way */
     }
+  }
+
+  /* files the app writes itself (native Save dialog, chunked writes) */
+  async fileStart(req: FileSinkStart, signal?: AbortSignal): Promise<FileSinkReply> {
+    const o = obj(await this.ok('export/file/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req), signal }, 'The desktop app could not open the file.'));
+    return { saved: o.saved === true, ...(typeof o.id === 'string' ? { id: o.id } : {}), ...(typeof o.path === 'string' ? { path: o.path } : {}) };
+  }
+  async fileWrite(id: string, at: number, data: Uint8Array, signal?: AbortSignal): Promise<void> {
+    await this.ok(`export/file/${encodeURIComponent(id)}/write?at=${Math.max(0, Math.floor(at))}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: data as BodyInit, signal }, 'The desktop app could not write the file.');
+  }
+  async fileFinish(id: string): Promise<{ path: string; bytes: number }> {
+    const o = obj(await this.ok(`export/file/${encodeURIComponent(id)}/finish`, { method: 'POST' }, 'The desktop app could not finish the file.'));
+    return { path: str(o.path), bytes: num(o.bytes) };
+  }
+  async fileCancel(id: string): Promise<void> {
+    try {
+      await this.call(`export/file/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    } catch {
+      /* gone either way */
+    }
+  }
+
+  /* FFmpeg conversions that return the file */
+  private async bytesFrom(path: string, body: ArrayBufferView, signal: AbortSignal | undefined, fallback: string): Promise<Uint8Array> {
+    if (!this.enabled()) throw new Error('This is only available in the desktop app.');
+    const res = await this.fetchFn(desktopUrl(path, this.base), { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/octet-stream' }, body: body as BodyInit, signal });
+    if (!res.ok) {
+      let msg: unknown = null;
+      try {
+        msg = await res.json();
+      } catch {
+        /* not JSON */
+      }
+      throw new Error(errorText(msg, res.status, fallback));
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  async convertStill(codec: string, rgba: ArrayBufferView, width: number, height: number, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.bytesFrom(`export/ffmpeg/still?codec=${encodeURIComponent(codec)}&width=${width}&height=${height}`, rgba, signal, 'FFmpeg could not write the picture.');
+  }
+  async convertAudio(codec: string, pcm: ArrayBufferView, sampleRate: number, channels: number, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.bytesFrom(`export/ffmpeg/sound?codec=${encodeURIComponent(codec)}&rate=${sampleRate}&channels=${channels}`, pcm, signal, 'FFmpeg could not write the sound.');
   }
 }

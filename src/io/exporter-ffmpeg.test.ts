@@ -9,7 +9,7 @@ async function setup(available: boolean) {
   const calls: string[] = [];
   const sizes: number[] = [];
   const client: FfmpegExportClient = {
-    info: async () => ({ available, source: null, version: null, codecs: [], active: false }),
+    info: async () => ({ available, source: null, version: null, codecs: [], encoders: null, active: false }),
     start: async (r) => {
       calls.push(`start ${r.codec} ${r.width}x${r.height}${r.audio ? ' +audio' : ''}`);
       return { id: 'x', ext: 'mov', alpha: true, even: false, frameBytes: r.width * r.height * 4 };

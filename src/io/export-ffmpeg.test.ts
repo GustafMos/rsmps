@@ -7,7 +7,7 @@ function fake(finish: ExportFinishReply = { saved: true, path: 'C:\\out\\clip.mo
   const calls: string[] = [];
   const bodies: ArrayBufferView[] = [];
   const client: FfmpegExportClient = {
-    info: async () => ({ available: true, source: 'download', version: '9', codecs: [], active: false }),
+    info: async () => ({ available: true, source: 'download', version: '9', codecs: [], encoders: null, active: false }),
     start: async (req) => {
       calls.push(`start ${req.codec} ${req.width}x${req.height}@${req.fps}${req.audio ? ` audio ${req.audio.sampleRate}/${req.audio.channels}` : ''}`);
       return { id: 'e1', ext: 'mov', alpha: true, even: false, frameBytes: req.width * req.height * 4 };

@@ -158,7 +158,7 @@ function MidiDialog({ live }: { live: Live }) {
   return (
     <Dialog
       title="MIDI mappings"
-      width={900}
+      width={mappings.length ? 900 : 600}
       onClose={() => live.midi.store.set((s) => ({ ...s, dialog: false }))}
       footer={
         <>
@@ -173,7 +173,7 @@ function MidiDialog({ live }: { live: Live }) {
         {midi.last && ` Last: ${midi.last.text}.`}
       </div>
       {mappings.length === 0 ? (
-        <p className="rs-live__status">Nothing is mapped yet. Right-click any number, switch or choice (in the inspector or on a node) and pick MIDI learn, then move a knob or press a key.</p>
+        <p className="rs-live__status rs-live__empty">Nothing is mapped yet. Right-click any number, switch or choice (in the inspector or on a node) and pick MIDI learn, then move a knob or press a key.</p>
       ) : (
         <table className="rs-live__table">
           <thead>

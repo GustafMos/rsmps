@@ -8,6 +8,8 @@ import { registerBuiltins } from '../nodes';
  * and group names follow the same rule. Labels are unique inside a node + group (and option labels inside their parameter).
  */
 const MAX_LABEL = 24;
+/** A node-body row has about 90 px for its label (about 16 characters); the parameter label limit is tighter than the option label limit. */
+const MAX_PARAM_LABEL = 18;
 
 /** Whole nodes that are not checked yet. Remove an entry once its labels comply. */
 const SKIP_NODES: Record<string, string> = {
@@ -31,7 +33,7 @@ describe('node labels', () => {
     for (const d of defs()) {
       for (const [key, p] of Object.entries(d.params as Record<string, { label?: string; group?: string }>)) {
         const label = p.label ?? '';
-        if (label.length > MAX_LABEL) bad.push(`${d.id}.${key}: "${label}" is ${label.length} characters`);
+        if (label.length > MAX_PARAM_LABEL) bad.push(`${d.id}.${key}: "${label}" is ${label.length} characters`);
         if (/[()]/.test(label)) bad.push(`${d.id}.${key}: "${label}" has parentheses (use hint)`);
         const group = p.group ?? '';
         if (group.length > MAX_LABEL || /[()]/.test(group)) bad.push(`${d.id}.${key}: group "${group}" is too long or has parentheses`);

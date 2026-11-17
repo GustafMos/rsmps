@@ -8,7 +8,7 @@ Nodes used here (all in the Add menu, search by the keywords in brackets):
 | Node | What it does |
 | --- | --- |
 | Sprite Sheet In (spritesheet, atlas, slice, aseprite) | plays a sheet's cells as an animation, or hands each cell to the graph as a batch item |
-| Output, kind Spritesheet | writes the sheet and its metadata; presets for engines |
+| Output, kind Sprite sheet | writes the sheet and its metadata; presets for engines |
 | Pixel Outline (outline, selout) | hard pixel outline, inside / outside, 4 or 8 connected, selective color, per side |
 | Sprite Shadow | drop, ground or contact shadow, solid or dithered |
 | Pixel Cleanup | hard alpha, stray pixels, 1 px holes, edge color, optional elbow trimming |
@@ -22,7 +22,7 @@ Nodes used here (all in the Add menu, search by the keywords in brackets):
 
 1. **Media In**: add all the sprite pictures (each is one batch item) or one animation.
 2. A look chain: Pixelate (if they are not pixel art yet) > Pixel Cleanup > Palette Lock (shared palette) > Pixel Outline > Sprite Shadow.
-3. **Output**, kind `Spritesheet`, `Sheet from: All batch items`: ONE sheet holding every sprite, one animation tag per file name.
+3. **Output**, kind `Sprite sheet`, `Sheet from: All batch items`: ONE sheet holding every sprite, one animation tag per file name.
    With `Each clip` (the default) you get one sheet per file instead. Kind `Still image` writes one PNG per sprite.
 
 Everything before the Output runs once per item, so every sprite gets the same treatment. In the app the Export dialog exports
@@ -54,7 +54,7 @@ or Sprites) or use a Media In with that many files. A future kernel hook (`batch
 
 ## Sprite sheet out
 
-Output node, `Export as: Spritesheet`. The first group of settings:
+Output node, `Export as: Sprite sheet`. The first group of settings:
 
 | Setting | Meaning |
 | --- | --- |
@@ -103,7 +103,7 @@ with hard alpha, you never needed it; if you use Pixelate with soft edges and li
 ### Engine presets ("For")
 
 Starting points, not guarantees about an engine's current UI. A preset overrides the sheet fields it lists (pick Generic to set
-them yourself); the file is always a PNG with straight alpha. Nearest-neighbour enlargement stays your choice (Pixel upscale).
+them yourself); the file is always a PNG with straight alpha. Nearest-neighbor enlargement stays your choice (Pixel upscale).
 
 | For | Sets | Why / how to use |
 | --- | --- | --- |
@@ -151,7 +151,7 @@ against your Godot version.)
 ## Pixel looks
 
 - **Pixel Outline**: `Position` outside / inside / both; `Corners` 4-connected (plus shape) or 8-connected (ring);
-  `Color from` one color / darker neighbour (selective outline: each outline pixel takes the color of the sprite pixel it
+  `Color from` one color / darker neighbor (selective outline: each outline pixel takes the color of the sprite pixel it
   touches, darkened) / palette (that color snapped to a palette); Sides Top / Bottom / Left / Right (only Bottom + Right is a
   drop-shadow style edge); Width in art pixels; Second outline. It works per art pixel, also on an art grid after a masked
   Pixelate. Sprite Outline (Stylize) is the smooth, anti-aliased stroke: use Pixel Outline for crisp sprites.
@@ -159,8 +159,8 @@ against your Godot version.)
   line), Contact blob (ellipse); Transparency Solid blend, Dither (Bayer 4 x 4 by Opacity), Checkerboard, Scan lines: the
   patterns use fully opaque shadow pixels, so no new colors appear. The shadow is behind the sprite and clipped to the picture:
   leave room.
-- **Pixel Cleanup**: Hard alpha + cutoff, Fix edge colors (a partly transparent pixel takes the color of its solid neighbours),
-  Remove stray pixels (no solid 8-neighbour), Fill 1 px holes (4 solid neighbours; their most common color), Trim elbows (off by
+- **Pixel Cleanup**: Hard alpha + cutoff, Fix edge colors (a partly transparent pixel takes the color of its solid neighbors),
+  Remove strays (no solid 8-neighbor), Fill 1 px holes (4 solid neighbors; their most common color), Trim elbows (off by
   default; every other corner pixel of a one-pixel staircase, so a line steps diagonally).
 - **Normal Map** and **Material 2D** (another work item) light sprites: wire Pixel Outline's result into Normal Map with
   `4 / 8 direction pixel-art normals`, or into Material 2D with per-art-pixel lighting.
@@ -204,7 +204,7 @@ Draw five equal squares (T x T, 16 x 16 for example) in ONE row, left to right (
  ########    ########     ..######         ########         ........
  (all        (terrain     (terrain to the  (terrain all     (an island, as it
  terrain)    below, empty bottom right;    around, only     should look with no
-             above)       empty N and W)   NW diagonal      neighbours)
+             above)       empty N and W)   NW diagonal      neighbors)
                                            empty)
  #  terrain      .  empty
 ```
@@ -212,7 +212,7 @@ Draw five equal squares (T x T, 16 x 16 for example) in ONE row, left to right (
 Everything is drawn with the empty side on top and the corner at the top left; the node turns the pieces by whole quarter
 turns. Every output tile is put together from four quarter tiles:
 
-| neighbours of that quarter | taken from |
+| neighbors of that quarter | taken from |
 | --- | --- |
 | both orthogonal ones empty | outer corner |
 | one empty | edge, turned to face the empty one |
@@ -220,9 +220,9 @@ turns. Every output tile is put together from four quarter tiles:
 | both terrain, diagonal terrain | center |
 | nothing around the whole tile | single |
 
-Outputs: **47 tile blob** set (8 columns x 6 rows, tile i = the i-th of the 47 distinct neighbourhoods in ascending mask order,
+Outputs: **47 tile blob** set (8 columns x 6 rows, tile i = the i-th of the 47 distinct neighborhoods in ascending mask order,
 the 48th slot empty) or the **16 tile edge** set (4 x 4, tile number = N + 2 E + 4 S + 8 W). The 8-bit mask is
-N=1, NE=2, E=4, SE=8, S=16, SW=32, W=64, NW=128, a diagonal counting only when both its orthogonal neighbours are terrain:
+N=1, NE=2, E=4, SE=8, S=16, SW=32, W=64, NW=128, a diagonal counting only when both its orthogonal neighbors are terrain:
 the list is 0, 1, 4, 5, 7, 16, 17, 20, 21, 23, 28, 29, 31, 64, 65, 68, 69, 71, 80, 81, 84, 85, 87, 92, 93, 95, 112, 113, 116, 117,
 119, 124, 125, 127, 193, 197, 199, 209, 213, 215, 221, 223, 241, 245, 247, 253, 255. This is **its own layout**: Godot terrains,
 Tiled and RPG Maker each want theirs (RPG Maker's A2 autotile is a different 2 x 3 sub-tile scheme and is not produced here),
@@ -231,7 +231,7 @@ so import the PNG and assign the tiles by mask number from this table.
 ### Tileset Map
 
 Wire a mask (white = terrain) and the tileset (as Autotile writes it, with the same layout setting). The mask is cut into map
-cells (`Mask cell` pixels each; 1 means the mask is already one pixel per tile), the eight neighbours of every terrain cell give
+cells (`Mask cell` pixels each; 1 means the mask is already one pixel per tile), the eight neighbors of every terrain cell give
 the bitmask, the bitmask picks the tile. A blobby painted mask becomes a properly edged terrain image of
 `cells x tile size` pixels. `Beyond the map: Terrain` lets the border continue without an edge. One GPU pass.
 

@@ -71,3 +71,11 @@ export function numberOpt(p: Parsed, name: string, min = -Infinity): number | un
   if (!Number.isFinite(n) || n < min) throw new Error(`Option --${name} needs a number${min > -Infinity ? ` >= ${min}` : ''}, got "${v}".`);
   return n;
 }
+
+/** `--for <name>` covers sheet presets (generic|godot|unity|gamemaker|rpgmaker|web) and video presets (vj|editing|web). "web" sets both. */
+export function parseForFlag(name: string): { preset?: string; videoFor?: string } {
+  const sheetFor = ['generic', 'godot', 'unity', 'gamemaker', 'rpgmaker', 'web'];
+  const videoFor = ['vj', 'editing', 'web'];
+  if (!sheetFor.includes(name) && !videoFor.includes(name)) throw new Error(`Unknown --for "${name}" (${[...sheetFor, 'vj', 'editing'].join(', ')}).`);
+  return { ...(sheetFor.includes(name) ? { preset: name } : {}), ...(videoFor.includes(name) ? { videoFor: name } : {}) };
+}

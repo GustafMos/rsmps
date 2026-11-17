@@ -239,7 +239,7 @@ describe('format detection', () => {
     expect(parseModelBytes(meshGltf(triangleMesh())).triangleCount).toBe(1);
     expect(parseModelBytes(textBytes('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3')).triangleCount).toBe(1);
     expect(err(() => parseModelBytes(new Uint8Array([1, 2]).buffer))).toMatch(/too small/);
-    expect(err(() => parseModelBytes(new Uint8Array([0, 1, 2, 3, 4, 5]).buffer))).toMatch(/Unrecognised 3D file/);
+    expect(err(() => parseModelBytes(new Uint8Array([0, 1, 2, 3, 4, 5]).buffer))).toMatch(/Unrecognized 3D file/);
   });
   it('computeNormals welds duplicate positions', () => {
     // two triangles sharing positions but not vertex ids: the shared edge gets one blended normal

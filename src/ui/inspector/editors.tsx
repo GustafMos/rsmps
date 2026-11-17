@@ -233,24 +233,29 @@ export function AssetsEditor({ value, accept, onChange }: { value: string[]; acc
 
 /* ------------------------------- JSON (read-only) ------------------------- */
 
-export function JsonEditor({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+export function JsonEditor({ value, onChange, empty = 'Empty' }: { value: unknown; onChange: (v: unknown) => void; empty?: string }) {
   const text = (() => {
     try {
-      return JSON.stringify(value, null, 1) ?? 'null';
+      return JSON.stringify(value, null, 1) ?? '';
     } catch {
-      return String(value);
+      return '';
     }
   })();
+  const isEmpty = value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0) || (typeof value === 'object' && !Array.isArray(value) && Object.keys(value as object).length === 0);
+  if (isEmpty) return <div className="rs-json"><span className="rs-insp__hint rs-json__empty">{empty}</span></div>;
   const count = Array.isArray(value) ? value.length : null;
+  const fields = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value as object).length : null;
+  const summary = count !== null ? `${count} item${count === 1 ? '' : 's'}` : fields !== null ? `${fields} field${fields === 1 ? '' : 's'}` : 'Value';
   return (
     <div className="rs-json">
-      {count !== null && (
-        <div className="rs-json__row">
-          <span className="rs-num">{count} item{count === 1 ? '' : 's'}</span>
-          <button className="rs-btn rs-btn--ghost rs-btn--danger" disabled={count === 0} onClick={() => onChange([])}>Clear</button>
-        </div>
-      )}
-      <pre className="rs-json__pre rs-mono">{text.length > 700 ? text.slice(0, 700) + '\n…' : text}</pre>
+      <div className="rs-json__row">
+        <span className="rs-num">{summary}</span>
+        {count !== null && <button className="rs-btn rs-btn--ghost rs-btn--danger" onClick={() => onChange([])}>Clear</button>}
+      </div>
+      <details className="rs-json__details">
+        <summary>Show data</summary>
+        <pre className="rs-json__pre rs-mono">{text.length > 700 ? text.slice(0, 700) + '\n…' : text}</pre>
+      </details>
     </div>
   );
 }

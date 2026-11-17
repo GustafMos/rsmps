@@ -21,7 +21,7 @@ export default defineNode({
   title: 'Feedback',
   category: 'time',
   description:
-    'Endless video feedback: every frame is laid over a zoomed, turned, shifted, recoloured and softened copy of the previous result, so trails spiral into tunnels. Memory is a bounded number of frames, so any frame renders the same in any order, and a looping project loops. For a fixed number of fading copies use Frame Echo or Warped Echo.',
+    'Endless video feedback: every frame is laid over a zoomed, turned, shifted, recolored and softened copy of the previous result, so trails spiral into tunnels. Memory is a bounded number of frames, so any frame renders the same in any order, and a looping project loops. For a fixed number of fading copies use Frame Echo or Warped Echo.',
   keywords: ['video feedback', 'trails', 'recursive', 'tunnel', 'smear', 'echo', 'infinite', 'droste', 'ghost', 'afterimage'],
   inputs: {
     image: { type: 'image', required: true, label: 'Image' },

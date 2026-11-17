@@ -54,10 +54,10 @@ export function OutputsSection() {
                   ed.setActiveOutput(id);
                   ed.setViewed(id);
                 }}
-                title="Select and view this output"
+                title={`${n.label || def.title}${fs ? ` · ${fs.width}×${fs.height}` : ''}: select and view this output`}
               >
                 {isAudioOut(id) ? <Icon name="volume" size={14} /> : <span className="rs-side__chip" style={{ background: CATEGORIES[def.category]?.color }} />}
-                <span className="rs-side__name">{n.label || def.title}{fs && <span className="rs-side__sub rs-num"> {fs.width}×{fs.height}</span>}</span>
+                <span className="rs-side__name">{n.label || def.title}</span>
                 {active === id && <span className="rs-side__active" title="Active output: previews use its frame">active</span>}
                 {errors.has(id) && <Icon name="warn" size={13} />}
                 {viewed === id && <Icon name="eye" size={13} />}

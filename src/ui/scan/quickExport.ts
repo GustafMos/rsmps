@@ -8,7 +8,7 @@ export const QUICK_KINDS: { id: QuickKind; label: string }[] = [
   { id: 'mp4', label: 'Video (MP4, H.264)' },
   { id: 'webm', label: 'Video (WebM, VP9)' },
   { id: 'sequence', label: 'PNG sequence (ZIP)' },
-  { id: 'spritesheet', label: 'Spritesheet (+ JSON)' },
+  { id: 'spritesheet', label: 'Sprite sheet (+ JSON)' },
 ];
 
 export interface QuickOptions {

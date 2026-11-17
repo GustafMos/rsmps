@@ -269,11 +269,7 @@ export function ScanView() {
             <Icon name="image" size={28} />
             <strong>Drop photos or scans of your printed pages here</strong>
             <span>Pages can be in any order. Each page needs its four corner markers in the picture.</span>
-            <span>
-              <button className="rs-btn" onClick={() => ed.openDialog('blankSheets')} title="Empty frame boxes with scan markers, for animation drawn entirely on paper"><Icon name="export" /> Print blank sheets…</button>{' '}
-              <button className="rs-btn" onClick={() => setPhoneOpen(true)} title="Photograph the sheets with your phone: the photos come straight in, no uploading"><Icon name="plug" /> Scan with phone…</button>{' '}
-              <button className="rs-btn" onClick={() => setTextureMode(true)} title="Crop a photo of paper, tape or scribbles into a texture; no markers needed"><Icon name="image" /> Scan a texture…</button>
-            </span>
+            <span>No sheets yet? Use Blank sheets… above to print some, or Scan with phone… to photograph them. Texture… crops a photo of paper into a texture.</span>
           </div>
         )}
 
@@ -452,7 +448,7 @@ function Frames({ result, defaultName, initial, onOptions, onTiming, onDone }: {
           <button className="rs-btn rs-btn--primary" disabled={exporting || r.recoveredFrames === 0} onClick={() => void quickExport('mp4')} title="Straight to an MP4 file; nothing is added to your project">{exporting ? 'Exporting…' : 'Export as video'}</button>
           <MenuButton className="rs-btn rs-btn--primary rs-top__caret" title="Other formats" items={QUICK_KINDS.map((k) => ({ label: k.label, onClick: () => void quickExport(k.id) }))}><Icon name="chevronDown" size={12} /></MenuButton>
         </div>
-        <span className="rs-insp__hint">Uses the frame rate, upscale and loop count above. &quot;Drawing only&quot; applies to PNG sequence and spritesheet.</span>
+        <span className="rs-insp__hint">Uses the frame rate, upscale and loop count above. &quot;Drawing only&quot; applies to PNG sequence and sprite sheet.</span>
       </div>
       {done ? (
         <div className="rs-sc__done">

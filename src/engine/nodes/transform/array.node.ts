@@ -211,7 +211,7 @@ export default defineNode({
   title: 'Array',
   category: 'transform',
   description:
-    'Duplicates a picture: a grid, a line, a ring, or an endless grid that tiles in every direction so scrolling it never shows an edge. Each copy can be offset, rotated, scaled, mirrored, faded and recoloured by its position in the array. Computed in one pass, so thousands of copies cost the same as a few.',
+    'Duplicates a picture: a grid, a line, a ring, or an endless grid that tiles in every direction so scrolling it never shows an edge. Each copy can be offset, rotated, scaled, mirrored, faded and recolored by its position in the array. Computed in one pass, so thousands of copies cost the same as a few.',
   keywords: ['duplicate', 'repeat', 'tile', 'clone', 'grid', 'instances', 'copies', 'cloner', 'pattern', 'brick', 'radial', 'circle', 'ring', 'infinite', 'wallpaper', 'scroll', 'sprite sheet', 'tile preview', 'seamless', 'tileable', 'texture repeat'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

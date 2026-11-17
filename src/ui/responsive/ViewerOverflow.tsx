@@ -1,43 +1,27 @@
 import { useState } from 'react';
 import { Icon } from '../components/Icon';
-import { MenuPopup, type MenuItem } from '../components/Menu';
+import { MenuPopup } from '../components/Menu';
+import { useSelector } from '../store/createStore';
+import { viewerMore } from '../viewer/viewerMore';
 
 /**
- * The viewer toolbar is too wide for a phone, so its less-used buttons are hidden there (responsive.css) and listed here instead:
- * one "…" that offers every button the bar has hidden, by its own title, and presses it. It reads the toolbar as it is, so a button
- * another feature adds to the viewer later is reachable on a phone without anyone touching this file.
+ * The viewer toolbar is too wide for a phone, so the viewer keeps only its name and preview scale in the bar and publishes every other
+ * control as menu rows (viewerMore). This "…" in the viewer header opens them.
  */
 export function ViewerOverflow() {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-  const open = (el: HTMLElement) => {
-    const r = el.getBoundingClientRect();
-    setAt({ x: r.right - 8, y: r.bottom + 2 });
-  };
-  const items = (): MenuItem[] => {
-    const bar = document.querySelector('.rs-viewer__bar');
-    if (!bar) return [];
-    const out: MenuItem[] = [];
-    for (const b of Array.from(bar.querySelectorAll<HTMLButtonElement>('button'))) {
-      if (getComputedStyle(b).display !== 'none') continue; // only what the phone layout hid
-      const label = (b.getAttribute('aria-label') || b.title || b.textContent || '').trim().split(/\s*\(/)[0].replace(/\s+/g, ' ');
-      if (!label) continue;
-      out.push({ label: label.length > 64 ? `${label.slice(0, 61)}…` : label, disabled: b.disabled, onClick: () => b.click() });
-    }
-    return out;
-  };
+  const items = useSelector(viewerMore, (s) => s.items);
   return (
     <>
-      <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={(e) => open(e.currentTarget)} aria-label="More viewer tools" aria-haspopup="menu">
+      <button
+        className="rs-btn rs-btn--icon rs-btn--ghost"
+        onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAt({ x: r.right - 8, y: r.bottom + 2 }); }}
+        aria-label="More viewer tools"
+        aria-haspopup="menu"
+      >
         <Icon name="more" size={18} />
       </button>
-      {at && (
-        <MenuPopup
-          x={Math.max(8, at.x - 260)}
-          y={at.y}
-          items={items().length ? items() : [{ label: 'Nothing more here', disabled: true }]}
-          onClose={() => setAt(null)}
-        />
-      )}
+      {at && <MenuPopup x={Math.max(8, at.x - 260)} y={at.y} items={items.length ? items : [{ label: 'Nothing more here', disabled: true }]} onClose={() => setAt(null)} />}
     </>
   );
 }

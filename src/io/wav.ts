@@ -6,9 +6,9 @@ export interface WavPcm {
   channels: Float32Array[];
 }
 
-export type WavBits = 24 | 32;
+export type WavBits = 16 | 24 | 32;
 
-/** RIFF/WAVE bytes. 32 = IEEE float (lossless for our float32 audio), 24 = integer PCM. Samples are clamped to -1..1 for 24-bit. */
+/** RIFF/WAVE bytes. 32 = IEEE float (lossless for our float32 audio), 24 and 16 = integer PCM. Samples are clamped to -1..1 for 24-bit. */
 export function encodeWav(pcm: WavPcm, bits: WavBits = 32): Uint8Array {
   const nch = Math.max(1, pcm.channels.length);
   const frames = pcm.channels[0]?.length ?? 0;
@@ -38,6 +38,9 @@ export function encodeWav(pcm: WavPcm, bits: WavBits = 32): Uint8Array {
       const x = pcm.channels[Math.min(c, pcm.channels.length - 1)][i] ?? 0;
       if (bits === 32) {
         v.setFloat32(o, x, true);
+      } else if (bits === 16) {
+        const s16 = Math.max(-1, Math.min(1, x));
+        v.setInt16(o, Math.round(s16 < 0 ? s16 * 0x8000 : s16 * 0x7fff), true);
       } else {
         const s = Math.max(-1, Math.min(1, x));
         const n = Math.round(s < 0 ? s * 0x800000 : s * 0x7fffff);

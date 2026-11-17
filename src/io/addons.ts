@@ -4,6 +4,7 @@
  */
 import type { AddonActionResult, AddonsApi } from './api';
 import type { AddonInfo, DesktopClient } from './desktop';
+import { setVideoAvailability } from '../engine/lib/video-presets';
 
 export const POLL_MS = 500;
 
@@ -101,6 +102,8 @@ export class AddonsImpl implements AddonsApi {
 
   private set(list: AddonInfo[]): void {
     this.cache = list;
+    const ff = list.find((a) => a.id === 'ffmpeg' && a.state === 'installed');
+    setVideoAvailability({ ffmpeg: !!ff, encoders: ff?.encoders ? new Set(ff.encoders) : null });
     for (const l of [...this.listeners]) l(list);
   }
 }

@@ -6,24 +6,15 @@ import { compareStore, compareWithNode, currentStrip, exitCompare, patchCompare,
 import { useSelector } from '../store/createStore';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { COMPARE_MODES, PLAYBACK_NOTE, overlayStyle, snapCaption, wipeLine, wipePosFromPointer } from './compare';
+import { RenameField } from '../sidebar/RenameField';
 import './compare.css';
 
-/** Snapshot button and compare controls: a chip in the viewer bar. */
-export function CompareBar() {
+/** The menus behind the Snapshot / A/B / Node… buttons, also used as plain rows when the viewer bar folds them away. */
+export function useCompareMenus() {
   const app = useApp();
   const { ed } = app;
   const mode = useSelector(compareStore, (s) => s.mode);
-  const onion = useSelector(compareStore, (s) => s.onion);
-  const gain = useSelector(compareStore, (s) => s.gain);
-  const angle = useSelector(compareStore, (s) => s.wipeAngle);
-  const busy = useSelector(compareStore, (s) => s.busy);
-  const playing = usePlayer((s) => s.playing);
-  const projects = useEd((s) => s.projects);
-  const [menu, setMenu] = useState<{ x: number; y: number; kind: 'mode' | 'node' } | null>(null);
-
-  useEffect(() => pruneProjects(projects.map((p) => p.id)), [projects]);
-
-  const nodes = ed.state.graph.nodes;
+  useEd((s) => s.viewedNodeId);
   const modeItems: MenuItem[] = [
     ...COMPARE_MODES.map((m) => ({ label: `${mode === m.id ? '✓ ' : ''}${m.label}`, onClick: () => patchCompare({ mode: m.id }) })),
     { sep: true },
@@ -33,24 +24,56 @@ export function CompareBar() {
     { label: 'Selected node vs its input (what did it change?)', onClick: () => void compareWithNode(app) },
     { sep: true },
     { head: 'Compare the view with…' },
-    ...nodes.filter((n) => n.id !== ed.state.viewedNodeId).slice(0, 40).map((n) => ({ label: n.label || app.io.registry.get(n.type)?.title || n.type, onClick: () => void compareWithNode(app, n.id) })),
+    ...ed.state.graph.nodes.filter((n) => n.id !== ed.state.viewedNodeId).slice(0, 40).map((n) => ({ label: n.label || app.io.registry.get(n.type)?.title || n.type, onClick: () => void compareWithNode(app, n.id) })),
   ];
-  const open = (e: React.MouseEvent, kind: 'mode' | 'node') => {
+  const foldItems: MenuItem[] = [
+    { head: 'Snapshot and compare' },
+    { label: 'Snapshot', onClick: () => void takeSnapshot(app) },
+    ...modeItems,
+    { sep: true },
+    ...nodeItems,
+  ];
+  return { mode, modeItems, nodeItems, foldItems };
+}
+
+/** Snapshot button and compare controls: a chip in the viewer bar. `compact` folds the three buttons into one icon button with the same menus. */
+export function CompareBar({ compact = false }: { compact?: boolean }) {
+  const app = useApp();
+  const { mode, modeItems, nodeItems, foldItems } = useCompareMenus();
+  const angle = useSelector(compareStore, (s) => s.wipeAngle);
+  const onion = useSelector(compareStore, (s) => s.onion);
+  const gain = useSelector(compareStore, (s) => s.gain);
+  const busy = useSelector(compareStore, (s) => s.busy);
+  const playing = usePlayer((s) => s.playing);
+  const projects = useEd((s) => s.projects);
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: 'mode' | 'node' | 'fold' } | null>(null);
+
+  useEffect(() => pruneProjects(projects.map((p) => p.id)), [projects]);
+
+  const open = (e: React.MouseEvent, kind: 'mode' | 'node' | 'fold') => {
     const r = e.currentTarget.getBoundingClientRect();
     setMenu({ x: r.left, y: r.bottom + 2, kind });
   };
 
   return (
     <div className="rs-viewer__look rs-viewer__chip rs-cmp__bar" data-nodrag>
-      <button className="rs-btn rs-btn--ghost" onClick={() => void takeSnapshot(app)} title="Snapshot of the viewer (shortcut: Shift+S, rebindable)">
-        <Icon name="image" /> Snapshot
-      </button>
-      <button className={`rs-btn rs-btn--ghost${mode !== 'off' ? ' is-on' : ''}`} onClick={(e) => open(e, 'mode')} aria-haspopup="menu" title="Compare the live view with a snapshot">
-        A/B{mode !== 'off' ? `: ${COMPARE_MODES.find((m) => m.id === mode)?.label}` : ''}
-      </button>
-      <button className="rs-btn rs-btn--ghost" disabled={busy} onClick={(e) => open(e, 'node')} aria-haspopup="menu" title="Compare with another node at this frame">
-        Node…
-      </button>
+      {compact ? (
+        <button className={`rs-btn rs-btn--icon rs-btn--ghost${mode !== 'off' ? ' is-on' : ''}`} disabled={busy && mode === 'off'} onClick={(e) => open(e, 'fold')} aria-haspopup="menu" aria-label="Snapshot and compare" title="Snapshot, A/B compare, compare with another node">
+          <Icon name="image" />
+        </button>
+      ) : (
+        <>
+          <button className="rs-btn rs-btn--ghost" onClick={() => void takeSnapshot(app)} title="Snapshot of the viewer (shortcut: Shift+S, rebindable)">
+            <Icon name="image" /> Snapshot
+          </button>
+          <button className={`rs-btn rs-btn--ghost${mode !== 'off' ? ' is-on' : ''}`} onClick={(e) => open(e, 'mode')} aria-haspopup="menu" title="Compare the live view with a snapshot">
+            A/B{mode !== 'off' ? `: ${COMPARE_MODES.find((m) => m.id === mode)?.label}` : ''}
+          </button>
+          <button className="rs-btn rs-btn--ghost" disabled={busy} onClick={(e) => open(e, 'node')} aria-haspopup="menu" title="Compare with another node at this frame">
+            Node…
+          </button>
+        </>
+      )}
       {mode === 'wipe' && (
         <label className="rs-cmp__ctl" title="Wipe angle">
           <span className="rs-num">∠</span>
@@ -75,7 +98,7 @@ export function CompareBar() {
           <Icon name="close" size={12} />
         </button>
       )}
-      {menu && <MenuPopup x={menu.x} y={menu.y} items={menu.kind === 'mode' ? modeItems : nodeItems} onClose={() => setMenu(null)} />}
+      {menu && <MenuPopup x={menu.x} y={menu.y} items={menu.kind === 'mode' ? modeItems : menu.kind === 'fold' ? foldItems : nodeItems} onClose={() => setMenu(null)} />}
     </div>
   );
 }
@@ -189,6 +212,7 @@ export function CompareStrip() {
   const app = useApp();
   const st = useSelector(compareStore, (s) => s);
   const strip = currentStrip(st, app);
+  const [renaming, setRenaming] = useState<string | null>(null);
   if (!strip.length) return null;
   return (
     <div className="rs-cmp__strip" data-nodrag role="list" aria-label="Snapshots">
@@ -196,9 +220,10 @@ export function CompareStrip() {
         <div key={s.id} role="listitem" className={`rs-cmp__thumb${s.id === st.activeId ? ' is-on' : ''}`} title={snapCaption(s)}>
           <button className="rs-cmp__pick" onClick={() => selectSnapshot(s.id === st.activeId ? null : s.id)} aria-pressed={s.id === st.activeId}>
             <img src={snapUrl(s.id) ?? ''} alt={snapCaption(s)} draggable={false} />
-            <span className="rs-num">{s.label || `f${s.frame}`}</span>
+            {renaming === s.id ? null : <span className="rs-num">{s.label || `f${s.frame}`}</span>}
           </button>
-          <button className="rs-btn rs-btn--icon rs-btn--ghost rs-cmp__x" aria-label="Rename snapshot" title="Rename" onClick={() => { const v = window.prompt('Snapshot label', s.label); if (v !== null) renameSnapshot(app, s.id, v); }}>
+          {renaming === s.id && <RenameField value={s.label} label="Snapshot label" onDone={(v) => { setRenaming(null); if (v !== null) renameSnapshot(app, s.id, v.trim()); }} />}
+          <button className="rs-btn rs-btn--icon rs-btn--ghost rs-cmp__x" aria-label="Rename snapshot" title="Rename" onClick={() => setRenaming(s.id)}>
             <Icon name="rename" size={10} />
           </button>
           <button className="rs-btn rs-btn--icon rs-btn--ghost rs-cmp__x rs-cmp__x2" aria-label="Delete snapshot" title="Delete" onClick={() => removeSnapshot(app, s.id)}>

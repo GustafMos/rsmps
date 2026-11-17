@@ -11,7 +11,7 @@ export default defineNode({
   id: 'palette-swap',
   title: 'Palette Swap',
   category: 'pixel',
-  description: 'Remaps an image from one palette to another by color index. Handy for sprite recolours and day/night variants.',
+  description: 'Remaps an image from one palette to another by color index. Handy for sprite recolors and day/night variants.',
   keywords: ['recolor', 'remap', 'index', 'sprite', 'variant'],
   inputs: {
     image: { type: 'image', required: true, label: 'Image' },

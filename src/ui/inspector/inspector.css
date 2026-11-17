@@ -113,3 +113,7 @@
 .rs-insp__pick { text-align: left; padding: 4px 8px; background: transparent; border: 0; color: var(--text); font-size: var(--fs-sm); }
 .rs-insp__pick:hover, .rs-insp__pick:focus-visible { background: var(--bg-4); }
 .rs-insp__pickn { color: var(--text-faint); }
+
+.rs-insp__err.is-info { background: var(--bg-2); border-color: var(--line-strong); color: var(--text-dim); }
+.rs-json__empty { font-style: italic; }
+.rs-json__details > summary { cursor: pointer; color: var(--text-dim); font-size: var(--fs-xs); }

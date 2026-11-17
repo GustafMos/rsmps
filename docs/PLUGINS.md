@@ -85,7 +85,7 @@ whole cycles so it loops), `u.a` ... `u.d` (sliders, wire-able), `u.color`, plus
 the node with the line number of *your* code.
 
 It is meant for quick experiments. The code lives in the project file as one text parameter and the node
-has fixed inputs and sliders. To **ship** an effect (own name, own inputs, own labelled parameters, reuse
+has fixed inputs and sliders. To **ship** an effect (own name, own inputs, own labeled parameters, reuse
 across projects), turn the shader into a plugin: copy the WGSL into the `wgsl` of a `ctx.gpu.pass(...)`
 call as in the example above and give the plugin its own `params`.
 

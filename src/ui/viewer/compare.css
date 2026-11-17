@@ -21,3 +21,4 @@
 .rs-cmp__x { position: absolute; top: 0; right: 0; width: 16px; height: 16px; opacity: 0; background: var(--bg-3); }
 .rs-cmp__x2 { top: 0; right: 16px; }
 .rs-cmp__thumb:hover .rs-cmp__x, .rs-cmp__thumb:focus-within .rs-cmp__x { opacity: 1; }
+.rs-cmp__thumb .rs-media__rename { position: absolute; left: 2px; right: 2px; bottom: 2px; z-index: 2; width: auto; height: 18px; padding: 0 2px; font-size: var(--fs-xs); }

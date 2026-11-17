@@ -23,7 +23,15 @@ import { writeSheetMeta } from '../io/spritesheet-meta';
 import { bleedTransparent, buildSheets, type Bitmap } from '../io/spritesheet-pack';
 import { buildOptionsOf, readSheetParams, tagsOfClips, type SheetParams } from '../io/spritesheet-params';
 import { errorMessage, totalFramesOf } from '../io/util';
-import { CODECS, imageExt, normalizeImageFormat, parseCodec, VideoWriter, writePcmFile, writeStill, type CodecSpec, type ImageFormat } from './encode';
+import { isVideoPreset, resolveVideoPreset } from '../engine/lib/video-presets';
+import { CODECS, availableEncoders, ffmpegSoundFile, imageExt, normalizeImageFormat, parseCodec, VideoWriter, writePcmFile, writeStill, writeStillFloat, type CodecSpec, type ImageFormat } from './encode';
+import { NodeFileSink } from './file-sink';
+import { createHapGpuCompressor, type HapGpuCompressor, type HapSession } from '../io/encoders';
+import type { EncodeSession, JpegEncoder } from '../io/encoders';
+import { type CodecRow, stillRow } from '../io/export-codecs';
+import { beginOwnVideo, encodeAudioOwn, frameModeOf, hapFormatOf } from '../io/own-export';
+import { fileTimestamps, isReordered } from '../io/encode-order';
+import { readFileSync } from 'node:fs';
 import { NodeHost } from './host';
 import { pendingProcesses } from '../engine/process';
 import { EvalGate } from '../io/gate';
@@ -48,6 +56,8 @@ export interface Overrides {
   kind?: Kind;
   imageFormat?: ImageFormat;
   codec?: CodecSpec;
+  /** Sound-only export (--format wav|flac|mp3 ...): every item's Audio Output mix as one sound file. */
+  sound?: CodecRow;
   quality?: number;
   bitrate?: number;
   /** Output node params forced on every output (the sheet / game flags: sheetLayout, sheetMeta, preset, extrude, powerOfTwo, sheetTrim, maxSheet, bleed, padding, columns). */
@@ -108,8 +118,18 @@ interface OutParams {
   print: PrintParams;
   imageFormat: ImageFormat;
   quality: number;
+  hapQuality: 'fast' | 'better';
+  hapSnappy: boolean;
+  gifPalette: 'local' | 'global';
+  gifDither: 'none' | 'ordered' | 'floyd';
+  gifColors: number;
+  gifLoop: number;
   codec: string;
   bitrate: number;
+  /** The video "For" preset (general = none). */
+  videoFor: string;
+  /** Every frame a key frame (set by a "For" preset when it falls back to H.264 / VP9). */
+  allKeys: boolean;
   scale: number;
   columns: number;
   padding: number;
@@ -128,8 +148,16 @@ function readParams(registry: Registry, node: NodeInstance, ov: Overrides): OutP
     print: readPrintParams(p),
     imageFormat: ov.imageFormat ?? normalizeImageFormat(String(p.imageFormat ?? 'png')) ?? 'png',
     quality: ov.quality ?? Math.min(1, Math.max(0.1, num(p.quality, 0.92))),
+    hapQuality: p.hapQuality === 'better' ? 'better' : 'fast',
+    hapSnappy: p.hapSnappy !== false,
+    gifPalette: p.gifPalette === 'global' ? 'global' : 'local',
+    gifDither: p.gifDither === 'none' || p.gifDither === 'floyd' ? p.gifDither : 'ordered',
+    gifColors: Math.min(256, Math.max(2, Math.round(num(p.gifColors, 256)))),
+    gifLoop: Math.max(0, Math.round(num(p.gifLoop, 0))),
     codec: typeof p.codec === 'string' ? p.codec : 'avc',
     bitrate: ov.bitrate ?? Math.max(0.5, num(p.bitrate, 12)),
+    videoFor: isVideoPreset(p.videoFor) ? p.videoFor : 'general',
+    allKeys: p.allKeys === true,
     scale: Math.max(1, Math.round(num(p.scale, 1))),
     columns: Math.max(0, Math.round(num(p.columns, 0))),
     padding: Math.max(0, Math.round(num(p.padding, 0))),
@@ -172,7 +200,7 @@ export async function renderGraphBatch(opts: RenderOptions): Promise<RenderSumma
 
   const { nodes: outs } = selectOutputs(graph, registry, opts.outputs);
   const usable: NodeInstance[] = outs;
-  if (usable.length === 0) throw new Error('This graph has no exportable Output node (image-out). Add one and connect an image to it.');
+  if (usable.length === 0 && !ov.sound) throw new Error('This graph has no exportable Output node (image-out). Add one and connect an image to it.');
 
   const count = batchCount(graph, registry);
   const items = (opts.items ?? Array.from({ length: count }, (_, i) => i)).filter((i) => i >= 0 && i < count);
@@ -259,6 +287,31 @@ Run them in the app, or pass --process to run them first (headless, results are 
       let sourceAsset: AssetInfo | null = null;
 
       let itemGraph = graph;
+      if (ov.sound) {
+        jobNo++;
+        const where = `item ${item + 1}/${count} · sound`;
+        rep.event({ event: 'job-start', item: item + 1, output: 'sound', job: jobNo, jobs: items.length });
+        try {
+          if (prepError) throw new Error(prepError);
+          const written = await exportSound({ graph, registry, host, row: ov.sound, outDir: opts.outDir, tmp: tmp ?? tmpdir(), used, item, count, rep, where });
+          for (const f of written) {
+            summary.files.push(f);
+            rep.event({ event: 'file', item: item + 1, output: 'sound', path: f });
+          }
+          summary.jobs++;
+        } catch (err) {
+          const message = errorMessage(err);
+          summary.errors.push({ item: item + 1, output: 'sound', message });
+          rep.warn(`${where}: ${message}`);
+          rep.event({ event: 'error', item: item + 1, output: 'sound', message });
+        }
+        if (engine) {
+          engine.clear();
+          host.dropCaches();
+          for (const id of itemAssets) host.forget(id);
+        }
+        continue;
+      }
       for (const out of usable) {
         // One sheet for the whole batch: the first item makes it (it renders every item itself).
         if (batchSheetOut(out, ov, registry) && item !== items[0]) continue;
@@ -302,11 +355,20 @@ Run them in the app, or pass --process to run them first (headless, results are 
             else if (dry) kind = frames > 1 ? 'video' : 'image';
             else kind = (await hasMotion(engine!, itemGraph, out.id, item, count, frames)) ? 'video' : 'image';
           } else kind = params.kind;
-          const codec: CodecSpec = ov.codec ?? CODECS[parseCodec(params.codec) ?? 'h264'];
+          let codec: CodecSpec = ov.codec ?? CODECS[parseCodec(params.codec) ?? 'h264'];
           const w0 = itemGraph.project.width;
           const h0 = itemGraph.project.height;
           const sw = w0 * params.scale;
           const sh = h0 * params.scale;
+          if (kind === 'video' && !ov.codec && params.videoFor !== 'general') {
+            // The "For" preset is resolved against the FFmpeg that is really installed.
+            const have = await availableEncoders();
+            const r = resolveVideoPreset(params.videoFor, { codec: params.codec, bitrate: params.bitrate, allKeys: params.allKeys }, { ffmpeg: true, encoders: have.size ? have : null }, sw * sh);
+            codec = CODECS[parseCodec(r.codec) ?? 'h264'];
+            params.bitrate = r.bitrate;
+            params.allKeys = r.allKeys;
+            if (r.note) rep.warn(`${where}: ${r.note}`);
+          }
 
           if (dry) {
             const planned = planFiles(kind, params, codec, tokens, frames, sw, sh, used);
@@ -534,7 +596,7 @@ interface Composed {
 }
 
 /** Nearest upscale and/or pad to even size in one GPU pass. */
-function compose(gpu: Gpu, img: Img, scale: number, even: boolean): Composed {
+function compose(gpu: Gpu, img: Img, scale: number, even: boolean, format?: 'rgba8unorm' | 'rgba16float'): Composed {
   const w = img.width * scale;
   const h = img.height * scale;
   const W = even ? Math.ceil(w / 2) * 2 : w;
@@ -544,6 +606,7 @@ function compose(gpu: Gpu, img: Img, scale: number, even: boolean): Composed {
   if (W > maxDim || H > maxDim) throw new Error(`The output would be ${W}x${H}, larger than this GPU supports (${maxDim}). Lower the pixel upscale.`);
   const out = gpu.pass({
     label: 'cli-compose',
+    format,
     size: { width: W, height: H },
     textures: { src: img },
     uniforms: { scale, srcSize: [img.width, img.height] },
@@ -605,9 +668,39 @@ export async function exportPrintSheets(c: JobCtx): Promise<string[]> {
   return names;
 }
 
+/** Formats that take the picture over black (premultiplied) from us: JPEG and the FFmpeg formats without alpha. Own formats composite themselves. */
+function wantsPremultiplied(format: string): boolean {
+  const row = stillRow(format);
+  return format === 'jpeg' || (row?.route === 'ffmpeg' && !row.alpha);
+}
+
+/** Half-float pixels of a frame (float stills: OpenEXR, Radiance HDR, 16-bit TIFF). */
+async function frameHalf(c: JobCtx, frame: number, scale: number): Promise<{ half: Uint16Array; width: number; height: number }> {
+  const img = await renderFrame(c, frame);
+  c.gpu.begin();
+  try {
+    const comp = compose(c.gpu, img, scale, false, img.texture.format === 'rgba16float' ? 'rgba16float' : undefined);
+    try {
+      return { half: await c.gpu.readFloat(comp.drawable), width: comp.drawable.width, height: comp.drawable.height };
+    } finally {
+      comp.release();
+    }
+  } finally {
+    c.gpu.end();
+    c.gpu.release(img.texture);
+  }
+}
+
 async function exportImage(c: JobCtx): Promise<string[]> {
   const p = c.params;
-  const opaque = p.imageFormat === 'jpeg';
+  if (stillRow(p.imageFormat)?.float) {
+    const f = await frameHalf(c, 0, p.scale);
+    const name = uniqueName(c.used, `${resolvePattern(p.name, c.tokens(f.width, f.height))}.${imageExt(p.imageFormat)}`);
+    await writeStillFloat(join(c.outDir, name), f.half, f.width, f.height, p.imageFormat);
+    await addReport(c, { files: [name], kind: 'image', item: c.item + 1, width: f.width, height: f.height, frames: 1, colors: 0 });
+    return [name];
+  }
+  const opaque = wantsPremultiplied(p.imageFormat);
   const f = await frameBytes(c, 0, p.scale, false, !opaque);
   const name = uniqueName(c.used, `${resolvePattern(p.name, c.tokens(f.width, f.height))}.${imageExt(p.imageFormat)}`);
   const colors = c.report ? distinctColors(f.data) : 0;
@@ -620,10 +713,21 @@ async function exportImage(c: JobCtx): Promise<string[]> {
 async function exportSequence(c: JobCtx): Promise<string[]> {
   const p = c.params;
   const pattern = sequencePattern(p.name);
-  const opaque = p.imageFormat === 'jpeg';
+  const opaque = wantsPremultiplied(p.imageFormat);
+  const float = stillRow(p.imageFormat)?.float === true;
   const files: string[] = [];
   let dir = '';
   for (let f = 0; f < c.frames; f++) {
+    if (float) {
+      const h = await frameHalf(c, f, p.scale);
+      if (!dir) dir = uniqueName(c.used, sequenceDir(p.name, c.tokens(h.width, h.height)));
+      const fname = `${dir}/${resolvePattern(pattern, c.tokens(h.width, h.height, f, c.frames))}.${imageExt(p.imageFormat)}`;
+      await writeStillFloat(join(c.outDir, fname), h.half, h.width, h.height, p.imageFormat);
+      await addReport(c, { files: [fname], kind: 'sequence', item: c.item + 1, width: h.width, height: h.height, frames: 1, colors: 0 });
+      files.push(fname);
+      c.rep.progress(c.label, f + 1, c.frames);
+      continue;
+    }
     const px = await frameBytes(c, f, p.scale, false, !opaque);
     if (!dir) dir = uniqueName(c.used, sequenceDir(p.name, c.tokens(px.width, px.height)));
     const name = `${dir}/${resolvePattern(pattern, c.tokens(px.width, px.height, f, c.frames))}.${imageExt(p.imageFormat)}`;
@@ -664,7 +768,7 @@ async function exportSheet(c: JobCtx): Promise<string[]> {
     }
   }
   const build = buildSheets(bitmaps, buildOptionsOf(sp));
-  for (const pg of build.pages) if (pg.width * pg.height * 4 > 2 ** 31 - 1) throw new Error(`The spritesheet would be ${pg.width}x${pg.height}: too large. Use fewer frames, a smaller size, more columns or a maximum sheet size.`);
+  for (const pg of build.pages) if (pg.width * pg.height * 4 > 2 ** 31 - 1) throw new Error(`The sprite sheet would be ${pg.width}x${pg.height}: too large. Use fewer frames, a smaller size, more columns or a maximum sheet size.`);
   const base = resolvePattern(p.name, c.tokens(build.pages[0].width, build.pages[0].height));
   mkdirSync(c.outDir, { recursive: true });
   const images: string[] = [];
@@ -724,7 +828,173 @@ async function videoAudio(c: JobCtx, duration: number): Promise<PcmAudio | null>
   return null;
 }
 
+/** Motion JPEG in Node: sharp (libjpeg) writes each frame; the canvas the browser uses does not exist here. */
+const sharpJpeg: JpegEncoder = async (rgba, width, height, quality) => {
+  const buf = await sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width, height, channels: 4 } })
+    .removeAlpha()
+    .jpeg({ quality: Math.round(quality * 100), chromaSubsampling: '4:2:0' })
+    .toBuffer();
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+};
+
+/** Formats the app writes itself (HAP, Motion JPEG, PNG and uncompressed MOV, GIF, APNG): no FFmpeg. MOV files stream straight to the file. */
+async function exportVideoOwn(c: JobCtx, codec: CodecSpec): Promise<string[]> {
+  const p = c.params;
+  const row = codec.row;
+  const fps = c.graph.project.fps;
+  const { gpu } = c;
+  let session: EncodeSession | null = null;
+  let sink: NodeFileSink | null = null;
+  let hapGpu: HapGpuCompressor | null = null;
+  let mode = frameModeOf(row, p, true);
+  const hapFmt = hapFormatOf(row);
+  let pcm: PcmAudio | null = null;
+  let audioPos = 0;
+  let name = '';
+  let outW = 0;
+  let outH = 0;
+  const pushAudio = async (seconds: number, all = false) => {
+    if (!pcm || !session?.addAudio) return;
+    const total = pcm.channels[0].length;
+    const limit = all ? total : Math.min(total, Math.ceil(seconds * pcm.sampleRate));
+    const chunk = Math.max(1024, Math.round(pcm.sampleRate / 10));
+    while (audioPos < limit) {
+      const n = Math.min(chunk, limit - audioPos);
+      await session.addAudio(pcm.channels.map((ch) => ch.slice(audioPos, audioPos + n)));
+      audioPos += n;
+    }
+  };
+  try {
+    for (let f = 0; f < c.frames; f++) {
+      const img = await renderFrame(c, f);
+      gpu.begin();
+      try {
+        const comp = compose(gpu, img, p.scale, false);
+        try {
+          const { width, height } = comp.drawable;
+          if (!session) {
+            outW = width;
+            outH = height;
+            if (hapFmt && mode === 'hap-gpu') {
+              try {
+                hapGpu = createHapGpuCompressor(gpu, width, height, hapFmt);
+              } catch (err) {
+                c.rep.warn(`${c.where}: GPU HAP compression is unavailable (${errorMessage(err)}); the CPU was used (slower).`);
+                mode = frameModeOf(row, { hapQuality: 'better' }, false);
+              }
+            }
+            pcm = row.audio && row.kind === 'video' ? await videoAudio(c, c.frames / fps) : null;
+            name = uniqueName(c.used, `${resolvePattern(p.name, c.tokens(width, height))}.${row.ext}`);
+            if (row.kind === 'video') sink = new NodeFileSink(join(c.outDir, name));
+            session = beginOwnVideo({
+              row,
+              width,
+              height,
+              fps,
+              frames: c.frames,
+              hapQuality: p.hapQuality,
+              hapSnappy: p.hapSnappy,
+              gif: { palette: p.gifPalette, dither: p.gifDither, colors: p.gifColors, loop: p.gifLoop },
+              jpeg: sharpJpeg,
+              quality: 0.92,
+              audio: pcm ? { sampleRate: pcm.sampleRate, channels: pcm.channels.length } : null,
+              sink: sink ?? undefined,
+            });
+          }
+          if (mode === 'hap-gpu' && hapGpu) {
+            let src = comp.drawable.texture;
+            if (src.format !== 'rgba8unorm') {
+              src = gpu.pass({ label: 'hap-convert', size: comp.drawable, textures: { src: comp.drawable }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smpNearest, uv, 0.0); }' }).texture;
+            }
+            await (session as HapSession).addTexture(await hapGpu.compress({ texture: src }));
+          } else {
+            const data = await gpu.read(comp.drawable, mode === 'straight');
+            if (mode !== 'straight') for (let i = 3; i < data.length; i += 4) data[i] = 255;
+            await session.addFrame(data);
+          }
+        } finally {
+          comp.release();
+        }
+      } finally {
+        gpu.end();
+        gpu.release(img.texture);
+      }
+      await pushAudio((f + 1) / fps + 0.1);
+      c.rep.progress(c.label, f + 1, c.frames);
+    }
+    if (!session) throw new Error('No frames were rendered.');
+    await pushAudio(0, true);
+    const parts = await session.finish();
+    if (!sink) {
+      mkdirSync(c.outDir, { recursive: true });
+      writeFileSync(join(c.outDir, name), Buffer.concat(parts.map((x) => Buffer.from(x.buffer, x.byteOffset, x.byteLength))));
+    } else {
+      const size = statSync(join(c.outDir, name)).size;
+      if (size < 6e8) {
+        try {
+          const b = readFileSync(join(c.outDir, name));
+          // the demuxer logs a line for codecs it cannot decode (HAP...); only the packet timestamps are needed here
+          const log = { error: console.error, warn: console.warn };
+          console.error = () => undefined;
+          console.warn = () => undefined;
+          let stamps: number[];
+          try {
+            stamps = await fileTimestamps(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer);
+          } finally {
+            console.error = log.error;
+            console.warn = log.warn;
+          }
+          if (stamps.length !== c.frames) c.rep.warn(`${c.where}: the written file holds ${stamps.length} frames, ${c.frames} were rendered.`);
+          else if (isReordered(stamps)) c.rep.warn(`${c.where}: the written file stores its frames out of order.`);
+        } catch {
+          /* advisory */
+        }
+      }
+    }
+    void outW;
+    void outH;
+    return [name];
+  } catch (err) {
+    sink?.abort();
+    throw err;
+  } finally {
+    hapGpu?.dispose();
+  }
+}
+
+/** Sound only: the graph's Audio Output mix of one batch item as a sound file (own encoders, FFmpeg for the rest). */
+async function exportSound(o: { graph: GraphDoc; registry: Registry; host: NodeHost; row: CodecRow; outDir: string; tmp: string; used: Set<string>; item: number; count: number; rep: Reporter; where: string }): Promise<string[]> {
+  const { graph, registry, host, row } = o;
+  if (!hasAudioOutput(graph, registry)) throw new Error('This graph has no Audio Output with sound wired to it.');
+  const duration = totalFramesOf(graph.project) / graph.project.fps;
+  const rendered = await renderAudioOffline(graph, registry, (id) => host.assetAudio(id), { duration, loop: graph.project.loop });
+  if (!rendered || !rendered.channels.length || !rendered.channels[0].length) throw new Error('There is no enabled Audio Output with sound wired to it.');
+  const pcm = fitAudio(rendered, 0, duration, false);
+  let base = graph.name || 'audio';
+  for (const n of graph.nodes) {
+    const id = n.type === 'media-in' ? assetIdFor(n, o.item) : null;
+    const info = id ? host.assetInfo(id) : null;
+    if (info) {
+      base = info.name;
+      break;
+    }
+  }
+  const name = uniqueName(o.used, `${sanitizeFileName(base)}.${row.ext}`);
+  const file = join(o.outDir, name);
+  mkdirSync(o.outDir, { recursive: true });
+  if (row.route === 'own') {
+    writeFileSync(file, Buffer.concat(encodeAudioOwn(row, pcm).map((x) => Buffer.from(x.buffer, x.byteOffset, x.byteLength))));
+  } else {
+    const pcmFile = join(o.tmp, `sound-${o.item}-${Date.now()}.f32`);
+    const nch = Math.min(2, pcm.channels.length);
+    writePcmFile(pcmFile, pcm.channels.slice(0, nch));
+    await ffmpegSoundFile(row.id, pcmFile, pcm.sampleRate, nch, file);
+  }
+  return [name];
+}
+
 async function exportVideo(c: JobCtx, codec: CodecSpec): Promise<string[]> {
+  if (codec.route === 'own') return exportVideoOwn(c, codec);
   const p = c.params;
   const fps = c.graph.project.fps;
   let writer: VideoWriter | null = null;
@@ -741,7 +1011,7 @@ async function exportVideo(c: JobCtx, codec: CodecSpec): Promise<string[]> {
           writePcmFile(file, pcm.channels);
           audio = { file, sampleRate: pcm.sampleRate, channels: pcm.channels.length };
         }
-        writer = await VideoWriter.open({ file: join(c.outDir, name), width: px.width, height: px.height, fps, codec, bitrateMbps: p.bitrate, audio });
+        writer = await VideoWriter.open({ file: join(c.outDir, name), width: px.width, height: px.height, fps, codec, bitrateMbps: p.bitrate, allKeys: p.allKeys, audio });
       }
       if (!codec.alpha) for (let i = 3; i < px.data.length; i += 4) px.data[i] = 255; // premultiplied = composited over black
       await writer.write(px.data);

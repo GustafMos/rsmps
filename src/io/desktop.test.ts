@@ -99,8 +99,11 @@ describe('DesktopClient', () => {
 
 describe('codec lookup', () => {
   it('marks the FFmpeg-only formats and maps them to endpoint ids', () => {
-    expect(FFMPEG_CODEC_VALUES).toEqual(['prores', 'prores4444', 'qtrle', 'png-mov', 'webm-alpha']);
-    expect(ffmpegOnlyCodec('png-mov')?.id).toBe('png');
+    expect(FFMPEG_CODEC_VALUES.slice(0, 2)).toEqual(['dxv', 'prores-proxy']);
+    expect(FFMPEG_CODEC_VALUES).toEqual(expect.arrayContaining(['prores', 'prores4444', 'qtrle', 'webm-alpha']));
+    // HAP, Motion JPEG, PNG MOV, GIF and APNG are written by the app itself, not by FFmpeg
+    for (const v of ['hap', 'hap_alpha', 'hap_q', 'mjpeg', 'png-mov', 'gif', 'apng']) expect(FFMPEG_CODEC_VALUES).not.toContain(v);
+    expect(ffmpegOnlyCodec('png-mov')).toBeNull();
     expect(ffmpegOnlyCodec('prores4444')).toMatchObject({ alpha: true, even: false, ext: 'mov' });
     expect(ffmpegOnlyCodec('webm-alpha')).toMatchObject({ alpha: true, even: true, ext: 'webm' });
     expect(ffmpegOnlyCodec('prores')?.alpha).toBe(false);
@@ -113,5 +116,46 @@ describe('codec lookup', () => {
     expect(videoRoute('avc', true)).toBe('webcodecs');
     expect(videoRoute('prores', true)).toBe('ffmpeg');
     expect(videoRoute('prores', false)).toBe('missing');
+  });
+});
+
+describe('files the app writes itself, and FFmpeg conversions that return a file', () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fake = (reply: (url: string) => Response) => new DesktopClient(async (url, init) => (calls.push({ url, init }), reply(url)), 'app://rsmps/__rsmps/', () => true);
+  const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status });
+
+  it('start asks for the Save dialog by name and extension, write goes to a position, finish and cancel by id', async () => {
+    calls.length = 0;
+    const c = fake((u) => (u.endsWith('/start') ? json({ saved: true, id: 'ab', path: 'C:\out\a.mov' }) : u.endsWith('/finish') ? json({ saved: true, path: 'C:\out\a.mov', bytes: 12 }) : json({ bytes: 5 })));
+    expect(await c.fileStart({ name: 'clip', ext: 'mov' })).toEqual({ saved: true, id: 'ab', path: 'C:\out\a.mov' });
+    await c.fileWrite('ab', 4096, new Uint8Array(5));
+    await c.fileWrite('ab', -3.7, new Uint8Array(1)); // never a negative or fractional position
+    expect(await c.fileFinish('ab')).toEqual({ path: 'C:\out\a.mov', bytes: 12 });
+    await c.fileCancel('ab');
+    expect(calls.map((x) => x.url)).toEqual([
+      'app://rsmps/__rsmps/export/file/start',
+      'app://rsmps/__rsmps/export/file/ab/write?at=4096',
+      'app://rsmps/__rsmps/export/file/ab/write?at=0',
+      'app://rsmps/__rsmps/export/file/ab/finish',
+      'app://rsmps/__rsmps/export/file/ab/cancel',
+    ]);
+    expect(JSON.parse(String(calls[0].init!.body))).toEqual({ name: 'clip', ext: 'mov' });
+    expect(calls.every((x) => x.init?.method === 'POST')).toBe(true);
+    expect(await fake(() => json({ saved: false, canceled: true })).fileStart({ name: 'a', ext: 'mov' })).toEqual({ saved: false });
+  });
+
+  it('convertStill and convertAudio return the bytes, and report an error body as a plain message', async () => {
+    calls.length = 0;
+    const c = fake(() => new Response(new Uint8Array([1, 2, 3])));
+    expect(Array.from(await c.convertStill('dpx', new Uint8Array(16), 2, 2))).toEqual([1, 2, 3]);
+    expect(Array.from(await c.convertAudio('mp3', new Float32Array(4), 48000, 2))).toEqual([1, 2, 3]);
+    expect(calls.map((x) => x.url)).toEqual(['app://rsmps/__rsmps/export/ffmpeg/still?codec=dpx&width=2&height=2', 'app://rsmps/__rsmps/export/ffmpeg/sound?codec=mp3&rate=48000&channels=2']);
+    await expect(fake(() => json({ error: 'FFmpeg is not set up.' }, 409)).convertStill('dpx', new Uint8Array(16), 2, 2)).rejects.toThrow('FFmpeg is not set up.');
+  });
+
+  it('refuses outside the desktop app', async () => {
+    const web = new DesktopClient(async () => json({}), 'app://rsmps/__rsmps/', () => false);
+    await expect(web.fileStart({ name: 'a', ext: 'mov' })).rejects.toThrow(/desktop app/);
+    await expect(web.convertStill('dpx', new Uint8Array(4), 1, 1)).rejects.toThrow(/desktop app/);
   });
 });

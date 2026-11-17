@@ -28,7 +28,7 @@ export default defineNode({
     outside: {
       type: 'enum',
       default: 'empty',
-      label: 'Beyond the map',
+      label: 'Outside map',
       options: [
         { value: 'empty', label: 'Empty' },
         { value: 'terrain', label: 'Terrain' },

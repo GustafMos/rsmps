@@ -6,7 +6,7 @@ export default defineNode({
   title: 'Chroma Smear',
   category: 'stylize',
   description:
-    'Color smear for a video-mixer look (not temporal feedback; for that see Feedback). Smears each color channel a different distance in a different direction, boosts saturation, recolours brightness bands through a palette and lets contours ripple outward: the look of a video mixer fed back into itself.',
+    'Color smear for a video-mixer look (not temporal feedback; for that see Feedback). Smears each color channel a different distance in a different direction, boosts saturation, recolors brightness bands through a palette and lets contours ripple outward: the look of a video mixer fed back into itself.',
   keywords: ['smear', 'feedback', 'glitch', 'psychedelic', 'rgb shift', 'streak', 'mixer', 'ripple', 'datamosh', 'color cycling', 'interference', 'vhs', 'video feedback color', 'video feedback color', 'color smear'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },

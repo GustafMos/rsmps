@@ -170,11 +170,12 @@ export interface ExportRequest {
   zip: boolean;
   onProgress?: (p: ExportProgress) => void;
   /**
-   * Sound-only export (when `outputs` names an `audio-out` node, or the graph has no picture output at all): 'wav' (default,
-   * 32-bit float), 'm4a' (AAC) or 'webm' (Opus). Falls back to WAV with a note in errors.txt when the browser cannot encode it.
+   * Sound-only export (when `outputs` names an `audio-out` node, or the graph has no picture output at all). Default: the Audio Output's
+   * "Sound file" setting. A value here overrides it: 'wav' (32-bit float), 'm4a' (AAC), 'webm' (Opus) or any sound row id of the format
+   * registry (src/io/export-codecs.ts). Falls back to 32-bit float WAV with a note in errors.txt when the format cannot be written here.
    * Videos always get their audio from the enabled Audio Out(s); with every Audio Out disabled they have no audio track.
    */
-  audioFormat?: 'wav' | 'm4a' | 'webm';
+  audioFormat?: 'wav' | 'm4a' | 'webm' | (string & {});
   signal?: AbortSignal;
   /**
    * Process mode export gate. Default (false): when a process upstream of the outputs is not done the export stops with a

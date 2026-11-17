@@ -319,12 +319,12 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
         {row.input && (
           <>
             {!row.input.multi && <Socket node={node.id} port={row.input.port} type={row.input.type} dir="in" wired={wired.has(row.input.port)} />}
-            <span className="rs-row__label">{row.input.label}</span>
+            <span className="rs-row__label" title={row.input.label}>{row.input.label}</span>
           </>
         )}
         {row.output && (
           <>
-            <span className="rs-row__label rs-row__label--out">{row.output.label}</span>
+            <span className="rs-row__label rs-row__label--out" title={row.output.label}>{row.output.label}</span>
             <Socket node={node.id} port={row.output.port} type={row.output.type} dir="out" />
           </>
         )}
@@ -394,7 +394,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
       case 'enum':
         control = (
           <div className="rs-row__pair">
-            <span className="rs-row__label">{label}</span>
+            <span className="rs-row__label" title={label}>{label}</span>
             <SelectField value={String(value)} options={p.options} onChange={set} label={label} title={p.hint} />
           </div>
         );
@@ -405,7 +405,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
       case 'string':
         control = (
           <div className="rs-row__pair">
-            <span className="rs-row__label">{label}</span>
+            <span className="rs-row__label" title={label}>{label}</span>
             {p.kind === 'font' ? <FontField value={String(value ?? '')} onChange={set} /> : p.kind === 'code' ? <span className="rs-row__label" title="Edit the code in the Inspector">{String(value ?? '').split('\n').length} lines · edit in Inspector</span> : <TextField value={String(value ?? '')} onChange={set} />}
           </div>
         );
@@ -417,7 +417,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         const colors = (Array.isArray(value) ? value : []) as number[][];
         control = (
           <div className="rs-row__pair">
-            <span className="rs-row__label">{label}</span>
+            <span className="rs-row__label" title={label}>{label}</span>
             <div className="rs-row__palette" title={`${colors.length} colors`}>
               {colors.slice(0, 16).map((c, i) => (
                 <span key={i} style={{ background: hexOf(c) }} />
@@ -430,7 +430,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
       case 'curve':
         control = (
           <div className="rs-row__pair">
-            <span className="rs-row__label">{label}</span>
+            <span className="rs-row__label" title={label}>{label}</span>
             <CurveField nodeId={node.id} keyName={row.key} label={label} value={value} min={p.min} max={p.max} />
           </div>
         );
@@ -438,7 +438,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
       case 'device':
         control = (
           <div className="rs-row__pair">
-            <span className="rs-row__label">{label}</span>
+            <span className="rs-row__label" title={label}>{label}</span>
             <DeviceField value={String(value ?? '')} kind={p.device} onChange={set} hint={false} />
           </div>
         );
@@ -447,7 +447,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
         const n = Array.isArray(value) ? value.length : 0;
         control = (
           <div className="rs-row__pair">
-            <span className="rs-row__label">{label}</span>
+            <span className="rs-row__label" title={label}>{label}</span>
             <span className="rs-row__count rs-num">{n === 0 ? 'none' : `${n} file${n > 1 ? 's' : ''}`}</span>
           </div>
         );

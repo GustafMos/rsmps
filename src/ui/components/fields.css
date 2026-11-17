@@ -64,7 +64,7 @@
 .rs-text { width: 100%; height: var(--ctl-h); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r); padding: 0 var(--s-2); font-size: var(--fs-sm); min-width: 0; }
 .rs-text:hover { border-color: var(--bg-5); }
 .rs-text:focus { border-color: var(--accent-hi); }
-textarea.rs-text { height: auto; min-height: 64px; padding: var(--s-1) var(--s-2); resize: vertical; font-family: var(--font-mono); }
+textarea.rs-text { height: auto; min-height: 64px; padding: var(--s-1) var(--s-2); resize: vertical; }
 .rs-text--lg { height: var(--ctl-h-lg); font-size: var(--fs-md); }
 
 .rs-dev { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; }

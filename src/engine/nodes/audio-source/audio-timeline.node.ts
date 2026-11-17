@@ -524,14 +524,14 @@ export default defineNode({
   description: 'Arrange audio and MIDI clips on tracks like in a music app, layer and offset them, loop them, and record new takes into it.',
   keywords: ['arranger', 'clips', 'record', 'daw', 'ableton', 'tracks', 'loop', 'midi clip', 'take', 'overdub', 'sequencer', 'multitrack', 'timeline'],
   inputs: {
-    recordAudio: { type: 'audio', label: 'Record audio (e.g. Microphone tap)' },
-    recordMidi: { type: 'midi', label: 'Record MIDI (e.g. Keyboard)' },
+    recordAudio: { type: 'audio', label: 'Record audio' },
+    recordMidi: { type: 'midi', label: 'Record MIDI' },
   },
   outputs: {
-    audio: { type: 'audio', label: 'Audio (all tracks)' },
-    midi: { type: 'midi', label: 'MIDI (all tracks)' },
-    soloAudio: { type: 'audio', label: 'Audio (chosen track)' },
-    soloMidi: { type: 'midi', label: 'MIDI (chosen track)' },
+    audio: { type: 'audio', label: 'All audio' },
+    midi: { type: 'midi', label: 'All MIDI' },
+    soloAudio: { type: 'audio', label: 'Track audio' },
+    soloMidi: { type: 'midi', label: 'Track MIDI' },
   },
   params: {
     clips: { type: 'json', default: emptyTimeline(), label: 'Tracks and clips', hint: 'Edited with the timeline editor.' },

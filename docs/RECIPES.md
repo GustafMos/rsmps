@@ -13,34 +13,34 @@ The preset is called **Blue scan glow**. To build it by hand:
 1. **Media In**: your footage, ideally a person against a plain background. Set the project to 1080 x 1920 for a portrait look.
 2. **Subject Mask** then **Cutout**: removes the background so only the subject is drawn. (Skip both if the background is already black.)
 3. **Levels** (black point 0.15, white point 0.95): spreads the subject's shading over the full range. This matters:
-   the line thickness comes from brightness, so a flat grey subject gives flat lines.
+   the line thickness comes from brightness, so a flat gray subject gives flat lines.
 4. **Scan Line Relief** (`line-modulation`): the heart of the look. Line count 130, thickness 3.4 px, displacement 9 px,
-   smoothing 3 px, *Bright = thicker* 1, *Light lines* 1, glow 0.9, line colour electric blue
+   smoothing 3 px, *Bright = thicker* 1, *Light lines* 1, glow 0.9, line color electric blue
    (0.12, 0.45, 1), background black. More lines = finer; thicker lines = raise Thickness (and lower Line count).
 5. **Bloom** (threshold 0.3, radius 16, intensity 1.2): gives the lines their halo.
-6. **Particles** twice (type Fireflies, own colours blue/light blue): one layer of 9 large orbs (size 90) and one of 45 small ones (size 22).
+6. **Particles** twice (type Fireflies, own colors blue/light blue): one layer of 9 large orbs (size 90) and one of 45 small ones (size 22).
    Merge them over a black **Solid** with blend *Add*. They loop exactly.
 7. Dashed wavy verticals: **Pattern** (Stripes, angle 90, cell 54, width 2, blue) multiplied by a second **Pattern**
    (Stripes, angle 0, cell 18, width 8, black/white) in a **Merge** set to *Multiply*: that cuts the lines into dashes.
    Feed that into **Noise Displace** (amount 26, feature size 220, evolution 1) to make them wave, then merge it with *Add*
    and a **Gradient Mask** that is 1 at the left edge and 0 in the middle, so it only shows on the left.
-8. Speckle field: **Noise** (scale 2, 1 octave) into **Threshold** (level 0.86, light colour blue, dark colour black): sparse blue dots.
+8. Speckle field: **Noise** (scale 2, 1 octave) into **Threshold** (level 0.86, light color blue, dark color black): sparse blue dots.
    Merge with *Add* through a **Gradient Mask** that is 0 in the middle and 1 on the right.
 9. Final **Bloom** (threshold 0.2, radius 40, intensity 1.0) over everything so the orbs and lines share one soft glow, then **Output**.
 
-For a different colour change the line colour (step 4), the Particles colours, the Pattern colour and the Threshold light colour
+For a different color change the line color (step 4), the Particles colors, the Pattern color and the Threshold light color
 (and the Bloom tint). For a warmer, more "oscilloscope" look use white or green lines with less glow.
 Everything that moves (orbs, wavy lines) is driven by the project loop, so the result loops when the project loops.
 
 ## Other presets
 
-**Pixel art + CRT**: Pixelate to 180 rows, extract a 16-colour palette from the result, dither it (Bayer 4x4) and send it through
+**Pixel art + CRT**: Pixelate to 180 rows, extract a 16-color palette from the result, dither it (Bayer 4x4) and send it through
 CRT Display (arcade). CRT Display enlarges small pictures by a whole number so the phosphor mask has room to show.
 
-**Game Boy handheld**: greyscale, pixelate to 144 rows, dither to the four-green Game Boy palette, then CRT Display in its
+**Game Boy handheld**: grayscale, pixelate to 144 rows, dither to the four-green Game Boy palette, then CRT Display in its
 flat LCD look with a little ghosting (phosphor persistence) like the slow LCD of the original.
 
-**VHS tape**: Analog Video (VHS preset, animated) for colour bleed, tracking noise and dropouts, plus a touch of chromatic
+**VHS tape**: Analog Video (VHS preset, animated) for color bleed, tracking noise and dropouts, plus a touch of chromatic
 aberration, scan lines, film grain and a vignette.
 
 **Composite console (NTSC)**: Pixelate to 224 rows, then Analog Video (console preset) which turns dither patterns into the
@@ -58,7 +58,7 @@ come from earlier frames; on a still image they are copies of it.
 and Parallax moves the two at different speeds in a gentle loop.
 
 **Sprite outline + palette swap**: Pixelate, cut the subject out, draw a one-pixel dark outline around it, then swap the sprite's own
-(extracted) colours for the PICO-8 palette.
+(extracted) colors for the PICO-8 palette.
 
 **Scanned drawing clean-up**: Paper Clean (flatten light, whiten paper, fade pale guides), Despeckle (remove dust), Line Art (crisp
 solid lines) and Upscale (edge-sharpened 2x). Put the **Scan** frames in through Media In.
@@ -70,7 +70,7 @@ solid lines) and Upscale (edge-sharpened 2x). Put the **Scan** frames in through
    *Dither · Ordered 4×4*, *Blue-noise dissolve* or *Halftone dots grow*; *Pattern size* sets how big the dither cells are.
 3. Drive **Progress** (it is also a socket) from the music: add **Sound to Numbers** (`audio-level`) on your audio and wire its
    *Loudness* (or *Bass*) into a **Smooth** node, then the Smooth output into Progress. Set Sound to Numbers *From* 0 and *To* 1 so a loud
-   beat pushes the picture towards B and silence falls back to A. With **Note Pulse** (`midi-trigger`) from a drum track instead, each hit
+   beat pushes the picture toward B and silence falls back to A. With **Note Pulse** (`midi-trigger`) from a drum track instead, each hit
    flicks the morph, and Smooth's attack and release shape the flick.
 4. For a morph that needs no music, wire an **Animate** node (Sine, 1 repeat per loop) into Progress: A turns into B and back, looping exactly.
    **Morph / Transition (timed)** does the same with its own start, length, hold and ping-pong controls.
@@ -80,7 +80,7 @@ solid lines) and Upscale (edge-sharpened 2x). Put the **Scan** frames in through
 
 1. **Media In** with a clip, then optionally **Color Adjust** (contrast 1.15) so there is more range for the characters to show.
 2. **ASCII Art** (`ascii-art`): Characters *Classic ramp*, Character width 8 px, *Match by* **Shape** (edges become `/ \ | _`),
-   Colour **Terminal** (green phosphor), Contrast 1.5, Glow 0.8. Raise Character width for chunkier text, or pick *Braille dots* with
+   Color **Terminal** (green phosphor), Contrast 1.5, Glow 0.8. Raise Character width for chunkier text, or pick *Braille dots* with
    a small width for a fine, almost photographic look.
 3. For a crisp export, set *Output size* to **Exact character grid**: the picture is exactly columns × font width pixels, so the
    text is pixel-perfect (the second output, *Glyph mask*, is the text shapes alone, for compositing).
@@ -167,7 +167,7 @@ With Loop on, the project length should be a whole number of cycles (cycle = sum
 
 ## More presets
 
-**ASCII terminal**: Color Adjust, then ASCII Art in green terminal colours with glow.
+**ASCII terminal**: Color Adjust, then ASCII Art in green terminal colors with glow.
 
 **Dither morph (two clips)**: two empty Media In nodes (A and B) feed Morph / Transition in an ordered-dither style; an Animate node drives
 its Progress with one smooth A to B to A cycle per loop.
@@ -184,41 +184,41 @@ frame while playing forward.
   Range seconds away). A horizontal gradient map gives a column scan, noise gives ghostly melting time. N slices = ceil(N / 8) passes and one input
   evaluation per distinct frame, never more than the frames in the range.
 - **Optical Flow (Detect & Track)**: outputs `flow` (rg = motion as a fraction of the picture per frame, right and down positive; use it with any node that reads
-  an image as a displacement) and a colour wheel (hue = direction). About 11 small passes at half resolution; lower Flow resolution to make it cheaper.
+  an image as a displacement) and a color wheel (hue = direction). About 11 small passes at half resolution; lower Flow resolution to make it cheaper.
 - **Motion Smear (Time), the datamosh look**: Media In straight into Motion Smear, New key frame every 24, Block size 16, Bleed 1.2. Each key frame is held and then
   dragged along the clip's measured motion, so shapes bleed and melt until the next key frame. Choose a refresh interval that divides the loop length
   so the loop seam lands on a key frame. Wire a second clip to Held frame to drag that picture along the first clip's motion.
 
 ## Fall into a logo forever (Infinite Zoom)
 
-A black logo that contains a smaller copy of itself in its hole, forever, with a different colour on each pass, falling in a perfect loop.
+A black logo that contains a smaller copy of itself in its hole, forever, with a different color on each pass, falling in a perfect loop.
 
 1. **Media In** (your logo with transparency, or a drawing: put it through **Recolor** in Ink mode first so the paper becomes transparent).
-2. **Infinite Zoom** after it. Set **Next center** to the middle of a hole or counter of the logo (drag the Centre until the little copy lands inside it)
+2. **Infinite Zoom** after it. Set **Next center** to the middle of a hole or counter of the logo (drag the Center until the little copy lands inside it)
    and **Copy scale** so that copy fits inside that hole (the lens of an O: about 0.55; the loop is clean for any picture, but the tunnel looks best when the copy fits).
-3. **Recolour each level**: Fill. Edit **Level colours** (the palette) to the colours you want; level 1 takes the first colour, level 2 the second, round and round.
-   Wire a Palette Extract node into the Level colours socket to take them from another picture.
-4. **Levels per loop**: set it to the palette length (4 colours, 4) so colours loop too. With **Colours stay with each copy** off, the colours belong to the depth on
+3. **Recolor each level**: Fill. Edit **Level colors** (the palette) to the colors you want; level 1 takes the first color, level 2 the second, round and round.
+   Wire a Palette Extract node into the Level colors socket to take them from another picture.
+4. **Levels per loop**: set it to the palette length (4 colors, 4) so colors loop too. With **Colors stay with each copy** off, the colors belong to the depth on
    screen instead and any whole number loops. Add **Turn per level** (e.g. 20) and **Spiral twist** (1) for the spiral fall; **Fade per level** darkens the deep end.
 5. Optional: wire a second picture into **Inner picture** to morph into it as it falls; put **Array** (Infinite grid, brick offset, Scroll X/Y, Hue shift per copy) behind it as a
-   self-recolouring wallpaper, or **3D Array** (Tunnel, Travel 2, Depth fog, Colour steps follow: depth) for cards flying at you.
+   self-recoloring wallpaper, or **3D Array** (Tunnel, Travel 2, Depth fog, Color steps follow: depth) for cards flying at you.
 
 Cost: Infinite Zoom is one pass whose work is the levels still visible; Array and Kaleidoscope are one pass whatever the copy count; 3D Array is one instanced draw.
 
 ## 3D from pictures, blobs and materials (Image to 3D, SDF 3D, Material, Deform)
 
 **A pixel-art sprite as a chunky voxel object.** Pixelate a picture (or use a sprite with transparent background) and wire it into **Image to 3D**. Pixel art keeps its
-art grid, so the silhouette is traced pixel by pixel: every wall takes the colour of the pixel at that edge (*Side walls: Edge pixels*), holes stay holes. Thickness 0.4-0.6,
+art grid, so the silhouette is traced pixel by pixel: every wall takes the color of the pixel at that edge (*Side walls: Edge pixels*), holes stay holes. Thickness 0.4-0.6,
 a slow *Spin Y* of 1 turn per loop, **Soft shadows** and **Ambient occlusion** on, *Cel shading* for the console look. *Quality: High* when it is for export.
 
-**A logo as a coin or a card.** Wire the logo into **Image to 3D** (*Silhouette edges: Smooth*), thickness 0.15, and a **Back image** so the other side shows its own picture.
+**A logo as a coin or a card.** Wire the logo into **Image to 3D** (*Edge style: Smooth*), thickness 0.15, and a **Back image** so the other side shows its own picture.
 For embossing, wire a depth map (a blurred copy of the logo, or a gradient) into **Depth map** and raise **Relief** to 0.2-0.4: the front is displaced, the walls follow.
 *Side walls: Edge pixels, darkened* gives a metal rim; add a **Material** (Metal) for the shine.
 
 **A vase from a drawing.** Draw (or cut out) half a bottle, set **Mode: Lathe**: the silhouette is spun around the vertical axis. Wire a texture into **Side image** and set
 *Side walls: Side image* to wrap it around.
 
-**A liquid blob that morphs.** **SDF 3D** with two or three spheres, shape 2 and 3 *Union* with Smoothness 0.5-0.8: metaballs with blended colours. **Gooeyness** scales every
+**A liquid blob that morphs.** **SDF 3D** with two or three spheres, shape 2 and 3 *Union* with Smoothness 0.5-0.8: metaballs with blended colors. **Gooeyness** scales every
 blend at once, so one number wired to sound makes the whole blob more or less liquid. Move shape 3's Y with **Animate** (sine, whole cycles) to make it orbit. For a morph between
 two forms turn on *Morph 1 to 2* (sphere into box, say) and animate **Morph amount** with a **Keyframes** node. A 2D logo or a tracked mask wired into **2D shape**
 becomes an extruded shape of its own (set a shape to *2D picture*) that blends smoothly with the primitives.
@@ -231,13 +231,13 @@ becomes an extruded shape of its own (set a shape to *2D picture*) that blends s
 Wire a picture into **Displace map** to push the surface by brightness. *Low-fi vertices* snaps geometry to a coarse grid for the early-3D-console look. All amounts are
 sockets: wire audio loudness into *Noise displace* and it pulses with the music.
 
-**Materials.** **Material** makes a surface look (matte, clay, plastic, metal, glass, toon, emissive, hologram, matcap, wire grid) from a colour, roughness, rim light and optional
-pictures: colour map, normal map, roughness map, emission map, matcap, a 360° environment for reflections. Wire its output into the **Material** input of 3D Object, Image to 3D
-SDF 3D, a custom model (an imported .glb / .gltf / .obj uses the model's own UVs for colour and normal maps and falls back to triplanar projection when it has none), 3D Array (every card is lit with its own
+**Materials.** **Material** makes a surface look (matte, clay, plastic, metal, glass, toon, emissive, hologram, matcap, wire grid) from a color, roughness, rim light and optional
+pictures: color map, normal map, roughness map, emission map, matcap, a 360° environment for reflections. Wire its output into the **Material** input of 3D Object, Image to 3D
+SDF 3D, a custom model (an imported .glb / .gltf / .obj uses the model's own UVs for color and normal maps and falls back to triplanar projection when it has none), 3D Array (every card is lit with its own
 normal and the Material's normal map; the light is set on the node) or **Material 2D** (below); one Material can feed several nodes. Glass refracts a picture wired into *Background*. Hologram scanlines move in whole
 cycles per loop. Without a Material connected, the 3D nodes look exactly as before.
 
-**Fog and depth of field.** Every 3D node has a **Depth** output: distance from the camera (in scene units) in all three colour channels, alpha 1 where the object is. Feed it to a
+**Fog and depth of field.** Every 3D node has a **Depth** output: distance from the camera (in scene units) in all three color channels, alpha 1 where the object is. Feed it to a
 **Gradient Map** or **Levels** to turn it into a mask, then blur or fade the picture with it. It is only rendered when something is wired to it.
 
 Cost (1920x1080, headless GPU, default settings, warm shader): 3D Object about 2 ms; Image to 3D 6-8 ms (about half is the 10-pass silhouette field); SDF 3D with two spheres about
@@ -279,7 +279,7 @@ Needs the phone link (see `docs/LIVE_INPUT.md`): the desktop app, or `npm run de
 
 ## Gaussian splats (Gaussian Splat, Picture to Splats)
 
-**View a scan.** Import a `.ply` from a 3D Gaussian Splatting trainer (or a `.splat` file; compressed `.ply` / `.spz` are not supported) into the library, add a **Gaussian Splat** node and choose the file in its *Splat file* field. *Fit to view* centres and scales the scan (floaters are
+**View a scan.** Import a `.ply` from a 3D Gaussian Splatting trainer (or a `.splat` file; compressed `.ply` / `.spz` are not supported) into the library, add a **Gaussian Splat** node and choose the file in its *Splat file* field. *Fit to view* centers and scales the scan (floaters are
 ignored). Many scans are upside down: *Which way is up* is **Automatic** (a guess: a note in the file, else the ground plane of a flat scene, else the trainer's y-down frame); pick *Y points down* or *Z points up* if it is wrong. Wire a **Camera** (orbit with *Motion: Orbit around*, 1 cycle) for a
 perfect turntable loop, or use *Spin Y* on the node itself. Remove floaters with **Crop** (box or sphere, keep inside or outside) and **Min opacity**.
 
@@ -288,7 +288,7 @@ perfect turntable loop, or use *Spin Y* on the node itself. Remove floaters with
 **Fast or exact.** *Blending: Sorted* is exact and is re-sorted only when the camera moves (about 25 ms per frame at 1 M splats, a few ms for typical scans; a still camera costs nothing extra). *Draft* has no sort and is a little off in dense areas; *Automatic* uses Sorted for export and still
 preview and Draft only while playing at a reduced proxy. *Max splats* keeps the largest, most opaque splats (the same ones every time). Memory is about 100 bytes per splat.
 
-**Soft 2.5D parallax from any photo.** Wire a picture into **Picture to Splats** and a **3D Camera** into its *Camera (view)*: a slow *Dolly* or *Orbit* of a few degrees gives a painterly parallax move. With no depth the shape is a GUESS (default: a dome bulging at the centre); for real relief wire a depth
+**Soft 2.5D parallax from any photo.** Wire a picture into **Picture to Splats** and a **3D Camera** into its *Camera (view)*: a slow *Dolly* or *Orbit* of a few degrees gives a painterly parallax move. With no depth the shape is a GUESS (default: a dome bulging at the center); for real relief wire a depth
 map (from a depth-estimation tool, or hand-painted: white = near) into **Depth** and set *Near / Far distance* (the further apart, the stronger the parallax). **Edge break** (0.4-0.7) shrinks or drops the splats that would smear across a depth jump; 0 shows the full rubber-sheet look.
 *Splats across* 640 (about 230,000 splats) is instant; video works every frame because the splats are made on the GPU from each frame and need no sorting.
 
@@ -314,7 +314,7 @@ Cost (1920x1080, headless GPU, warm): Gaussian Splat 100k / 500k / 1M splats sor
 6. Happy with the cameras but want more detail: set *Quality preset* to **Normal** or **High** and Reconstruct again; with *Keep poses* on the
    camera solving is skipped.
 
-Anything upstream applies before reconstruction (a Crop, a colour grade, a stabiliser), and a **photo set** works too: choose the photos in
+Anything upstream applies before reconstruction (a Crop, a color grade, a stabilizer), and a **photo set** works too: choose the photos in
 *Photos* instead of wiring a clip. What fails and why: docs/SPLATS.md.
 
 ## Give a photo depth (Depth from Picture)
@@ -329,7 +329,7 @@ A distance picture from a 3D node (its **Depth** output) is a different conventi
 **Real depth for a clip.** **AI Depth** is the measured-looking sibling of Depth from Picture: a small neural model (Depth Anything V2 Small, Apache-2.0) that runs on your own GPU, nothing uploaded. It needs a one-time 50 MB download: open **Plugins**, find **AI models**, press **Download** (or press **Get the AI model** in the node's panel, which opens the same place). Nothing is fetched until you do.
 Wire the picture or clip into **AI Depth** and its **Depth** output into **Picture to Splats** (*Depth*), **Lens Blur** (*Depth*), **Depth Slice** (*Depth map*) or **Image to 3D** (*Depth map*). The output convention is exactly Depth from Picture's (white = near), so it is a drop-in, and until the model has run the node shows the quick Depth from Picture guess so the graph keeps working.
 Press **Estimate depth** once. It walks the clip, shows progress and the time left, and keeps the depth steady from frame to frame: the model's numbers float in scale and offset for every frame, so each frame is fitted onto the previous one on the pixels that did not change, and one range maps the whole clip to 0 to 1. The result is stored with the project (16 bit, no banding in Lens Blur) and used by exports; editing the picture before it, or *Model size*, *Every N frames* or *Smoothing in time*, makes it stale (it says so; nothing restarts by itself). *Near level*, *Far level* and *Invert* act on the stored depth and cost nothing.
-For a long clip set **Every N frames** to 2 to 4: the model runs on every Nth frame and the frames between are blended. **Model size** 392 is fastest, 518 is what the model was trained at, 700 adds a little fine detail. **Smoothing in time** blends neighbouring frames and backs off where a pixel changes fast; it has no motion tracking, so a fast-moving object is simply not smoothed. A still picture costs one model run.
+For a long clip set **Every N frames** to 2 to 4: the model runs on every Nth frame and the frames between are blended. **Model size** 392 is fastest, 518 is what the model was trained at, 700 adds a little fine detail. **Smoothing in time** blends neighboring frames and backs off where a pixel changes fast; it has no motion tracking, so a fast-moving object is simply not smoothed. A still picture costs one model run.
 In **Picture to Splats** set *Near / Far distance* 3.5 / 5.5 and move the camera slowly: with real depth the foreground slides against the background. Speed on an RTX 3080: about 40 ms per frame at 518 on the GPU, about 3 s per frame on the processor if the browser has no WebGPU (the job says so). The command line cannot run the model: it uses the stored result, or stops with the list of processes an export still needs.
 
 ## Keep the look of the playback preview (Render Scale)
@@ -352,7 +352,7 @@ and sometimes you like it better. To keep that look in the export:
 The **Subtitles** node (Generate) turns an `.srt` / `.vtt` file, or lines you type, into a caption overlay on a TRANSPARENT picture the size of the project. It is a normal picture, so anything can follow it.
 
 1. Drop the `.srt` / `.vtt` onto the graph (a Subtitles node appears with the file), or add **Subtitles** and type one caption per line in *Text*. A line can start with `[1.5-3.0]` (seconds or m:ss.s); lines without times share the project length.
-2. Put the result over the footage: **Merge** with the video as *Background* and Subtitles as *Foreground* (*Foreground size: Stretch*).
+2. Put the result over the footage: **Merge** with the video as *Background* and Subtitles as *Foreground* (*Top size: Stretch*).
 3. Pick a **Look**: Classic, Bold caption (word pop), Karaoke highlight, Typewriter, Pixel 8-bit, Pixel dithered, Boxed word, Big single word, Lyric wave. A look only overrides the controls it lists; **Custom** uses every control as set (a new node starts on Bold caption). In a 9:16 project set **Safe area** to TikTok, Reels or Shorts to keep clear of the app's buttons (approximate guides, only applied to portrait frames).
 4. Timing: **Offset** delays the captions, **Speed** fits a retimed clip, **Loop** makes captions pushed past the end come back at the start (a seamless loop). Without a VTT word timestamp, a caption's duration is shared over its words by letter count, with a longer pause after `, ; : . ! ?`.
 
@@ -360,19 +360,19 @@ The **Subtitles** node (Generate) turns an `.srt` / `.vtt` file, or lines you ty
 
 **Letters filled with video.** Wire any picture into **Fill**: the letters show it (the outline and box keep their own colors). **Word colors** takes a palette: word *n* uses color *n* of it. **Text mask** outputs the letters' coverage; **Cue showing**, **Cue progress** and **Word index** are numbers for driving other nodes (a flash on every word, a zoom on the cue).
 
-Cost: each distinct word is drawn once into an atlas (with its distance field) per 24 captions of the file; playing a frame then costs one small instanced draw and no rasterising, whatever the file length (atlases are kept in a bounded cache, 8 pages / 128 MB). Known limits: emoji come out as single-color silhouettes, no letter spacing control (the host's text call has none), CJK text without spaces is one "word" per caption.
+Cost: each distinct word is drawn once into an atlas (with its distance field) per 24 captions of the file; playing a frame then costs one small instanced draw and no rasterizing, whatever the file length (atlases are kept in a bounded cache, 8 pages / 128 MB). Known limits: emoji come out as single-color silhouettes, no letter spacing control (the host's text call has none), CJK text without spaces is one "word" per caption.
 
 ## Game assets (sprite sheets, tiles, shared palettes)
 
 The whole guide, with the tile templates and metadata formats, is docs/GAME_ASSETS.md. The short recipes:
 
-**A sheet in, a clean sheet out.** Sprite Sheet In (grid or the JSON of Aseprite / TexturePacker) > Pixel Cleanup > Pixel Outline > Output kind Spritesheet. Set the project length to the number of cells divided by the frame rate and the project loop on; the Output writes a trimmed, packed, extruded sheet and the JSON.
+**A sheet in, a clean sheet out.** Sprite Sheet In (grid or the JSON of Aseprite / TexturePacker) > Pixel Cleanup > Pixel Outline > Output kind Sprite sheet. Set the project length to the number of cells divided by the frame rate and the project loop on; the Output writes a trimmed, packed, extruded sheet and the JSON.
 
-**Every sprite of a folder in one atlas.** Media In with all the sprites > look chain > Output: Export as Spritesheet, Sheet from All batch items, Sheet layout Packed, Trim frames, Extrude 1, Power of two, Metadata Aseprite (or Generic). One PNG, one JSON with a tag per file.
+**Every sprite of a folder in one atlas.** Media In with all the sprites > look chain > Output: Export as Sprite sheet, Sheet from All batch items, Sheet layout Packed, Trim frames, Extrude 1, Power of two, Metadata Aseprite (or Generic). One PNG, one JSON with a tag per file.
 
 **One palette for a character set.** Batch Palette: Sprites = the same files as Media In, Color count 16, press Extract shared palette. Wire its palette into Palette Lock (Snap) at the end of the look chain. Add a second Palette Lock in Report only mode behind it and the command line `--report json` lists the off-palette fraction of every exported file.
 
-**An outline that matches the sprite.** Pixel Outline, Color from Darker neighbour (selective outline), Corners 8-connected. For a drop-shadow style edge turn Top and Left off. A second outline in white gives a sticker look.
+**An outline that matches the sprite.** Pixel Outline, Color from Darker neighbor (selective outline), Corners 8-connected. For a drop-shadow style edge turn Top and Left off. A second outline in white gives a sticker look.
 
 **Normal-mapped sprites.** Sprite look chain > Normal Map (4 / 8 direction pixel-art normals) > the engine's lighting, or Material 2D with per-art-pixel lighting (see "Materials on flat pictures" above).
 
@@ -434,7 +434,7 @@ shell loop or a scheduled task (see docs/CLI.md).
 
 **File > Share this look...** saves the graph without media as a small `.rsmps.json` file, or copies a link. The link holds the whole look after the `#` (compressed), so it is never sent to a
 server; above about 8 kB it warns, and a look too large for a link is offered as a file. Whoever opens it sees a confirmation (node types, "contains a custom shader", plugins it needs) and gets
-a new tab with empty media slots labelled "Drop ... here". Media is never included; plugins are never installed for you.
+a new tab with empty media slots labeled "Drop ... here". Media is never included; plugins are never installed for you.
 
 ## Stop-motion
 
@@ -443,8 +443,8 @@ See docs/LIVE_INPUT.md, "Stop-motion capture". Put a camera on a tripod, capture
 ## Cut on the beat (Beat Detect)
 
 1. Put a clip with music on a **Media In** (or an Audio File for the soundtrack and a picture clip beside it). Add **Beat Detect** and wire the sound into its **Sound** input.
-2. For exact beats, choose the music under *Sound file* and press **Analyse sound file** once. Skip this to listen live instead.
-3. Two or more clips into **Switch**: wire **Beat count** into the Switch's *Index*. The picture changes on every beat. Use *Half time* (analysed) to change on every second beat.
+2. For exact beats, choose the music under *Sound file* and press **Analyze sound file** once. Skip this to listen live instead.
+3. Two or more clips into **Switch**: wire **Beat count** into the Switch's *Index*. The picture changes on every beat. Use *Half time* (analyzed) to change on every second beat.
 4. For a glitch on the snare: **Snare** into the Glitch node's *Trigger*. For a flash on the kick: **Kick** through a Remap Range into an Exposure or Color Adjust setting.
 5. Or right-click any number setting and use **React to sound**. The presets Pulse with the beat, Glitch on snare, Hue cycle per bar, Strobe cut on beats and Zoom punch per beat are built this way.
 6. If the cuts sit a little early or late, move *Offset ms*. If the tempo is half or double what you feel, use *Half time* or *Double time*.

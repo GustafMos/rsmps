@@ -36,7 +36,7 @@ export default defineNode({
         { value: 'cover', label: 'Fill' },
         { value: 'stretch', label: 'Stretch' },
       ],
-      label: 'Fit clips to frame',
+      label: 'Clip fit',
     },
     background: { type: 'color', default: [0, 0, 0, 0], label: 'Background', hint: 'Shown where no clip covers the frame. Transparent by default.' },
   },

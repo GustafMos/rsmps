@@ -51,7 +51,7 @@
 .rs-row__label--out { margin-left: auto; text-align: right; }
 .rs-row--param { padding: 0 var(--s-2); }
 .rs-row--param > .rs-nf, .rs-row--param > .rs-check, .rs-row--param > .rs-color { height: 24px; }
-.rs-row__pair { display: grid; grid-template-columns: minmax(40px, 40%) 1fr; align-items: center; gap: var(--s-1); width: 100%; min-width: 0; }
+.rs-row__pair { display: grid; grid-template-columns: minmax(40px, 44%) 1fr; align-items: center; gap: var(--s-1); width: 100%; min-width: 0; }
 .rs-row__pair .rs-select, .rs-row__pair .rs-text { height: 24px; }
 .rs-row__palette { display: flex; height: 18px; border: 1px solid #000; overflow: hidden; min-width: 0; }
 .rs-row__palette > span { flex: 1; min-width: 2px; }

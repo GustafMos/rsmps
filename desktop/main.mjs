@@ -16,7 +16,7 @@ const SCHEME = 'app';
 const HOST = 'rsmps';
 const ORIGIN = `${SCHEME}://${HOST}`;
 // Same paragraph as the README and the in-app About box (src/ui/aboutCopy.ts; a test keeps them equal).
-const NOT_AFFILIATED = "RSMPS is an independent project. It is not affiliated with, sponsored by or endorsed by Blackmagic Design, the Blender Foundation, Adobe, Ableton, Apple, or any other company, product or creator mentioned here. DaVinci Resolve, Fusion, Blender, Adobe Color, Ableton Live and ProRes are trademarks of their respective owners. They are named only to describe what inspired this tool or what it works with. Adobe Color inspired Palette Studio; Blender's shader nodes and DaVinci Resolve's Fusion page inspired the node workflow.";
+const NOT_AFFILIATED = "RSMPS is an independent project. It is not affiliated with, sponsored by or endorsed by Blackmagic Design, the Blender Foundation, Adobe, Ableton, Apple, or any other company, product or creator mentioned here. DaVinci Resolve, Fusion, Blender, Adobe Color, Ableton Live, ProRes, Resolume, DXV, DNxHR and CineForm are trademarks of their respective owners. They are named only to describe what inspired this tool or what it works with. Adobe Color inspired Palette Studio; Blender's shader nodes and DaVinci Resolve's Fusion page inspired the node workflow.";
 const HOMEPAGE = 'https://github.com/GustafMos/rsmps';
 const KOFI = 'https://ko-fi.com/ripscorpy';
 
@@ -161,7 +161,7 @@ async function handleInternal(request, rel, url) {
   }
   if (rel === '/__rsmps/backups' || rel.startsWith('/__rsmps/backups/')) return handleBackups(request, rel, url);
   if (rel === '/__rsmps/addons' || rel.startsWith('/__rsmps/addons/')) return handleAddons(request, rel);
-  if (rel === '/__rsmps/export/ffmpeg' || rel.startsWith('/__rsmps/export/ffmpeg/')) return handleExport(request, rel);
+  if (rel === '/__rsmps/export/ffmpeg' || rel.startsWith('/__rsmps/export/ffmpeg/') || rel.startsWith('/__rsmps/export/file/')) return handleExport(request, rel, url);
   if (rel === '/__rsmps/splat-train' || rel.startsWith('/__rsmps/splat-train/')) return handleSplatTrain(request, rel, url);
   return new Response('Not found', { status: 404 });
 }
@@ -284,58 +284,83 @@ async function confirmInstall(info) {
   return r.response === 0;
 }
 
+/** The FFmpeg add-on's entry also lists which of the optional encoders it has (DXV, HAP...), so the renderer can grey out what is missing. */
+async function withEncoders(info) {
+  if (!info || info.id !== 'ffmpeg' || !info.installed || !addons) return info;
+  return { ...info, encoders: await addons.exporter.encoders() };
+}
+
+async function withEncodersList(list) {
+  return { ...list, addons: await Promise.all(list.addons.map(withEncoders)) };
+}
+
 async function handleAddons(request, rel) {
   if (!addons) return json({ error: 'Add-ons are not available in this build.' }, 503);
   const { mgr } = addons;
   const parts = rel.split('/').slice(3); // after /__rsmps/addons
-  if (parts.length === 0) return request.method === 'GET' ? json(await mgr.list()) : new Response('Method not allowed', { status: 405 });
+  if (parts.length === 0) return request.method === 'GET' ? json(await withEncodersList(await mgr.list())) : new Response('Method not allowed', { status: 405 });
   const [id, action] = parts;
   const info = await mgr.get(id);
   if (!info) return json({ error: 'Unknown add-on.' }, 404);
-  if (!action) return request.method === 'GET' ? json(info) : new Response('Method not allowed', { status: 405 });
+  if (!action) return request.method === 'GET' ? json(await withEncoders(info)) : new Response('Method not allowed', { status: 405 });
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
   if (action === 'install') {
     if (!info.download) return json({ ...info, error: `No download is offered for this platform. Use Locate to pick ${info.name} if you already have it.` }, 400);
     if (info.state === 'installing') return json(info);
     if (!(await confirmInstall(info))) return json({ ...info, declined: true });
     void mgr.install(id);
-    return json(await mgr.get(id));
+    return json(await withEncoders(await mgr.get(id)));
   }
   if (action === 'cancel') {
     mgr.cancel(id);
-    return json(await mgr.get(id));
+    return json(await withEncoders(await mgr.get(id)));
   }
   if (action === 'remove') {
     mgr.remove(id);
-    return json(await mgr.get(id));
+    return json(await withEncoders(await mgr.get(id)));
   }
   if (action === 'locate') {
     // Only a native file dialog can name the program to run; the renderer never supplies a path.
     if (!info.canLocate) return json({ ...info, error: 'This add-on cannot be located.' }, 400);
     const r = await dialog.showOpenDialog(win ?? undefined, { title: `Choose your ${info.name} program`, properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : [] });
-    if (r.canceled || !r.filePaths[0]) return json({ ...(await mgr.get(id)), canceled: true });
+    if (r.canceled || !r.filePaths[0]) return json({ ...(await withEncoders(await mgr.get(id))), canceled: true });
     try {
       await mgr.locate(id, r.filePaths[0]);
     } catch (err) {
       return json({ ...(await mgr.get(id)), error: String(err?.message ?? err) }, 400);
     }
-    return json(await mgr.get(id));
+    return json(await withEncoders(await mgr.get(id)));
   }
   return new Response('Not found', { status: 404 });
 }
 
-async function handleExport(request, rel) {
+const bytesResponse = (buf) => new Response(buf, { status: 200, headers: { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'content-security-policy': csp() } });
+
+async function handleExport(request, rel, url) {
   if (!addons) return json({ error: 'Add-ons are not available in this build.' }, 503);
   const { mgr, exporter, mod } = addons;
-  const parts = rel.split('/').slice(4); // after /__rsmps/export/ffmpeg
   try {
+    // Files the app writes itself (same origin checks as every /__rsmps endpoint, see handleInternal). The path comes from the native Save dialog only.
+    if (rel.startsWith('/__rsmps/export/file/')) {
+      if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+      const fp = rel.split('/').slice(4); // after /__rsmps/export/file
+      if (fp[0] === 'start') return json(await exporter.fileStart(await readJson(request)));
+      const [fid, faction] = fp;
+      if (faction === 'write') return json(exporter.fileWrite(fid, Number(url.searchParams.get('at')), await readBody(request)));
+      if (faction === 'finish') return json(exporter.fileFinish(fid));
+      if (faction === 'cancel') return json(exporter.fileCancel(fid));
+      return new Response('Not found', { status: 404 });
+    }
+    const parts = rel.split('/').slice(4); // after /__rsmps/export/ffmpeg
     if (parts.length === 0) {
       if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
       const b = await mgr.get('ffmpeg');
-      return json({ available: !!b?.installed, source: b?.installed?.source ?? null, version: b?.installed?.version ?? null, codecs: exporter.codecs(), active: exporter.sessions.size > 0 });
+      return json({ available: !!b?.installed, source: b?.installed?.source ?? null, version: b?.installed?.version ?? null, codecs: exporter.codecs(), encoders: b?.installed ? await exporter.encoders() : null, active: exporter.sessions.size > 0 });
     }
     if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
     if (parts[0] === 'start') return json(await exporter.start(await readJson(request)));
+    if (parts[0] === 'still') return bytesResponse(await exporter.still(Object.fromEntries(url.searchParams), await readBody(request)));
+    if (parts[0] === 'sound') return bytesResponse(await exporter.sound(Object.fromEntries(url.searchParams), await readBody(request)));
     const [id, action] = parts;
     if (action === 'audio') return json(await exporter.audio(id, await readBody(request)));
     if (action === 'frame') return json(await exporter.frame(id, await readBody(request)));

@@ -44,6 +44,7 @@ export interface FfmpegStreamOptions {
   fps: number;
   frames: number;
   bitrateMbps: number;
+  allKeys?: boolean;
   /** File name without extension, from the first frame's size. */
   name: (size: { width: number; height: number }) => string;
   signal?: AbortSignal;
@@ -80,7 +81,7 @@ export async function streamToFfmpeg(o: FfmpegStreamOptions): Promise<FfmpegStre
     check();
     const name = o.name(first);
     const started = await client.start(
-      { width: first.width, height: first.height, fps: o.fps, codec: o.codec.id, bitrateMbps: o.bitrateMbps, name, ...(inter ? { audio: { sampleRate: pcm!.sampleRate, channels: inter.channels } } : {}) },
+      { width: first.width, height: first.height, fps: o.fps, codec: o.codec.id, bitrateMbps: o.bitrateMbps, ...(o.allKeys ? { allKeys: true } : {}), name, ...(inter ? { audio: { sampleRate: pcm!.sampleRate, channels: inter.channels } } : {}) },
       signal,
     );
     id = started.id;

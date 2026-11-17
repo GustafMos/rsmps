@@ -178,6 +178,19 @@ fix it, then remove `?safe`.
 Phone Camera node). The phone will warn that the connection is not private: choose Advanced, then Proceed. It is your own
 computer. The other live inputs (Webcam, URL / Stream) are described in [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md).
 
+## Export formats
+
+About seventy output formats, one entry each. The app writes most of them itself, in every version, with no add-on:
+
+| | Written by the app itself | Written by the browser | Needs FFmpeg (desktop add-on or command line) |
+| --- | --- | --- | --- |
+| **Video** | HAP, HAP Alpha, HAP Q, Motion JPEG, PNG and uncompressed MOV | H.264, H.265, VP9, AV1 | ProRes-compatible, DXV-compatible, DNxHR-compatible, CineForm-compatible, lossless and delivery codecs |
+| **Animated pictures** | GIF (exact for pixel art), Animated PNG | | Animated WebP, Animated AVIF |
+| **Pictures and sequences** | QOI, TIFF (8 and 16 bit), TGA, BMP, ICO, PPM, OpenEXR, Radiance HDR | PNG, WebP, JPEG, AVIF where the browser can write it | DPX, JPEG 2000 |
+| **Sound** | WAV (16, 24, 32-bit float), AIFF, FLAC | AAC, Opus | MP3, Opus OGG, Vorbis, ALAC |
+
+Large video files are written to disk as they are made, so a 4K HAP export does not need the whole file in memory. See [docs/FORMATS.md](docs/FORMATS.md) for what each format is good for, sizes to expect and which route writes it, and [docs/CLI.md](docs/CLI.md) for `rsmps formats`.
+
 ## Desktop app
 
 The desktop app is the same web app in an Electron shell: it runs offline and adds what a web page cannot do (the phone
@@ -200,6 +213,19 @@ The desktop app does not include FFmpeg. ProRes-compatible export and video with
 add-on (Plugins > Add-ons): it downloads FFmpeg from its official source only when you ask, or you can point the app at an
 FFmpeg you already have. The command line below can do the same with your own FFmpeg. The phone link runs inside the
 desktop app.
+
+**More formats through FFmpeg.** With the FFmpeg add-on the Output node's video codec list gains Editing (ProRes-compatible Proxy to XQ,
+DNxHR-compatible, CineForm-compatible), VJ software (DXV-compatible), Lossless (Animation, FFV1, UT Video, uncompressed 10-bit and RGBA),
+Delivery (H.264 / H.265 by quality or all-intra, AV1, VP9 with alpha), Animated WebP and AVIF, Legacy (VP8, MPEG-2, MPEG-4), DPX and JPEG 2000 pictures
+and MP3, Opus, Vorbis and ALAC sound. These are written by **your own FFmpeg**, never by code shipped with RSMPS, and a format is enabled only when your FFmpeg
+reports its encoder (otherwise it reads "not in this FFmpeg"). HAP, Motion JPEG, PNG MOV, GIF and the picture and sound formats in the table above are written by the app itself and need no add-on. Names such as ProRes, DXV, DNxHR and CineForm belong to
+their owners: the "-compatible" files follow the format but are not made by those companies' software.
+
+**For VJ software.** DXV-compatible export (Resolume's own format, no transparency, large files) is written by the desktop
+app's FFmpeg add-on when that FFmpeg has the DXV encoder; pick "VJ software" in the Output's For setting and it chooses DXV-compatible,
+else ProRes-compatible 422 HQ. Without FFmpeg (the web version), export H.264 or VP9 with **All key frames** on and convert
+the file in Resolume Alley, or choose HAP if your VJ software supports it (HAP is supported by many VJ and media-server applications; check your
+software's documentation). The preset never picks HAP by itself. DXV output is written by FFmpeg, not by Resolume software: test your file in Resolume before a show.
 
 **Splat from Video (desktop app, optional add-ons).** The Splat from Video node turns a clip or a photo set into a 3D
 Gaussian splat scene and gives back the original camera move. It runs two separate open-source programs on your computer:
@@ -225,8 +251,9 @@ npm run cli -- render my-graph.rsmps.json sprites/ --out out/
 npm run cli -- nodes          # every node with its sockets and parameters
 ```
 
-Video and ProRes output (and video, audio or GIF input) need ffmpeg: the optional `@ffmpeg-installer/ffmpeg` dependency, or
-your own on PATH or in `$FFMPEG_PATH`. Still images, PNG sequences and spritesheets do not. See [docs/CLI.md](docs/CLI.md).
+Video input and the formats marked FFmpeg in the table above (H.264, ProRes-compatible ...) need ffmpeg: the optional `@ffmpeg-installer/ffmpeg` dependency, or
+your own on PATH or in `$FFMPEG_PATH`. HAP, Motion JPEG, GIF, QOI, TIFF, OpenEXR, WAV, FLAC and the other formats the app writes itself, still images, image sequences
+and sprite sheets do not. `rsmps formats` lists every format with its route and whether it works on your machine. See [docs/CLI.md](docs/CLI.md).
 The showcase renders above were made this way.
 
 ## Documentation
@@ -236,6 +263,7 @@ The showcase renders above were made this way.
 | [docs/ENGINE.md](docs/ENGINE.md) | How the engine works and how to add a node (start here to contribute) |
 | [docs/PLUGINS.md](docs/PLUGINS.md) | Writing and installing plugins |
 | [docs/CLI.md](docs/CLI.md) | Command-line rendering |
+| [docs/FORMATS.md](docs/FORMATS.md) | Every output format: what it is good for, what writes it, sizes to expect |
 | [docs/PRINT_AND_SCAN.md](docs/PRINT_AND_SCAN.md) | Printing frame sheets and scanning them back |
 | [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md) | Webcam, URL / Stream and phone inputs |
 | [src/engine/audio/README.md](src/engine/audio/README.md) | Audio and MIDI nodes, and driving pictures with sound |
@@ -283,7 +311,9 @@ The capture uses only generated content, `test-assets/` and the author's base pi
 - The microphone and MIDI devices are live-only. For export, record the take (the Audio Timeline node records audio and MIDI); a
   recorded take exports like any other clip.
 - Webcam, URL / Stream and Phone Camera pictures are live-only too: record them to a file first to render them.
-- ProRes-compatible export needs FFmpeg: the optional add-on in the desktop app, or your own FFmpeg on the command line. FFmpeg is never bundled.
+- ProRes-compatible, DXV-compatible and the other FFmpeg formats need FFmpeg: the optional add-on in the desktop app, or your own FFmpeg on the command line. FFmpeg is never bundled.
+- HAP, GIF and the other formats the app writes itself have been checked by decoding the files with FFmpeg and with the app's own test decoders. Playback in VJ and media-server software has not been tested: check that your software plays the HAP variant you export.
+- Motion JPEG in the browser is encoded through the browser's canvas; in a hidden window it was measured at about one second a frame, so give it a visible tab for long clips.
 - Splat from Video works only in the desktop app with the COLMAP and Brush add-ons, needs a graphics card Brush can use, and needs footage with real camera movement around a still, textured subject. It has been measured on synthetic scenes only; real phone footage will often be harder (docs/SPLATS.md). The command line cannot run it.
 - AI Depth (optional) needs a 50 MB model you download yourself and runs on your GPU (about 40 ms a frame on an RTX 3080) or, without WebGPU, on the processor (about 3 s a frame). Depth from Picture, subject extraction, the detectors and the tracker are classical methods, not neural networks: expect touch-ups when subject
   and background share colors, and occasional id swaps when tracked objects cross.
@@ -306,7 +336,7 @@ Special thanks to:
 - **MaxK1920** — [stardetect](https://github.com/MaxK1920/stardetect), the inspiration for the Detect & Track nodes (no code is shared; RSMPS uses its own classical detectors).
 - The pixel-art community behind the PICO-8, Sweetie 16, Endesga 32, DawnBringer 16 and Game Boy palettes.
 
-**Not affiliated.** RSMPS is an independent project. It is not affiliated with, sponsored by or endorsed by Blackmagic Design, the Blender Foundation, Adobe, Ableton, Apple, or any other company, product or creator mentioned here. DaVinci Resolve, Fusion, Blender, Adobe Color, Ableton Live and ProRes are trademarks of their respective owners. They are named only to describe what inspired this tool or what it works with. Adobe Color inspired Palette Studio; Blender's shader nodes and DaVinci Resolve's Fusion page inspired the node workflow.
+**Not affiliated.** RSMPS is an independent project. It is not affiliated with, sponsored by or endorsed by Blackmagic Design, the Blender Foundation, Adobe, Ableton, Apple, or any other company, product or creator mentioned here. DaVinci Resolve, Fusion, Blender, Adobe Color, Ableton Live, ProRes, Resolume, DXV, DNxHR and CineForm are trademarks of their respective owners. They are named only to describe what inspired this tool or what it works with. Adobe Color inspired Palette Studio; Blender's shader nodes and DaVinci Resolve's Fusion page inspired the node workflow.
 
 ---
 

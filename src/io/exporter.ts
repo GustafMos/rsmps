@@ -2,7 +2,7 @@
  * Exporter: renders output nodes at final quality and encodes them.
  *
  * Every pixel path stays on the GPU: evaluation -> optional nearest upscale pass -> WebGPU
- * OffscreenCanvas -> convertToBlob (images) or VideoFrame -> mediabunny (video). Spritesheets are
+ * OffscreenCanvas -> convertToBlob (images) or VideoFrame -> mediabunny (video). Sprite sheets are
  * assembled with texture-to-texture copies. Per-item failures never abort a batch: they are
  * collected into errors.txt. Cancellation is honoured between frames.
  */
@@ -31,10 +31,10 @@ import type { GraphDoc, ImageValue, MaskValue, NodeInstance } from '../engine/ty
 import type { ExportRequest, ExportedFile, Exporter } from './api';
 import type { AudioBridge } from './audio-bridge';
 import { fitAudio } from './audio-util';
-import { conformImage, enlargeNearest } from './frame-gpu';
+import { conformImage, enlargeNearest, type PassFormat } from './frame-gpu';
 import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
 import { encodeWav } from './wav';
-import { OffscreenPresenter, presentToBlob, presentToFrame } from './encode';
+import { OffscreenPresenter, canEncodeAvif, presentToBlob, presentToFrame } from './encode';
 import { choosePipeline, fileTimestamps, isReordered, sourceOptions } from './encode-order';
 import { GpuWatch, scopeMessage } from './gpu-watch';
 import type { EvalResult } from '../engine/engine';
@@ -49,7 +49,13 @@ import { writeSheetMeta } from './spritesheet-meta';
 import { bleedTransparent, buildSheets, type Bitmap } from './spritesheet-pack';
 import { buildOfLayout, buildOptionsOf, needsCpuSheet, readSheetParams, tagsOfClips, type SheetParams } from './spritesheet-params';
 import { isDesktop, type FfmpegExportClient } from './desktop';
-import { ffmpegFallbackCodec, ffmpegMissingMessage, ffmpegOnlyCodec, videoRoute, type FfmpegCodec } from './export-codecs';
+import { audioRow, encoderMissing, ffmpegFallbackCodec, ffmpegMissingMessage, ffmpegOnlyCodec, rowByValue, stillRow, videoRoute, type CodecRow, type FfmpegCodec } from './export-codecs';
+import { MEMORY_LIMIT, beginOwnVideo, encodeAudioOwn, encodeStillOwn, estimateBytes, frameModeOf, hapFormatOf, streamsToSink, tooBigMessage } from './own-export';
+import { createHapGpuCompressor, type HapGpuCompressor, type HapSession } from './encoders';
+import { browserSinkEnv, openOutputSink, type OpenedSink } from './sinks';
+import type { EncodeSession } from './encoders';
+import { missingEncoderMessage } from './ffmpeg-encoders';
+import { isVideoPreset, resolveVideoPreset } from '../engine/lib/video-presets';
 import { savedEntry, streamToFfmpeg } from './export-ffmpeg';
 import type { ProcessApi } from './api';
 import { ProcessPendingError } from './processes';
@@ -85,12 +91,23 @@ type Kind = 'image' | 'sequence' | 'video' | 'spritesheet' | 'print';
 interface OutParams {
   name: string;
   kind: 'auto' | Kind;
-  imageFormat: 'png' | 'webp' | 'jpeg';
+  /** A still row's value (png, webp, jpeg, avif, qoi, tiff, tga, bmp, exr, hdr, tiff16, dpx, ico, ppm, jp2). */
+  imageFormat: string;
   quality: number;
   codec: string;
   bitrate: number;
   /** Every frame is a key frame (intra-only): bigger files, but VJ software and editors loop and scrub them frame-exactly. */
   allKeys: boolean;
+  /** The Output's video "For" preset (general = none); resolved against what is available when the export runs. */
+  videoFor?: string;
+  /** HAP: 'fast' = GPU / no refinement, 'better' = CPU refinement (slow). */
+  hapQuality: 'fast' | 'better';
+  /** HAP: Snappy compression ("Smaller files"). */
+  hapSnappy: boolean;
+  gifPalette: 'local' | 'global';
+  gifDither: 'none' | 'ordered' | 'floyd';
+  gifColors: number;
+  gifLoop: number;
   scale: number;
   columns: number;
   padding: number;
@@ -112,6 +129,8 @@ interface Job {
   label: string;
   /** Set by sequence / spritesheet exports that deliver art-size frames. */
   artMode?: boolean;
+  /** Float stills (EXR, HDR, 16-bit TIFF): the conform and enlarge passes keep rgba16float instead of rounding to 8 bits. */
+  keepFloat?: boolean;
   /** Sprite sheet from all batch items: the items that feed this one sheet. */
   sheetItems?: number[];
 }
@@ -132,7 +151,8 @@ interface Composed {
 const EXPORT_ENGINE_CACHE = 192 * 1024 * 1024;
 const EXPORT_MEDIA_CACHE = 128 * 1024 * 1024;
 
-const MIME: Record<OutParams['imageFormat'], string> = { png: 'image/png', webp: 'image/webp', jpeg: 'image/jpeg' };
+const MIME: Record<string, string> = { png: 'image/png', webp: 'image/webp', jpeg: 'image/jpeg', avif: 'image/avif' };
+const STILL_MIME: Record<string, string> = { qoi: 'image/qoi', tiff: 'image/tiff', tiff16: 'image/tiff', tga: 'image/x-tga', bmp: 'image/bmp', exr: 'image/x-exr', hdr: 'image/vnd.radiance', dpx: 'image/x-dpx', ico: 'image/vnd.microsoft.icon', ppm: 'image/x-portable-pixmap', jp2: 'image/jp2' };
 
 export class ExporterImpl implements Exporter {
   private presenters = new Map<boolean, OffscreenPresenter>();
@@ -343,11 +363,18 @@ export class ExporterImpl implements Exporter {
     return {
       name: typeof p.name === 'string' && p.name.trim() ? p.name : '{name}',
       kind: oneOf(p.kind, ['auto', 'image', 'sequence', 'video', 'spritesheet', 'print'] as const, 'auto'),
-      imageFormat: oneOf(p.imageFormat, ['png', 'webp', 'jpeg'] as const, 'png'),
+      imageFormat: typeof p.imageFormat === 'string' && stillRow(p.imageFormat) ? stillRow(p.imageFormat)!.value : 'png',
       quality: Math.min(1, Math.max(0.1, num(p.quality, 0.92))),
       codec: typeof p.codec === 'string' ? p.codec : 'avc',
       bitrate: Math.max(0.5, num(p.bitrate, 12)),
       allKeys: p.allKeys === true,
+      videoFor: isVideoPreset(p.videoFor) ? p.videoFor : 'general',
+      hapQuality: oneOf(p.hapQuality, ['fast', 'better'] as const, 'fast'),
+      hapSnappy: p.hapSnappy !== false,
+      gifPalette: oneOf(p.gifPalette, ['local', 'global'] as const, 'local'),
+      gifDither: oneOf(p.gifDither, ['none', 'ordered', 'floyd'] as const, 'ordered'),
+      gifColors: Math.min(256, Math.max(2, Math.round(num(p.gifColors, 256)))),
+      gifLoop: Math.max(0, Math.round(num(p.gifLoop, 0))),
       scale: Math.max(1, Math.round(num(p.scale, 1))),
       pixelSize: readFrameParams(p).pixelSize,
       exportArtSize: p.exportArtSize === true,
@@ -396,6 +423,16 @@ export class ExporterImpl implements Exporter {
     return !!def && Object.values(def.inputs).some((i) => (i as { type: string }).type === type);
   }
 
+  /** The sound file format of an Audio Output: the request's legacy name, else the node's "Sound file" setting, else 32-bit float WAV. */
+  private soundFormatOf(job: Job, run: Run): CodecRow {
+    const legacy: Record<string, string> = { wav: 'wav32f', m4a: 'aac', webm: 'webm-opus' };
+    const asked = run.req.audioFormat;
+    if (asked) return audioRow(legacy[asked] ?? asked) ?? audioRow('wav32f')!;
+    const def = this.d.registry.get(job.out.type);
+    const p = { ...(def ? defaultParams(def) : {}), ...job.out.params } as Record<string, unknown>;
+    return (typeof p.soundFormat === 'string' ? audioRow(p.soundFormat) : null) ?? audioRow('wav32f')!;
+  }
+
   /** Sound-only export: everything the enabled Audio Outs play, as one file. */
   private async exportAudio(job: Job, run: Run): Promise<ExportedFile[]> {
     const { audio, registry, library } = this.d;
@@ -405,15 +442,47 @@ export class ExporterImpl implements Exporter {
     if (!rendered || !rendered.channels.length || !rendered.channels[0].length) throw new Error('There is no enabled Audio Out with sound wired to it.');
     const pcm = fitAudio(rendered, 0, duration, false);
     const base = sanitizeFileName(graph.name || 'audio');
-    const format = run.req.audioFormat ?? 'wav';
+    let row = this.soundFormatOf(job, run);
     run.progress(0.5, `${base}`);
-    if (format !== 'wav') {
-      const blob = await this.encodeCompressedAudio(pcm, format).catch(() => null);
-      if (blob) return [{ name: this.claim(run, `${base}.${format}`), blob }];
-      run.warnings.push(`This browser cannot encode ${format === 'm4a' ? 'AAC' : 'Opus'} audio; exported WAV instead.`);
+    const wav = audioRow('wav32f')!;
+    const fallback = (why: string): ExportedFile => {
+      run.warnings.push(`${row.label}: ${why}; exported ${wav.label} instead.`);
+      row = wav;
+      return { name: this.claim(run, `${base}.wav`), blob: new Blob(encodeAudioOwn(wav, pcm) as BlobPart[], { type: 'audio/wav' }) };
+    };
+    let file: ExportedFile | null = null;
+    if (row.route === 'own') {
+      const mime = row.ext === 'wav' ? 'audio/wav' : row.ext === 'aiff' ? 'audio/aiff' : 'audio/flac';
+      file = { name: this.claim(run, `${base}.${row.ext}`), blob: new Blob(encodeAudioOwn(row, pcm) as BlobPart[], { type: mime }) };
+    } else {
+      // Where a browser can encode it, the browser does (AAC, Opus); FFmpeg (desktop) writes the rest and is the fallback for these two.
+      if (row.route === 'builtin-webcodecs') {
+        const kind = row.ext === 'm4a' ? 'm4a' : 'webm';
+        const blob = await this.encodeCompressedAudio(pcm, kind).catch(() => null);
+        if (blob) file = { name: this.claim(run, `${base}.${row.ext}`), blob };
+      }
+      if (!file) {
+        const status = await this.ffmpegStatus();
+        const client = this.d.ffmpeg;
+        const fc = ffmpegOnlyCodec(row.value) ?? { id: row.id, label: row.label, even: false, alpha: false, ext: row.ext, encoder: row.encoders.join(' or '), encoders: row.encoders, bitrate: false };
+        if (status.available && client?.convertAudio && !encoderMissing(fc, status.encoders)) {
+          const nch = Math.min(2, pcm.channels.length);
+          const inter = new Float32Array(pcm.channels[0].length * nch);
+          for (let i = 0; i < pcm.channels[0].length; i++) for (let c = 0; c < nch; c++) inter[i * nch + c] = pcm.channels[c][i];
+          try {
+            const bytes = await client.convertAudio(row.id, inter, pcm.sampleRate, nch, run.req.signal);
+            file = { name: this.claim(run, `${base}.${row.ext}`), blob: new Blob([bytes as BlobPart]) };
+          } catch (err) {
+            if (isAbort(err)) throw err;
+            file = fallback(errorMessage(err));
+          }
+        } else {
+          file = fallback(row.route === 'ffmpeg' ? ffmpegMissingMessage(isDesktop()) : `this browser cannot encode ${row.label}`);
+        }
+      }
     }
-    run.progress(1, `${base}.wav`);
-    return [{ name: this.claim(run, `${base}.wav`), blob: new Blob([encodeWav(pcm, 32) as BlobPart], { type: 'audio/wav' }) }];
+    run.progress(1, file.name);
+    return [file];
   }
 
   private async encodeCompressedAudio(pcm: PcmAudio, format: 'm4a' | 'webm'): Promise<Blob | null> {
@@ -561,9 +630,10 @@ export class ExporterImpl implements Exporter {
       // Conform to the art grid, then enlarge with hard pixels to the full frame (unless art-size export). The temporaries of
       // these passes are recycled when the scope closes; only the final texture is retained.
       const art = pixelPlan(target, fp.pixelSize).art;
+      const keep: PassFormat | undefined = job.keepFloat && img.texture.format === 'rgba16float' ? 'rgba16float' : undefined;
       const out = gpu.scoped(() => {
-        const conformed = conformImage(gpu, img, fp.pixelSize > 1 ? art : target, effectiveConform(fp), fp.conformAnchor);
-        const final = job.artMode ? conformed : enlargeNearest(gpu, conformed, fp.pixelSize);
+        const conformed = conformImage(gpu, img, fp.pixelSize > 1 ? art : target, effectiveConform(fp), fp.conformAnchor, keep);
+        const final = job.artMode ? conformed : enlargeNearest(gpu, conformed, fp.pixelSize, keep);
         if (final !== img) gpu.retain(final.texture);
         return final;
       });
@@ -592,7 +662,7 @@ export class ExporterImpl implements Exporter {
    * Nearest-neighbour upscale and/or pad to even dimensions in one GPU pass. Returns the input untouched
    * when nothing needs to change.
    */
-  private compose(img: Img, scale: number, even: boolean): Composed {
+  private compose(img: Img, scale: number, even: boolean, format?: PassFormat): Composed {
     const { gpu } = this.d;
     const w = img.width * scale;
     const h = img.height * scale;
@@ -604,6 +674,7 @@ export class ExporterImpl implements Exporter {
     const out = gpu.scoped(() => {
       const o = gpu.pass({
         label: 'export-compose',
+        format,
         size: { width: W, height: H },
         textures: { src: img },
         uniforms: { scale, srcSize: [img.width, img.height] },
@@ -628,20 +699,51 @@ export class ExporterImpl implements Exporter {
     return p;
   }
 
-  private async encodeImage(img: Img, p: OutParams): Promise<Blob> {
+  /**
+   * One still picture as a file. Browser formats (PNG, WebP, JPEG, AVIF) go through the canvas; the formats this app writes itself
+   * (QOI, TIFF, TGA, BMP, ICO, PPM, OpenEXR, Radiance HDR, 16-bit TIFF) through src/io/own-export.ts; DPX and JPEG 2000 through FFmpeg.
+   */
+  private async encodeImage(img: Img, job: Job, run: Run): Promise<{ blob: Blob; ext: string }> {
     const { gpu } = this.d;
+    const p = job.params;
+    const row = stillRow(p.imageFormat);
     gpu.retain(img.texture);
-    const comp = this.compose(img, p.scale, false);
+    const own = row?.route === 'own' ? row : null;
+    const comp = this.compose(img, p.scale, false, own?.float && img.texture.format === 'rgba16float' ? 'rgba16float' : undefined);
     try {
-      if (p.sheet.bleedStills && p.imageFormat === 'png') {
+      const w = comp.drawable.width;
+      const h = comp.drawable.height;
+      if (own) {
+        const px = own.float ? { half: await gpu.readFloat(comp.drawable) } : { rgba: await gpu.read(comp.drawable, true) };
+        const bytes = await encodeStillOwn(own, px, w, h);
+        return { blob: new Blob([bytes as BlobPart], { type: STILL_MIME[own.value] ?? 'application/octet-stream' }), ext: own.ext };
+      }
+      if (row?.route === 'ffmpeg') {
+        const status = await this.ffmpegStatus();
+        const client = this.d.ffmpeg;
+        if (!status.available || !client?.convertStill) throw new Error(ffmpegMissingMessage(isDesktop()));
+        const fc = ffmpegOnlyCodec(row.value)!;
+        if (encoderMissing(fc, status.encoders)) throw new Error(missingEncoderMessage(fc.label, fc.encoder));
+        const data = await gpu.read(comp.drawable, row.alpha);
+        if (!row.alpha) for (let i = 3; i < data.length; i += 4) data[i] = 255;
+        const bytes = await client.convertStill(row.id, data, w, h, run.req.signal);
+        return { blob: new Blob([bytes as BlobPart], { type: STILL_MIME[row.value] ?? 'application/octet-stream' }), ext: row.ext };
+      }
+      let format = p.imageFormat;
+      if (format === 'avif' && !(await canEncodeAvif())) {
+        run.warnings.push(`${job.label}: this browser cannot encode AVIF, so PNG was written instead.`);
+        format = 'png';
+      }
+      if (p.sheet.bleedStills && format === 'png') {
         // The canvas path is premultiplied and loses the colour under alpha 0: read straight pixels, bleed, write the PNG ourselves.
         const px = await gpu.read(comp.drawable as ImageValue, true);
         bleedTransparent(px, comp.drawable.width, comp.drawable.height);
-        return new Blob([(await encodePngRgba(px, comp.drawable.width, comp.drawable.height)) as BlobPart], { type: 'image/png' });
+        return { blob: new Blob([(await encodePngRgba(px, comp.drawable.width, comp.drawable.height)) as BlobPart], { type: 'image/png' }), ext: 'png' };
       }
-      const mime = MIME[p.imageFormat];
+      const mime = MIME[format] ?? 'image/png';
       // present() and convertToBlob() must run in the same task: no await between them.
-      return await presentToBlob(this.presenter(p.imageFormat === 'jpeg'), comp.drawable, mime, p.imageFormat === 'png' ? undefined : p.quality);
+      const blob = await presentToBlob(this.presenter(format === 'jpeg'), comp.drawable, mime, format === 'png' ? undefined : p.quality);
+      return { blob, ext: blob.type === 'image/avif' ? 'avif' : imageExtension(blob.type) };
     } finally {
       comp.release();
       gpu.release(img.texture);
@@ -659,17 +761,19 @@ export class ExporterImpl implements Exporter {
   /* ------------------------------------- stills ------------------------------------------------- */
 
   private async exportImage(job: Job, run: Run): Promise<ExportedFile[]> {
+    job.keepFloat = stillRow(job.params.imageFormat)?.float === true;
     const img = await this.renderFrame(job, run, 0);
-    const blob = await this.encodeImage(img, job.params);
+    const { blob, ext } = await this.encodeImage(img, job, run);
     const w = img.width * job.params.scale;
     const h = img.height * job.params.scale;
-    const name = `${resolvePattern(job.params.name, this.tokens(job, w, h))}.${imageExtension(blob.type)}`;
+    const name = `${resolvePattern(job.params.name, this.tokens(job, w, h))}.${ext}`;
     run.progress(1, name);
     return [{ name: this.claim(run, name), blob }];
   }
 
   private async exportSequence(job: Job, run: Run): Promise<ExportedFile[]> {
     job.artMode = job.params.exportArtSize;
+    job.keepFloat = stillRow(job.params.imageFormat)?.float === true;
     const graph = run.req.graph;
     const frames = totalFramesOf(graph.project);
     const pattern = sequencePattern(job.params.name);
@@ -677,8 +781,8 @@ export class ExporterImpl implements Exporter {
     for (let f = 0; f < frames; f++) {
       throwIfAborted(run.req.signal);
       const img = await this.renderFrame(job, run, f);
-      const blob = await this.encodeImage(img, job.params);
-      const name = `${resolvePattern(pattern, this.tokens(job, img.width * job.params.scale, img.height * job.params.scale, f, frames))}.${imageExtension(blob.type)}`;
+      const { blob, ext } = await this.encodeImage(img, job, run);
+      const name = `${resolvePattern(pattern, this.tokens(job, img.width * job.params.scale, img.height * job.params.scale, f, frames))}.${ext}`;
       files.push({ name: this.claim(run, name), blob });
       run.progress((f + 1) / frames, `${name} · frame ${f + 1}/${frames}`);
       await yieldToEventLoop();
@@ -719,7 +823,7 @@ export class ExporterImpl implements Exporter {
           try {
             const data = await gpu.read(comp.drawable as ImageValue, true);
             bytes += data.byteLength;
-            if (bytes > 1.5e9) throw new Error('The frames of this spritesheet need more than 1.5 GB of memory. Use fewer frames or a smaller size.');
+            if (bytes > 1.5e9) throw new Error('The frames of this sprite sheet need more than 1.5 GB of memory. Use fewer frames or a smaller size.');
             bitmaps.push({ width: comp.drawable.width, height: comp.drawable.height, data });
           } finally {
             comp.release();
@@ -782,7 +886,7 @@ export class ExporterImpl implements Exporter {
             layout = layoutSheet(frames, comp.drawable.width, comp.drawable.height, job.params.columns, job.params.padding);
             const maxDim = gpu.device.limits.maxTextureDimension2D;
             if (layout.width > maxDim || layout.height > maxDim) {
-              throw new Error(`The spritesheet would be ${layout.width}x${layout.height}, larger than this GPU supports (${maxDim}). Use fewer frames, a smaller size or more columns.`);
+              throw new Error(`The sprite sheet would be ${layout.width}x${layout.height}, larger than this GPU supports (${maxDim}). Use fewer frames, a smaller size or more columns.`);
             }
             const cleared = gpu.pass({ label: 'sheet-clear', size: { width: layout.width, height: layout.height }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return vec4f(0.0); }' });
             gpu.retain(cleared.texture);
@@ -878,11 +982,24 @@ export class ExporterImpl implements Exporter {
   /* ------------------------------------- video -------------------------------------------------- */
 
   /** FFmpeg-only formats stream to the desktop app; everything else is the WebCodecs path (with FFmpeg as a fallback for H.264 / H.265). */
-  private async exportVideoRouted(job: Job, run: Run): Promise<ExportedFile[]> {
+  private async exportVideoRouted(job0: Job, run: Run): Promise<ExportedFile[]> {
+    const status = await this.ffmpegStatus();
+    let job = job0;
+    // The "For" preset is resolved here, with what is really available, never earlier.
+    if (job0.params.videoFor && job0.params.videoFor !== 'general') {
+      const proj = run.req.graph?.project;
+      const px = proj ? proj.width * proj.height * job0.params.scale * job0.params.scale : NaN;
+      const r = resolveVideoPreset(job0.params.videoFor, { codec: job0.params.codec, bitrate: job0.params.bitrate, allKeys: job0.params.allKeys }, { ffmpeg: status.available, encoders: status.encoders ? new Set(status.encoders) : null }, Number.isFinite(px) && px > 0 ? px : undefined);
+      job = { ...job0, params: { ...job0.params, codec: r.codec, bitrate: r.bitrate, allKeys: r.allKeys } };
+      if (r.note) run.warnings.push(`${job.label}: ${r.note}`);
+    }
+    const own = rowByValue(job.params.codec);
+    if (own && videoRoute(job.params.codec, status.available) === 'own') return this.exportVideoOwn(job, run, own);
     const only = ffmpegOnlyCodec(job.params.codec);
     if (only) {
-      const route = videoRoute(job.params.codec, await this.ffmpegReady());
+      const route = videoRoute(job.params.codec, status.available);
       if (route === 'missing') throw new Error(ffmpegMissingMessage(isDesktop()));
+      if (encoderMissing(only, status.encoders)) throw new Error(missingEncoderMessage(only.label, only.encoder));
       return this.exportVideoFfmpeg(job, run, only);
     }
     try {
@@ -894,12 +1011,17 @@ export class ExporterImpl implements Exporter {
     }
   }
 
-  private async ffmpegReady(): Promise<boolean> {
+  private async ffmpegStatus(): Promise<{ available: boolean; encoders: string[] | null }> {
     try {
-      return (await this.d.ffmpeg?.info())?.available === true;
+      const i = await this.d.ffmpeg?.info();
+      return { available: i?.available === true, encoders: i?.available === true ? (i.encoders ?? null) : null };
     } catch {
-      return false;
+      return { available: false, encoders: null };
     }
+  }
+
+  private async ffmpegReady(): Promise<boolean> {
+    return (await this.ffmpegStatus()).available;
   }
 
   private async exportVideoFfmpeg(job: Job, run: Run, codec: FfmpegCodec): Promise<ExportedFile[]> {
@@ -927,6 +1049,7 @@ export class ExporterImpl implements Exporter {
       fps: project.fps,
       frames,
       bitrateMbps: job.params.bitrate,
+      allKeys: job.params.allKeys,
       signal: run.req.signal,
       name: (size) => resolvePattern(job.params.name, this.tokens(job, size.width, size.height)),
       render,
@@ -937,6 +1060,151 @@ export class ExporterImpl implements Exporter {
     if (!result.saved || !result.path) throw new DOMException('Save canceled', 'AbortError'); // the user closed the Save dialog
     run.progress(1, result.path);
     return [savedEntry(result.path)];
+  }
+
+  /**
+   * Formats this app writes itself (HAP, Motion JPEG, PNG and uncompressed MOV, GIF, APNG): no FFmpeg, no WebCodecs. Frames come from the same
+   * render loop as every video export; MOV files stream to a sink (the desktop file, a File System Access file, or memory with a size check).
+   */
+  private async exportVideoOwn(job: Job, run: Run, row: CodecRow): Promise<ExportedFile[]> {
+    const { gpu } = this.d;
+    const project = run.req.graph.project;
+    const frames = totalFramesOf(project);
+    const fps = project.fps;
+    const p = job.params;
+    let session: EncodeSession | null = null;
+    let opened: OpenedSink | null = null;
+    let hapGpu: HapGpuCompressor | null = null;
+    let mode = frameModeOf(row, p, true);
+    let pcm: PcmAudio | null = null;
+    let audioPos = 0;
+    let outW = 0;
+    let outH = 0;
+    const hapFmt = hapFormatOf(row);
+    const audioChunk = () => Math.max(1024, Math.round((pcm?.sampleRate ?? 48000) / 10));
+    const pushAudio = async (seconds: number, all = false) => {
+      if (!pcm || !session?.addAudio) return;
+      const total = pcm.channels[0].length;
+      const limit = all ? total : Math.min(total, Math.ceil(seconds * pcm.sampleRate));
+      while (audioPos < limit) {
+        const n = Math.min(audioChunk(), limit - audioPos);
+        await session.addAudio(pcm.channels.map((c) => c.slice(audioPos, audioPos + n)));
+        audioPos += n;
+      }
+    };
+    try {
+      for (let f = 0; f < frames; f++) {
+        throwIfAborted(run.req.signal);
+        const img = await this.renderFrame(job, run, f);
+        gpu.retain(img.texture);
+        const comp = this.compose(img, p.scale, false);
+        try {
+          const { width, height } = comp.drawable;
+          if (!session) {
+            outW = width;
+            outH = height;
+            if (hapFmt && mode === 'hap-gpu') {
+              try {
+                hapGpu = createHapGpuCompressor(gpu, width, height, hapFmt);
+              } catch (err) {
+                run.warnings.push(`${job.label}: GPU HAP compression is unavailable here (${errorMessage(err)}); the CPU was used (slower).`);
+                mode = frameModeOf(row, { hapQuality: 'better' }, false);
+              }
+            }
+            pcm = row.audio && row.kind === 'video' ? await this.videoAudio(job, run, frames / fps) : null;
+            const estimate = estimateBytes(row, { width, height, frames, hapSnappy: p.hapSnappy });
+            const name = `${resolvePattern(p.name, this.tokens(job, width, height))}.${row.ext}`;
+            if (streamsToSink(row)) {
+              opened = await openOutputSink(browserSinkEnv(this.d.ffmpeg), { name, mime: 'video/quicktime', estimate, signal: run.req.signal });
+              if (opened.kind === 'memory' && estimate > 4e8) run.warnings.push(`${job.label}: this export (about ${(estimate / 1e9).toFixed(1)} GB) is kept in memory. A browser with file saving (Chrome, Edge) or the desktop app writes straight to disk.`);
+            } else if (estimate > MEMORY_LIMIT) throw new Error(tooBigMessage(estimate));
+            session = beginOwnVideo({
+              row,
+              width,
+              height,
+              fps,
+              frames,
+              hapQuality: p.hapQuality,
+              hapSnappy: p.hapSnappy,
+              gif: { palette: p.gifPalette, dither: p.gifDither, colors: p.gifColors, loop: p.gifLoop },
+              audio: pcm ? { sampleRate: pcm.sampleRate, channels: pcm.channels.length } : null,
+              sink: opened?.sink,
+            });
+          }
+          if (mode === 'hap-gpu' && hapGpu) {
+            // The compressor reads 8-bit pictures; a float image is converted (clamped) first.
+            let src = comp.drawable.texture;
+            let converted: ImageValue | null = null;
+            if (src.format !== 'rgba8unorm') {
+              converted = gpu.pass({ label: 'hap-convert', size: comp.drawable, textures: { src: comp.drawable }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smpNearest, uv, 0.0); }' });
+              gpu.retain(converted.texture);
+              src = converted.texture;
+            }
+            try {
+              await (session as HapSession).addTexture(await hapGpu.compress({ texture: src }));
+            } finally {
+              if (converted) gpu.release(converted.texture);
+            }
+          } else {
+            // Straight alpha for formats that keep it, the picture over black (premultiplied, alpha 255) for the rest.
+            const data = await gpu.read(comp.drawable, mode === 'straight');
+            if (mode !== 'straight') for (let i = 3; i < data.length; i += 4) data[i] = 255;
+            await session.addFrame(data);
+          }
+        } finally {
+          comp.release();
+          gpu.release(img.texture);
+        }
+        await pushAudio((f + 1) / fps + 0.1);
+        run.progress(((f + 1) / frames) * 0.97, `${job.label} · frame ${f + 1}/${frames}`);
+        await yieldToEventLoop();
+      }
+      if (!session) throw new Error('No frames were rendered.');
+      await pushAudio(0, true);
+      run.progress(0.98, `${job.label} · finishing`);
+      const parts = await session.finish();
+      const mime = row.kind === 'video' ? 'video/quicktime' : row.ext === 'gif' ? 'image/gif' : 'image/png';
+      const name = `${resolvePattern(p.name, this.tokens(job, outW, outH))}.${row.ext}`;
+      let file: ExportedFile;
+      let bytes = 0;
+      if (opened) {
+        const o = opened;
+        const result = await o.result();
+        bytes = result.bytes;
+        await this.sanityCheckMov(job, run, o, frames, bytes);
+        file = result.savedPath ? { name: result.name, blob: result.blob, savedPath: result.savedPath } : { name: this.claim(run, result.name), blob: result.blob };
+        opened = null;
+      } else {
+        const blob = new Blob(parts as BlobPart[], { type: mime });
+        bytes = blob.size;
+        file = { name: this.claim(run, name), blob };
+      }
+      run.progress(1, file.savedPath ?? file.name);
+      return [file];
+    } catch (err) {
+      if (opened) await (opened as OpenedSink).abort().catch(() => undefined);
+      throw err;
+    } finally {
+      hapGpu?.dispose();
+    }
+  }
+
+  /** Last line of defense for the files the app writes itself: read the MOV back and compare frame count and timing. Advisory; never fails the export. */
+  private async sanityCheckMov(job: Job, run: Run, o: OpenedSink, frames: number, bytes: number): Promise<void> {
+    if (bytes > 6e8) return; // reading a file this large back would need the memory the sink saved
+    try {
+      const buf = await o.readBack();
+      if (!buf) return;
+      const stamps = await fileTimestamps(buf);
+      if (!stamps.length) {
+        run.warnings.push(`${job.label}: the written file could not be read back to check it (a player may still open it).`);
+        return;
+      }
+      if (stamps.length !== frames) run.warnings.push(`${job.label}: the video holds ${stamps.length} frames, ${frames} were rendered. Export again; if it repeats, use an image sequence.`);
+      else if (isReordered(stamps)) run.warnings.push(`${job.label}: the written file stores its frames out of order.`);
+    } catch {
+      /* advisory */
+    }
   }
 
   private async exportVideo(job: Job, run: Run): Promise<ExportedFile[]> {

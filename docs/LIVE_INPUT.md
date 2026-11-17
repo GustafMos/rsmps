@@ -180,7 +180,7 @@ desktop app relay text frames untouched (they share `PhoneSessions`), so neither
 | `caps` | which sensors exist (`orientation`, `motion`, `absolute`, `geo`, `ar`, `touch`, `ios`), the rate cap and what is switched on. Re-sent after every change and after a reconnect. |
 | `motion` | `t` (phone clock, ms), `q` orientation quaternion [x y z w] (W3C alpha/beta/gamma with the screen orientation applied), `abs` (1 = referenced to north), `h` compass heading (iOS), `r` rotation rate deg/s, `a` acceleration without gravity and `g` with gravity (m/s²) |
 | `touch` | up to 5 touches `[id, x, y, pressure]` (0..1 across the pad), pinch scale `ps`, twist `tw` (deg), two-finger pan `pn`, gesture counter `g` |
-| `geo` | metres east / north of the first fix, speed, altitude change, accuracy (never absolute coordinates) |
+| `geo` | meters east / north of the first fix, speed, altitude change, accuracy (never absolute coordinates) |
 | `ar` | WebXR viewer pose: position (m) and quaternion |
 | `mevent` | `recenter`, `tap`, `doubletap` (a double tap on the pad recenters) |
 
@@ -204,9 +204,9 @@ What drifts and what does not: the gyro's pitch and roll are anchored by gravity
 without the compass: it starts at the pose where you pressed Recenter and can creep slowly, so press **Recenter** (or double-tap the pad) whenever it
 wanders. The compass heading is absolute but noisy near metal and speakers.
 
-**Position is not computed from the accelerometer.** Double-integrating acceleration drifts by metres within seconds, so no number from it is offered.
-Position comes from, in this order: **AR tracking** (Android, if you turn it on), else **location** (metres from where you started: only useful outdoors,
-metres accurate), else the **touch pad as a virtual dolly** (two fingers pan = x / y, pinch = z, and it stays where you leave it). Recenter zeroes all three.
+**Position is not computed from the accelerometer.** Double-integrating acceleration drifts by meters within seconds, so no number from it is offered.
+Position comes from, in this order: **AR tracking** (Android, if you turn it on), else **location** (meters from where you started: only useful outdoors,
+meters accurate), else the **touch pad as a virtual dolly** (two fingers pan = x / y, pinch = z, and it stays where you leave it). Recenter zeroes all three.
 The inspector says which one is active.
 
 ### Phone Motion
@@ -252,7 +252,7 @@ and is never stored unless you record it into a take. Nothing is sent to any oth
 ### What can only be confirmed on a real phone
 
 The iOS permission prompt, the actual sensor values and signs on a given phone (iOS and Android report acceleration with gravity with opposite signs), compass-corrected yaw on iPhone, landscape
-rotation, the touch pad feel and multi-touch limits, location, the AR toggle, and how the 3D Object follows the phone visually (the maths is tested; a mirrored axis is fixed with *Invert*).
+rotation, the touch pad feel and multi-touch limits, location, the AR toggle, and how the 3D Object follows the phone visually (the math is tested; a mirrored axis is fixed with *Invert*).
 
 ## MIDI learn: any setting from a knob, fader or pad
 
@@ -291,29 +291,29 @@ and press **F** or double-click for full screen (Esc leaves it); the cursor hide
 | Space (Alt+F in the main window) | Freeze the picture |
 | 1 / 2 / 3 | Fit / Fill / Pixels 1:1 |
 
-The Output menu also sets nearest-neighbour scaling (on by default, right for pixel art), the background color, a clean feed (no on-screen hint at all) and, in the desktop app, which display it opens
+The Output menu also sets nearest-neighbor scaling (on by default, right for pixel art), the background color, a clean feed (no on-screen hint at all) and, in the desktop app, which display it opens
 on (automatic = the first display that is not the main window's). **It shows what the player renders, so the playback proxy applies**: the output is as sharp as the viewer's Preview percentage.
-Pause and use Full res, or lower the proxy, when you need the sharpest still. Keep the main window visible (not minimised): the picture is drawn by it.
+Pause and use Full res, or lower the proxy, when you need the sharpest still. Keep the main window visible (not minimized): the picture is drawn by it.
 
 How the picture gets there: the viewer's canvas is captured into a video in the popup (`captureStream`), so no JavaScript touches a frame and a frame is only sent when the player drew one, at the cost of about one
 frame of latency. If the browser gives no picture that way within 1.5 seconds it switches to copying the canvas every animation frame, which has no extra latency but costs a copy. If the browser blocks the window,
 allow pop-ups for the site (the icon at the right of the address bar) and press Output again. Not tested on a real second monitor or projector.
 
-## Beat Detect: live and analysed
+## Beat Detect: live and analyzed
 
 **Beat Detect** (Math and utility) turns a sound into numbers: `Hit` (a pulse that jumps to 1 on every sharp sound and fades over *Pulse ms*), `Beat pulse`, `Beat ramp` (0 to 1 through each beat),
 `Bar ramp` (through each bar, *Beats per bar*), `Tempo` (BPM), `Kick`, `Snare`, `Hat` (hits in the low, mid and high band), `Loudness` and `Beat count` (a whole number that grows by one per beat: wire it into a Switch
 index or a Frame Interleave to step through pictures). Wire any sound into its Sound input. Because the audio engine only runs a node that has something wired in, **the Sound input must be wired in both modes**.
 
-* **Live** (microphone, phone audio, or any file you did not analyse): a causal detector. It reports hits about 15 to 30 ms after they sound and locks onto the tempo after about 4 to 5 seconds of steady music.
+* **Live** (microphone, phone audio, or any file you did not analyze): a causal detector. It reports hits about 15 to 30 ms after they sound and locks onto the tempo after about 4 to 5 seconds of steady music.
   The grid then runs ahead of the sound (negative *Offset ms* pre-compensates a slow display). It follows slow tempo changes, and lets go of the tempo after about 4 seconds without a beat.
-* **Analysed** (a sound file): choose the file under *Sound file*, press **Analyse sound file** in the inspector. The whole file is listened to once, hits and a beat grid are stored in the node, and the outputs are
-  then a pure function of the time: exact, with look-ahead, identical in every export, and correct after seeking. Wire the same file (an Audio File, or a Media In) into the Sound input. Nudges for the analysed grid:
-  *Offset ms*, *Fixed tempo* (a steady grid at that BPM on the first analysed beat), *Double time*, *Half time*, and *Snap to loop*: with Loop on, if the loop is within 0.12 of a beat of a whole number of beats, the
+* **Analyzed** (a sound file): choose the file under *Sound file*, press **Analyze sound file** in the inspector. The whole file is listened to once, hits and a beat grid are stored in the node, and the outputs are
+  then a pure function of the time: exact, with look-ahead, identical in every export, and correct after seeking. Wire the same file (an Audio File, or a Media In) into the Sound input. Nudges for the analyzed grid:
+  *Offset ms*, *Fixed tempo* (a steady grid at that BPM on the first analyzed beat), *Double time*, *Half time*, and *Snap to loop*: with Loop on, if the loop is within 0.12 of a beat of a whole number of beats, the
   beats are made to divide the loop exactly (off by default; it also makes the grid steady).
-  Sound that only exists as the output of the audio graph (a mixed Audio Timeline) cannot be analysed ahead of time: a process job can read a file or a recorded take, not the rendered graph. Use Live for those, or record the take.
+  Sound that only exists as the output of the audio graph (a mixed Audio Timeline) cannot be analyzed ahead of time: a process job can read a file or a recorded take, not the rendered graph. Use Live for those, or record the take.
 
-Exports do not need the analysis: they replay the audio graph offline and the detector gives the same numbers on every run. Analysing makes them exact and better than the live detector.
+Exports do not need the analysis: they replay the audio graph offline and the detector gives the same numbers on every run. Analyzing makes them exact and better than the live detector.
 
 Right-click a number setting and pick **React to sound** to wire it in one step: Loudness, Beat pulse, Kick, Snare, Hat, Any hit or Beat ramp go through one shared Beat Detect and a **Remap Range** node into the setting. The setting's
 current value is the value at silence (the look does not jump); the Remap's *To max* is how far it goes. It is one undo step; **Stop reacting** removes the wiring and restores the value. The presets

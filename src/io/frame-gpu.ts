@@ -8,10 +8,14 @@ import { conformRect, type ConformAnchor, type ConformMode, type Size } from './
  * retain it right away if it must outlive the current task.
  */
 /** Enlarge by a whole factor with hard pixels. Returns the input for k = 1. Not retained (see conformImage). */
-export function enlargeNearest(gpu: Gpu, img: ImageValue | MaskValue, k: number): ImageValue | MaskValue {
+/** `format`: keep the source's precision (rgba16float) instead of the default 8-bit (float stills: EXR, HDR). */
+export type PassFormat = 'rgba8unorm' | 'rgba16float';
+
+export function enlargeNearest(gpu: Gpu, img: ImageValue | MaskValue, k: number, format?: PassFormat): ImageValue | MaskValue {
   if (k <= 1) return img;
   const out = gpu.pass({
     label: 'pixel-size',
+    format,
     size: { width: img.width * k, height: img.height * k, unit: img.unit * k },
     textures: { src: img },
     uniforms: { k },
@@ -26,11 +30,13 @@ export function conformImage(
   dst: Size,
   mode: Exclude<ConformMode, 'auto'>,
   anchor: ConformAnchor,
+  format?: PassFormat,
 ): ImageValue | MaskValue {
   const rect = conformRect(img, dst, mode, anchor);
   if (!rect) return img;
   const out = gpu.pass({
     label: 'conform',
+    format,
     size: { width: dst.width, height: dst.height, unit: img.unit * (rect.w / img.width) },
     textures: { src: img },
     uniforms: { rect: [rect.x, rect.y, rect.w, rect.h] },

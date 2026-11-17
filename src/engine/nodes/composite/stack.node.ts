@@ -18,7 +18,7 @@ export default defineNode({
         { value: 'cover', label: 'Fill' },
         { value: 'stretch', label: 'Stretch' },
       ],
-      label: 'Upper layer size',
+      label: 'Top size',
     },
     opacity: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Top opacity' },
   },

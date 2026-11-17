@@ -159,6 +159,12 @@ async function phoneFlow(k, landscape) {
   await tab(k, 1);
   await k.sleep(600);
   await k.shot('view');
+  // the viewer header's "…" lists every control the phone bar leaves out
+  await k.tapSel('[aria-label="More viewer tools"]');
+  await k.sleep(400);
+  await k.shot('view-more');
+  await k.js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await k.sleep(300);
   await tab(k, 4);
   await k.sleep(500);
   await k.shot('media');

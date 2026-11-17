@@ -127,7 +127,7 @@ export default defineNode({
     hardAlpha: { type: 'bool', default: true, label: 'Hard alpha', hint: 'Every pixel becomes fully opaque or fully transparent at the cutoff below.' },
     threshold: { type: 'number', default: 0.5, min: 0.01, max: 1, step: 0.01, label: 'Alpha cutoff', visibleIf: (p) => p.hardAlpha === true },
     defringe: { type: 'bool', default: true, label: 'Fix edge colors', hint: 'A partly transparent edge pixel takes the average color of the solid pixels around it (removes dark or light halos).' },
-    orphans: { type: 'bool', default: true, label: 'Remove stray pixels', hint: 'A solid pixel with no solid pixel among its 8 neighbors.' },
+    orphans: { type: 'bool', default: true, label: 'Remove strays', hint: 'A solid pixel with no solid pixel among its 8 neighbors.' },
     holes: { type: 'bool', default: true, label: 'Fill 1 px holes', hint: 'An empty pixel whose 4 neighbors are all solid takes their most common color.' },
     jaggies: { type: 'bool', default: false, label: 'Trim elbows', hint: 'For one-pixel lines: removes every other corner pixel of L-shaped steps so a line steps diagonally (pixel-perfect lines). Leave off for filled shapes.' },
   },

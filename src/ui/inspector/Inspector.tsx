@@ -30,7 +30,7 @@ import { bakeSelection } from '../store/bake';
 import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
 import { PhoneMotionPanel } from './PhoneMotionPanel';
-import { CodecSelect, hasFfmpegOptions } from './CodecSelect';
+import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
 import { ProjectSettingsPanel } from './ProjectSettings';
 import { BakePanel } from './BakePanel';
@@ -40,6 +40,11 @@ import { DepthAiPanel } from './DepthAiPanel';
 import { GroupPanel } from './GroupPanel';
 import { defOf, GROUP_TYPE } from '../../engine/group';
 import './inspector.css';
+
+/** Messages that only say what to set up first (nothing is broken): shown as a note, not as an error. */
+const isSetupNotice = (msg: string) => /^(Not linked|Link a phone|No (phone|camera|microphone|device|file|image|clip|take))/i.test(msg);
+/** What an empty JSON-typed parameter says, by parameter key. */
+const JSON_EMPTY: Record<string, string> = { take: 'No take recorded', analysis: 'Not analyzed yet', strokes: 'No strokes yet', clips: 'No clips yet', edit: 'No clips yet', iter: 'Not started' };
 
 export function Inspector() {
   const selection = useEd((s) => s.selection);
@@ -179,7 +184,7 @@ function NodePanel({ id }: { id: string }) {
             <Icon name="trash" />
           </button>
         </div>
-        {error && !missing.length && <p className="rs-insp__err" role="alert">{error}</p>}
+        {error && !missing.length && <p className={`rs-insp__err${isSetupNotice(error) ? ' is-info' : ''}`} role={isSetupNotice(error) ? 'status' : 'alert'}>{error}</p>}
         {missing.map((m) => (
           <div key={m.capability} className="rs-insp__req" role="note">
             <div className="rs-insp__reqhead"><Icon name="warn" size={16} /><strong>{m.label}</strong></div>
@@ -283,6 +288,7 @@ function ParamGroups({
     // jsons are skipped by visibleParams; show them last so the user can see their state
     for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) {
       if (p.type !== 'json') continue;
+      try { if (p.visibleIf && !p.visibleIf(node.params)) continue; } catch { /* keep it */ }
       let g = out.find((x) => x.name === (p.group ?? ''));
       if (!g) out.push((g = { name: p.group ?? '', items: [] }));
       g.items.push([key, p]);
@@ -296,7 +302,7 @@ function ParamGroups({
   const autoClosed = (name: string): boolean => {
     if (hasKind(def) && String(node.params.kind ?? 'auto') === 'auto' && AUTO_COLLAPSED.includes(name)) return true;
     if (!big || !name) return false;
-    const slot = /^Shape (d+)$/.exec(name);
+    const slot = /^Shape (\d+)$/.exec(name);
     return slot ? node.params[`shape${slot[1]}`] === 'off' : true;
   };
   const isClosed = (name: string): boolean => collapsed[name] ?? autoClosed(name);
@@ -355,7 +361,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
         control = <CheckField value={!!value} onChange={set} label={value ? 'On' : 'Off'} />;
         break;
       case 'enum':
-        control = keyName === 'codec' && hasFfmpegOptions(p.options) ? <CodecSelect value={String(value)} options={p.options} onChange={set} label={label} /> : <SelectField large value={String(value)} options={p.options} onChange={set} label={label} />;
+        control = REGISTRY_PARAMS.includes(keyName) && hasFfmpegOptions(p.options) ? <CodecSelect value={String(value)} options={p.options} onChange={set} label={label} /> : <SelectField large value={String(value)} options={p.options} onChange={set} label={label} />;
         break;
       case 'color':
         control = <ColorField large value={value as [number, number, number, number]} onChange={set} />;
@@ -379,7 +385,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
         control = <DeviceField large value={String(value ?? '')} kind={p.device} onChange={set} />;
         break;
       case 'json':
-        control = keyName === 'pattern' && looksLikeDrumPattern(value) ? <DrumGrid nodeId={node.id} keyName={keyName} value={value} /> : <JsonEditor value={value} onChange={set} />;
+        control = keyName === 'pattern' && looksLikeDrumPattern(value) ? <DrumGrid nodeId={node.id} keyName={keyName} value={value} /> : <JsonEditor value={value} onChange={set} empty={JSON_EMPTY[keyName] ?? 'Empty'} />;
         break;
     }
   }

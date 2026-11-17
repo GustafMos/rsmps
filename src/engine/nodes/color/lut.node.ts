@@ -37,11 +37,11 @@ export default defineNode({
     inSpace: {
       type: 'enum',
       default: 'srgb',
-      label: 'LUT input space',
+      label: 'Input space',
       options: SPACE_OPTIONS,
       hint: 'The encoding the LUT expects at its input. The picture (sRGB) is converted to it first: use e.g. S-Log3 for a log-to-Rec.709 LUT after a Color Space conversion, or leave sRGB for a creative look that expects display values. Log entries are curve-only (Rec.709 primaries).',
     },
-    outSpace: { type: 'enum', default: 'srgb', label: 'LUT output space', options: SPACE_OPTIONS, hint: 'The encoding the LUT writes. The result is converted back to sRGB for the picture.' },
+    outSpace: { type: 'enum', default: 'srgb', label: 'Output space', options: SPACE_OPTIONS, hint: 'The encoding the LUT writes. The result is converted back to sRGB for the picture.' },
   },
   summary: (p) => (p.lut.length ? `${p.interpolation} · ${Math.round(p.intensity * 100)}%` : 'no LUT'),
   async render(ctx) {

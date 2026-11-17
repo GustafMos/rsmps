@@ -10,7 +10,7 @@ fly through, and gives back the camera move of the original shot as a Camera out
    *Use until*) are looked at small. The camera's "distance travelled" is measured from frame to frame (exposure changes do not count),
    and the picks are spread evenly along it: a stretch where the camera stands still gives no frames, a fast stretch gives more. In each
    stretch the sharpest candidate wins (variance of the Laplacian), which drops motion-blurred frames. The picked frames are pulled through
-   the graph, so anything upstream (crop, colour, stabilise) applies, made at most *Max side* pixels and sent as JPEG (quality 0.92).
+   the graph, so anything upstream (crop, color, stabilize) applies, made at most *Max side* pixels and sent as JPEG (quality 0.92).
    A photo set (*Photos*) is used as is, in its order.
 2. **COLMAP** (`feature_extractor`, then `sequential_matcher` for video or `exhaustive_matcher` for photo sets of up to 150 pictures,
    then `mapper` or `global_mapper`, then `image_undistorter`) finds where the camera was for every frame. One SIMPLE_RADIAL camera
@@ -93,10 +93,10 @@ Everything runs on your computer; nothing is uploaded.
 - Brush's GPU tuning cache: `<app data>/splat-train/brush-home/`.
 - The trained splats and the camera path: stored with the project, like a bake.
 
-## Licences
+## Licenses
 
-COLMAP is BSD-3-Clause (its Windows archive also contains libraries under their own licences, such as Qt under LGPL-3.0); Brush is
-Apache-2.0. Neither is part of RSMPS, and both run as separate programs. Not used, for licence reasons: the INRIA 3DGS reference code
+COLMAP is BSD-3-Clause (its Windows archive also contains libraries under their own licenses, such as Qt under LGPL-3.0); Brush is
+Apache-2.0. Neither is part of RSMPS, and both run as separate programs. Not used, for license reasons: the INRIA 3DGS reference code
 (non-commercial), OpenSplat (AGPL), gsplat (needs Python and PyTorch), VGGT / MASt3R (gated or non-commercial weights). See
 THIRD_PARTY_NOTICES.md.
 

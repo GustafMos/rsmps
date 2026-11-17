@@ -10,8 +10,8 @@ animation you can use in the graph.
    *Full frames*, *Faded* (strength %), *Outlines only* or *Blank frames, marks only*. *Every Nth frame* prints a
    subset. Output is a PDF (one page per sheet at exact paper size), PNG pages, or both.
 2. **Print at 100% / "Actual size".** Never "fit to page" or "shrink to printable area": the registration marks
-   and corner markers are placed for the exact paper size and the printer must not rescale. Colour or grey both work.
-3. **Draw.** Draw inside the frames in any colour. Do not cover the black **+** marks between frames, the four
+   and corner markers are placed for the exact paper size and the printer must not rescale. Color or gray both work.
+3. **Draw.** Draw inside the frames in any color. Do not cover the black **+** marks between frames, the four
    square corner markers or the small data strip at the top.
 4. **Photograph or scan.** Flat sheet, even light (no hard shadows from your hand/phone), all four corner markers
    in the picture, camera roughly above the page. Any rotation is fine (the top-left marker is recognisable), and
@@ -19,22 +19,22 @@ animation you can use in the graph.
    mirror image (back of a translucent sheet).
 5. **Scan tab.** Add the photos. Each page shows status, detected corners and warnings. If the corner markers or
    the data strip cannot be read, supply the corners (click them) and/or the layout (paper, columns, rows) and
-   re-analyse that page. Commit creates an image-sequence asset (optionally *drawing only*: ink on transparent, or
+   re-analyze that page. Commit creates an image-sequence asset (optionally *drawing only*: ink on transparent, or
    with the printed guide divided out when the originals are supplied) that works in a Media In node like a video.
 
 ## What the scanner does
 
-1. Greyscale, adaptive (local-mean) threshold, run-length 1:1:3:1:1 finder detection with vertical and horizontal
+1. Grayscale, adaptive (local-mean) threshold, run-length 1:1:3:1:1 finder detection with vertical and horizontal
    cross-checks; the four candidates forming the largest convex quadrilateral are the page corners.
 2. The top-left finder has a notch (a black module in its white ring); the best-scoring rotation is tried first.
    If a rotation does not decode, the others are tried (the data strip is the final judge).
 3. The data strip is sampled through the homography of the four finders for each paper size and orientation until the
    CRC-16 validates; the decoded header gives the exact page geometry.
-4. The four finder positions are refined by normalised cross-correlation on a rectified page, the homography is
+4. The four finder positions are refined by normalized cross-correlation on a rectified page, the homography is
    re-solved (8 DOF), then every **+** mark is located by template matching (sub-pixel, parabolic peak). Marks that
-   cannot be found follow their neighbours' displacement and are reported.
+   cannot be found follow their neighbors' displacement and are reported.
 5. Each frame is cut with the bilinear map of its four refined marks, directly from the photo (one resampling,
-   area-averaged when downscaling), so paper curl and lens distortion are absorbed and neighbouring frames register.
+   area-averaged when downscaling), so paper curl and lens distortion are absorbed and neighboring frames register.
 6. Paper white is estimated per channel from blank margins and gutters (two passes, rejecting pen strokes) and
    divided out; frames come out flat on white.
 
@@ -48,13 +48,13 @@ markers and data strip, "+" marks and frame numbers, and no picture, for animati
 
 * **Frames**: a count, or seconds x frame rate. **Frame aspect**: same as the project, a preset (16:9, 4:3, 1:1, 3:4, 9:16, 4:5, 2:3, 21:9) or custom width : height.
 * **Frames per sheet**: the grid (columns x rows) that makes the frames largest on the chosen **paper and orientation** (exact columns and rows from the CLI). **Margins** and **gutter**.
-* **Guides inside every frame** (light grey, so pencil dominates): centre cross, thirds, safe area, light grid, perspective horizon line (with a vanishing-point mark), registration / peg marks.
+* **Guides inside every frame** (light gray, so pencil dominates): center cross, thirds, safe area, light grid, perspective horizon line (with a vanishing-point mark), registration / peg marks.
 * **Frame numbers** in the gutter above each frame, **frame boxes** just outside the cut area (they never land in a recovered frame), optional **faint onion-skin placeholder numbers** inside.
 * **Timing**: shoot on ones / twos / threes (time code and `X2` hold printed beside each frame number), **beat marks** (dots) from an audio asset (a simple energy-onset detector, `io/print/beats.ts`) or a blank column to fill in, and an optional **exposure sheet** page (one row per timeline frame: frame, time code, drawing, hold, beat, action / sound).
 * **Download PDF** (or PNG pages, or both). Print at 100 %.
 
 Scanning those sheets uses the Scan tab unchanged: they are ordinary version 1 sheets with the guide set to *blank*. The size the scan cuts the
-frames to is recorded as 8 pixels per printed millimetre (about 200 dpi); upscale in the clean-up graph if you need more. A column of timing beside the
+frames to is recorded as 8 pixels per printed millimeter (about 200 dpi); upscale in the clean-up graph if you need more. A column of timing beside the
 frames is done as the time code / hold / beat dot to the right of each frame number (there is no room for a separate column in the page margin).
 
 ### Next round (onion-skin rounds)
@@ -68,10 +68,10 @@ rounds replace earlier ones. Remove the printed picture again with the same *Kee
 ## Rotoscope sheets
 
 The Output node's Print group has **Picture style**: *Full* (the Frame guide setting, as before), *faint* (picture printed at a chosen strength),
-*outline* (edges only, light grey or non-photo blue) and *non-photo blue* (the picture's darkness becomes light blue). On the scan side the
+*outline* (edges only, light gray or non-photo blue) and *non-photo blue* (the picture's darkness becomes light blue). On the scan side the
 clean-up graph of a scan project gets a **Remove Printed Guide** node ("Keep only what I drew", `color/remove-guide`, GPU):
 
-* blue guide: by colour. The blue is bright in green and blue, graphite and dark ink are not, so darkness is read from the blue channel (do not draw in blue);
+* blue guide: by color. The blue is bright in green and blue, graphite and dark ink are not, so darkness is read from the blue channel (do not draw in blue);
 * faint / outline guide: when the **Original frame** input is wired, the guide is rebuilt exactly as printed and divided out (scan = guide x drawing); otherwise a threshold just above the guide's printed strength is used.
 
 The strip records the style, so the node's settings are filled in automatically. **The original is not looked up automatically**: the scan project does
@@ -100,11 +100,11 @@ turn) 5 4 3 2, bottom row 6 7 8 1; fold lines are dashed, the middle slit is a s
 
 ## Plates and plotter output
 
-Output *Print as*: *Plates* writes one file set per ink (a PDF per ink with a page per frame, or PNGs). The palette is the exact colours of a picture that already has few enough colours
+Output *Print as*: *Plates* writes one file set per ink (a PDF per ink with a page per frame, or PNGs). The palette is the exact colors of a picture that already has few enough colors
 (quantized, dithered), else k-means with the chosen number of inks; near-white is paper and gets no plate. Each plate is black coverage on white with registration marks
-outside the frame and the ink name (nearest stock risograph colour) and hex printed below. *Pen plotter SVG* traces every ink into closed paths (marching squares,
-Ramer-Douglas-Peucker simplification), optional hatch fill, nearest-neighbour path ordering, SVG in millimetres with one Inkscape / AxiDraw layer per ink. Tracing gives the outline of
-filled shapes (a thin line becomes a narrow outline loop, not a centre line). Code: `separations.ts`, `plot.ts`.
+outside the frame and the ink name (nearest stock risograph color) and hex printed below. *Pen plotter SVG* traces every ink into closed paths (marching squares,
+Ramer-Douglas-Peucker simplification), optional hatch fill, nearest-neighbor path ordering, SVG in millimeters with one Inkscape / AxiDraw layer per ink. Tracing gives the outline of
+filled shapes (a thin line becomes a narrow outline loop, not a center line). Code: `separations.ts`, `plot.ts`.
 
 ## Scanned textures
 
@@ -126,7 +126,7 @@ certificate warning and the firewall).
 
 1. Press **Scan with phone…**. If a phone is already linked (for example for a Phone Camera node) that session is reused and the phone switches to scan mode: no second QR code.
    Otherwise a QR code appears; the link carries `&mode=scan` after the unchanged pairing token, so the phone opens straight in scan mode.
-2. **Phone:** a live viewfinder from the rear camera with a guide frame. Four corner ticks turn from grey to white as the corner squares of a sheet come into view, with a hint
+2. **Phone:** a live viewfinder from the rear camera with a guide frame. Four corner ticks turn from gray to white as the corner squares of a sheet come into view, with a hint
    ("Point at a printed sheet", "Move back: 2 of 4 corner squares in view", "Move closer", "Hold steady", "All four corners found"). The check runs about 4 times a second on a downscaled
    preview (720 px long side) with the scanner's own finder search (`finder.ts`, which imports nothing else, so the phone bundle stays small). It does not read the data strip, so it cannot tell
    *which* sheet it is, only that a sheet is there; "Sheet 3 of 6" appears under the thumbnail once the computer has read the photo.
@@ -181,7 +181,7 @@ dropped files), never executed, and the only place they are stored is the scan p
 
 ### Preview packaging
 
-One sprite-sheet JPEG plus a description: at most 96 frames (every Nth frame when there are more, and the playback rate is divided by N so the loop lasts as long as the animation), each cell at most
+One sprite sheet JPEG plus a description: at most 96 frames (every Nth frame when there are more, and the playback rate is divided by N so the loop lasts as long as the animation), each cell at most
 480 px on its long side, the sheet at most 4096 px on a side and 8 MP (so 96 frames come out at about 400 px). Missing frames show the previous drawing and are listed; transparent pixels are put on white.
 Code: `src/io/phone-scan-preview.ts`.
 
@@ -213,15 +213,15 @@ A 20-sheet blank-sheet PDF at 300 dpi takes about 3 s (about 155 ms per sheet, n
 
 All coordinates are mm from the top-left of the page; the frame area keeps 20 mm bands at top and bottom.
 
-* **Finder patterns**, 7 x 7 modules of 1.4 mm (9.8 mm), outer edge 7 mm from the two adjacent page edges, centres
+* **Finder patterns**, 7 x 7 modules of 1.4 mm (9.8 mm), outer edge 7 mm from the two adjacent page edges, centers
   at 11.9 mm. Black 7x7, white 5x5, black 3x3 core. The **top-left** finder additionally has the module at (1,1) black
-  (the top-left corner of the white ring), which makes it distinguishable without disturbing the 1:1:3:1:1 centre lines.
-* **"+" registration marks** at every cell corner, shared by neighbours, in the gutter centres:
+  (the top-left corner of the white ring), which makes it distinguishable without disturbing the 1:1:3:1:1 center lines.
+* **"+" registration marks** at every cell corner, shared by neighbors, in the gutter centers:
   `x = gridX0 + col * pitchX - gutter/2`, `y = gridY0 + row * pitchY - gutter/2`, `col = 0..columns`, `row = 0..rows`.
   Arm half-length `min(2.0, gutter/2 - 0.3)` mm (at least 0.8), thickness 0.4 mm. A cell's content is the rectangle
   `gutter/2` inside its four marks.
-* **Data strip**, a 41 x 9 module grid of 0.9 mm modules (36.9 x 8.1 mm), centred horizontally between the top
-  finders and vertically on their centres. Row 0 and column 0 are the timing pattern (black on even indices, black
+* **Data strip**, a 41 x 9 module grid of 0.9 mm modules (36.9 x 8.1 mm), centered horizontally between the top
+  finders and vertically on their centers. Row 0 and column 0 are the timing pattern (black on even indices, black
   at the corner); the thresholds are calibrated from them. The remaining 40 x 8 modules carry 40 bytes row by row,
   most significant bit first.
 * **Header**, all integers big-endian bit fields; lengths in 0.1 mm:

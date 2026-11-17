@@ -244,20 +244,19 @@ html[data-vp='tablet'] .rs-tp__scrub { flex: 1 1 240px; }
 
 /* viewer bar, tablet and desktop: when the buttons do not fit in one row (a narrow centre column, or more tools than before) the chips wrap onto a second row instead of being cut off */
 html:not([data-vp='phone']) .rs-viewer__bar { height: auto; min-height: 40px; flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; overflow: visible; }
-html:not([data-vp='phone']) .rs-viewer__bar .rs-viewer__info { flex: 1 1 250px; min-width: 250px; }
+html:not([data-vp='phone']) .rs-viewer__bar .rs-viewer__info { flex: 1 1 auto; min-width: 150px; }
+/* the bar folds secondary buttons away step by step (Viewer.tsx, data-fold): from level 3 the readouts shrink to name and preview scale; from level 4 Full res / Keep this look are icon-only */
+.rs-viewer__bar[data-fold='3'] .rs-viewer__info > .rs-num:not([title^='Preview']), .rs-viewer__bar[data-fold='4'] .rs-viewer__info > .rs-num:not([title^='Preview']), .rs-viewer__bar[data-fold='5'] .rs-viewer__info > .rs-num:not([title^='Preview']) { display: none; }
+.rs-viewer__look--icons .rs-btn { padding: 0 var(--s-1); }
+.rs-viewer__look--icons .rs-viewer__btxt { display: none; }
 
-/* viewer bar on a phone: icon-only Full res / Keep this look, fewer readouts, scrolls sideways if it must */
-html[data-vp='phone'] .rs-viewer__bar { overflow-x: auto; scrollbar-width: none; gap: var(--s-1); padding: 0 var(--s-1); }
-html[data-vp='phone'] .rs-viewer__bar::-webkit-scrollbar { display: none; }
-html[data-vp='phone'] .rs-viewer__info { flex: 0 1 auto; min-width: 56px; max-width: 120px; }
+/* viewer bar on a phone: only the node name and the preview scale ("Output · 25%"); every other control is in the header's "…" menu (ViewerOverflow) */
+html[data-vp='phone'] .rs-viewer__bar { overflow: hidden; flex-wrap: nowrap; gap: var(--s-1); padding: 0 var(--s-2); }
+html[data-vp='phone'] .rs-viewer__info { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 html[data-vp='phone'] .rs-viewer__info > .rs-num:not([title^='Preview']) { display: none; }
-html[data-vp='phone'] .rs-viewer__look .rs-btn { font-size: 0; gap: 0; width: 44px; padding: 0; justify-content: center; }
-/* Full res and Keep this look stay; every other button of the bar moves into the viewer's "…" menu (ViewerOverflow) */
-html[data-vp='phone'] .rs-viewer__look .rs-btn:nth-child(n + 3) { display: none; }
-html[data-vp='phone'] .rs-viewer__bar > .rs-viewer__chip:not(.rs-viewer__info):not(.rs-viewer__look):not(.rs-viewer__tools):not(.rs-viewer__batch) { display: none; }
-html[data-vp='phone'] .rs-viewer__look .rs-btn svg { width: 20px; height: 20px; }
-html[data-vp='phone'] .rs-viewer__zoom { display: none; }
-html[data-vp='phone'] .rs-viewer__name { max-width: 110px; }
+html[data-vp='phone'] .rs-viewer__long { display: none; }
+html[data-vp='phone'] .rs-viewer__info > .rs-num[title^='Preview']::before { content: '·'; margin-right: var(--s-2); color: var(--text-faint); }
+html[data-vp='phone'] .rs-viewer__name { max-width: 60vw; }
 .rs-pshell__viewer[data-mode='dock'] .rs-viewer__bar .rs-viewer__info > .rs-num { display: none; }
 .rs-pshell__viewer[data-mode='dock'] .rs-viewer__bar { height: 48px; }
 

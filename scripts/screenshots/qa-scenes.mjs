@@ -119,7 +119,7 @@ const QA_LIB = `(() => {
 
 /** Everything checked for each captured state. Runs in the page. */
 const MEASURE_QA = `(() => {
-  const out = { boundary: !!document.querySelector('.rs-boot--error'), clipped: [], overlaps: [], cutoff: [], outside: [], engine: [] };
+  const out = { boundary: !!document.querySelector('.rs-boot--error'), clipped: [], overlaps: [], cutoff: [], outside: [], engine: [], leaks: [] };
   const vis = (e) => { const r = e.getBoundingClientRect(); if (r.width <= 0 || r.height <= 0) return false; const s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity > 0 && !e.closest('[aria-hidden="true"]') && !e.closest('[inert]'); };
   const desc = (e) => { const c = typeof e.className === 'string' ? e.className.trim().split(/\\s+/).slice(0, 2).join('.') : ''; return e.tagName.toLowerCase() + (c ? '.' + c : '') + ' "' + ((e.textContent || '') || e.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ').slice(0, 40) + '"'; };
   const seen = new Set();
@@ -167,6 +167,14 @@ const MEASURE_QA = `(() => {
     for (let a = e.parentElement; a && a !== document.body; a = a.parentElement) { const s = getComputedStyle(a); if ((s.overflowX !== 'visible' || s.overflowY !== 'visible')) { const ar = a.getBoundingClientRect(); if (ar.right <= innerWidth + 1 && ar.bottom <= innerHeight + 1) { inScroller = true; break; } } }
     if (!inScroller) add(out.outside, 'w' + desc(e), { el: desc(e), at: Math.round(r.left) + ',' + Math.round(r.top) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) });
   }
+  // 5. raw values leaking into the UI as text: null, undefined, NaN, [object Object] or a JSON object / array
+  { const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      const t = (n.textContent || '').trim(); const p = n.parentElement;
+      if (!t || !p || !vis(p) || ['SCRIPT', 'STYLE', 'TEXTAREA', 'PRE'].includes(p.tagName) || p.closest('pre, code, textarea, .rs-mono')) continue;
+      if (['null', 'undefined', 'NaN'].includes(t) || t.includes('[object Object]') || ((t[0] === '[' || t[0] === '{') && t.length > 2 && (t.endsWith(']') || t.endsWith('}')) && t.includes('"'))) add(out.leaks, 'l' + t.slice(0, 40), { text: t.slice(0, 60), in: desc(p).slice(0, 60) });
+    } }
+  for (const e of document.querySelectorAll('input:not([type=hidden]), textarea')) if (vis(e) && ['null', 'undefined', 'NaN', '[object Object]'].includes(e.value)) add(out.leaks, 'i' + desc(e), { text: 'field value: ' + e.value, in: desc(e).slice(0, 60) });
   try { for (const [id, m] of window.__rsmpsIo.player.getState().errors) out.engine.push(String(m).slice(0, 140)); } catch { /* no handle */ }
   out.inspectorScroll = (() => { const e = document.querySelector('.rs-inspector__body, .rs-inspector'); return e ? e.scrollHeight + '/' + e.clientHeight : null; })();
   return out;
@@ -191,7 +199,7 @@ function makeQa(k, sceneId) {
       const rec = { scene: sceneId, state: name, file: `${sceneId}-${name}.png`, note: note ?? null, consoleErrors: consoleErrors.splice(0), settleErrors: engine, ...m };
       records.push(rec);
       writeFileSync(join(QA_DIR, 'qa-report.json'), JSON.stringify(records, null, 1));
-      const flags = [rec.boundary && 'BOUNDARY', rec.consoleErrors.length && `console x${rec.consoleErrors.length}`, rec.clipped.length && `clipped ${rec.clipped.length}`, rec.overlaps.length && `overlap ${rec.overlaps.length}`, rec.cutoff.length && `cutoff ${rec.cutoff.length}`, rec.outside.length && `outside ${rec.outside.length}`, rec.engine.length && `engine ${rec.engine.length}`].filter(Boolean);
+      const flags = [rec.boundary && 'BOUNDARY', rec.consoleErrors.length && `console x${rec.consoleErrors.length}`, rec.clipped.length && `clipped ${rec.clipped.length}`, rec.overlaps.length && `overlap ${rec.overlaps.length}`, rec.cutoff.length && `cutoff ${rec.cutoff.length}`, rec.outside.length && `outside ${rec.outside.length}`, rec.engine.length && `engine ${rec.engine.length}`, rec.leaks.length && `LEAK ${rec.leaks.length}`].filter(Boolean);
       console.log(`  QA ${name}${flags.length ? '  ' + flags.join(', ') : '  ok'}`);
       return rec;
     },
@@ -299,17 +307,21 @@ export const scenes = [
       await q.boot();
       await q.media();
       await k.js(`window.__qa.build({ name: 'Viewer', nodes: { src: { type: 'media-in', at: [0, 0], params: { assets: '@asset:scene' } }, pix: { type: 'pixelate', at: [300, 0] }, out: { type: 'image-out', at: [600, 0] } }, edges: [['src.image', 'pix.image'], ['pix.image', 'out.image']] })`);
+      // narrow viewer bars fold Snapshot / A/B / Output into one icon button and the "…" menu
+      const has = (text) => k.js(`[...document.querySelectorAll('.rs-viewer__bar button')].some((b) => (b.textContent || '').trim().toLowerCase().includes(${JSON.stringify(text.toLowerCase())}))`);
+      const openAb = async () => { if (await has('A/B')) await q.click('button', 'A/B', false); else await q.click('button', 'Snapshot and compare'); };
+      const openOutput = async () => { if (await has('Output')) await q.click('button', 'Output', true); else { await q.click('button', 'More view controls'); await sleep(250); await q.click('.rs-menu__item, [role=menuitem]', 'Output window', false); } };
       await k.js(`window.__rsmps.ed.select([window.__qa.ids.pix])`);
       await sleep(1500);
       await q.shot('toolbar');
       await q.step('full-res', async () => { await q.click('button', 'Full res', false); await sleep(1500); await q.shot('full-res'); });
       await q.step('keep-look', async () => { await k.js(`(() => { const b = [...document.querySelectorAll('button')].find((x) => /keep this look/i.test(x.textContent)); b && b.focus(); })()`); await q.shot('keep-look-focus'); });
-      await q.step('output-menu', async () => { await q.click('button', 'Output', true); await sleep(500); await q.shot('output-menu'); await q.esc(); });
-      await q.step('snapshot', async () => { await q.click('button', 'Snapshot', false); await sleep(1200); await q.shot('snapshot-taken'); });
-      await q.step('ab-menu', async () => { await q.click('button', 'A/B', false); await sleep(400); await q.shot('ab-menu'); });
+      await q.step('output-menu', async () => { await openOutput(); await sleep(500); await q.shot('output-menu'); await q.esc(); });
+      await q.step('snapshot', async () => { if (await has('Snapshot')) await q.click('button', 'Snapshot', false); else { await q.click('button', 'Snapshot and compare'); await sleep(250); await q.click('.rs-menu__item, [role=menuitem]', 'Snapshot', true); } await sleep(1200); await q.shot('snapshot-taken'); });
+      await q.step('ab-menu', async () => { await openAb(); await sleep(400); await q.shot('ab-menu'); });
       for (const [id, label] of [['wipe', 'Wipe'], ['difference', 'Difference'], ['side', 'Side by side']]) {
         await q.step('ab-' + id, async () => {
-          if (!(await k.js(`!!document.querySelector('.rs-menu')`))) await q.click('button', 'A/B', false);
+          if (!(await k.js(`!!document.querySelector('.rs-menu')`))) await openAb();
           await sleep(250);
           await k.js(`window.__rsmps.ed.setParam(window.__qa.ids.pix, 'value', 90)`);
           await q.click('.rs-menu__item, [role=menuitem]', label, false);
@@ -318,6 +330,16 @@ export const scenes = [
         });
       }
       await q.step('exit-compare', async () => { await q.click('button', 'Exit compare'); });
+      await q.step('compare-node', async () => {
+        // "what did this node change": node B is evaluated off screen, the viewer must keep showing the same node the whole time
+        await k.js(`window.__qa.viewedLog = []; void window.__rsmps.ed.store.subscribe(() => window.__qa.viewedLog.push(window.__rsmps.ed.state.viewedNodeId))`);
+        if (await has('Node…')) await q.click('button', 'Node…', false); else await q.click('button', 'Snapshot and compare');
+        await sleep(300);
+        await q.click('.rs-menu__item, [role=menuitem]', 'Selected node vs its input', false);
+        await sleep(2500);
+        const log = await k.js(`[...new Set(window.__qa.viewedLog)]`);
+        await q.shot('compare-node', 'viewed node ids seen during compare: ' + JSON.stringify(log));
+      });
     },
   })),
 
@@ -521,7 +543,7 @@ export const scenes = [
         }
       });
       await q.step('stopmotion', async () => { await k.js(`location.hash = ''`); await q.clean(); await q.menu('File', 'Stop-motion capture'); await sleep(1200); await q.shot('stop-motion-no-camera'); await q.esc(); });
-      await q.step('scan-tab', async () => { await k.js(`window.__rsmps.ed.newScanTab()`); await sleep(2500); await q.shot('scan-start'); });
+      await q.step('scan-tab', async () => { await k.js(`(() => { const b = [...document.querySelectorAll('[role=dialog] button')].find((x) => /^cancel$/i.test((x.textContent || '').trim())); if (b) b.click(); })()`); await sleep(300); await k.js(`window.__rsmps.ed.newScanTab()`); await sleep(2500); await q.shot('scan-start'); });
     },
   },
   {
@@ -541,7 +563,7 @@ export const scenes = [
         await q.esc();
         await k.js(`window.__rsmpsIo.processes.cancelAll && window.__rsmpsIo.processes.cancelAll()`);
       });
-      await q.step('memory', async () => { await k.js(`document.querySelector('.rs-mem').click()`); await sleep(600); await q.shot('memory-popover'); await q.esc(); });
+      await q.step('memory', async () => { await q.esc(); await k.js(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); document.body.click()`); await sleep(400); await k.js(`document.querySelector('.rs-mem').click()`); await sleep(600); if (!(await k.js(`!!document.querySelector('.rs-mem__pop')`))) throw new Error('memory popover did not open'); await q.shot('memory-popover'); await q.esc(); });
     },
   },
   { id: 'e-safe', ...W, async run(k) { const q = makeQa(k, 'e-safe'); await q.boot('/index.html?safe=1'); await sleep(1500); await q.shot('safe-mode-banner'); } },
@@ -575,4 +597,30 @@ export const scenes = [
       });
     },
   })),
+  /* g. Dialogs the other scenes do not open, and the compare / rename flows */
+  {
+    id: 'g-views', ...W,
+    async run(k) {
+      const q = makeQa(k, 'g-views');
+      await q.boot();
+      await q.media();
+      await k.js(`window.__qa.build({ name: 'Views', nodes: { src: { type: 'media-in', at: [0, 0], params: { assets: '@asset:scene' } }, pix: { type: 'pixelate', at: [320, 0] }, out: { type: 'image-out', at: [620, 0] } }, edges: [['src.image', 'pix.image'], ['pix.image', 'out.image']] }); window.__rsmps.ed.select([window.__qa.ids.pix]); window.__rsmps.ed.setViewed(window.__qa.ids.out)`);
+      await sleep(1500);
+      for (const [id, name] of [['backups', 'backups'], ['about', 'about'], ['shortcuts', 'shortcuts'], ['keymap', 'keymap'], ['blankSheets', 'print-blank-sheets']]) {
+        await q.step(name, async () => { await k.js(`window.__rsmps.ed.openDialog(${JSON.stringify(id)})`); await sleep(1000); await q.shot(name); await k.js(`window.__rsmps.ed.openDialog(null)`); await sleep(300); });
+      }
+      await q.step('snapshot-rename', async () => {
+        try { await q.click('button', 'Snapshot', true); } catch { await q.click('button', 'Snapshot and compare'); await sleep(250); await q.click('.rs-menu__item, [role=menuitem]', 'Snapshot', true); } await sleep(1200); await q.clean();
+        await k.js(`(() => { const b = document.querySelector('.rs-cmp__x[aria-label="Rename snapshot"]'); if (!b) throw new Error('no rename button'); b.click(); })()`);
+        await sleep(400);
+        await q.shot('snapshot-rename-inline');
+        await q.esc();
+      });
+      await q.step('sdf-3d', async () => {
+        await k.js(`window.__qa.single('sdf-3d', { shape3: 'box' }); window.__rsmps.ed.select([window.__qa.ids.n])`);
+        await sleep(2000);
+        await q.shot('sdf-3d-inspector');
+      });
+    },
+  },
 ];

@@ -95,7 +95,7 @@ export default defineNode({
   title: 'Subtitles',
   category: 'generate',
   description:
-    'Turns an .srt / .vtt file (or lines you type) into a styled caption overlay on a transparent image: TikTok-style word pops, karaoke, typewriter, pixel-art and dithered lettering. Put it over the video with Merge, or run it through Pixelate, Dither, CRT, Recolor or a Custom Shader first. Needs the app to rasterise fonts (empty in headless runs).',
+    'Turns an .srt / .vtt file (or lines you type) into a styled caption overlay on a transparent image: TikTok-style word pops, karaoke, typewriter, pixel-art and dithered lettering. Put it over the video with Merge, or run it through Pixelate, Dither, CRT, Recolor or a Custom Shader first. Needs the app to rasterize fonts (empty in headless runs).',
   keywords: ['srt', 'vtt', 'captions', 'subtitle', 'subtitles', 'lyrics', 'karaoke', 'tiktok', 'reels', 'shorts', 'text', 'caption', 'closed captions', 'words'],
   inputs: {
     image: { type: 'image', label: 'Fill (picture in the letters)' },

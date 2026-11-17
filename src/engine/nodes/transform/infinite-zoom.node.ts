@@ -134,7 +134,7 @@ export default defineNode({
   title: 'Infinite Zoom',
   category: 'transform',
   description:
-    'The picture contains a smaller copy of itself, which contains a smaller copy, forever, and the camera falls in (the Droste effect). Put the centre on a hole of your logo, set how small each copy is, and let it fall; every level can take the next colour of a palette. Loops seamlessly when it travels a whole number of levels.',
+    'The picture contains a smaller copy of itself, which contains a smaller copy, forever, and the camera falls in (the Droste effect). Put the center on a hole of your logo, set how small each copy is, and let it fall; every level can take the next color of a palette. Loops seamlessly when it travels a whole number of levels.',
   keywords: ['droste', 'tunnel', 'recursive', 'recursion', 'fall into', 'zoom loop', 'fractal', 'infinite', 'mise en abyme', 'zoom', 'logo', 'spiral', 'trippy', 'feedback'],
   inputs: { image: { type: 'image', required: true, label: 'Image' }, inner: { type: 'image', label: 'Inner picture' } },
   outputs: { image: { type: 'image', label: 'Image' } },

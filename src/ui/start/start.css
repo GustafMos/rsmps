@@ -10,7 +10,10 @@
 .rs-start__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: var(--s-3); }
 .rs-tile { display: flex; flex-direction: column; gap: var(--s-1); padding: var(--s-2); text-align: left; background: var(--bg-2); border: 1px solid var(--line-strong); color: var(--text); cursor: pointer; font: inherit; }
 .rs-tile:hover, .rs-tile:focus-visible { border-color: var(--text-dim); background: var(--bg-3); }
-.rs-tile__img { aspect-ratio: 16 / 9; display: grid; place-items: center; background: #000; color: var(--text-faint); overflow: hidden; }
+.rs-tile__img { aspect-ratio: 16 / 9; display: grid; place-items: center; background: var(--bg-3); color: var(--text-faint); overflow: hidden; }
+.rs-tile__img.is-wait { animation: rs-tile-wait 1.6s steps(6) infinite; }
+@keyframes rs-tile-wait { 50% { background: var(--bg-2); } }
+@media (prefers-reduced-motion: reduce) { .rs-tile__img.is-wait { animation: none; } }
 .rs-tile__img img { width: 100%; height: 100%; object-fit: cover; }
 .rs-tile__title { font-weight: 600; font-size: var(--fs-md); }
 .rs-tile__desc { color: var(--text-dim); font-size: var(--fs-xs); line-height: 1.4; }

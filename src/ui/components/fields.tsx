@@ -72,7 +72,7 @@ export function SelectField({
   label,
 }: {
   value: string;
-  options: readonly { value: string; label: string }[];
+  options: readonly { value: string; label: string; disabled?: boolean; group?: string }[];
   onChange: (v: string) => void;
   large?: boolean;
   title?: string;
@@ -80,11 +80,20 @@ export function SelectField({
 }) {
   return (
     <select className={`rs-select${large ? ' rs-select--lg' : ''}`} value={value} data-nodrag title={title ?? label} aria-label={label} onChange={(e) => onChange(e.target.value)}>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
+      {options.some((o) => o.group)
+        ? [...new Set(options.map((o) => o.group ?? ''))].map((g) => {
+            const items = options.filter((o) => (o.group ?? '') === g).map((o) => (
+              <option key={o.value} value={o.value} disabled={o.disabled}>
+                {o.label}
+              </option>
+            ));
+            return g ? <optgroup key={g} label={g}>{items}</optgroup> : items;
+          })
+        : options.map((o) => (
+            <option key={o.value} value={o.value} disabled={o.disabled}>
+              {o.label}
+            </option>
+          ))}
     </select>
   );
 }

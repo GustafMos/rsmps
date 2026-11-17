@@ -3,18 +3,18 @@ import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 
 /** Param groups shown for each export kind (everything else in the Output's inspector is hidden). Defined once. */
 export const KIND_GROUPS: Record<string, string[]> = {
-  auto: ['Frame', 'Video', 'Spritesheet'],
+  auto: ['Frame', 'Video', 'Sprite sheet'],
   image: ['Frame'],
   sequence: ['Frame'],
   video: ['Frame', 'Video'],
-  spritesheet: ['Frame', 'Spritesheet'],
+  spritesheet: ['Frame', 'Sprite sheet'],
   print: ['Print'],
 };
 /** Groups that start collapsed for `auto` (the kind is not decided yet). */
-export const AUTO_COLLAPSED = ['Video', 'Spritesheet'];
+export const AUTO_COLLAPSED = ['Video', 'Sprite sheet'];
 
 export const KIND_ICON = { auto: 'focus', image: 'image', sequence: 'folder', video: 'video', spritesheet: 'grid', print: 'export' } as const;
-export const KIND_SHORT: Record<string, string> = { auto: 'Auto', image: 'Still', sequence: 'Sequence', video: 'Video', spritesheet: 'Sheet', print: 'Print' };
+export const KIND_SHORT: Record<string, string> = { auto: 'Auto', image: 'Still', sequence: 'Sequence', video: 'Video', spritesheet: 'Sprite sheet', print: 'Print' };
 
 export function hasKind(def: AnyNodeDef | undefined): boolean {
   return !!def && def.category === 'output' && (def.params as Record<string, ParamDef>).kind?.type === 'enum';
@@ -34,7 +34,8 @@ export function describeOutput(def: AnyNodeDef, node: NodeInstance, project: Gra
   const fs = hasFrameParams(def) ? frameSize(project, node) : { width: project.width, height: project.height };
   const size = `${fs.width}×${fs.height}`;
   const frames = Math.max(1, Math.round(project.duration * project.fps));
-  const fmt = String(node.params.imageFormat ?? 'png').toUpperCase();
+  const rawFmt = String(node.params.imageFormat ?? 'png');
+  const fmt = ({ tiff16: '16-bit TIFF', exr: 'OpenEXR', hdr: 'Radiance HDR', ico: 'ICO' } as Record<string, string>)[rawFmt] ?? rawFmt.toUpperCase();
   switch (kind) {
     case 'image':
       return `1 ${fmt} image, ${size}`;
@@ -46,7 +47,7 @@ export function describeOutput(def: AnyNodeDef, node: NodeInstance, project: Gra
       return `1 video (${[container, codec].filter(Boolean).join(', ')}, ${size}, ${project.duration} s)`;
     }
     case 'spritesheet':
-      return `1 spritesheet + JSON, ${frames} frames, ${size} each`;
+      return `1 sprite sheet + JSON, ${frames} frames, ${size} each`;
     case 'print':
       return 'Print sheets (PDF) to draw on and scan back';
     default:

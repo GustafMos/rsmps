@@ -9,9 +9,12 @@
  */
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseArgs, numberOpt, one, type OptionSpec } from './args';
-import { CODEC_NAMES, IMAGE_FORMATS, CODECS, normalizeImageFormat, parseCodec } from './encode';
+import { parseArgs, parseForFlag, numberOpt, one, type OptionSpec } from './args';
+import { CODEC_NAMES, CODECS, availableEncoders, requireEncoder, parseCodec } from './encode';
+import { audioRow, stillRow, STILL_ROWS, AUDIO_ROWS } from '../io/export-codecs';
+import { formatText, listFormats } from './formats';
 import { findFfmpeg } from './ffmpeg';
+import { missingEncoderMessage } from '../io/ffmpeg-encoders';
 import { createRegistry, loadPlugins } from './nodes';
 import { applyOverrides, assignInputs, loadGraph, parseItemRange } from './prepare';
 import { renderGraphBatch, selectOutputs, type Kind, type Overrides, type Reporter } from './render';
@@ -26,6 +29,7 @@ Usage
   rsmps render <graph.rsmps.json> [inputs...] --out <dir> [options]
   rsmps check  <graph.rsmps.json> [--plugin file.js]
   rsmps nodes  [--json] [--plugin file.js]
+  rsmps formats [--json]                       every output format, who writes it, and whether it works on this machine
   rsmps print-blank --out <dir> (--frames <n> | --seconds <s>) [options]   blank sheets for paper animation (--help)
 
 Inputs (render)
@@ -44,17 +48,22 @@ Options (render)
   --duration <s|auto>        project duration in seconds; 'auto' = length of each item's source video
   --loop / --no-loop         project loop mode
   --size WxH                 project canvas size
-  --format <x>               png|webp|jpeg, or image|sequence|spritesheet|video, or a codec name
+  --format <x>               a picture format (${STILL_ROWS.map((r) => r.value).join('|')}),
+                             a sound format (${AUDIO_ROWS.map((r) => r.id).join('|')}: sound only),
+                             image|sequence|spritesheet|video, or a codec name. "rsmps formats" lists them with their route
   --kind <image|sequence|spritesheet|video|print>   force the export kind of every output
   --codec <name>             video codec (implies --kind video): ${CODEC_NAMES}
   --quality <0.1-1>          still image quality (webp/jpeg)
   --bitrate <Mbps>           lossy video bitrate
+  Formats the app writes itself (HAP, Motion JPEG, PNG and uncompressed MOV, GIF, APNG, QOI, TIFF, TGA, BMP, ICO, PPM, OpenEXR, Radiance HDR, WAV, AIFF, FLAC)
+  need no FFmpeg. Their options are Output params: --set Out.hapQuality=better  --set Out.hapSnappy=false  --set Out.gifDither=floyd ...
   --plugin <file.js>         load node definitions from a module; repeatable
   --quiet, -q                no progress output
   --json                     machine-readable progress, one JSON object per line
   --dry-run                  validate and list what would be written, render nothing
-  Game assets (apply to every spritesheet Output; the same as the Output node's params, which --set can also reach)
-  --for <preset>             generic|godot|unity|gamemaker|rpgmaker|web: a starting point for that engine
+  Game assets (apply to every sprite sheet Output; the same as the Output node's params, which --set can also reach)
+  --for <preset>             generic|godot|unity|gamemaker|rpgmaker|web: a starting point for that engine (sprite sheets);
+                             vj|editing|web: video presets (DXV-compatible or ProRes-compatible for VJ software, ProRes for editing, H.264 for the web)
   --sheet-layout <x>         grid|row|column|pack      --columns <n>   --sheet-padding <n>   --extrude <n>
   --trim                     trim transparent borders (offsets go into the metadata)
   --pot                      power-of-two sheet sizes   --max-sheet <n>  largest page, more pages when needed
@@ -203,6 +212,14 @@ async function cmdNodes(argv: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdFormats(argv: string[]): Promise<number> {
+  const p = parseArgs(argv, { json: {} });
+  const { formats, ffmpeg } = await listFormats();
+  if (p.flags.has('json')) console.log(JSON.stringify({ ffmpeg, formats }, null, 2));
+  else console.log(formatText(formats, ffmpeg));
+  return 0;
+}
+
 async function cmdCheck(argv: string[]): Promise<number> {
   const p = parseArgs(argv, { plugin: { value: true, repeat: true }, json: {} });
   if (p.positionals.length !== 1) throw new Error('Usage: rsmps check <graph.rsmps.json>');
@@ -268,10 +285,12 @@ async function cmdRender(argv: string[]): Promise<number> {
   const kind = one(p, 'kind');
   const codecName = one(p, 'codec');
   if (fmt) {
-    if (IMAGE_FORMATS.includes(fmt.toLowerCase())) ov.imageFormat = normalizeImageFormat(fmt)!;
-    else if (kinds.includes(fmt.toLowerCase())) ov.kind = fmt.toLowerCase() as Kind;
+    const lc = fmt.toLowerCase();
+    if (stillRow(lc)) ov.imageFormat = stillRow(lc)!.value;
+    else if (kinds.includes(lc)) ov.kind = lc as Kind;
     else if (parseCodec(fmt)) ov.codec = CODECS[parseCodec(fmt)!];
-    else throw new Error(`Unknown --format "${fmt}". Use png, webp, jpeg, image, sequence, spritesheet, video, print or a codec (${CODEC_NAMES}).`);
+    else if (audioRow(lc)) ov.sound = audioRow(lc)!;
+    else throw new Error(`Unknown --format "${fmt}". Use a picture format (${STILL_ROWS.map((r) => r.value).join(', ')}), a sound format (${AUDIO_ROWS.map((r) => r.id).join(', ')}), image, sequence, spritesheet, video, print or a codec (${CODEC_NAMES}). \`rsmps formats\` lists them all.`);
   }
   if (kind) {
     if (!kinds.includes(kind)) throw new Error(`Unknown --kind "${kind}" (${kinds.join(', ')}).`);
@@ -290,7 +309,12 @@ async function cmdRender(argv: string[]): Promise<number> {
     if (!allowed.includes(v)) throw new Error(`Unknown --${flag} "${v}" (${allowed.join(', ')}).`);
     outputParams[key] = v;
   };
-  choice('for', 'preset', ['generic', 'godot', 'unity', 'gamemaker', 'rpgmaker', 'web']);
+  // --for covers both families: sheet presets (generic|godot|unity|gamemaker|rpgmaker|web) and video presets (vj|editing|web). "web" is both: a sheet
+  // Output gets the CSS-sprites preset, a video Output the Web / social one.
+  const forName = one(p, 'for');
+  if (forName !== undefined) {
+    Object.assign(outputParams, parseForFlag(forName));
+  }
   choice('sheet-layout', 'sheetLayout', ['grid', 'row', 'column', 'pack']);
   choice('sheet-meta', 'sheetMeta', ['json', 'aseprite', 'texturepacker', 'css', 'none']);
   choice('sheet-from', 'sheetFrom', ['clip', 'batch']);
@@ -325,8 +349,15 @@ async function cmdRender(argv: string[]): Promise<number> {
   const dry = p.flags.has('dry-run');
   const outputs = (one(p, 'outputs') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
-  const needsFfmpeg = ov.codec || ov.kind === 'video' || graph.nodes.some((n) => n.type === 'media-in' && Array.isArray(n.params.assets) && (n.params.assets as string[]).some((a) => /\.(mp4|mov|m4v|mkv|webm|avi|gif|mpe?g|wmv|flv|ogv|wav|mp3|flac|ogg|m4a|aac|opus|aiff?)$/i.test(a)));
+  const needsFfmpeg = (ov.codec ? ov.codec.route !== 'own' : ov.kind === 'video') || (ov.imageFormat && stillRow(ov.imageFormat)?.route === 'ffmpeg') || (ov.sound && ov.sound.route !== 'own') || (outputParams.videoFor && outputParams.videoFor !== 'web') || graph.nodes.some((n) => n.type === 'media-in' && Array.isArray(n.params.assets) && (n.params.assets as string[]).some((a) => /\.(mp4|mov|m4v|mkv|webm|avi|gif|mpe?g|wmv|flv|ogv|wav|mp3|flac|ogg|m4a|aac|opus|aiff?)$/i.test(a)));
   if (needsFfmpeg && !(await findFfmpeg())) throw new Error('ffmpeg was not found. Install the optional dependency @ffmpeg-installer/ffmpeg, put ffmpeg on PATH or set FFMPEG_PATH.');
+
+  if (ov.codec) await requireEncoder(ov.codec); // fails early, naming the missing encoder (formats the app writes itself need none)
+  if (ov.imageFormat && stillRow(ov.imageFormat)?.route === 'ffmpeg') {
+    const row = stillRow(ov.imageFormat)!;
+    const have = await availableEncoders();
+    if (have.size > 0 && !row.encoders.some((e) => have.has(e))) throw new Error(missingEncoderMessage(row.label, row.encoders.join(' or ')));
+  }
 
   if (!dry) mkdirSync(outDir, { recursive: true });
   const summary = await renderGraphBatch({
@@ -369,6 +400,9 @@ export async function main(argv: string[]): Promise<number> {
         return await cmdRender(rest);
       case 'nodes':
         return await cmdNodes(rest);
+      case 'formats':
+      case '--list-formats':
+        return await cmdFormats(rest);
       case 'check':
         return await cmdCheck(rest);
       case 'print-blank':

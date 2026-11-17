@@ -6,7 +6,9 @@
 }
 .rs-live__banner .rs-live__pulse { width: 9px; height: 9px; border-radius: 50%; background: #ff9f1c; animation: rs-live-pulse 1s ease-in-out infinite; }
 @keyframes rs-live-pulse { 50% { opacity: .25; } }
-.rs-live__status { color: var(--text-dim); font-size: var(--fs-sm); }
+.rs-live__status { margin: 0; color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.5; }
+.rs-live__empty { padding: var(--s-3); border: 1px dashed var(--line-strong); }
+.rs-dlg__body:has(> .rs-live__status) { gap: var(--s-3); }
 .rs-live__table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .rs-live__table th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 2px 6px; white-space: nowrap; }
 .rs-live__table td { padding: 3px 6px; vertical-align: middle; border-top: 1px solid var(--bg-3); }

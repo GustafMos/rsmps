@@ -17,7 +17,9 @@ import '../scan/scan.css';
 export function TopBar() {
   const app = useApp();
   const { io, ed } = app;
-  const name = useEd((s) => s.graph.name);
+  // a scan tab has no graph name of its own: the bar shows the tab's name (read-only; rename the tab itself) instead of the graph's "Untitled"
+  const name = useEd((s) => (s.mode === 'scan' ? (s.projects.find((p) => p.id === s.activeProject)?.name ?? 'Scan') : s.graph.name));
+  const isScan = useEd((s) => s.mode === 'scan');
   const canUndo = useEd((s) => s.canUndo);
   const canRedo = useEd((s) => s.canRedo);
   const mode = useEd((s) => s.mode);
@@ -114,7 +116,9 @@ export function TopBar() {
         value={name}
         spellCheck={false}
         aria-label="Project name"
-        title="Project name"
+        title={isScan ? 'Scan tab name: double-click the tab to rename it' : 'Project name'}
+        readOnly={isScan}
+        placeholder="Untitled"
         onChange={(e) => ed.setName(e.target.value)}
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); }}
       />
@@ -141,7 +145,7 @@ export function TopBar() {
           { label: 'Video', onClick: () => ed.exportAs('video') },
           { label: 'Still image', onClick: () => ed.exportAs('image') },
           { label: 'Image sequence', onClick: () => ed.exportAs('sequence') },
-          { label: 'Spritesheet', onClick: () => ed.exportAs('spritesheet') },
+          { label: 'Sprite sheet', onClick: () => ed.exportAs('spritesheet') },
           { sep: true },
           { label: 'Export…', onClick: () => ed.openDialog('export'), shortcut: 'Ctrl+E' },
           { sep: true },

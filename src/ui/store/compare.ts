@@ -2,6 +2,8 @@
  * Viewer snapshots and A/B compare state (see ../viewer/compare.ts for the pure parts). Snapshot pixels are kept as compressed PNG blobs in
  * memory per open project (never in the graph document); they go when their project is closed. Uses only the Editor / Player public API.
  */
+import type { ImageValue } from '../../engine/types';
+import { imageToBlob } from '../../io/encode';
 import type { AppCtx } from './context';
 import { createStore } from './createStore';
 import { SNAPSHOT_CAP, firstImageInputSource, stripAdd, stripRemove, stripRename, type CompareMode, type Snap } from '../viewer/compare';
@@ -158,52 +160,31 @@ export function pruneProjects(openIds: readonly string[]): void {
   patchCompare({ byProject: by });
 }
 
-/** Resolves a little after the player stops reporting changes (a new view has rendered), or after `max` ms. */
-function settle(app: AppCtx, max = 5000, quiet = 280): Promise<void> {
-  return new Promise((resolve) => {
-    let quietTimer: ReturnType<typeof setTimeout> | undefined;
-    const done = () => {
-      off();
-      clearTimeout(quietTimer);
-      clearTimeout(cap);
-      resolve();
-    };
-    const off = app.io.player.subscribe(() => {
-      clearTimeout(quietTimer);
-      quietTimer = setTimeout(done, quiet);
-    });
-    quietTimer = setTimeout(done, quiet + 400);
-    const cap = setTimeout(done, max);
-  });
-}
-
 /**
- * Snapshot of ANOTHER node at the current frame, as snapshot A (one-off evaluation: the viewer shows that node for a moment, then
- * returns). It is exact when paused; during playback it takes whatever frame is on screen.
+ * Snapshot of ANOTHER node at the current frame, as snapshot A. The node is evaluated once, off screen (the same one-off evaluation the
+ * template thumbnails use) at the frame and preview scale the viewer shows now, then encoded like any snapshot. The viewer is never
+ * pointed at that node, so nothing flickers, and a slow node is simply waited for.
  */
 export async function snapshotOfNode(app: AppCtx, nodeId: string, label = ''): Promise<Snap | null> {
   if (compareStore.get().busy) return null;
   const { ed, io } = app;
-  const back = ed.state.viewedNodeId;
-  const was = io.player.getState().playing;
   patchCompare({ busy: true });
   try {
-    if (was) io.player.pause();
-    if (back !== nodeId) {
-      ed.setViewed(nodeId);
-      await settle(app);
-    }
-    const blob = await io.player.snapshot();
-    if (!blob) {
+    const st = io.player.getState();
+    const g = ed.state.graph;
+    const proxy = st.pixelSize > 1 ? 1 / st.pixelSize : st.proxy;
+    const value = (await io.evaluate(g, nodeId, { seconds: st.frame / Math.max(1, g.project.fps), item: ed.state.item, proxy })) as ImageValue | null;
+    if (!value || value.kind !== 'image') {
       ed.toast('That node has no image to compare.', 'info');
       return null;
     }
-    const st = io.player.getState();
+    const blob = await imageToBlob(io.engine.gpu, value, 'image/png');
     const dims = await sizeOf(blob);
-    const snap = add(app, blob, { frame: st.frame, nodeId, nodeName: nodeName(app, nodeId), label, ...dims, previewPct: st.pixelSize > 1 ? 100 : Math.round(st.proxy * 100), kind: 'node' });
-    return snap;
+    return add(app, blob, { frame: st.frame, nodeId, nodeName: nodeName(app, nodeId), label, ...dims, previewPct: st.pixelSize > 1 ? 100 : Math.round(st.proxy * 100), kind: 'node' });
+  } catch (err) {
+    ed.toast(`Could not evaluate that node: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    return null;
   } finally {
-    if (back !== nodeId) ed.setViewed(back);
     patchCompare({ busy: false });
   }
 }

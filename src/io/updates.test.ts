@@ -98,7 +98,7 @@ describe('download target', () => {
     expect(downloadTarget(info, 'nonsense')).toBe(info.url);
   });
   it('is the store page once set', () => {
-    expect(downloadTarget(info, 'https://example.itch.io/rsmps')).toBe('https://example.itch.io/rsmps');
+    expect(downloadTarget(info, 'https://example.com/rsmps')).toBe('https://example.com/rsmps');
   });
 });
 

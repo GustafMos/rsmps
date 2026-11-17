@@ -97,8 +97,8 @@
           "extract": { "binary": "bin/colmap.exe", "tree": ["bin/", "plugins/"], "exclude": ["_test.exe"] },
           "license": { "name": "BSD-3-Clause (COLMAP); the archive also contains third-party libraries under their own licences, including NVIDIA CUDA runtime libraries", "url": "https://colmap.github.io/license.html" },
           "source": { "name": "COLMAP releases on GitHub (ETH Zurich and UNC Chapel Hill)", "url": "https://github.com/colmap/colmap/releases/tag/4.2.1", "host": "github.com" },
-          "hashSource": "SHA-256 shown by GitHub for the release asset (digest field of release 4.2.1); the size is the asset's Content-Length. NOT downloaded or run by the maintainer (the no-CUDA build was tested instead); the layout is assumed to match the no-CUDA build.",
-          "verified": false
+          "hashSource": "SHA-256 shown by GitHub for the release asset (digest field of release 4.2.1); the size is the asset's Content-Length. Recomputed from a download of the URL above on 2026-11-17 through the add-on manager (size and SHA-256 match; it unpacks and answers `colmap version` like the no-CUDA build).",
+          "verified": true
         }
       }
     },

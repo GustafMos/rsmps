@@ -105,8 +105,8 @@ async function cover(buf, w, h, title, sub, size, file, pos = 'centre') {
   writeFileSync(join(storeDir, file), out);
   console.log(file, Math.round(out.length / 1024) + ' KB');
 }
-await cover(full['look-crt.rsmps.json'], 630, 500, 'RSMPS', 'Media Processing Suite', 64, 'itch-cover-630x500.png');
-await cover(full['look-pixel-dither.rsmps.json'], 600, 600, 'RSMPS', 'Pixel art, video and sound', 70, 'gumroad-thumbnail-600x600.png', 'centre');
+await cover(full['look-crt.rsmps.json'], 630, 500, 'RSMPS', 'Media Processing Suite', 64, 'cover-630x500.png');
+await cover(full['look-pixel-dither.rsmps.json'], 600, 600, 'RSMPS', 'Pixel art, video and sound', 70, 'thumbnail-600x600.png', 'centre');
 const shots = [['01-hero.png', 'hero'], ['02-generate.png', 'generators'], ['03-audio.png', 'audio'], ['04-track.png', 'detect-track'], ['05-add-menu.png', 'add-menu'], ['06-palette.png', 'palette-studio'], ['07-scan.png', 'scan']];
 for (const [f, name] of shots) {
   const out = await sharp(join(outDir, f)).resize(1280, 800).png({ palette: true, quality: 92, effort: 10, dither: 0.6 }).toBuffer();
@@ -115,5 +115,5 @@ for (const [f, name] of shots) {
 const wide = await sharp(join(outDir, 'looks.png')).resize(1280, 727).png({ palette: true, quality: 90, effort: 10 }).toBuffer();
 writeFileSync(join(storeDir, 'looks-1280x727.png'), wide);
 const gcover = await sharp(join(outDir, '01-hero.png')).extract({ left: 0, top: 50, width: 1600, height: 900 }).resize(1280, 720).png({ palette: true, quality: 92, effort: 10 }).toBuffer();
-writeFileSync(join(storeDir, 'gumroad-cover-1280x720.png'), gcover);
+writeFileSync(join(storeDir, 'cover-1280x720.png'), gcover);
 rmSync(work, { recursive: true, force: true });

@@ -5,7 +5,7 @@ export default defineNode({
   id: 'text',
   title: 'Text',
   category: 'generate',
-  description: 'Draws text on a transparent image, with optional outline. Needs the app to rasterise fonts (empty in headless runs).',
+  description: 'Draws text on a transparent image, with optional outline. Needs the app to rasterize fonts (empty in headless runs).',
   keywords: ['title', 'caption', 'label', 'font', 'typography', 'type', 'words'],
   inputs: { size: { type: 'image', label: 'Size from' } },
   outputs: { image: { type: 'image', label: 'Image' } },

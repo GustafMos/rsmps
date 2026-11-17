@@ -2,12 +2,43 @@
 
 All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify Studio) are documented here.
 
+## [0.7.1] - 2026-11-17
+
+### Added
+
+- **One format registry, and the app writes most formats itself.** Every output format is one row of `src/io/export-codecs.ts` with a route: the app's own encoder, the browser's encoder or FFmpeg, and the Output node's lists, the dropdown tags, the command line and the docs are generated from or checked against it. A format that could be written two ways has one entry and the app picks the route. **HAP, HAP Alpha, HAP Q, Motion JPEG MOV, PNG MOV, a new Uncompressed MOV, animated GIF and animated PNG are now written by the app itself**, in the web version too, with no FFmpeg. HAP is compressed on the GPU (about a millisecond for a 1080p frame; the Output's "HAP quality: Better" refines on the processor, slowly) and has a "Smaller files" (Snappy) option; GIF has palette (per frame or shared), dither, colors and loop settings. The "For: VJ software" preset still never picks HAP by itself.
+- **More picture formats.** The Output node's Image format (stills and image sequences) now lists, in groups, Web (PNG, WebP, JPEG, AVIF where the browser can write it), Lossless (QOI, TIFF, TGA, BMP), High dynamic range (OpenEXR, Radiance HDR, 16-bit TIFF, DPX) and Other (ICO, PPM, JPEG 2000). DPX and JPEG 2000 need FFmpeg; the rest are written by the app. OpenEXR and Radiance HDR keep values above 1.0 and are written linear (new `Gpu.readFloat`: half-float readback of the engine's rgba16float images).
+- **More sound formats.** The Audio Output has a "Sound file" setting for its stand-alone export: WAV 16 / 24 / 32-bit float, AIFF and FLAC 16 / 24-bit (written by the app), AAC and Opus WebM (the browser), MP3, Opus OGG, Vorbis and ALAC (FFmpeg). A format that cannot be written falls back to 32-bit float WAV with a note in the export notes.
+- **Big files stream.** MOV files the app writes are written as they are made (index at the end of the file): the desktop app writes straight to the file you chose through new `/__rsmps/export/file/` endpoints, Chrome and Edge ask where to save (File System Access API), and other browsers keep the file in memory with a plain refusal above about 1.5 GB. A 4K, 100-frame HAP export (790 MB) peaked at about 220 MB of process memory in the command line, and a 25-frame 4K export (200 MB) at 128 MB of JavaScript heap in the browser.
+- **Command line:** `rsmps formats` lists every format with its route and whether it works on this machine; `--format` takes the new picture and sound formats, `--codec` the new ids (`raw-mov`), and the app's own formats need no FFmpeg. `--set Out.hapQuality=better`, `hapSnappy`, `gifDither` and the other new Output params work. `scripts/check-formats.mjs` exports and validates every available format through the real export code, and `scripts/gen-format-docs.mjs` regenerates the tables in docs/CLI.md and docs/FORMATS.md. docs/FORMATS.md is now the user-facing format guide.
+- **DXV-compatible and many more video formats through FFmpeg.** One table (`src/io/export-codecs.ts`) now drives the Output node's codec list, the dropdown tags, the desktop and CLI
+  FFmpeg arguments and the docs. New: DXV-compatible, HAP, HAP Alpha, HAP Q, Motion JPEG MOV, ProRes-compatible Proxy / LT / 422 / XQ, DNxHR-compatible LB to 444, CineForm-compatible (with an alpha
+  variant), FFV1, UT Video, uncompressed 10-bit and RGBA, H.264 / H.265 by quality or all-intra, AV1 by quality, VP8, MPEG-2, MPEG-4, and animated WebP and AVIF.
+  The dropdown is grouped (General, VJ software, Editing, Lossless, Delivery, Animated picture, Legacy). These are written by your own FFmpeg; trademarked names use the "-compatible" wording.
+- **The app asks your FFmpeg what it can do.** `ffmpeg -hide_banner -encoders` is read once per FFmpeg and reported with its add-on status; a format whose encoder is missing is shown disabled with
+  "not in this FFmpeg", and exporting one fails early with a plain message. The command line does the same.
+- **"For" preset for video** (General, VJ software, Editing, Web / social). It resolves against what is really available (DXV-compatible, else ProRes-compatible, else all-key-frame H.264) and lists any fallback in the
+  export notes. Command line: `--for vj|editing|web`, `--codec dxv|hap|hap-alpha` and the rest of the table.
+- `scripts/check-ffmpeg-codecs.mjs <ffmpeg>` encodes a one-second test clip with every row of the table, re-reads it and checks alpha where claimed.
+- The image sequence and audio-only formats of the table are now wired into the exporter (see above); DPX, JPEG 2000, MP3, Opus, Vorbis and ALAC go through the FFmpeg add-on in the desktop app (new `export/ffmpeg/still` and `export/ffmpeg/sound` endpoints) and through the command line's FFmpeg.
+
+### Changed
+
+- Bitrate and All key frames are hidden for formats that do not use them (ProRes-compatible, DXV-compatible, HAP, lossless, quality-based).
+- The Output node's video codec hint, the About box and the README name Resolume, DXV, DNxHR and CineForm as trademarks of their owners.
+- The viewer toolbar folds its secondary buttons step by step (pixel size, snap, magnifier and background, then frame and batch, then Snapshot / A/B / Node…, then Output) into one "…" menu when the pane is narrow, so it stays on one row at 1440 px and at most two at 1024 px. On a phone it shows only the node name and the preview scale ("Output · 25%"); everything else is in the viewer header's "…".
+- "Compare with node…" evaluates the other node off screen at the current frame and preview scale, so the viewer no longer jumps to that node for a moment, and a slow node is waited for. Renaming a snapshot is an inline field instead of a browser prompt.
+- Node-body labels were shortened (Top size, Input space, Output space, Edge style, Outside map, Clip fit, Image fit, Record audio and others), rows show their full text as a tooltip, and the Outputs list in the media panel no longer cuts names for the size.
+- Image format and Quality only show for the Output kinds that use them. The Scan tab start screen has one set of buttons, and its title shows the tab name. The Phone Motion "not linked" note is a note, not an error; empty data fields say what is missing ("No take recorded") instead of "null". The MIDI mappings dialog is compact when empty, multi-line text fields use the normal font.
+- "Sprite sheet" is the one spelling in labels and docs. Start-screen template tiles show a neutral tile with the group icon until the picture is ready (and in safe mode) instead of a black box.
+- SDF 3D: the groups of shapes that are on start open again (a broken pattern kept every group closed).
+
 ## [0.7.0] - 2026-11-17
 
 ### Added
 
 - **Beat Detect (Math and utility):** a sound in, beat numbers out: hit and beat pulses, beat and bar ramps, tempo, kick, snare and hat hits, loudness and a beat count (to step a Switch or Frame Interleave).
-  Live (microphone, phone) it is a causal detector that locks onto the tempo in a few seconds; for a sound file, "Analyse sound file" listens to the whole file once and stores exact hits and beats, with
+  Live (microphone, phone) it is a causal detector that locks onto the tempo in a few seconds; for a sound file, "Analyze sound file" listens to the whole file once and stores exact hits and beats, with
   offset, fixed tempo, double / half time and snap to loop. Exports reproduce it exactly.
 - **React to sound:** right-click any number setting to wire it to loudness, the beat, kick, snare or hat in one undo step (Beat Detect and a Remap Range are added, the look does not jump); Stop reacting undoes it.
   Five new presets: Pulse with the beat, Glitch on snare, Hue cycle per bar, Strobe cut on beats, Zoom punch per beat.
@@ -34,7 +65,7 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
   shot as a Camera output (match-moving: render the scene, or other 3D nodes, from the real camera path). The node picks frames along the camera
   movement (sharpest in each stretch), then its Reconstruct process runs two separate open-source programs on your computer: COLMAP (BSD-3-Clause)
   finds the cameras and Brush (Apache-2.0) trains the splats. Neither is bundled: Plugins > Official add-ons downloads them from their GitHub releases
-  only when you press Install (pinned version, size and SHA-256, licence shown; a NVIDIA-accelerated COLMAP is a separate choice; Locate uses
+  only when you press Install (pinned version, size and SHA-256, license shown; a NVIDIA-accelerated COLMAP is a separate choice; Locate uses
   copies you already have, the only way on Linux for COLMAP). Draft / Normal / High training presets, sequential or exhaustive matching, incremental
   or global solving, solved cameras kept for re-training. Everything runs locally; nothing is uploaded. See docs/SPLATS.md.
 - **Gaussian Splat:** "Fade tiny splats" is now off by default. Files from standard trainers (Brush, the original 3DGS) are not trained with that
@@ -57,17 +88,17 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
   settings on the node). Graphs without a Material render exactly as before.
 - **AI Depth (optional):** real depth maps from a small neural model (Depth Anything V2 Small, Apache-2.0) that runs on your own
   GPU, in the browser and the desktop app; nothing is uploaded. The 50 MB model is not included and is never downloaded by
-  itself: Plugins > AI models has a Download button (pinned version, SHA-256 checked, licence and source shown, Remove). The
+  itself: Plugins > AI models has a Download button (pinned version, SHA-256 checked, license and source shown, Remove). The
   AI Depth node is a process node: it shows the quick Depth from Picture guess until you press Estimate depth, then stores a
   steady 16-bit depth for the whole clip (each frame fitted onto the previous one, one range for the clip, optional smoothing
   in time, Every N frames, 392 / 518 / 700 model size). Same output convention as Depth from Picture, so Picture to Splats,
   Lens Blur, Depth Slice and Image to 3D take it unchanged. Without WebGPU it runs on the processor, slowly, and says so.
   The command line cannot run the model; it uses a stored result or the usual process export gate.
 - **Game assets (docs/GAME_ASSETS.md):** Sprite Sheet In (a sheet from a wired picture or a file, sliced by grid, by the gaps between sprites or by pasted Aseprite / TexturePacker JSON with trimmed frames, durations and animation tags; plays as an animation or as batch items, with trim, anchor, ping-pong and frame lists).
-  The Output's spritesheet got layouts (grid, single row / column, shelf-packed), trim, padding, extrude, power of two, a maximum page size with several pages, per-frame pivot, one sheet from every batch item with a tag per item, metadata as generic JSON (the old keys are
+  The Output's sprite sheet got layouts (grid, single row / column, shelf-packed), trim, padding, extrude, power of two, a maximum page size with several pages, per-frame pivot, one sheet from every batch item with a tag per item, metadata as generic JSON (the old keys are
   all still there), Aseprite JSON, TexturePacker JSON or CSS sprites, a "For" preset (Godot, Unity, GameMaker, RPG Maker, Web: starting points) and a Bleed color option that writes straight-alpha PNGs with the nearest opaque color under transparent pixels. The same from the command line
   (`--for`, `--sheet-layout`, `--trim`, `--extrude`, `--pot`, `--max-sheet`, `--sheet-meta`, `--sheet-from`, `--bleed`) plus `--report json|text` (size, colors, frames and off-palette fraction per file).
-- **Pixel look tools:** Pixel Outline (inside / outside, 4 or 8 connected, selective darker-neighbour or palette color, per side, second outline), Sprite Shadow (drop, ground, contact; solid or dithered), Pixel Cleanup (hard alpha, stray pixels, 1 px holes, edge colors, elbow trimming),
+- **Pixel look tools:** Pixel Outline (inside / outside, 4 or 8 connected, selective darker-neighbor or palette color, per side, second outline), Sprite Shadow (drop, ground, contact; solid or dithered), Pixel Cleanup (hard alpha, stray pixels, 1 px holes, edge colors, elbow trimming),
   Palette Lock (snap / highlight / report with off-palette and color counts) and Batch Palette (one shared palette for a whole set, read by a process job). Tiles: Make Seamless (offset blend, mirror, edge match, pixel-art mode), Autotile (the 47 tile blob set or the 16 tile edge set from five pieces) and Tileset Map (paint a terrain mask with that set, one GPU pass).
 
 ### Fixed

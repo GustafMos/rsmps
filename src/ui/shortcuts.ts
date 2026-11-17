@@ -138,7 +138,7 @@ export const COMMANDS: Command[] = [
 
   {
     id: 'view.maximise',
-    label: 'Maximise the panel under the cursor',
+    label: 'Maximize the panel under the cursor',
     group: 'View',
     defaults: ['`'],
     run: ({ app }) => {

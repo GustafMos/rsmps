@@ -15,7 +15,10 @@ import { PaintOverlay } from './PaintOverlay';
 import { PointsOverlay } from './PointsOverlay';
 import { FrameControl, useFrameMenuItems } from './FrameControl';
 import { Loupe } from './Loupe';
-import { CompareBar, CompareOverlay, CompareStrip } from './CompareUi'; // snapshots + A/B compare
+import { CompareBar, CompareOverlay, CompareStrip, useCompareMenus } from './CompareUi'; // snapshots + A/B compare
+import { useFoldLevel } from './useFoldLevel';
+import { viewerMore } from './viewerMore';
+import { useViewportClass } from '../responsive/viewport';
 import './viewer.css';
 
 type Bg = 'checker' | 'dark' | 'light';
@@ -235,36 +238,48 @@ export function Viewer() {
       ? 'Nothing is being viewed. Click the eye on a node to see its result here.'
       : null;
 
-  /** 0 = every control inline; 1 = pixel size, snap, magnifier and background fold into the "…" menu; 2 = frame and batch fold in too. */
+  /**
+   * Fold level (priority+): 0 = every control inline; 1 = pixel size, snap, magnifier and background fold into the "…" menu; 2 = frame and batch
+   * too; 3 = Snapshot / A/B / Node… become one icon button and the readouts shrink; 4 = Output joins the "…" menu and Full res / Keep this look
+   * lose their labels; 5 = those two fold too. On a phone (6) the bar keeps only the name and preview scale: the header's "…" holds the rest.
+   */
   const bar = useRef<HTMLDivElement>(null);
-  const [level, setLevel] = useState<0 | 1 | 2>(0);
-  useEffect(() => {
-    const el = bar.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const w = el.clientWidth;
-      setLevel(w >= 900 ? 0 : w >= 600 ? 1 : 2);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const phone = useViewportClass() === 'phone';
+  const cmp = useCompareMenus();
+  const measured = useFoldLevel(bar, 5, `${nodeTitle}|${count > 1}|${cmp.mode}|${fullRes}|${hasNodes}`);
+  const level = phone ? 6 : measured;
   const [more, setMore] = useState<{ x: number; y: number } | null>(null);
   const frameItems = useFrameMenuItems({ frame: level >= 2, pix: level >= 1 });
+  const openOutput = (x: number, y: number) => live.ui.set((s) => ({ ...s, outputMenu: { x, y } }));
   const moreItems: MenuItem[] = [];
+  if (level >= 5) {
+    moreItems.push(
+      { head: 'Render' },
+      { label: 'Full res', disabled: !canFull, onClick: () => io.player.renderFullFrame() },
+      { label: 'Keep this look', disabled: !viewedNode, onClick: () => ed.keepPreviewLook(keepPct) },
+    );
+  }
+  if (level >= 4) moreItems.push({ label: 'Output window…', onClick: () => openOutput(Math.max(8, window.innerWidth - 300), 90) });
+  if (level >= 5) moreItems.push(...cmp.foldItems);
   if (level >= 2 && count > 1) moreItems.push({ head: `Batch item ${item + 1} / ${count}` }, { label: 'Previous item', onClick: () => ed.setItem(item - 1) }, { label: 'Next item', onClick: () => ed.setItem(item + 1) });
   moreItems.push(...frameItems);
   if (level >= 1) {
     moreItems.push(
       { head: 'View' },
+      ...(phone ? [{ label: 'Fit to window', onClick: () => setFitMode(true) }, { label: 'Actual pixels (100%)', onClick: oneToOne }] : []),
       { label: `${snap ? '✓ ' : ''}Snap Fit to whole pixels (1:n)`, onClick: () => { snapRef.current = !snap; setSnap(!snap); apply(); } },
       { label: `Magnifier: ${loupe === 2 ? '2×' : loupe === 1 ? '1×' : 'off'} (click for next)`, onClick: () => setLoupe((l) => ((l + 1) % 3) as 0 | 1 | 2) },
       { label: `Background: ${bg} (click for next)`, onClick: () => setBg((b) => (b === 'checker' ? 'dark' : b === 'dark' ? 'light' : 'checker')) },
     );
   }
+  useEffect(() => {
+    if (phone) viewerMore.set({ items: moreItems });
+  });
+  useEffect(() => () => viewerMore.set({ items: [] }), []);
 
   return (
     <div className="rs-viewer-wrap" data-panel="viewer">
-    <div ref={bar} className="rs-viewer__bar">
+    <div ref={bar} className="rs-viewer__bar" data-fold={level}>
       <div className="rs-viewer__info rs-viewer__chip" data-nodrag>
         {nodeTitle ? (
           <>
@@ -277,7 +292,7 @@ export function Viewer() {
               title={previewPct < 100 ? 'Preview scale: the whole graph is rendered at this share of the full resolution (the playback proxy), then enlarged' : 'Preview scale: full resolution'}
               style={previewPct < 100 ? { color: 'var(--yellow)' } : undefined}
             >
-              Preview {previewPct}%
+              <span className="rs-viewer__long">Preview </span>{previewPct}%
             </span>
             {fullRes === 'rendering' && <span className="rs-viewer__spin" role="status" aria-label="Rendering the full-resolution frame" title="Rendering the full-resolution frame…" />}
             {fullRes === 'shown' && <span className="rs-viewer__badge" title="This is the current frame rendered once at final quality. It stays until you change frame, graph or view, or press play.">Full res</span>}
@@ -287,7 +302,7 @@ export function Viewer() {
         )}
       </div>
 
-      {count > 1 && level < 2 && (
+      {count > 1 && level < 2 && !phone && (
         <div className="rs-viewer__batch rs-viewer__chip" data-nodrag title="Batch item (Ctrl+←/→)">
           <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={() => ed.setItem(item - 1)} aria-label="Previous batch item"><Icon name="chevronLeft" /></button>
           <span className="rs-num">{item + 1} / {count}</span>
@@ -295,14 +310,15 @@ export function Viewer() {
         </div>
       )}
 
-      <div className="rs-viewer__look rs-viewer__chip" data-nodrag>
+      {level < 5 && (
+      <div className={`rs-viewer__look rs-viewer__chip${level >= 4 ? ' rs-viewer__look--icons' : ''}`} data-nodrag>
         <button
           className={`rs-btn rs-btn--ghost${fullRes !== 'off' ? ' is-on' : ''}`}
           disabled={!canFull}
           onClick={() => io.player.renderFullFrame()}
           title="Render this frame once at full resolution and final quality, whatever the preview scale (shortcut: Shift+R, rebindable)"
         >
-          <Icon name="focus" /> Full res
+          <Icon name="focus" /><span className="rs-viewer__btxt"> Full res</span>
         </button>
         <button
           className="rs-btn rs-btn--ghost"
@@ -310,8 +326,9 @@ export function Viewer() {
           onClick={() => ed.keepPreviewLook(keepPct)}
           title="Adds a Render Scale node before the output so the export looks like this preview"
         >
-          <Icon name="pin" /> Keep this look
+          <Icon name="pin" /><span className="rs-viewer__btxt"> Keep this look</span>
         </button>
+        {level < 4 && (
         <button
           className={`rs-btn rs-btn--ghost${outOpen ? ' is-on' : ''}`}
           onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); live.ui.set((s) => ({ ...s, outputMenu: { x: r.left, y: r.bottom + 2 } })); }}
@@ -320,10 +337,13 @@ export function Viewer() {
         >
           <Icon name="maximize" /> Output
         </button>
+        )}
       </div>
+      )}
 
-      <CompareBar />
-      <FrameControl frame={level < 2} pix={level < 1} />
+      {!phone && (level < 5 || cmp.mode !== 'off') && <CompareBar compact={level >= 3} />}
+      {!phone && <FrameControl frame={level < 2} pix={level < 1} />}
+      {!phone && (
       <div className="rs-viewer__tools rs-viewer__chip" data-nodrag>
         <button className={`rs-btn rs-btn--ghost rs-viewer__fitbtn${fit ? ' is-on' : ''}`} onClick={() => setFitMode(true)} title="Fit to window (F or 0)"><Icon name="fit" /> Fit</button>
         <button className={`rs-btn rs-viewer__actual${zoomPct === 100 && !fit ? ' is-on' : ''}`} onClick={oneToOne} title="Actual pixels, 100% (1)">100%</button>
@@ -347,6 +367,7 @@ export function Viewer() {
           <button className="rs-btn rs-btn--icon rs-btn--ghost" title="More view controls" aria-label="More view controls" aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMore({ x: r.left, y: r.bottom + 2 }); }}>…</button>
         )}
       </div>
+      )}
       {more && <MenuPopup x={more.x} y={more.y} items={moreItems} onClose={() => setMore(null)} />}
     </div>
     <div ref={box} className={`rs-viewer rs-viewer--${bg}`} onPointerDown={onPointerDown} onDoubleClick={() => setFitMode(true)}>

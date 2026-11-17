@@ -11,7 +11,7 @@ export default defineNode({
   title: 'White Balance',
   category: 'color',
   description:
-    'Corrects colour cast in linear light with a real chromatic adaptation (Bradford or CAT16). Set the colour temperature (Kelvin) and tint, pick something that should be grey, or let it estimate the cast automatically.',
+    'Corrects color cast in linear light with a real chromatic adaptation (Bradford or CAT16). Set the color temperature (Kelvin) and tint, pick something that should be gray, or let it estimate the cast automatically.',
   keywords: ['grade', 'white balance', 'wb', 'temperature', 'kelvin', 'tint', 'cast', 'neutral', 'gray world', 'color temperature', 'color temperature', 'bradford', 'cat16', 'warm', 'cool', 'correct'],
   cpu: true,
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
