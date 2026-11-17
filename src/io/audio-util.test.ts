@@ -42,3 +42,19 @@ describe('stereo fold-down of decoded sound', () => {
     expect(out[0][1]).toBe(0);
   });
 });
+
+describe('chunks handed to a browser audio encoder', () => {
+  it('are a whole number of codec frames, about a tenth of a second', async () => {
+    const { encoderChunkFrames } = await import('./audio-util');
+    for (const sr of [22050, 44100, 48000, 96000]) {
+      expect(encoderChunkFrames('aac', sr) % 1024).toBe(0);
+      expect(encoderChunkFrames('mp3', sr) % 1152).toBe(0);
+      expect(encoderChunkFrames('opus', sr) % Math.round(sr / 50)).toBe(0);
+      for (const c of ['aac', 'mp3', 'opus', 'vorbis']) {
+        expect(encoderChunkFrames(c, sr)).toBeGreaterThan(0);
+        expect(Math.abs(encoderChunkFrames(c, sr) / sr - 0.1)).toBeLessThan(0.03);
+      }
+    }
+    expect(encoderChunkFrames('aac', 48000)).toBe(5120);
+  });
+});

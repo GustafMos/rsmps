@@ -10,6 +10,7 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 - **Frames** field next to Length in the transport: set the project length in frames.
 
 ### Fixed
+- Sound in MP4 and M4A exports is handed to the browser's audio encoder in whole AAC frames. In browsers whose encoder pads each call with silence, the uneven pieces sent before were heard as a regular ticking.
 - Exported sound of a video was silent (and waveforms and Beat Detect went empty) after the clip had been played in the preview, when the file's sample rate equals the sound card's (usually 48 kHz): the player handed the library's decoded sound to the audio thread instead of a copy.
 - Sound of 5.1 and other surround files is folded down to stereo with the centre and surround channels; before only front left and right were used, so speech was missing.
 - Command line: with several batch items every exported video got the sound of the first item; a trimmed or speed-changed Media In now maps its sound exactly as the app does.

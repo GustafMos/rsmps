@@ -62,3 +62,13 @@ export function mixToStereo(dst: Float32Array[], at: number, src: Float32Array[]
     }
   }
 }
+
+/**
+ * How many sample frames to hand a browser audio encoder per call: a whole number of the codec's own frames (AAC 1024,
+ * MP3 1152, Opus 20 ms), about a tenth of a second. Some browser encoders pad every call that is not a whole number of
+ * codec frames with silence instead of carrying the rest over, which is heard as a regular tick in the exported sound.
+ */
+export function encoderChunkFrames(codec: string, sampleRate: number): number {
+  const frame = codec === 'aac' ? 1024 : codec === 'mp3' ? 1152 : codec === 'opus' ? Math.max(1, Math.round(sampleRate / 50)) : 1024;
+  return frame * Math.max(1, Math.round(sampleRate / 10 / frame));
+}
