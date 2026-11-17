@@ -2,7 +2,7 @@
  * Every link the update notice uses, in one place.
  *
  * DOWNLOAD_URL: where "Get it" goes. Fill it in (https only) when the itch.io / Gumroad page exists; until then "Get it" opens the
- * GitHub release page. See docs/STORE.md and docs/RELEASING.md.
+ * GitHub release page.
  */
 export const DOWNLOAD_URL: string | null = null;
 

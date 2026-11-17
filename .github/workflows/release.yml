@@ -1,7 +1,7 @@
 name: Release
 
 # Run manually (Actions > Release > Run workflow, on a tag) to build the desktop apps on Windows, macOS and Linux and create a DRAFT
-# GitHub Release. Nothing is published automatically. See docs/RELEASING.md.
+# GitHub Release. Nothing is published automatically.
 on:
   workflow_dispatch:
 

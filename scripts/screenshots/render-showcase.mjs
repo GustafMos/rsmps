@@ -90,8 +90,8 @@ const anim = await sharp(Buffer.concat(raw), { raw: { width: AW, height: AH * ra
 writeFileSync(join(outDir, 'anim-crt.webp'), anim);
 console.log(`anim-crt.webp ${frames.length} frames, ${Math.round(anim.length / 1024)} KB`);
 
-// Store assets (docs/store/assets): crops of the renders and screenshots at the sizes the store pages ask for.
-const storeDir = join(root, 'docs', 'store', 'assets');
+// Store assets (private/store/assets, not in git): crops of the renders and screenshots at the sizes the store pages ask for.
+const storeDir = join(root, 'private', 'store', 'assets');
 mkdirSync(storeDir, { recursive: true });
 const FONT = 'Segoe UI, Helvetica, Arial, sans-serif';
 const banner = (w, h, title, sub, size) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">

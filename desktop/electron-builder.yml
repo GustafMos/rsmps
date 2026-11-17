@@ -30,7 +30,7 @@ extraResources:
     to: LICENSE.rsmps.txt
 
 # Code signing: nothing is configured, so builds are unsigned. electron-builder signs automatically when CSC_LINK /
-# CSC_KEY_PASSWORD (Windows and macOS) or WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD are present. See docs/RELEASING.md.
+# CSC_KEY_PASSWORD (Windows and macOS) or WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD are present.
 
 win:
   icon: ../desktop/build/icon.ico

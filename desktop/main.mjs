@@ -3,7 +3,7 @@
 // Loads the production web build from the app bundle through a private `app://rsmps/` protocol, so the existing
 // `base: './'` build, ES module workers, AudioWorklets and `import.meta` URLs behave exactly as on the web.
 // Everything runs offline; there is no server. Security: sandboxed renderer, context isolation, no Node in the page,
-// no preload script, strict navigation and permission policies. See docs/STORE.md and docs/RELEASING.md.
+// no preload script, strict navigation and permission policies.
 import { app, BrowserWindow, Menu, net, protocol, screen, session, shell, dialog, clipboard } from 'electron';
 import { readFileSync, writeFileSync, mkdirSync, statSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -13,7 +13,7 @@ results along their wires.
 
 > MIT licensed · local-first · no account · no upload · your media stays on your machine.
 
-**Live demo:** <https://gustafmos.github.io/rsmps/> · **Desktop app:** [Releases](https://github.com/GustafMos/rsmps/releases) · **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+**Live demo:** <https://gustafmos.github.io/rsmps/> · **Versions:** [Releases](https://github.com/GustafMos/rsmps/releases) (source) · **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -180,15 +180,19 @@ computer. The other live inputs (Webcam, URL / Stream) are described in [docs/LI
 
 ## Desktop app
 
-The desktop app is the same web app in an Electron shell: it runs offline and comes as an installer (Windows), a dmg (macOS)
-or an AppImage (Linux). It is built by GitHub Actions for tagged releases and is currently **unsigned**, so Windows
-SmartScreen and macOS Gatekeeper show a one-time warning ([docs/RELEASING.md](docs/RELEASING.md) explains how to get past it).
+The desktop app is the same web app in an Electron shell: it runs offline and adds what a web page cannot do (the phone
+link server, optional add-ons such as FFmpeg, backups on disk).
 
-- **Free:** download the builds from [Releases](https://github.com/GustafMos/rsmps/releases) once a release is published, or
-  build them yourself with `npm run desktop:build` (current OS) and check with `npm run desktop:smoke`.
-- **Pay what you want:** the same builds are sold as a convenience on itch.io and Gumroad. The money supports development;
-  the source stays MIT and nothing is held back. itch.io: TODO (page not published yet) · Gumroad: TODO (page not published
-  yet). See [docs/STORE.md](docs/STORE.md).
+Installers are not published on GitHub; the [Releases](https://github.com/GustafMos/rsmps/releases) here are source
+releases, one per version. Build the app yourself from any of them:
+
+```bash
+npm ci
+npm run desktop:build   # installer and portable build for the current OS, in release/
+npm run desktop:smoke   # starts the built app once and checks that the UI and WebGPU come up
+```
+
+Builds made this way are **unsigned**, so Windows SmartScreen and macOS Gatekeeper show a one-time warning.
 
 **Update check:** the desktop app asks GitHub once a day whether a newer version exists and sends nothing else (no account, no identifiers). It only tells you; it never downloads or installs anything. Turn it off in File > About RSMPS.
 
@@ -234,8 +238,6 @@ The showcase renders above were made this way.
 | [docs/CLI.md](docs/CLI.md) | Command-line rendering |
 | [docs/PRINT_AND_SCAN.md](docs/PRINT_AND_SCAN.md) | Printing frame sheets and scanning them back |
 | [docs/LIVE_INPUT.md](docs/LIVE_INPUT.md) | Webcam, URL / Stream and phone inputs |
-| [docs/RELEASING.md](docs/RELEASING.md) | Building and releasing the desktop app |
-| [docs/STORE.md](docs/STORE.md) | What the store builds are and how they are described |
 | [src/engine/audio/README.md](src/engine/audio/README.md) | Audio and MIDI nodes, and driving pictures with sound |
 
 ## Layout
@@ -267,7 +269,7 @@ npx electron scripts/screenshots/capture.mjs --dist /tmp/rsmps-shots    # UI scr
 node scripts/screenshots/optimize.mjs           # keep each screenshot small
 npx electron scripts/screenshots/responsive.mjs --dist /tmp/rsmps-shots --scenes scripts/screenshots/qa-scenes.mjs   # QA pass over the desktop layout: PNGs and qa-report.json in the OS temp folder
 node scripts/screenshots/make-graphs.mjs        # the small graphs behind the looks
-node scripts/screenshots/render-showcase.mjs    # looks.png, anim-crt.webp and the store crops in docs/store/assets
+node scripts/screenshots/render-showcase.mjs    # looks.png and anim-crt.webp
 npx electron scripts/screenshots/video-to-webp.mjs my-scan.mp4 --webp docs/screenshots/scan-example-1.webp --dur 4 --fps 15
 ```
 
@@ -285,7 +287,7 @@ The capture uses only generated content, `test-assets/` and the author's base pi
 - Splat from Video works only in the desktop app with the COLMAP and Brush add-ons, needs a graphics card Brush can use, and needs footage with real camera movement around a still, textured subject. It has been measured on synthetic scenes only; real phone footage will often be harder (docs/SPLATS.md). The command line cannot run it.
 - AI Depth (optional) needs a 50 MB model you download yourself and runs on your GPU (about 40 ms a frame on an RTX 3080) or, without WebGPU, on the processor (about 3 s a frame). Depth from Picture, subject extraction, the detectors and the tracker are classical methods, not neural networks: expect touch-ups when subject
   and background share colors, and occasional id swaps when tracked objects cross.
-- The phone link needs `npm run dev:lan` and is not available in the desktop app.
+- The phone link needs the desktop app or `npm run dev:lan`; the hosted page cannot run it.
 - Error-diffusion dithers fall back to an ordered pattern on very large images.
 - The desktop builds are unsigned and do not update themselves; the macOS and Linux builds come from CI and have had less
   testing than the Windows one.

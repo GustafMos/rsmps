@@ -2,7 +2,7 @@ name: Source release
 
 # Push a tag like v0.5.0 to publish a GitHub Release for that version: release notes from CHANGELOG.md plus the source
 # archives GitHub attaches to every release. No installers are attached here; the desktop builds are made by release.yml
-# (run manually) and distributed separately. See docs/RELEASING.md.
+# (run manually) and distributed separately.
 on:
   push:
     tags: ['v*']

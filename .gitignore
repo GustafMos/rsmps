@@ -29,3 +29,6 @@ desktop/build/
 
 # local TLS certificates (never commit)
 .certs/
+
+# maintainer-only notes and store material (never published)
+/private/
