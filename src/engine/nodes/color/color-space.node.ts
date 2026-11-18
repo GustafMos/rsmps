@@ -7,8 +7,8 @@ export default defineNode({
   title: 'Color Space',
   category: 'color',
   description:
-    'Converts the picture\'s values between color spaces: sRGB, linear light, gamma 2.2 / 2.4, Display P3, Rec.2020 and the log curves Cineon, S-Log3, LogC3, V-Log, ACEScct and DaVinci Intermediate. Use it to feed a log LUT or to grade in linear.',
-  keywords: ['grade', 'color space', 'color space', 'colorspace', 'transform', 'convert', 'linear', 'gamma', 'p3', 'display p3', 'rec2020', 'rec 2020', 'rec709', 'rec.709', 'log', 'cineon', 's-log3', 'slog3', 'logc', 'logc3', 'v-log', 'vlog', 'acescct', 'davinci intermediate', 'oetf', 'eotf', 'gamut'],
+    'Converts the picture\'s values between color spaces: sRGB, linear light, gamma 2.2 / 2.4, Display P3, Rec.2020 and the log curves Cineon, S-Log3, LogC3, V-Log, ACEScct, DaVinci Intermediate and Samsung Log. Use it to feed a log LUT or to grade in linear.',
+  keywords: ['grade', 'color space', 'color space', 'colorspace', 'transform', 'convert', 'linear', 'gamma', 'p3', 'display p3', 'rec2020', 'rec 2020', 'rec709', 'rec.709', 'log', 'cineon', 's-log3', 'slog3', 'logc', 'logc3', 'v-log', 'vlog', 'acescct', 'davinci intermediate', 'samsung log', 'samsung', 'galaxy log', 'oetf', 'eotf', 'gamut'],
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
@@ -20,7 +20,7 @@ export default defineNode({
       label: 'To',
       options: SPACE_OPTIONS,
       hint:
-        'What the values become. The result is still shown as sRGB, so a linear or log result looks dark / flat: that is the data, not a bug. Primaries are converted between Rec.709, P3 (D65) and Rec.2020 exactly (matrices derived from the chromaticities, D65 white, no adaptation). Log curves are the TRANSFER curves only (Rec.709 primaries): camera gamuts such as S-Gamut3 or AWG are not applied. Camera logs offered here are only those whose published constants are included; F-Log, Canon Log and N-Log are left out.',
+        'What the values become. The result is still shown as sRGB, so a linear or log result looks dark / flat: that is the data, not a bug. Primaries are converted between Rec.709, P3 (D65) and Rec.2020 exactly (matrices derived from the chromaticities, D65 white, no adaptation). Log curves are the TRANSFER curves only (Rec.709 primaries): camera gamuts such as S-Gamut3 or AWG are not applied. Samsung Log is the exception: its gamut is Rec.2020, so From: Samsung Log, To: sRGB is the complete conversion of Galaxy log footage. Camera logs offered here are only those whose published constants are included; F-Log, Canon Log and N-Log are left out.',
     },
   },
   summary: (p) => `${spaceDef(p.from).id} → ${spaceDef(p.to).id}`,

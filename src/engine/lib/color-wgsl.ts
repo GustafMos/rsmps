@@ -19,7 +19,7 @@ fn cg_luma(c: vec3f) -> f32 { return dot(c, CG_LUMA); }
 fn cg_pos(x: f32) -> f32 { return max(x, 0.0); }
 fn cg_log10(x: f32) -> f32 { return log2(max(x, 1e-12)) * 0.30102999566398; }
 
-// ---- transfer functions: id = index in TRANSFER_IDS (srgb, linear, gamma22, gamma24, cineon, slog3, logc3, vlog, acescct, davinci) ----
+// ---- transfer functions: id = index in TRANSFER_IDS (srgb, linear, gamma22, gamma24, cineon, slog3, logc3, vlog, acescct, davinci, samsunglog) ----
 fn cg_dec1(v: f32, id: f32) -> f32 {
   if (id < 0.5) {
     if (v <= ${fl(t.srgb.cutEnc)}) { return v / ${fl(t.srgb.slope)}; }
@@ -48,8 +48,13 @@ fn cg_dec1(v: f32, id: f32) -> f32 {
     if (v <= ${fl(t.acescct.a * t.acescct.cut + t.acescct.b)}) { return (v - ${fl(t.acescct.b)}) / ${fl(t.acescct.a)}; }
     return exp2(v * ${fl(t.acescct.c)} - ${fl(t.acescct.d)});
   }
-  if (v <= ${fl(t.davinci.logCut)}) { return v / ${fl(t.davinci.m)}; }
-  return exp2(v / ${fl(t.davinci.c)} - ${fl(t.davinci.b)}) - ${fl(t.davinci.a)};
+  if (id < 9.5) {
+    if (v <= ${fl(t.davinci.logCut)}) { return v / ${fl(t.davinci.m)}; }
+    return exp2(v / ${fl(t.davinci.c)} - ${fl(t.davinci.b)}) - ${fl(t.davinci.a)};
+  }
+  if (v >= ${fl(t.samsunglog.yt)}) { return pow(10.0, (v - ${fl(t.samsunglog.g1)}) / ${fl(t.samsunglog.a1)}) - ${fl(t.samsunglog.b1)}; }
+  if (v >= 0.0) { return ${fl(t.samsunglog.b2)} - pow(10.0, (v - ${fl(t.samsunglog.g2)}) / ${fl(t.samsunglog.a2)}); }
+  return ${fl(t.samsunglog.x0)};
 }
 fn cg_enc1(l: f32, id: f32) -> f32 {
   if (id < 0.5) {
@@ -79,8 +84,13 @@ fn cg_enc1(l: f32, id: f32) -> f32 {
     if (l <= ${fl(t.acescct.cut)}) { return ${fl(t.acescct.a)} * l + ${fl(t.acescct.b)}; }
     return (log2(l) + ${fl(t.acescct.d)}) / ${fl(t.acescct.c)};
   }
-  if (l <= ${fl(t.davinci.linCut)}) { return l * ${fl(t.davinci.m)}; }
-  return (log2(l + ${fl(t.davinci.a)}) + ${fl(t.davinci.b)}) * ${fl(t.davinci.c)};
+  if (id < 9.5) {
+    if (l <= ${fl(t.davinci.linCut)}) { return l * ${fl(t.davinci.m)}; }
+    return (log2(l + ${fl(t.davinci.a)}) + ${fl(t.davinci.b)}) * ${fl(t.davinci.c)};
+  }
+  if (l >= ${fl(t.samsunglog.xt)}) { return ${fl(t.samsunglog.a1)} * cg_log10(l + ${fl(t.samsunglog.b1)}) + ${fl(t.samsunglog.g1)}; }
+  if (l >= ${fl(t.samsunglog.x0)}) { return ${fl(t.samsunglog.a2)} * cg_log10(${fl(t.samsunglog.b2)} - l) + ${fl(t.samsunglog.g2)}; }
+  return 0.0;
 }
 fn cg_dec(c: vec3f, id: f32) -> vec3f { return vec3f(cg_dec1(c.x, id), cg_dec1(c.y, id), cg_dec1(c.z, id)); }
 fn cg_enc(c: vec3f, id: f32) -> vec3f { return vec3f(cg_enc1(c.x, id), cg_enc1(c.y, id), cg_enc1(c.z, id)); }

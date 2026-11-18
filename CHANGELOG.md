@@ -5,6 +5,7 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 ## Unreleased
 
 ### Added
+- **Samsung Log** in the Color Space and LUT nodes ("Samsung Log (Rec.2020)"): the transfer function of the Samsung Log White Paper (2025) with its BT.2020 gamut, so From: Samsung Log, To: sRGB is the complete conversion of Galaxy log footage. Checked against the paper's table of encoded values.
 - **Enable audio wires the sound.** When the picture comes from a video with sound and no Audio Output plays anything, Enable audio adds an Audio Output wired to that clip's Sound (one undo step), so what you hear is what is exported. With audio already on, a "Hear the clip" button does the same.
 - **The export dialog says what sound the video gets:** what is wired into the Audio Output, the clip's own sound (with a button to add an Audio Output for it), or none and why.
 - **The project takes the frame rate of its first video.** Adding the first video to a project that still has the default 24 fps sets the project to the clip's rate (25 for a 25 fps clip), in the same undo step. A rate you set yourself is never changed.

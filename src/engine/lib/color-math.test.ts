@@ -86,6 +86,10 @@ describe('transfer functions', () => {
     near(tfEncode('vlog', 0.18), 0.423, 5e-4);
     near(tfEncode('acescct', 0.18), 0.4135, 5e-4);
     near(tfEncode('davinci', 0.18), 0.336, 1e-3);
+    // Samsung Log White Paper, Table 1: scene reflection -> encoded float (black, 1% black, middle grey, 90% white, white limit)
+    for (const [x, y] of [[0, 0.125124], [0.01, 0.206562], [0.18, 0.527859], [0.9, 0.7087], [12, 1]]) near(tfEncode('samsunglog', x), y, 2e-6, `samsunglog ${x}`);
+    near(tfEncode('samsunglog', -0.05), 0, 1e-5);
+    near(tfDecode('samsunglog', tfEncode('samsunglog', -0.03)), -0.03, 1e-9);
     near(tfEncode('cineon', 1), 685 / 1023, 1e-9);
     near(tfEncode('cineon', 0), 95 / 1023, 1e-9);
     near(tfEncode('srgb', 0.18), 0.4614, 1e-3);

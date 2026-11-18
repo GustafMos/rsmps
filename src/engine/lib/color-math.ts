@@ -16,7 +16,7 @@
  *  - Illuminant chromaticity: Planckian locus approximation of Kim et al. (2002, 1667-25000 K) and the CIE daylight locus
  *    (CIE 15, 4000-25000 K), blended between 4000 and 5000 K. Tint is Duv: an offset in CIE 1960 UCS perpendicular to the locus.
  *  - Log curves: Cineon (Kodak), Sony S-Log3, ARRI LogC3 (EI 800), Panasonic V-Log, ACEScct (S-2016-001), DaVinci Intermediate
- *    (Blackmagic whitepaper). Each one is checked in color-math.test.ts for continuity at its break point and for its published
+ *    (Blackmagic whitepaper), Samsung Log (Samsung Log White Paper, 2025: two logarithms, BT.2020 primaries). Each one is checked in color-math.test.ts for continuity at its break point and for its published
  *    18% grey code value.
  */
 import { evalCurve } from './util-curve';
@@ -123,7 +123,7 @@ export const luma709 = (c: V3): number => c[0] * REC709_LUMA[0] + c[1] * REC709_
 /* ----------------------------------------------------------------------- */
 
 /** Order = the numeric id used by the shaders. NEVER reorder (ids are passed to the GPU). */
-export const TRANSFER_IDS = ['srgb', 'linear', 'gamma22', 'gamma24', 'cineon', 'slog3', 'logc3', 'vlog', 'acescct', 'davinci'] as const;
+export const TRANSFER_IDS = ['srgb', 'linear', 'gamma22', 'gamma24', 'cineon', 'slog3', 'logc3', 'vlog', 'acescct', 'davinci', 'samsunglog'] as const;
 export type TransferId = (typeof TRANSFER_IDS)[number];
 export const transferIndex = (id: TransferId): number => TRANSFER_IDS.indexOf(id);
 
@@ -136,6 +136,8 @@ export const TF = {
   vlog: { cut: 0.01, linA: 5.6, linB: 0.125, b: 0.00873, c: 0.241514, d: 0.598206, cutEnc: 0.181 },
   acescct: { cut: 0.0078125, a: 10.5402377416545, b: 0.0729055341958355, c: 17.52, d: 9.72 },
   davinci: { a: 0.0075, b: 7.0, c: 0.07329248, m: 10.44426855, linCut: 0.00262409, logCut: 0.02740668 },
+  // Samsung Log White Paper (2025): y = a1 log10(x + b1) + g1 for x >= xt; a2 log10(-x + b2) + g2 for x0 <= x < xt; 0 below x0.
+  samsunglog: { x0: -0.05, xt: 0.01, yt: 0.206561909, a1: 0.258984868, b1: 0.0003645, g1: 0.720504856, a2: -0.20942, b2: 0.016904, g2: -0.24597 },
 } as const;
 
 export const CINEON_OFFSET = Math.pow(10, ((TF.cineon.refBlack - TF.cineon.refWhite) * TF.cineon.density) / TF.cineon.gamma);
@@ -183,6 +185,12 @@ export function tfDecode(id: TransferId, v: number): number {
       if (v <= c.logCut) return v / c.m;
       return Math.pow(2, v / c.c - c.b) - c.a;
     }
+    case 'samsunglog': {
+      const c = TF.samsunglog;
+      if (v >= c.yt) return Math.pow(10, (v - c.g1) / c.a1) - c.b1;
+      if (v >= 0) return -Math.pow(10, (v - c.g2) / c.a2) + c.b2;
+      return c.x0;
+    }
   }
 }
 
@@ -227,6 +235,12 @@ export function tfEncode(id: TransferId, l: number): number {
       if (l <= c.linCut) return l * c.m;
       return (Math.log2(l + c.a) + c.b) * c.c;
     }
+    case 'samsunglog': {
+      const c = TF.samsunglog;
+      if (l >= c.xt) return c.a1 * log10(l + c.b1) + c.g1;
+      if (l >= c.x0) return c.a2 * log10(-l + c.b2) + c.g2;
+      return 0;
+    }
   }
 }
 
@@ -237,6 +251,7 @@ export const TF_BREAKS: Partial<Record<TransferId, number>> = {
   vlog: TF.vlog.cut,
   acescct: TF.acescct.cut,
   davinci: TF.davinci.linCut,
+  samsunglog: TF.samsunglog.xt,
   srgb: TF.srgb.cutLin,
 };
 
@@ -263,6 +278,8 @@ export const SPACES: readonly SpaceDef[] = [
   { id: 'vlog', label: 'Panasonic V-Log', primaries: 'rec709', transfer: 'vlog' },
   { id: 'acescct', label: 'ACEScct', primaries: 'rec709', transfer: 'acescct' },
   { id: 'davinci', label: 'DaVinci Intermediate', primaries: 'rec709', transfer: 'davinci' },
+  // Samsung Log is defined on BT.2020 primaries (D65), which the engine converts exactly: this one includes its gamut.
+  { id: 'samsunglog', label: 'Samsung Log (Rec.2020)', primaries: 'rec2020', transfer: 'samsunglog' },
 ];
 export const spaceDef = (id: string): SpaceDef => SPACES.find((s) => s.id === id) ?? SPACES[0];
 export const SPACE_OPTIONS = SPACES.map((s) => ({ value: s.id, label: s.label }));
