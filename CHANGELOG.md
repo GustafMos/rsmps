@@ -5,6 +5,7 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 ## Unreleased
 
 ### Added
+- **Any picture into a mask input.** Dropping a picture wire (a gradient, noise, text, a depth map, a photo) on a mask input now adds an Image to Mask node in between, in one undo step: its brightness is the mask, or its alpha or one color. Mask sockets are no longer dimmed while dragging a picture wire.
 - **Depth as a mask.** Depth from Picture, AI Depth and Depth Convert have a Mask output (near = white) that goes straight into any mask input: limit an effect to the foreground, fade it with distance. Mask Invert selects the background, Mask Levels narrows it to a band of depth.
 - **Particles from a picture.** The Particles node has a Particle picture input: wire an image with transparency, a Shape or Text and every particle is drawn as that, moving exactly like the chosen type (same paths, life, fades, sizes and loop). Turn: like the type (confetti tumbles and flips, rain and sparks point along their path, the others stay upright), upright, point where it goes, or spin. "Color it" multiplies the picture by the particle colors.
 - **Chords in a key.** The Chord node has "In key: triad" and "In key: seventh": pick a scale and key and every note gets the chord that belongs to it (in C major: C major, D minor, E minor ...). With Audio to MIDI in front, singing a melody plays its harmony.

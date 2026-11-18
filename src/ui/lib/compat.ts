@@ -1,5 +1,6 @@
 import { paramSocketType } from '../../engine/define';
 import { connectError } from '../../engine/graph';
+import { wireError } from './wireConvert';
 import type { Registry } from '../../engine/define';
 import type { Edge, GraphDoc, InputSchema, ParamDef, SocketType } from '../../engine/types';
 import { hexOf } from './drag';
@@ -31,7 +32,7 @@ export function compatibleSockets(graph: GraphDoc, registry: Registry, nodeId: s
   const out: CompatSocket[] = [];
   const wiredPorts = new Set(graph.edges.filter((e) => e.to.node === nodeId).map((e) => e.to.port));
   for (const [port, d] of Object.entries(def.inputs as InputSchema)) {
-    if (connectError(graph, registry, from, { node: nodeId, port })) continue;
+    if (wireError(graph, registry, from, { node: nodeId, port })) continue;
     out.push({ port, label: d.label ?? port, group: 'Inputs', type: d.type, kind: 'input', current: '', wired: wiredPorts.has(port) && !d.multi });
   }
   for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) {
