@@ -146,7 +146,7 @@ function fakeRecorder(take: () => Promise<LiveRecording>) {
   return r;
 }
 
-const TAKE: LiveRecording = { blob: new Blob(['x'], { type: 'video/mp4' }), name: 'Stream take 2026-11-17 18.42.05.mp4', frames: 30, seconds: 1, width: 640, height: 360 };
+const TAKE: LiveRecording = { hasAudio: false, blob: new Blob(['x'], { type: 'video/mp4' }), name: 'Stream take 2026-11-17 18.42.05.mp4', frames: 30, seconds: 1, width: 640, height: 360 };
 const SRC: LiveSource = { kind: 'url', url: 'http://a/b.mp4' };
 
 function setup(take: () => Promise<LiveRecording> = async () => TAKE) {

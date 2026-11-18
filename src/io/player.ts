@@ -109,6 +109,10 @@ export class PlayerImpl implements Player {
   private playing = false;
   private frame = 0;
   private totalFrames = 1;
+  /** Run on: time does not wrap or end at the project length, and the graph is evaluated with Loop off (see `setRunOn`). */
+  private runOn = false;
+  private runOnSrc: GraphDoc | null = null;
+  private runOnGraph: GraphDoc | null = null;
   private proxyMode: 'auto' | number = 'auto';
   private ctl = new ProxyController();
   /**
@@ -233,7 +237,7 @@ export class PlayerImpl implements Player {
     const total = totalFramesOf(p);
     const timeChanged = !prev || prev.graph.project.fps !== p.fps || prev.graph.project.duration !== p.duration || prev.graph.project.loop !== p.loop;
     this.totalFrames = total;
-    if (this.frame >= total) this.frame = total - 1;
+    if (this.frame >= total && !this.runOn) this.frame = total - 1;
     if (this.playing && timeChanged) this.anchorClock();
     if (view.graph !== this.audioGraph) {
       this.audioGraph = view.graph;
@@ -253,7 +257,7 @@ export class PlayerImpl implements Player {
 
   play(): void {
     if (this.playing || !this.view) return;
-    if (!this.view.graph.project.loop && this.frame >= this.totalFrames - 1) this.frame = 0;
+    if (!this.runOn && !this.view.graph.project.loop && this.frame >= this.totalFrames - 1) this.frame = 0;
     this.signalEvent('play');
     if (this.audioNeeded && !this.deps.audio.running) this.deps.audio.start().then(() => this.markChanged(), () => undefined);
     this.playing = true;
@@ -305,6 +309,35 @@ export class PlayerImpl implements Player {
     this.dirty = true;
     this.kick();
     this.markChanged();
+  }
+
+  /**
+   * Run on (live recording): the clock keeps counting past the project length instead of wrapping or stopping, and the graph is
+   * evaluated with Loop off, so nothing snaps back to the start: motion that follows the clock keeps going and stepped randomness
+   * keeps finding new values. Turning it off brings the playhead back inside the project.
+   */
+  setRunOn(on: boolean): void {
+    if (on === this.runOn) return;
+    this.runOn = on;
+    this.runOnSrc = null;
+    this.runOnGraph = null;
+    if (!on) this.frame = this.frame % Math.max(1, this.totalFrames);
+    this.keyDirty = true;
+    this.dirty = true;
+    if (this.playing) this.anchorClock();
+    this.syncTransport();
+    this.kick();
+    this.markChanged();
+  }
+
+  /** The graph a frame is rendered from: the view's, with Loop off while running on. */
+  private graphOf(view: { graph: GraphDoc }): GraphDoc {
+    if (!this.runOn || !view.graph.project.loop) return view.graph;
+    if (this.runOnSrc !== view.graph) {
+      this.runOnSrc = view.graph;
+      this.runOnGraph = { ...view.graph, project: { ...view.graph.project, loop: false } };
+    }
+    return this.runOnGraph!;
   }
 
   setProxy(mode: 'auto' | number): void {
@@ -717,14 +750,17 @@ export class PlayerImpl implements Player {
   private syncTransport(): void {
     const p = this.view?.graph.project;
     if (!p) return;
-    this.deps.audio.setTransport({ playing: this.playing, seconds: this.frame / p.fps, duration: p.duration, loop: p.loop, item: this.view?.item ?? 0 });
+    // running on: the sound does not wrap at the project length either
+    this.deps.audio.setTransport({ playing: this.playing, seconds: this.frame / p.fps, duration: this.runOn ? 1e7 : p.duration, loop: this.runOn ? false : p.loop, item: this.view?.item ?? 0 });
   }
 
   private tick = (now: number): void => {
     if (!this.playing || this.disposed) return;
     const p = this.view?.graph.project;
     if (p) {
-      const r = frameAtTime(this.clockStartFrame, now - this.clockStartMs, p.fps, this.totalFrames, p.loop);
+      const r = this.runOn
+        ? { frame: this.clockStartFrame + Math.floor((Math.max(0, now - this.clockStartMs) * p.fps) / 1000), cycle: 0, ended: false }
+        : frameAtTime(this.clockStartFrame, now - this.clockStartMs, p.fps, this.totalFrames, p.loop);
       const wrapped = r.cycle !== this.lastCycle;
       if (wrapped) {
         this.lastCycle = r.cycle;
@@ -795,7 +831,7 @@ export class PlayerImpl implements Player {
     if (this.keyDirty) {
       // Only what feeds the viewed node (plus the active Output, whose frame settings size the picture) is part of the key: an edit in
       // another branch must not throw away the finished frames.
-      const key = renderHash(view.graph, view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}/${view.activeOutput ?? ''}`, view.activeOutput ? [view.activeOutput] : []);
+      const key = renderHash(this.graphOf(view), view.node, view.port, `${view.item}/${view.itemCount}/${this.deps.library.version}/${view.activeOutput ?? ''}`, view.activeOutput ? [view.activeOutput] : []);
       this.keyDirty = false;
       if (key !== this.key) {
         this.key = key;
@@ -820,14 +856,14 @@ export class PlayerImpl implements Player {
     const spec = this.frameSpecFor(view);
     if (this.fullReq) {
       if (this.fullReq.done) return null;
-      return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy: spec.pixelSize ? 1 / spec.pixelSize : 1, key: this.key, frameSpec: spec, final: true };
+      return { graph: this.graphOf(view), node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy: spec.pixelSize ? 1 / spec.pixelSize : 1, key: this.key, frameSpec: spec, final: true };
     }
     this.curPixel = spec.pixelSize ?? 1;
     const proxy = spec.pixelSize ? 1 / spec.pixelSize : this.currentProxy();
     const upToDate = !this.dirty && this.shown && this.shownKey === this.key && this.shownFrame === this.frame && this.shownProxy >= proxy - 1e-6;
     if (upToDate) return null;
     if (!this.dirty && this.settledKey === this.key && this.settledFrame === this.frame && this.settledProxy >= proxy - 1e-6) return null;
-    return { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key, frameSpec: spec };
+    return { graph: this.graphOf(view), node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key, frameSpec: spec };
   }
 
   private async execute(job: Job): Promise<void> {
