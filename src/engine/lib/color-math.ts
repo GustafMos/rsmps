@@ -279,7 +279,7 @@ export const SPACES: readonly SpaceDef[] = [
   { id: 'acescct', label: 'ACEScct', primaries: 'rec709', transfer: 'acescct' },
   { id: 'davinci', label: 'DaVinci Intermediate', primaries: 'rec709', transfer: 'davinci' },
   // Samsung Log is defined on BT.2020 primaries (D65), which the engine converts exactly: this one includes its gamut.
-  { id: 'samsunglog', label: 'Samsung Log (Rec.2020)', primaries: 'rec2020', transfer: 'samsunglog' },
+  { id: 'samsunglog', label: 'Samsung Log Rec.2020', primaries: 'rec2020', transfer: 'samsunglog' },
 ];
 export const spaceDef = (id: string): SpaceDef => SPACES.find((s) => s.id === id) ?? SPACES[0];
 export const SPACE_OPTIONS = SPACES.map((s) => ({ value: s.id, label: s.label }));

@@ -35,8 +35,8 @@ export default defineNode({
       default: 'major',
       label: 'Chord',
       options: [
-        { value: 'key', label: 'In key (triad)' },
-        { value: 'key7', label: 'In key (seventh)' },
+        { value: 'key', label: 'In key: triad' },
+        { value: 'key7', label: 'In key: seventh' },
         { value: 'major', label: 'Major' },
         { value: 'minor', label: 'Minor' },
         { value: 'dim', label: 'Diminished' },

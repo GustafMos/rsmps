@@ -1,5 +1,6 @@
 import { defineNode } from '../../define';
 import { DEPTH_WGSL } from '../../lib/depth';
+import { depthMaskPass } from '../../lib/depth-heuristic';
 
 /**
  * Converts between the two depth conventions (lib/depth.ts): the 3D nodes' scene depth (distance in scene units, alpha = hit) and the
@@ -14,7 +15,8 @@ export default defineNode({
     'Converts a depth picture between conventions: the Depth output of the 3D nodes (distance in scene units) and a depth map (white = near), which Depth Slice, Lens Blur, Image to 3D and Picture to Splats read.',
   keywords: ['depth', 'z depth', 'depth map', 'convert', 'scene depth', 'distance', 'invert depth', 'near far'],
   inputs: { depth: { type: 'image', required: true, label: 'Depth' } },
-  outputs: { depth: { type: 'image', label: 'Depth' } },
+  outputs: { depth: { type: 'image', label: 'Depth' }, mask: { type: 'mask', label: 'Mask (near = white)' } },
+  optionalOutputs: ['mask'],
   params: {
     mode: {
       type: 'enum',
@@ -54,6 +56,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   return vec4f(z, z, z, 1.0);
 }`,
     });
-    return { depth };
+    // The mask is always the depth MAP (white = near): the result when converting to a map, the input when converting from one.
+    return { depth, mask: ctx.wants('mask') ? depthMaskPass(ctx.gpu, p.mode === 'scene-to-picture' ? depth : ctx.in.depth) : null };
   },
 });

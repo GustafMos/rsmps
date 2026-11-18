@@ -13,7 +13,7 @@ import {
   toU16,
   type DepthRange,
 } from '../../lib/depth-ai-math';
-import { depthHeuristicDefaults, depthPreviewPass, renderDepthHeuristic, type DepthHeuristicCtx } from '../../lib/depth-heuristic';
+import { depthHeuristicDefaults, depthMaskPass, depthPreviewPass, renderDepthHeuristic, type DepthHeuristicCtx } from '../../lib/depth-heuristic';
 import { stableStringify } from '../../lib/stable-json';
 import type { ImageValue, NodeGpu, ProcessView } from '../../types';
 
@@ -97,8 +97,8 @@ export default defineNode({
     'Real depth from a neural model (Depth Anything V2 Small) that runs on your own GPU, nothing is uploaded. Press Estimate depth once: it walks the clip, keeps the depth steady from frame to frame and stores it with the project. White = near, like Depth from Picture, so it plugs into Picture to Splats, Lens Blur, Depth Slice and Image to 3D. Needs a 50 MB model you download yourself (Plugins, AI models). Until it has run, the node shows the quick Depth from Picture guess.',
   keywords: ['depth map', 'depth anything', 'ai', 'neural', 'monocular', 'z depth', 'depth', 'estimate', 'relief', 'model'],
   inputs: { image: { type: 'image', required: true, label: 'Picture' } },
-  outputs: { depth: { type: 'image', label: 'Depth' }, preview: { type: 'image', label: 'Preview' } },
-  optionalOutputs: ['preview'],
+  outputs: { depth: { type: 'image', label: 'Depth' }, preview: { type: 'image', label: 'Preview' }, mask: { type: 'mask', label: 'Mask (near = white)' } },
+  optionalOutputs: ['preview', 'mask'],
   params: {
     size: {
       type: 'enum',
@@ -273,7 +273,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
 }`,
         });
         const depth = remap(gpu, up, p);
-        return { depth, preview: ctx.wants('preview') ? depthPreviewPass(gpu, src, depth) : null };
+        return { depth, preview: ctx.wants('preview') ? depthPreviewPass(gpu, src, depth) : null, mask: ctx.wants('mask') ? depthMaskPass(gpu, depth) : null };
       }
     }
     // Stand-in: the quick estimate from Depth from Picture (shared code, its default cues), with this node's levels.
@@ -282,6 +282,6 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
       depthHeuristicDefaults(),
     );
     const depth = remap(gpu, est.depth, p);
-    return { depth, preview: ctx.wants('preview') ? depthPreviewPass(gpu, src, depth) : null };
+    return { depth, preview: ctx.wants('preview') ? depthPreviewPass(gpu, src, depth) : null, mask: ctx.wants('mask') ? depthMaskPass(gpu, depth) : null };
   },
 });
