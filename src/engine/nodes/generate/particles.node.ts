@@ -85,13 +85,33 @@ export function driftKey(nx: number, ny: number): { m: [number, number, number, 
 }
 const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
 
+/**
+ * The part of the shader that draws a particle as the wired picture. Only in the shader when a picture is wired (a pass
+ * declares only the textures it is given), so the node has two shader texts: with and without a picture.
+ */
+const SPRITE_WGSL = /* wgsl */ `if (u.useSprite > 0.5) {
+        // The particle is a picture: same place, size, life and colors as the type; only what is drawn changes.
+        var sa = 0.0;
+        if (u.sprTurn > 1.5) { sa = h0.z * TAU + TAU * (u.phase * u.cycles * (1.0 + floor(h0.y * 2.0)) + h0.x); }
+        else if (u.sprTurn > 0.5) { sa = ang + 0.25 * TAU; }
+        let sc = cos(sa); let ss = sin(sa);
+        let ls = vec2f(sc * l0.x + ss * l0.y, -ss * l0.x + sc * l0.y);
+        var hb = u.sprHalf * rad;
+        if (u.sprFlip > 0.5) { hb.y *= max(0.08, abs(cos(TAU * (u.phase * u.cycles * (1.0 + floor(h0.z * 3.0)) + h0.w)))); }
+        let suv = ls / (2.0 * hb) + 0.5;
+        if (suv.x >= 0.0 && suv.x <= 1.0 && suv.y >= 0.0 && suv.y <= 1.0) {
+          if (u.soft > 0.5) { tex = textureSampleLevel(spr, smp, suv, 0.0); } else { tex = textureSampleLevel(spr, smpNearest, suv, 0.0); }
+        }
+        cov = tex.a;
+      }`;
+
 export default defineNode({
   id: 'particles',
   title: 'Particles',
   category: 'generate',
-  description: 'Dust, snow, rain, sparks, bubbles, fireflies, confetti or twinkling stars. Handles thousands of particles and loops exactly.',
-  keywords: ['snow', 'rain', 'dust', 'sparks', 'embers', 'bubbles', 'fireflies', 'confetti', 'stars', 'twinkle', 'weather', 'overlay', 'emitter'],
-  inputs: { size: { type: 'image', label: 'Size from' } },
+  description: 'Dust, snow, rain, sparks, bubbles, fireflies, confetti or twinkling stars. Wire a picture, a shape or text into Particle picture and every particle is drawn as that, moving like the chosen type. Handles thousands of particles and loops exactly.',
+  keywords: ['sprite', 'picture particles', 'text particles', 'shape particles', 'emoji', 'leaves', 'snow', 'rain', 'dust', 'sparks', 'embers', 'bubbles', 'fireflies', 'confetti', 'stars', 'twinkle', 'weather', 'overlay', 'emitter'],
+  inputs: { size: { type: 'image', label: 'Size from' }, sprite: { type: 'image', label: 'Particle picture' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     preset: {
@@ -120,6 +140,20 @@ export default defineNode({
     opacity: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Opacity' },
     soft: { type: 'bool', default: true, label: 'Soft edges', hint: 'Off = crisp hard-edged particles (good for pixel art).' },
     seed: { type: 'number', default: 1, min: 0, max: 9999, integer: true, label: 'Seed' },
+    spriteTurn: {
+      type: 'enum',
+      default: 'auto',
+      label: 'Turn',
+      group: 'Particle picture',
+      options: [
+        { value: 'auto', label: 'Like the type' },
+        { value: 'upright', label: 'Upright' },
+        { value: 'direction', label: 'Point where it goes' },
+        { value: 'spin', label: 'Spin' },
+      ],
+      hint: 'Used when something is wired into Particle picture. Like the type: confetti tumbles and flips, rain and sparks point along their path, the others stay upright.',
+    },
+    spriteTint: { type: 'bool', default: false, label: 'Color it', group: 'Particle picture', hint: 'Multiply the picture by the particle colors (the type colors, or Color A / B). White text or shapes take the colors fully. Off = the picture\'s own colors.' },
   },
   summary: (p) => `${p.preset} · ${p.count} · ${p.cycles}× per loop`,
   render(ctx) {
@@ -132,7 +166,12 @@ export default defineNode({
     const base = Math.max(0.5, p.particleSize);
     const angle = ((r.angle + p.direction) * Math.PI) / 180;
     const dir = [Math.cos(angle), Math.sin(angle)];
-    const reachMul = r.shape === 'streak' ? 1 + r.streak : r.shape === 'sparkle' ? 2 : r.shape === 'glow' ? 2.6 : r.shape === 'rect' ? 1.5 : r.shape === 'bubble' ? 1.15 : 1.05;
+    const sprite = ctx.in.sprite ?? null;
+    // A particle picture is drawn with its longer side = the particle's diameter x spriteK (types whose shape reaches past the radius get a matching size).
+    const spriteK = r.shape === 'streak' ? 1 + 0.5 * r.streak : r.shape === 'sparkle' || r.shape === 'glow' ? 1.3 : 1;
+    const turn = p.spriteTurn === 'upright' ? 0 : p.spriteTurn === 'direction' ? 1 : p.spriteTurn === 'spin' ? 2 : r.shape === 'rect' ? 2 : r.shape === 'streak' ? 1 : 0;
+    const shapeReach = r.shape === 'streak' ? 1 + r.streak : r.shape === 'sparkle' ? 2 : r.shape === 'glow' ? 2.6 : r.shape === 'rect' ? 1.5 : r.shape === 'bubble' ? 1.15 : 1.05;
+    const reachMul = sprite ? spriteK * Math.SQRT2 + 0.05 : shapeReach;
 
     const layers = [0, 1, 2].map((i) => {
       const maxR = base * 0.5 * r.sizeMul * LAYER_SIZE[i] * (1 + r.sizeVar);
@@ -156,10 +195,28 @@ export default defineNode({
     const soft = r.forceSoft ? true : r.forceHard ? false : p.soft;
     const colA = p.presetColors ? r.a : rgba(p.colorA);
     const colB = p.presetColors ? r.b : rgba(p.colorB);
+    // A picture much larger than the particles is halved until it is about twice their size on screen: a plain sample of a
+    // large picture drawn small would shimmer. (The wired picture itself is never recycled.)
+    let spr = sprite;
+    if (sprite) {
+      const want = Math.max(16, 2 * base * r.sizeMul * LAYER_SIZE[2] * (1 + r.sizeVar) * spriteK);
+      while (Math.max(spr!.width, spr!.height) > 2 * want && Math.min(spr!.width, spr!.height) >= 4) {
+        const half = ctx.gpu.pass({ label: 'particles-sprite-half', size: { width: Math.max(1, Math.ceil(spr!.width / 2)), height: Math.max(1, Math.ceil(spr!.height / 2)) }, textures: { src: spr! }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smp, uv, 0.0); }' });
+        if (spr !== sprite) ctx.gpu.recycle(spr!);
+        spr = half;
+      }
+    }
     const image = ctx.gpu.pass({
       label: 'particles',
       size,
+      textures: { spr },
       uniforms: {
+        useSprite: !!sprite,
+        // half extents of the picture in units of the particle radius (longer side = spriteK)
+        sprHalf: sprite ? [(spriteK * sprite.width) / Math.max(sprite.width, sprite.height), (spriteK * sprite.height) / Math.max(sprite.width, sprite.height)] : [1, 1],
+        sprTurn: turn,
+        sprFlip: p.spriteTurn === 'auto' && r.shape === 'rect',
+        sprTint: p.spriteTint,
         l0: layers[0],
         l1: layers[1],
         l2: layers[2],
@@ -244,7 +301,8 @@ fn layer(px: vec2f, L: vec4f, K: vec4f, gk: f32, li: i32, acc: vec4f) -> vec4f {
 
       let w = select(1.0, max(1.0, rad * 0.9), u.soft > 0.5);
       var cov = 0.0;
-      if (shape == 0) {
+      var tex = vec4f(0.0);
+      ${sprite ? SPRITE_WGSL + ' else ' : ''}if (shape == 0) {
         cov = cvr(length(l) - rad, w);
       } else if (shape == 1) {
         let hl = rad * u.streak;
@@ -287,7 +345,13 @@ fn layer(px: vec2f, L: vec4f, K: vec4f, gk: f32, li: i32, acc: vec4f) -> vec4f {
       if (i32(u.colorMode) == 2) { col = mix(u.a, u.b, clamp(life * 1.25, 0.0, 1.0)); }
 
       let al = clamp(cov * a * u.opacity * col.a, 0.0, 1.0);
-      out = vec4f(col.rgb * al, al) + out * (1.0 - al);
+      var rgb = col.rgb * al;
+      if (u.useSprite > 0.5) {
+        // the picture is premultiplied: its own colors (optionally multiplied by the particle color), faded like the particle
+        let k = a * u.opacity * col.a;
+        if (u.sprTint > 0.5) { rgb = tex.rgb * col.rgb * k; } else { rgb = tex.rgb * k; }
+      }
+      out = vec4f(rgb, al) + out * (1.0 - al);
     }
   }
   return out;
@@ -301,6 +365,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   return c;
 }`,
     });
+    if (spr && spr !== sprite) ctx.gpu.recycle(spr);
     return { image };
   },
 });

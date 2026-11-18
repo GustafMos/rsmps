@@ -159,3 +159,70 @@ describe('audio-to-midi', () => {
     }
   });
 });
+
+/** A sung line: pitch(t) as a fractional MIDI note, amp(t); a harmonic voice with a weak fundamental and a little breath noise. */
+function sing(seconds: number, pitch: (t: number) => number, amp: (t: number) => number = (t) => (t > seconds - 0.3 ? 0 : 0.4), breath = 0.01): Float32Array {
+  const n = secs(seconds);
+  const o = new Float32Array(n);
+  const g = [0.5, 1, 0.8, 0.5, 0.3, 0.2];
+  let ph = 0;
+  let s = 12345;
+  for (let i = 0; i < n; i++) {
+    const t = i / SR;
+    ph += (2 * Math.PI * hz(pitch(t))) / SR;
+    let v = 0;
+    for (let h = 0; h < g.length; h++) v += g[h] * Math.sin(ph * (h + 1));
+    s = (s * 1664525 + 1013904223) >>> 0;
+    o[i] = amp(t) * (v / 2.6) + breath * ((s / 2 ** 32) * 2 - 1);
+  }
+  return o;
+}
+const vib = (cents: number, rate = 6) => (t: number) => (cents / 100) * Math.sin(2 * Math.PI * rate * t);
+const ease = (x: number) => x * x * (3 - 2 * x);
+const ramp = (t: number, from: number, len: number) => ease(Math.min(1, Math.max(0, (t - from) / len)));
+const sung = (x: Float32Array) => ons(detect(x)).map((e) => e.note);
+
+describe('audio-to-midi on real singing: one note per sung note', () => {
+  it.each([50, 80, 100, 150])('wide vibrato (+-%i cents at 6 Hz) stays one note, no trill between neighbours', (cents) => {
+    expect(sung(sing(2.3, (t) => 62 + vib(cents)(t) * Math.min(1, t / 0.4)))).toEqual([62]);
+  });
+  it.each([0.08, 0.15, 0.3, 0.5])('a slide from C4 to G4 over %f s plays the two notes, not the ones passed through', (d) => {
+    expect(sung(sing(2.3, (t) => 60 + 7 * ramp(t, 0.8, d)))).toEqual([60, 67]);
+  });
+  it('a legato line with short slides plays each note once', () => {
+    const seq = [60, 64, 67, 72];
+    const line = (t: number) => {
+      const k = Math.min(3, Math.floor(t / 0.7));
+      return k === 0 ? 60 : seq[k - 1] + (seq[k] - seq[k - 1]) * ramp(t, k * 0.7, 0.12);
+    };
+    expect(sung(sing(3.3, line))).toEqual(seq);
+  });
+  it('a scoop into the note is waited out, also with vibrato after it', () => {
+    expect(sung(sing(1.5, (t) => 64 - 2 * (1 - ramp(t, 0, 0.12))))).toEqual([64]);
+    expect(sung(sing(2, (t) => 64 - 3 * (1 - ramp(t, 0, 0.2)) + vib(60)(t) * ramp(t, 0.4, 0.3)))).toEqual([64]);
+  });
+  it('the pitch dropping as a note dies away is not a new note', () => {
+    const amp = (t: number) => (t > 1.3 ? 0 : t > 1.1 ? 0.4 * (1 - (t - 1.1) / 0.2) : 0.4);
+    expect(sung(sing(1.6, (t) => 64 - 4 * ramp(t, 1.1, 0.15), amp))).toEqual([64]);
+  });
+  it('drift, consonants, tremolo, a quiet breathy voice and a decaying note stay one note', () => {
+    expect(sung(sing(2.3, (t) => 62 + 0.45 * Math.sin(2 * Math.PI * 0.7 * t)))).toEqual([62]);
+    expect(sung(sing(2.3, () => 62, (t) => (t > 2 ? 0 : t % 0.4 < 0.03 ? 0.01 : 0.4), 0.03))).toEqual([62]);
+    expect(sung(sing(2.3, () => 62, (t) => (t > 2 ? 0 : 0.25 + 0.15 * Math.sin(2 * Math.PI * 5 * t))))).toEqual([62]);
+    expect(sung(sing(2.3, () => 62, (t) => (t > 2 ? 0 : 0.03), 0.02))).toEqual([62]);
+    expect(sung(sing(2.3, () => 62, (t) => 0.4 * Math.exp(-t * 3)))).toEqual([62]);
+  });
+  it('vibrato from the very first moment settles on the right note within two notes (never a trill)', () => {
+    for (const [note, cents, rate] of [[43, 80, 5.5], [79, 100, 6.5]]) {
+      const got = sung(sing(2.3, (t) => note + vib(cents, rate)(t)));
+      expect(got.length, String(got)).toBeLessThanOrEqual(2);
+      expect(got[got.length - 1]).toBe(note);
+    }
+  });
+  it('still answers quickly: a plain note within 120 ms, a step to another note within 150 ms', () => {
+    const ev = detect(concat(sine(hz(60), secs(0.5), SR, 0.5), sine(hz(64), secs(0.5), SR, 0.5), silence(0.3)));
+    expect(ons(ev).map((e) => e.note)).toEqual([60, 64]);
+    expect(ons(ev)[0].offset / SR).toBeLessThan(0.12);
+    expect(ons(ev)[1].offset / SR - 0.5).toBeLessThan(0.15);
+  });
+});

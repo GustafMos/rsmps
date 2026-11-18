@@ -116,8 +116,13 @@ and the runner sums the wires before the kernel sees them. A Volume & Pan node p
 `microphone` has two outputs: `audio` (audible only when "Hear myself" is on, avoids feedback) and `tap` (always live).
 Wire `tap` to `audio-to-midi`, its `midi` to a `synth` (optionally through `midi-transpose` / `chord` / `arpeggiator`),
 and the synth to `audio-out`. `audio-to-midi` is a monophonic McLeod pitch tracker (NSDF on a window sized from the
-lowest note, 10 ms hop) with a level gate, clarity threshold (Sensitivity), note confirmation and hysteresis
-(Steadiness), optional scale snap and optional pitch-bend output.
+lowest note, 10 ms hop) with a level gate, clarity threshold (Sensitivity), optional scale snap and optional pitch-bend
+output. Its note logic follows the SETTLED pitch, not the momentary one: a short window (40..80 ms, Steadiness) says
+whether the voice is holding a pitch, a long one (120..240 ms, about a vibrato cycle) gives the centre it sings around. A
+note starts when the short window holds still; it changes when the short window holds another note AND the centre has
+left the old one the same way (vibrato holds a pitch at its peaks but leaves the centre; a slide moves the centre but
+holds nothing), or when the centre itself has settled on another note; never while the sound is dying away. One voice is
+one note at a time: for harmony put `chord` after it ("In key" builds each chord from a scale).
 
 ## Sound to picture: the bridge
 

@@ -8,14 +8,23 @@ const RING = 1024; // history kept, in decimated samples (64 ms at 16 kHz)
 const HOP = 160; // decimated samples between analyses (~10 ms)
 const TARGET_RATE = 16000;
 const RECENT = 320; // decimated samples used for the level estimate (~20 ms)
+const HIST = 32; // pitch estimates kept (320 ms)
+const CENT = 8; // centre values kept: the centre counts as settled when these 80 ms agree
+const STABLE_RANGE = 0.5; // semitones: the short window spans less than this when the voice holds a pitch
+const ONSET_RANGE = 0.3; // semitones: tighter for the first note, so a vibrato peak is not taken for the note
+const CENTER_RANGE = 0.3; // semitones: the same for the centre
 
 /**
  * Monophonic pitch tracker: audio in, MIDI notes out ("sing a melody, play a synth").
  *
  * Pipeline: DC-block -> low-pass + decimate to ~16 kHz -> McLeod NSDF on a 64 ms window every 10 ms ->
- * snap to the nearest note (optionally to a scale) -> note-on only after the same note repeats
- * `confirm` times, a note changes only when the pitch moves clearly past the old note (hysteresis),
- * and note-off after the sound has been unvoiced or quiet for a short time.
+ * note logic that follows the SETTLED pitch, not the momentary one. Two views of the recent pitch are kept: a short window
+ * (is the voice holding a pitch right now?) and a long one of about a vibrato cycle (the centre it sings around).
+ *   - a note starts when the short window holds still (a scoop into the note is waited out);
+ *   - a note changes when the short window holds a different note AND the centre has left the old one the same way.
+ *     Vibrato holds a pitch at its peaks but leaves the centre in place; a slide moves the centre but holds nothing:
+ *     neither plays the notes in between;
+ *   - note-off after the sound has been unvoiced or quiet for a short time.
  */
 export default defineNode({
   id: 'audio-to-midi',
@@ -64,10 +73,17 @@ export default defineNode({
         // sample-domain energy tracking (for gate and velocity)
                 // note state
         note: -1,
-        cand: -1,
-        candCount: 0,
         quiet: 0,
         lastBend: 0,
+        peak: 0,
+        raw0: -1,
+        raw1: -1,
+        hist: new Float32Array(HIST),
+        histPos: 0,
+        histN: 0,
+        cent: new Float32Array(CENT),
+        centPos: 0,
+        centN: 0,
       };
     },
     process(st, io) {
@@ -82,8 +98,9 @@ export default defineNode({
       const maxLag = Math.min(st.nsdf.length - 2, Math.ceil(st.fsD / hzMin(p.minNote)) + 2);
       // Window just long enough for ~2.6 periods of the lowest note: cheaper for higher 'Lowest note' settings.
       const W = Math.min(RING, Math.max(RECENT + 64, Math.ceil((2.6 * maxLag) / 8) * 8));
-      const confirm = 2 + Math.round(p.smoothing * 4); // 2..6 hops (20..60 ms)
-      const hyst = 0.5 + 0.3 * p.smoothing; // semitones past the old note before a change is considered
+      const stableHops = 4 + Math.round(p.smoothing * 4); // 4..8 analyses (40..80 ms) the pitch must hold still
+      const centerHops = 12 + Math.round(p.smoothing * 12); // 12..24 analyses (120..240 ms): about one vibrato cycle
+      const hyst = 0.4 + 0.2 * p.smoothing; // semitones the centre must leave the old note by
       const releaseHops = 3 + Math.round(p.smoothing * 4);
       const key = Number(p.key);
       for (let i = 0; i < n; i++) {
@@ -125,68 +142,105 @@ export default defineNode({
 
         if (voiced) {
           st.quiet = 0;
-          const target = p.scale === 'off' ? Math.round(midi) : snapToScale(midi, p.scale, key);
+          // Median of the last three estimates: a single wrong estimate (an octave blip on a consonant) is dropped.
+          const m0 = st.raw0;
+          const m1 = st.raw1;
+          st.raw0 = st.raw1 < 0 ? midi : st.raw1;
+          st.raw1 = midi;
+          const med = m0 < 0 || m1 < 0 ? midi : Math.max(Math.min(m0, m1), Math.min(Math.max(m0, m1), midi));
+          // History of the pitch (voiced analyses only) and of its running centre.
+          st.hist[st.histPos] = med;
+          st.histPos = (st.histPos + 1) % HIST;
+          if (st.histN < HIST) st.histN++;
+          // Short window: is the voice holding a pitch right now (not sliding, not mid-vibrato)?
+          const ns = Math.min(st.histN, stableHops);
+          let lo = Infinity;
+          let hi = -Infinity;
+          let sum = 0;
+          for (let k = 1; k <= ns; k++) {
+            const v = st.hist[(st.histPos - k + HIST) % HIST];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+            sum += v;
+          }
+          const shortMean = sum / ns;
+          const shortStable = st.histN >= stableHops && hi - lo < STABLE_RANGE;
+          // Long window (about one vibrato cycle): the centre the voice is singing around.
+          const nc = Math.min(st.histN, centerHops);
+          let csum = 0;
+          for (let k = 1; k <= nc; k++) csum += st.hist[(st.histPos - k + HIST) % HIST];
+          const center = csum / nc;
+          st.cent[st.centPos] = center;
+          st.centPos = (st.centPos + 1) % CENT;
+          if (st.centN < CENT) st.centN++;
+          let clo = Infinity;
+          let chi = -Infinity;
+          for (let k = 1; k <= st.centN; k++) {
+            const v = st.cent[(st.centPos - k + CENT) % CENT];
+            if (v < clo) clo = v;
+            if (v > chi) chi = v;
+          }
+          const centerStable = st.histN >= centerHops && st.centN >= CENT && chi - clo < CENTER_RANGE;
+          if (level > st.peak) st.peak = level;
+
+          let next = -1;
           if (st.note < 0) {
-            // starting a note: the same note must be heard `confirm` times in a row
-            if (target === st.cand) st.candCount++;
-            else {
-              st.cand = target;
-              st.candCount = 1;
-            }
-            if (st.candCount >= confirm) {
-              emitOn(out, st.cand, velocityFor(level, gateLin), i, p.channel);
-              st.note = st.cand;
-              st.candCount = 0;
-              st.lastBend = 0;
-            }
+            // A note starts when the pitch has settled (a scoop into the note is waited out), or, for a voice that never
+            // holds still (vibrato from the first moment), on the centre once a full cycle has been heard.
+            if (shortStable && hi - lo < ONSET_RANGE) next = snapNote(shortMean, p.scale, key);
+            else if (centerStable) next = snapNote(center, p.scale, key);
           } else {
-            const moved = Math.abs(midi - st.note) > hyst && target !== st.note;
-            if (moved) {
-              if (target === st.cand) st.candCount++;
-              else {
-                st.cand = target;
-                st.candCount = 1;
-              }
-              if (st.candCount >= confirm) {
-                out.push(midiEvent('off', st.note, 0, i, p.channel));
-                emitOn(out, target, velocityFor(level, gateLin), i, p.channel);
-                st.note = target;
-                st.candCount = 0;
-                st.lastBend = 0;
-              }
-            } else {
-              st.candCount = 0;
-              st.cand = -1;
-              if (p.bend) {
-                const bend = Math.max(-1, Math.min(1, (midi - st.note) / 2));
-                if (Math.abs(bend - st.lastBend) > 0.02) {
-                  out.push({ type: 'bend', note: st.note, velocity: 0, value: bend, offset: i, channel: p.channel });
-                  st.lastBend = bend;
-                }
-              }
+            const d = center - st.note;
+            const t = snapNote(shortMean, p.scale, key);
+            // A new note: the voice holds a different pitch AND the centre has left the old note the same way. Vibrato
+            // peaks hold a pitch for a moment but leave the centre where it was; a slide moves the centre but holds nothing.
+            // (not while the sound is dying away: the pitch of a voice often drops as a note ends, and that is not a new note)
+            if (level > 0.35 * st.peak && shortStable && st.histN >= centerHops && t !== st.note && Math.abs(d) > hyst && Math.abs(shortMean - st.note) > hyst && d > 0 === t > st.note) next = t;
+            // ... or the centre itself has settled on another note (a vibrato note that was caught off-centre).
+            else if (level > 0.35 * st.peak && centerStable && Math.abs(d) > 0.6 && snapNote(center, p.scale, key) !== st.note) next = snapNote(center, p.scale, key);
+          }
+          if (next >= 0 && next !== st.note && next >= p.minNote && next <= p.maxNote) {
+            if (st.note >= 0) out.push(midiEvent('off', st.note, 0, i, p.channel));
+            emitOn(out, next, velocityFor(level, gateLin), i, p.channel);
+            st.note = next;
+            st.peak = level;
+            st.lastBend = 0;
+          } else if (st.note >= 0 && p.bend) {
+            const bend = Math.max(-1, Math.min(1, (med - st.note) / 2));
+            if (Math.abs(bend - st.lastBend) > 0.02) {
+              out.push({ type: 'bend', note: st.note, velocity: 0, value: bend, offset: i, channel: p.channel });
+              st.lastBend = bend;
             }
           }
-        } else {
-          st.candCount = 0;
-          st.cand = -1;
-          if (st.note >= 0 && ++st.quiet >= releaseHops) {
-            out.push(midiEvent('off', st.note, 0, i, p.channel));
-            st.note = -1;
-            st.quiet = 0;
-          }
+        } else if (++st.quiet >= releaseHops) {
+          // silence or noise for long enough: the note ends and the pitch history starts over
+          if (st.note >= 0) out.push(midiEvent('off', st.note, 0, i, p.channel));
+          st.note = -1;
+          st.peak = 0;
+          st.histN = 0;
+          st.centN = 0;
+          st.raw0 = -1;
+          st.raw1 = -1;
         }
       }
     },
     reset(st) {
       st.note = -1;
-      st.cand = -1;
-      st.candCount = 0;
+      st.histN = 0;
+      st.centN = 0;
+      st.raw0 = -1;
+      st.raw1 = -1;
     },
   }),
 });
 
 const hzMax = (note: number) => 440 * Math.pow(2, (note - 69) / 12);
 const hzMin = (note: number) => 440 * Math.pow(2, (note - 69) / 12);
+
+/** The note a pitch belongs to: the nearest one, or the nearest of the chosen scale. */
+function snapNote(v: number, scale: string, key: number): number {
+  return scale === 'off' ? Math.round(v) : snapToScale(v, scale as never, key);
+}
 
 function velocityFor(level: number, gateLin: number): number {
   const db = 20 * Math.log10(Math.max(level, 1e-6) / Math.max(gateLin, 1e-6));
