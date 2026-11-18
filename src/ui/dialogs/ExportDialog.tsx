@@ -3,6 +3,7 @@ import { CheckField } from '../components/fields';
 import { useApp, useEd } from '../store/context';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { KIND_SHORT, describeOutput, hasKind, kindOptions } from '../lib/outputInfo';
+import { describeExportSound } from '../lib/exportSound';
 import { needsFfmpeg } from '../../io/export-codecs';
 import { ffmpegInstalled, useAddons } from './AddonsSection';
 import { Dialog } from './Dialog';
@@ -22,6 +23,10 @@ export function ExportDialog() {
   const usesFfmpeg = (o: (typeof outputs)[number]) => ['auto', 'video'].includes(String(o.params.kind ?? 'auto')) && needsFfmpeg(String(o.params.codec ?? ''));
   const missingFfmpeg = enabled.filter(usesFfmpeg);
   const canInstall = io.addons.supported;
+  const sound = describeExportSound(graph, io.registry, (id) => io.library.assetInfo(id), item);
+  // Sound goes into video files only: say what it will be when a video is among the enabled outputs.
+  const pictureOuts = enabled.filter((o) => Object.values(io.registry.get(o.type)?.inputs ?? {}).some((i) => (i as { type: string }).type === 'image'));
+  const exportsVideo = pictureOuts.some((o) => o.params.kind === 'video') || (pictureOuts.some((o) => String(o.params.kind ?? 'auto') === 'auto') && (sound.kind !== 'none' || sound.unheard));
 
   const start = () => {
     ed.openDialog(null);
@@ -82,6 +87,19 @@ export function ExportDialog() {
                 </>
               ) : (
                 <span>{missingFfmpeg.map((o) => o.label || io.registry.get(o.type)?.title || o.type).join(', ')} uses a video format that needs the desktop app, or the free command-line tool (docs/CLI.md). Pick another video codec to export here.</span>
+              )}
+            </div>
+          )}
+          {exportsVideo && (
+            <div className="rs-dlg__sec">
+              <span className="rs-caps">Sound in the video</span>
+              <p className="rs-dlg__note">{sound.text}</p>
+              {sound.unheard && (
+                <div className="rs-dlg__row">
+                  <button className="rs-btn" onClick={() => { if (ed.ensureAudioOutput()) void io.player.enableAudio().catch(() => undefined); }}>
+                    Add an Audio Output for it
+                  </button>
+                </div>
               )}
             </div>
           )}

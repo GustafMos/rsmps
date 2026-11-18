@@ -6,6 +6,7 @@ import { ProcessesButton } from './ProcessesButton';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { formatTime } from '../lib/drag';
+import { soundToWire } from '../lib/exportSound';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { useKeyboardTarget } from '../playKeys';
 import { RecordButton } from '../timeline/RecordButton';
@@ -18,6 +19,7 @@ export function Transport() {
   const playing = usePlayer((s) => s.playing);
   const project = useEd((s) => s.graph.project);
   const hasAudio = useEd((s) => s.graph.nodes.some((n) => hasAudioSockets(io.registry.get(n.type))));
+  const unwired = useEd((s) => !!soundToWire(s.graph, io.registry, (id) => io.library.assetInfo(id), s.item));
   const lengthSet = useEd((s) => effectiveDuration(s.graph, io.registry) !== null);
   const [volume, setVolume] = useState(1);
   const audio = usePlayer((s) => s.audio);
@@ -67,13 +69,21 @@ export function Transport() {
             {!audio.running ? (
               <button
                 className="rs-btn rs-btn--primary"
-                onClick={() => io.player.enableAudio().catch((e) => ed.toast(`Audio: ${e instanceof Error ? e.message : String(e)}`, 'error'))}
-                title={audio.micNodes > 0 ? 'Starts sound. The browser will ask for permission to use the microphone.' : 'Browsers need a click before they allow sound'}
+                onClick={() => {
+                  ed.ensureAudioOutput(); // a clip with sound and no Audio Output yet: add one, wired, so what you hear is what is exported
+                  io.player.enableAudio().catch((e) => ed.toast(`Audio: ${e instanceof Error ? e.message : String(e)}`, 'error'));
+                }}
+                title={audio.micNodes > 0 ? 'Starts sound. The browser will ask for permission to use the microphone.' : unwired ? "Starts sound and adds an Audio Output wired to the clip's sound: what you hear is what is exported" : 'Browsers need a click before they allow sound'}
               >
                 <Icon name="volume" /> Enable audio{audio.micNodes > 0 ? ' + mic' : ''}
               </button>
             ) : (
               <span className="rs-tp__audio" title="The audio engine is running"><span className="rs-ps__dot" /> Audio on</span>
+            )}
+            {audio.running && unwired && (
+              <button className="rs-btn" onClick={() => ed.ensureAudioOutput()} title="The clip has sound but nothing plays it: adds an Audio Output wired to it, so you hear what is exported">
+                <Icon name="volume" /> Hear the clip
+              </button>
             )}
             {audio.needed && !audio.running && audio.micNodes > 0 && <span className="rs-tp__note">asks for the microphone</span>}
             <div className="rs-tp__field">

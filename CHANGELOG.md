@@ -5,12 +5,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 ## Unreleased
 
 ### Added
+- **Enable audio wires the sound.** When the picture comes from a video with sound and no Audio Output plays anything, Enable audio adds an Audio Output wired to that clip's Sound (one undo step), so what you hear is what is exported. With audio already on, a "Hear the clip" button does the same.
+- **The export dialog says what sound the video gets:** what is wired into the Audio Output, the clip's own sound (with a button to add an Audio Output for it), or none and why.
 - **The project takes the frame rate of its first video.** Adding the first video to a project that still has the default 24 fps sets the project to the clip's rate (25 for a 25 fps clip), in the same undo step. A rate you set yourself is never changed.
 - **Record on live picture inputs.** Webcam, Phone Camera and URL / Stream nodes have a Record button: the incoming picture is saved as a clip in Media (picture only, up to 30 minutes).
 - **Auto bitrate** on the Output for the built-in MP4 and WebM codecs: the first frames of an export are measured and the bitrate is set to what the picture needs. On by default; projects with a bitrate set by hand keep it.
 - **Frames** field next to Length in the transport: set the project length in frames.
 
 ### Fixed
+- Adding a sound effect with a Media In (or any node with a picture and a sound output) selected now inserts it into the sound chain, like picture effects join the picture chain. Before it was left unwired.
 - **Ticking instead of sound** from videos recorded with uncompressed (Linear PCM) sound by phone apps such as Blackmagic Camera, in the preview and in every export. These files store the sound one recorded buffer per table entry; only one sample of each buffer was read. PCM sound in MP4 and MOV is now read from the file's own tables, which also fixes packed 24-bit sound that a file labels as 32-bit.
 - Sound in MP4 and M4A exports is handed to the browser's audio encoder in whole AAC frames. In browsers whose encoder pads each call with silence, the uneven pieces sent before were heard as a regular ticking.
 - Exported sound of a video was silent (and waveforms and Beat Detect went empty) after the clip had been played in the preview, when the file's sample rate equals the sound card's (usually 48 kHz): the player handed the library's decoded sound to the audio thread instead of a copy.
