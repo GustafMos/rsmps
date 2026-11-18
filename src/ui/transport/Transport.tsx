@@ -11,6 +11,7 @@ import { useApp, useEd, usePlayer } from '../store/context';
 import { useKeyboardTarget } from '../playKeys';
 import { RecordButton } from '../timeline/RecordButton';
 import { RenderPause } from './RenderPause';
+import { AudioOutputSelect } from './AudioOutputSelect';
 import '../palette/studio.css';
 import './transport.css';
 
@@ -89,6 +90,7 @@ export function Transport() {
             <div className="rs-tp__field">
               <NumberField label="Vol" value={volume} min={0} max={1} step={0.01} defaultValue={1} onChange={(v) => { setVolume(v); io.player.setVolume(v); }} />
             </div>
+            <AudioOutputSelect />
           </>
         )}
       </div>
