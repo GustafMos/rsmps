@@ -5,6 +5,7 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 ## Unreleased
 
 ### Added
+- **The project takes the frame rate of its first video.** Adding the first video to a project that still has the default 24 fps sets the project to the clip's rate (25 for a 25 fps clip), in the same undo step. A rate you set yourself is never changed.
 - **Record on live picture inputs.** Webcam, Phone Camera and URL / Stream nodes have a Record button: the incoming picture is saved as a clip in Media (picture only, up to 30 minutes).
 - **Auto bitrate** on the Output for the built-in MP4 and WebM codecs: the first frames of an export are measured and the bitrate is set to what the picture needs. On by default; projects with a bitrate set by hand keep it.
 - **Frames** field next to Length in the transport: set the project length in frames.
