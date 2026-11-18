@@ -21,6 +21,7 @@ import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
 import type { AssetProblem, LibraryAsset, MediaLibrary } from './api';
 import { mixToStereo } from './audio-util';
+import { pcmLayoutOf, readIsoPcm } from './iso-pcm';
 import { encodeWav } from './wav';
 import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import type { SignalRouter } from './signals';
@@ -1238,12 +1239,28 @@ function audioBufferToPcm(buf: AudioBuffer): PcmAudio {
   return { sampleRate: buf.sampleRate, channels };
 }
 
+/** PCM sound of an MP4 / MOV track, read by iso-pcm.ts. Null for other codecs and containers (and fragmented files). */
+async function decodeIsoPcm(blob: Blob, track: { codec: string | null; numberOfChannels: number; sampleRate: number; id: number }): Promise<PcmAudio | null> {
+  if (!pcmLayoutOf(track.codec) || !(track.sampleRate > 0)) return null;
+  const read = async (start: number, end: number) => new Uint8Array(await blob.slice(start, end).arrayBuffer());
+  const pcm = await readIsoPcm(read, blob.size, { codec: track.codec, channels: track.numberOfChannels, trackId: track.id }, MAX_AUDIO_SECONDS * track.sampleRate);
+  if (!pcm || pcm.channels[0].length === 0) return null;
+  if (pcm.channels.length <= 2) return { sampleRate: track.sampleRate, channels: pcm.channels };
+  const channels = [new Float32Array(pcm.channels[0].length), new Float32Array(pcm.channels[0].length)];
+  mixToStereo(channels, 0, pcm.channels);
+  return { sampleRate: track.sampleRate, channels };
+}
+
 /** Decode the primary audio track with mediabunny (used for video sound tracks). */
 async function decodeTrackPcm(blob: Blob): Promise<PcmAudio | null> {
   const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
   try {
     const track = await input.getPrimaryAudioTrack();
     if (!track) return null;
+    // Uncompressed sound in MP4 / MOV is read from the file's own tables: the demuxer misreads the layout phone apps write
+    // (one entry per buffer), taking one sample out of each buffer, which is heard as ticking. See iso-pcm.ts.
+    const own = await decodeIsoPcm(blob, track).catch(() => null);
+    if (own) return own;
     const sink = new AudioBufferSink(track);
     const parts: { buffer: AudioBuffer; timestamp: number }[] = [];
     for await (const wrapped of sink.buffers(0, MAX_AUDIO_SECONDS)) parts.push(wrapped);
