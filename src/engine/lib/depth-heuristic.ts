@@ -417,6 +417,23 @@ export interface DepthHeuristicCtx {
 }
 
 /** The colour overlay of a depth picture on its source (far: blue, near: red-orange). Shared with AI Depth. */
+/**
+ * A depth map as a MASK (coverage = nearness: white = near), so it can go straight into any mask input: limit an effect to the
+ * foreground, fade it with distance. Mask Invert selects the background; Mask Levels narrows it to a band of depth.
+ */
+export function depthMaskPass(gpu: NodeGpu, depth: ImageValue): MaskValue {
+  return gpu.passMask({
+    label: 'depth mask',
+    size: depth,
+    textures: { src: depth },
+    wgsl: /* wgsl */ `
+fn fx(uv: vec2f, px: vec2f) -> vec4f {
+  let m = clamp(textureSampleLevel(src, smpNearest, uv, 0.0).r, 0.0, 1.0);
+  return vec4f(m, m, m, 1.0);
+}`,
+  });
+}
+
 export function depthPreviewPass(gpu: NodeGpu, src: ImageValue, depth: ImageValue): ImageValue {
   return gpu.pass({
         label: 'depth preview',
@@ -438,7 +455,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
 }
 
 /** The whole Depth from Picture render: a depth picture (white = near) and, when wanted, the colour preview. */
-export async function renderDepthHeuristic(ctx: DepthHeuristicCtx, params: DepthHeuristicParams): Promise<{ depth: ImageValue; preview: ImageValue | null }> {
+export async function renderDepthHeuristic(ctx: DepthHeuristicCtx, params: DepthHeuristicParams): Promise<{ depth: ImageValue; preview: ImageValue | null; mask: MaskValue | null }> {
     const { gpu } = ctx;
     const src = ctx.in.image;
     const p = { ...params };
@@ -536,5 +553,5 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     if (r.guide !== src) gpu.recycle(r.guide);
 
     const preview = ctx.wants('preview') ? depthPreviewPass(gpu, src, depth) : null;
-    return { depth, preview };
+    return { depth, preview, mask: ctx.wants('mask') ? depthMaskPass(gpu, depth) : null };
 }

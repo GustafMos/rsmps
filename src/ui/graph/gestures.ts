@@ -23,6 +23,7 @@ import {
 import { layoutFor, socketWorld, wirePath } from '../lib/layout';
 import { inputsAccepting } from '../lib/sockets';
 import { compatibleSockets } from '../lib/compat';
+import { wireError } from '../lib/wireConvert';
 import type { SocketType } from '../../engine/types';
 
 const THRESHOLD = 3;
@@ -272,10 +273,10 @@ export function createGestures(app: AppCtx) {
       if (p === NEW_PORT) return (fixed.side === 'out' && n === GROUP_OUT && d === 'in') || (fixed.side === 'in' && n === GROUP_IN && d === 'out') ? null : 'Drop on a socket of the right side';
       if (fixed.side === 'out') {
         if (d !== 'in') return 'Drop on an input socket';
-        return connectError(g, reg, { node: fixed.node, port: fixed.port }, { node: n, port: p });
+        return wireError(g, reg, { node: fixed.node, port: fixed.port }, { node: n, port: p });
       }
       if (d !== 'out') return 'Drop on an output socket';
-      return connectError(g, reg, { node: n, port: p }, { node: fixed.node, port: fixed.port });
+      return wireError(g, reg, { node: n, port: p }, { node: fixed.node, port: fixed.port });
     };
     /** Dropping an output on another output merges them (image/mask -> Merge, audio -> Mixer). */
     const mergeTarget = (el: HTMLElement): boolean => {

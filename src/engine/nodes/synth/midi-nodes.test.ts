@@ -95,6 +95,20 @@ describe('chord', () => {
     expect(summary(run('chord', { chord: 'major', inversion: 1 }, [on(60, 0)]))).toEqual(['on:72@0', 'on:64@0', 'on:67@0']);
     expect(summary(run('chord', { chord: 'power', bass: true }, [on(60, 0)]))).toEqual(['on:60@0', 'on:67@0', 'on:72@0', 'on:48@0']);
   });
+  it('in key: every note gets the chord that belongs to it in the scale', () => {
+    const chordOf = (note: number, params: Record<string, unknown> = {}) => run('chord', { chord: 'key', scale: 'major', key: '0', ...params }, [on(note, 0)]).map((e) => e.note);
+    expect(chordOf(60)).toEqual([60, 64, 67]); // C major
+    expect(chordOf(62)).toEqual([62, 65, 69]); // D minor
+    expect(chordOf(64)).toEqual([64, 67, 71]); // E minor
+    expect(chordOf(71)).toEqual([71, 74, 77]); // B diminished
+    expect(chordOf(61)).toEqual([60, 64, 67]); // a note outside the key is taken as its neighbour in the key
+    expect(chordOf(62, { chord: 'key7' })).toEqual([62, 65, 69, 72]); // D minor 7th
+    expect(chordOf(57, { scale: 'minor', key: '9' })).toEqual([57, 60, 64]); // A minor in A minor
+    expect(chordOf(62, { key: '2' })).toEqual([62, 66, 69]); // D major in D major
+    expect(chordOf(62, { bass: true })).toEqual([62, 65, 69, 50]);
+    const ev = run('chord', { chord: 'key' }, [on(62, 0), off(62, 100)]);
+    expect(ev.filter((e) => e.type === 'off').map((e) => e.note)).toEqual([62, 65, 69]);
+  });
   it('changing the chord type between press and release still releases what was started', () => {
     const a = runKernel(getDef('chord'), { params: { chord: 'major' }, midi: { midi: [on(60, 0)] }, frames: 128 });
     expect(a.midiOut.midi.length).toBe(3);

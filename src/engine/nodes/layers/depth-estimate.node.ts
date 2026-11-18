@@ -24,8 +24,8 @@ export default defineNode({
     farther: { type: 'mask', label: 'Farther paint' },
     flow: { type: 'image', label: 'Flow' },
   },
-  outputs: { depth: { type: 'image', label: 'Depth' }, preview: { type: 'image', label: 'Preview' } },
-  optionalOutputs: ['preview'],
+  outputs: { depth: { type: 'image', label: 'Depth' }, preview: { type: 'image', label: 'Preview' }, mask: { type: 'mask', label: 'Mask (near = white)' } },
+  optionalOutputs: ['preview', 'mask'],
   params: DEPTH_PARAMS,
   summary: (p, wired) => `${p.preset !== 'custom' ? p.preset : 'custom cues'}${wired?.has('flow') && p.motion > 0 ? ' + motion' : ''}`,
   async render(ctx) {

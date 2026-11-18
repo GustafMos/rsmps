@@ -34,6 +34,7 @@ import { DEFAULT_CLIP_SECONDS } from '../../engine/lib/media-edit';
 import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/audio/timeline';
 import { rateForFirstVideo } from '../lib/firstVideoRate';
 import { soundToWire } from '../lib/exportSound';
+import { makeWire, wireError } from '../lib/wireConvert';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -629,7 +630,9 @@ export class Editor {
 
   /** Connect, then (for multi inputs) place the new wire at layer position `slot`. */
   connectSlot(g: GraphDoc, from: Edge['from'], to: Edge['to'], slot?: number): GraphDoc {
-    let next = connect(g, this.registry, from, to);
+    // a picture dropped on a mask input goes through an Image to Mask node (lib/wireConvert.ts); everything else is a plain wire
+    const made = makeWire(g, this.registry, from, to);
+    let next = made ? made.graph : connect(g, this.registry, from, to);
     if (slot !== undefined) {
       const group = wiresInto(next, to.node, to.port);
       const mine = group[group.length - 1];
@@ -662,12 +665,14 @@ export class Editor {
       });
       return true;
     }
-    const err = connectError(this.level, this.registry, from, to);
+    const err = wireError(this.level, this.registry, from, to);
     if (err) {
       this.toast(err, 'error');
       return false;
     }
+    const converts = !!connectError(this.level, this.registry, from, to);
     this.editLevel((g) => this.connectSlot(g, from, to, slot));
+    if (converts) this.toast('Image to Mask added: the picture\'s brightness is the mask. Select it to use its alpha or one color instead.', 'info');
     return true;
   }
   disconnect(edgeId: string): void {
