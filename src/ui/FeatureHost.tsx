@@ -8,6 +8,7 @@ import { QueueBadge, QueueDialog } from './queue/QueueDialog';
 import { IncomingShareDialog, ShareDialog } from './share/ShareDialogs';
 import { StartScreen, TemplatesDialog } from './start/StartScreen';
 import { StopMotionDialog } from './stopmotion/StopMotionDialog';
+import { GoLiveDialog } from './stream/GoLiveDialog';
 import { useApp } from './store/context';
 import { featureStore, setIncoming } from './store/features';
 import { useSelector } from './store/createStore';
@@ -46,6 +47,7 @@ export function FeatureHost() {
       {dialog === 'queue' && <QueueDialog />}
       {dialog === 'templates' && <TemplatesDialog />}
       {dialog === 'stopmotion' && <StopMotionDialog />}
+      {dialog === 'golive' && <GoLiveDialog />}
       <IncomingShareDialog />
       <StartScreen />
       <QueueBadge />

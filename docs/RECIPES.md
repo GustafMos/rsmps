@@ -147,6 +147,22 @@ app; phones and Safari cannot choose an output device. For talking live, set Pit
 2. In OBS Studio add that window as a Window Capture and press **Start Virtual Camera**.
 3. In the other program choose "OBS Virtual Camera".
 
+## Go live on Twitch or YouTube (desktop app)
+
+The desktop app can stream its output, with the sound, straight to a streaming service. No OBS.
+
+1. Install the **FFmpeg** add-on (Plugins > Official add-ons) if it is not there yet.
+2. Build the picture (for example **Webcam** > effects > **Output**) and the sound (**Microphone** > **Pitch Correct** > **Audio Output**),
+   and press **Enable audio**.
+3. Press **Go live** in the transport. Choose Twitch or YouTube and paste your stream key (Twitch: Creator Dashboard > Settings > Stream;
+   YouTube Studio: Go live > Stream). "Other (RTMP)" takes the address of any service or server that accepts RTMP.
+4. Pick a size and press **Go live**. The button turns into a red **LIVE** clock; click it for the state of the stream or to end it.
+
+What is streamed is what the viewer shows, fitted into the chosen size with black bars where the shape differs, so press play and
+keep the app window visible (a minimised window stops drawing). The stream key is used only by FFmpeg on your computer and is
+stored only if you tick "Remember the key". If the dialog says the computer is not keeping up, choose a smaller size or a lower
+bitrate. The web version cannot go live: a web page is not allowed to open the kind of connection streaming services use.
+
 ## Weave several clips frame by frame
 
 Add a **Frame Interleave** (`frame-interleave`, category Time) and wire two or more videos into **Sources**; the wire order is the order of the sources (reorder the wires like layers). Only the one source that the current frame needs is evaluated, so the node costs one source evaluation per frame (two with Blend) and, with Blend 0 and sources of the project's size, no GPU pass at all: it hands on the picture it pulled. It has no sound: take that from one source or from a Media Timeline.

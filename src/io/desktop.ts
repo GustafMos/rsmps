@@ -281,6 +281,59 @@ export function parseExportFinish(raw: unknown): ExportFinishReply {
   return { saved, ...(o.canceled === true ? { canceled: true } : {}), ...(typeof o.path === 'string' ? { path: o.path } : {}), ...(typeof o.bytes === 'number' ? { bytes: o.bytes } : {}), ...(typeof o.frames === 'number' ? { frames: o.frames } : {}) };
 }
 
+/* ---------------------------------------------- go live ----------------------------------------------- */
+
+export interface LiveStartRequest {
+  /** 'twitch' | 'youtube' | 'custom'. */
+  service: string;
+  /** The stream key (a known service), or the last part of a custom address. Never stored by the app unless the user asks. */
+  key: string;
+  /** Custom only: rtmp:// or rtmps:// address. */
+  url?: string;
+  width: number;
+  height: number;
+  fps: number;
+  videoKbps: number;
+  audioKbps?: number;
+  /** The recording carries a sound track. */
+  hasAudio: boolean;
+}
+
+/** One stream as the main process reports it (the stream key is never part of it). */
+export interface LiveStatus {
+  id: string;
+  live: boolean;
+  /** Seconds of stream FFmpeg has sent. */
+  seconds: number;
+  wallSeconds: number;
+  fps: number;
+  kbps: number;
+  /** 1 = keeping up; below 1 the computer or the connection is too slow. */
+  speed: number;
+  error: string | null;
+}
+
+export interface LiveInfo {
+  /** FFmpeg is installed. */
+  available: boolean;
+  services: { id: string; label: string }[];
+  current: LiveStatus | null;
+  /** The stream that ended last (with its error, if it failed). */
+  last: LiveStatus | null;
+}
+
+function parseLiveStatus(v: unknown): LiveStatus | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = obj(v);
+  return { id: str(o.id), live: o.live === true, seconds: num(o.seconds), wallSeconds: num(o.wallSeconds), fps: num(o.fps), kbps: num(o.kbps), speed: num(o.speed), error: typeof o.error === 'string' ? o.error : null };
+}
+
+export function parseLiveInfo(v: unknown): LiveInfo {
+  const o = obj(v);
+  const services = Array.isArray(o.services) ? o.services.map((s) => ({ id: str(obj(s).id), label: str(obj(s).label) })).filter((s) => s.id) : [];
+  return { available: o.available === true, services, current: parseLiveStatus(o.current), last: parseLiveStatus(o.last) };
+}
+
 /** Last part of a path of either flavour (for the file name shown after a native save). */
 export function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -337,6 +390,22 @@ export class DesktopClient implements FfmpegExportClient {
   /** install / cancel / remove / locate. A 400 from `locate` or `install` carries `{error}`: thrown as an Error with that text. */
   async addonAction(id: string, action: 'install' | 'cancel' | 'remove' | 'locate'): Promise<AddonReply> {
     return parseAddonReply(await this.ok(`addons/${encodeURIComponent(id)}/${action}`, { method: 'POST' }, 'The add-on request failed.'));
+  }
+
+  /* Go live (desktop/addons/live.mjs) */
+  async liveInfo(): Promise<LiveInfo> {
+    return parseLiveInfo(await this.ok('live'));
+  }
+  async liveStart(req: LiveStartRequest): Promise<{ id: string; encoder: string; secure: boolean }> {
+    const o = obj(await this.ok('live/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) }, 'The stream could not start.'));
+    return { id: str(o.id), encoder: str(o.encoder), secure: o.secure === true };
+  }
+  /** The next piece of the recording. Throws with the reason when the stream has ended. */
+  async liveChunk(id: string, bytes: ArrayBuffer | ArrayBufferView): Promise<void> {
+    await this.ok(`live/chunk?id=${encodeURIComponent(id)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: bytes as BodyInit }, 'The stream has ended.');
+  }
+  async liveStop(id?: string): Promise<LiveInfo> {
+    return parseLiveInfo(await this.ok(`live/stop${id ? `?id=${encodeURIComponent(id)}` : ''}`, { method: 'POST' }));
   }
 
   /* FFmpeg export */
