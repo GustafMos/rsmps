@@ -38,3 +38,6 @@
 .rs-procbtn[data-state='failed'] { border-color: var(--danger); color: var(--danger); }
 .rs-procbtn[data-state='running'] .rs-mem__bar > span { background: var(--accent-hi); }
 .rs-proc__item { display: flex; flex-direction: column; gap: 2px; }
+
+/* where the sound plays: narrow, the device name is in the tooltip-free dropdown */
+.rs-tp__out { max-width: 150px; }

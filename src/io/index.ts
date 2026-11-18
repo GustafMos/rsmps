@@ -253,6 +253,8 @@ export const createIo: CreateIo = async () => {
     capabilities: () => new Set([...(phone.available ? (['local-server'] as const) : []), ...(desktop ? (['desktop'] as const) : [])]),
     devices: {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),
+      setAudioOutput: (id) => audio.setOutputDevice(id),
+      canChooseAudioOutput: () => audio.canChooseOutput(),
       onChanged: (l) => {
         const offs = [audio.onDevicesChanged(l), onVideoDevicesChanged(l)];
         return () => offs.forEach((off) => off());

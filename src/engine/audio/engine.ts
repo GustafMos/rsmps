@@ -49,6 +49,7 @@ class WebAudioEngine implements AudioEngine {
   private requested = new Set<string>();
   private transport: TransportState = { playing: false, seconds: 0, duration: 0, loop: false };
   private volume = 1;
+  private sinkId = '';
   private meters = new Map<string, [number, number]>();
   private signals = new Map<string, number>();
   private recState: RecordingState = { armed: false, recording: false, phase: 'idle', seconds: 0, countIn: 0, level: [0, 0], nodeId: null, error: null };
@@ -107,6 +108,7 @@ class WebAudioEngine implements AudioEngine {
         console.warn('Audio worklet error:', m.message);
       }
     };
+    if (this.sinkId) await this.applySink(ctx).catch(() => false);
     const master = ctx.createGain();
     master.gain.value = this.volume;
     node.connect(master).connect(ctx.destination);
@@ -136,6 +138,26 @@ class WebAudioEngine implements AudioEngine {
   setVolume(volume: number): void {
     this.volume = Math.max(0, volume);
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.01);
+  }
+
+  canChooseOutput(): boolean {
+    return typeof AudioContext !== 'undefined' && typeof (AudioContext.prototype as { setSinkId?: unknown }).setSinkId === 'function';
+  }
+
+  async setOutputDevice(id: string): Promise<boolean> {
+    this.sinkId = id;
+    if (!this.ctx) return this.canChooseOutput(); // applied when the engine starts
+    return this.applySink(this.ctx).catch((err) => {
+      console.warn('Could not play to the chosen output device:', err);
+      return false;
+    });
+  }
+
+  private async applySink(ctx: AudioContext): Promise<boolean> {
+    const c = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (typeof c.setSinkId !== 'function') return false;
+    await c.setSinkId(this.sinkId);
+    return true;
   }
 
   armRecording(nodeId: string, target: { track: string; kind: 'audio' | 'midi' } | null): void {
@@ -397,8 +419,14 @@ class WebAudioEngine implements AudioEngine {
 
   /* ------------------------------ devices ------------------------------ */
 
-  async listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]> {
+  async listDevices(kind: 'audio-input' | 'midi-input' | 'audio-output'): Promise<AudioDevice[]> {
     try {
+      if (kind === 'audio-output') {
+        if (!navigator.mediaDevices?.enumerateDevices) return [];
+        const all = await navigator.mediaDevices.enumerateDevices();
+        const outs = all.filter((d) => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== 'communications' && d.deviceId !== '');
+        return outs.map((d, i) => ({ id: d.deviceId, label: d.label || `Output ${i + 1}` }));
+      }
       if (kind === 'audio-input') {
         if (!navigator.mediaDevices?.enumerateDevices) return [];
         const all = await navigator.mediaDevices.enumerateDevices();

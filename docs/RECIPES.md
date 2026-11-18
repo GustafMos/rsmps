@@ -124,6 +124,29 @@ Each Media In has its own In / out trim, Start offset and Loop video, so the sou
 picture. Video A's own sound is not in the export: with an Audio Output in the graph, only what is wired into it is exported.
 To keep both, wire A's Sound into the same Audio Output as well (the wires are mixed).
 
+## Use the app as a microphone or a camera for other programs
+
+A web page (and the desktop app as it is today) cannot add a microphone or a camera to your computer by itself: that takes a
+driver. Two free helper programs close the gap.
+
+**Your processed voice as a microphone** (a call, a stream, a recorder):
+
+1. Install a virtual audio cable: VB-Cable (Windows), BlackHole (macOS), or a PipeWire / PulseAudio null sink (Linux).
+2. Build the sound: **Microphone** > effects (**Pitch Correct**, Compressor, Reverb ...) > **Audio Output**. On the Microphone turn
+   "Hear myself" on, so its sound goes into the mix.
+3. Press **Enable audio**, then in the transport set **Play to** to the cable ("CABLE Input", "BlackHole 2ch").
+4. In the other program choose the cable as the microphone ("CABLE Output", "BlackHole 2ch").
+
+The other program now hears exactly what the Audio Output plays. You do not hear it yourself while Play to is on the cable; to
+monitor, use the cable's own listen / multi-output option. Play to appears in Chrome and Edge on a computer and in the desktop
+app; phones and Safari cannot choose an output device. For talking live, set Pitch Correct to **Low delay**.
+
+**Your processed picture as a camera**:
+
+1. Build the picture: **Webcam** > effects > **Output**, and open the **Output window** (the interface-free window for a projector).
+2. In OBS Studio add that window as a Window Capture and press **Start Virtual Camera**.
+3. In the other program choose "OBS Virtual Camera".
+
 ## Weave several clips frame by frame
 
 Add a **Frame Interleave** (`frame-interleave`, category Time) and wire two or more videos into **Sources**; the wire order is the order of the sources (reorder the wires like layers). Only the one source that the current frame needs is evaluated, so the node costs one source evaluation per frame (two with Blend) and, with Blend 0 and sources of the project's size, no GPU pass at all: it hands on the picture it pulled. It has no sound: take that from one source or from a Media Timeline.

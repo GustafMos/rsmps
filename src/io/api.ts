@@ -352,7 +352,14 @@ export interface AudioApi {
 }
 
 export interface DeviceApi {
-  list(kind: 'audio-input' | 'midi-input' | 'video-input'): Promise<AudioDevice[]>;
+  list(kind: 'audio-input' | 'midi-input' | 'video-input' | 'audio-output'): Promise<AudioDevice[]>;
+  /**
+   * Where the app's sound plays ('' = system default). Choosing a virtual audio cable here makes the sound available to other
+   * programs as a microphone. False when this browser cannot choose an output or the device refuses.
+   */
+  setAudioOutput(id: string): Promise<boolean>;
+  /** True when this browser can play to a chosen output device (desktop Chrome and Edge, the desktop app). */
+  canChooseAudioOutput(): boolean;
   /** Returns an unsubscribe function. */
   onChanged(listener: () => void): () => void;
 }

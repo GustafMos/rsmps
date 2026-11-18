@@ -115,7 +115,15 @@ export interface AudioEngine {
    * granted microphone permission: before that you get generic labels ("Microphone 1"). Never throws: [] when
    * unsupported or denied. Does not include the "System default" / "All devices" entry (that is the empty id).
    */
-  listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]>;
+  listDevices(kind: 'audio-input' | 'midi-input' | 'audio-output'): Promise<AudioDevice[]>;
+  /**
+   * Play through this output device ('' = the system default). Lets the sound go to a virtual audio cable, which other
+   * programs (a call, a streaming program) then use as their microphone. Resolves false where the browser cannot choose an
+   * output (Android, Safari, Firefox without the setting) or refuses the device; the default device keeps playing then.
+   */
+  setOutputDevice(id: string): Promise<boolean>;
+  /** True when this browser can play to a chosen output device. */
+  canChooseOutput(): boolean;
   /** Call `listener` when devices are plugged or unplugged (or labels become available). Returns an unsubscribe function. */
   onDevicesChanged(listener: () => void): () => void;
   /**

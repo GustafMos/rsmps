@@ -5,6 +5,7 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 ## Unreleased
 
 ### Added
+- **Play to** in the transport: choose the output device the sound plays through. Pointed at a virtual audio cable (VB-Cable, BlackHole), the processed sound becomes the microphone of another program, such as a call or a stream. Chrome and Edge on a computer and the desktop app; the choice is remembered. Recipe: "Use the app as a microphone or a camera for other programs".
 - **Pitch Correct** (audio effect): tunes a voice or a single instrument to the nearest note of a scale and key, from gentle correction to the hard robotic effect (Retune 0 ms). It rebuilds the sound from pieces of the voice's own wave, so the voice keeps its character when tuned or shifted by whole semitones (no chipmunk effect); consonants and noise pass unchanged. Amount, Shift, Mix for doubling, and Low delay for singing live.
 - **The camera of the phone the app runs on.** The Webcam node has a Side setting (back / front camera) for phones and tablets; on a phone a new Webcam starts on the back camera, unmirrored, and choosing Phone Camera on the website adds a Webcam instead (Phone Camera links a second phone to a computer).
 - **Any picture into a mask input.** Dropping a picture wire (a gradient, noise, text, a depth map, a photo) on a mask input now adds an Image to Mask node in between, in one undo step: its brightness is the mask, or its alpha or one color. Mask sockets are no longer dimmed while dragging a picture wire.

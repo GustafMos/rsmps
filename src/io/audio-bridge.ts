@@ -14,7 +14,10 @@ export interface AudioBridge {
   readonly running: boolean;
   hasSignals(graph: GraphDoc, registry: Registry): boolean;
   signal(nodeId: string, name: string): number;
-  listDevices(kind: 'audio-input' | 'midi-input'): Promise<AudioDevice[]>;
+  listDevices(kind: 'audio-input' | 'midi-input' | 'audio-output'): Promise<AudioDevice[]>;
+  /** Play through this output device ('' = system default). False when the browser cannot or the device refuses. Never throws. */
+  setOutputDevice(id: string): Promise<boolean>;
+  canChooseOutput(): boolean;
   onDevicesChanged(listener: () => void): () => void;
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
   /** Feed a MediaStream (e.g. the phone's microphone) to a node's live input; null detaches. */
@@ -94,6 +97,15 @@ export function createAudioBridge(): AudioBridge {
         return [];
       }
     },
+    async setOutputDevice(id) {
+      if (!engine) return false;
+      try {
+        return await engine.setOutputDevice(id);
+      } catch {
+        return false;
+      }
+    },
+    canChooseOutput: () => guard(false, (e) => e.canChooseOutput()),
     onDevicesChanged: (l) => guard(() => undefined, (e) => e.onDevicesChanged(l)),
     sendNote: (id, n, v, on) => guard(undefined, (e) => e.sendNote(id, n, v, on)),
     setLiveStream: (id, stream) => guard(undefined, (e) => e.setLiveStream(id, stream)),
