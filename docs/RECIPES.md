@@ -147,6 +147,21 @@ app; phones and Safari cannot choose an output device. For talking live, set Pit
 2. In OBS Studio add that window as a Window Capture and press **Start Virtual Camera**.
 3. In the other program choose "OBS Virtual Camera".
 
+## Record a live take (Recorder node)
+
+To keep what you do live (a camera through effects, a performance with a MIDI controller, sliders moved by hand):
+
+1. Add a **Recorder** (category Time) where the picture you want passes: before the Output for the finished look, right after the
+   Webcam for the raw camera. It passes the picture on unchanged.
+2. Select it and press **Record**. The viewer switches to that node, playback starts, and what the viewer shows is recorded with
+   the sound that is playing (press Enable audio first for sound).
+3. Press **Stop**: the clip is saved to Media. Use it with a Media In, or export it.
+
+**While recording** decides what the clock does. **Time runs on** (the default): time keeps going until you stop, so effects keep
+changing instead of repeating every loop; the project plays with Loop off for the take. Movements that are a cycle by nature (a
+spin, a wobble) still come round. **Loop the project**: plays as usual, repeating at the project length. The clip is what the
+viewer shows, so raise the preview scale for a sharp one, and keep the window visible.
+
 ## Go live on Twitch or YouTube (desktop app)
 
 The desktop app can stream its output, with the sound, straight to a streaming service. No OBS.

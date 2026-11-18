@@ -7,6 +7,7 @@ import { createStore, type Store } from './createStore';
 import { MidiController } from './midi';
 import { OutputController } from './output';
 import { StreamController } from './stream';
+import { RecorderController } from './recorder';
 import { REACT_FEATURES, reactPatch, reactionOf, soundSources, stopReacting, type ReactFeature, type SoundSource } from './react';
 
 export interface LiveUi {
@@ -23,6 +24,8 @@ export class Live {
   readonly output: OutputController;
   /** Go live (desktop app): the output with its sound to a streaming service. */
   readonly stream: StreamController;
+  /** The Recorder node's Record button. */
+  readonly recorder: RecorderController;
   readonly ui: Store<LiveUi> = createStore<LiveUi>({ outputMenu: null, paramMenu: null, soundChooser: null });
 
   constructor(
@@ -32,6 +35,7 @@ export class Live {
     this.midi = new MidiController(ed, io);
     this.output = new OutputController((m, k) => ed.toast(m, k));
     this.stream = new StreamController(io.stream, (m, k) => ed.toast(m, k));
+    this.recorder = new RecorderController(ed, io);
   }
 
   /** "React to sound" on a number setting: one undo step. Asks which sound when the project has several. */

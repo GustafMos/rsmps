@@ -31,6 +31,7 @@ import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
 import { PhoneMotionPanel } from './PhoneMotionPanel';
 import { LiveRecordPanel } from './LiveRecordPanel';
+import { RecorderPanel } from './RecorderPanel';
 import { isLivePictureType } from '../../engine/lib/live-source';
 import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
@@ -221,6 +222,7 @@ function NodePanel({ id }: { id: string }) {
       {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
       {node.type === 'phone-motion' && !missing.length && <PhoneMotionPanel node={node} />}
       {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}
+      {node.type === 'recorder' && <RecorderPanel fullId={fullId} params={node.params} />}
       {def.playable && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Keyboard</div>

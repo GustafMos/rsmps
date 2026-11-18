@@ -1100,7 +1100,9 @@ export class Engine {
         get frame() { used.time = true; return scope.frame; },
         get fps() { return project.fps; },
         get duration() { used.time = true; return project.duration; },
-        get phase() { used.time = true; return (((scope.frame % totalFrames) + totalFrames) % totalFrames) / totalFrames; },
+        // Loop on: 0..1 over the project, wrapping. Loop off: the same over the project, and it runs on past 1 when time runs on past the
+        // end (the player's "run on" mode for live recording), so nothing jumps back and stepped randomness keeps finding new values.
+        get phase() { used.time = true; return project.loop || scope.frame < 0 ? (((scope.frame % totalFrames) + totalFrames) % totalFrames) / totalFrames : scope.frame / totalFrames; },
         get loop() { used.time = true; return project.loop; },
       };
       const itemInfo = {

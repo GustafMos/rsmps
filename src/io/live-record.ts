@@ -9,7 +9,7 @@
  * `LiveRecordController` is what the app uses (`io.liveRecorder`): one recording at a time, and the finished clip goes into the
  * Media library through the ordinary import path (`library.add`).
  */
-import { BufferTarget, Mp4OutputFormat, Output, Quality, VideoSample, VideoSampleSource, WebMOutputFormat, canEncodeVideo, type VideoCodec } from 'mediabunny';
+import { BufferTarget, MediaStreamAudioTrackSource, Mp4OutputFormat, Output, Quality, VideoSample, VideoSampleSource, WebMOutputFormat, canEncodeAudio, canEncodeVideo, type AudioCodec, type VideoCodec } from 'mediabunny';
 import type { AssetInfo, LiveSource } from '../engine/types';
 import { choosePipeline, sourceOptions } from './encode-order';
 import type { LiveRecordApi, LiveRecordFinish, LiveRecordResult, LiveRecordStart } from './api';
@@ -87,6 +87,8 @@ export function containRect(w: number, h: number, W: number, H: number): { x: nu
 export type LiveRecorderState = 'idle' | 'recording' | 'saving';
 
 export interface LiveRecording {
+  /** The clip has a sound track. */
+  hasAudio: boolean;
   blob: Blob;
   name: string;
   frames: number;
@@ -102,6 +104,13 @@ export interface LiveRecorderOptions {
   label?: string;
   /** How the node shows the picture: mirrored and / or turned clockwise in quarter turns. Read every frame. */
   orient?: () => { mirror: boolean; turns: number };
+  /**
+   * A live sound track to record with the picture (the app's sound mix), asked for once when the first picture arrives. Null or
+   * absent = picture only. The clip then has sound from that moment on, in step with the picture.
+   */
+  audio?: () => MediaStreamTrack | null;
+  /** Longest side of the clip (default 1920). */
+  maxSide?: number;
 }
 
 interface Session {
@@ -109,6 +118,10 @@ interface Session {
   fps: number;
   label: string;
   orient: () => { mirror: boolean; turns: number };
+  audio: (() => MediaStreamTrack | null) | null;
+  maxSide: number;
+  /** True when the clip got a sound track. */
+  hasAudio: boolean;
   started: Date;
   timer: ReturnType<typeof setInterval> | null;
   busy: boolean;
@@ -173,6 +186,9 @@ export class LiveRecorder {
       fps,
       label: opts.label ?? 'Live',
       orient: opts.orient ?? (() => ({ mirror: false, turns: 0 })),
+      audio: opts.audio ?? null,
+      maxSide: opts.maxSide ?? MAX_SIDE,
+      hasAudio: false,
       started: new Date(),
       timer: null,
       busy: false,
@@ -279,7 +295,7 @@ export class LiveRecorder {
 
   /** Pick the codec and frame order for this size (measured like an export does), then open the file. */
   private async setup(s: Session, srcW: number, srcH: number): Promise<void> {
-    const { width, height } = recordSize(srcW, srcH);
+    const { width, height } = recordSize(srcW, srcH, s.maxSide);
     const fps = s.fps;
     const bitrate = recordBitrate(width, height, fps);
     const quality = new Quality({ bitrate });
@@ -318,6 +334,29 @@ export class LiveRecorder {
       },
     });
     output.addVideoTrack(source, { frameRate: fps });
+    // Sound, when the owner has a live track for it: AAC in MP4 and Opus in WebM where the browser can encode them (Opus in MP4 as
+    // the fallback). A track that cannot be encoded is left out with a warning; the picture is still recorded.
+    const track = s.audio?.() ?? null;
+    if (track && track.readyState === 'live') {
+      const st = track.getSettings?.() ?? {};
+      const cfg = { numberOfChannels: Math.min(2, st.channelCount ?? 2), sampleRate: st.sampleRate ?? 48000, bitrate: 192_000 };
+      let codec: AudioCodec | null = null;
+      for (const c of (chosen.webm ? ['opus'] : ['aac', 'opus']) as AudioCodec[]) {
+        if (await canEncodeAudio(c, cfg).catch(() => false)) {
+          codec = c;
+          break;
+        }
+      }
+      if (codec) {
+        const audio = new MediaStreamAudioTrackSource(track as MediaStreamAudioTrack, { codec, bitrate: cfg.bitrate });
+        // a sound encoder that breaks mid-take ends the recording the way a picture error does: what was recorded is still saved
+        void audio.errorPromise.catch((err) => {
+          if (this.s === s && !s.stopping) this.onAutoStop?.('error', asError(err));
+        });
+        output.addAudioTrack(audio);
+        s.hasAudio = true;
+      } else console.warn('This browser cannot encode the sound of a recording: the clip has the picture only.');
+    }
     await output.start();
     s.canvas = canvas;
     s.ctx = ctx;
@@ -346,6 +385,7 @@ export class LiveRecorder {
       if (!buffer) throw new Error('The recording could not be written.');
       const ext = s.webm ? 'webm' : 'mp4';
       return {
+        hasAudio: s.hasAudio,
         blob: new Blob([buffer], { type: s.webm ? 'video/webm' : 'video/mp4' }),
         name: takeFileName(s.label, s.started, ext),
         frames: s.frames,

@@ -122,6 +122,11 @@ export interface Player {
   /** Proxy policy: 'auto' lowers resolution while playing to hold the project fps; a number forces it. */
   setProxy(mode: 'auto' | number): void;
   /**
+   * Run on, for live recording: time keeps counting past the project length (no wrap, no stop) and the graph is evaluated with Loop
+   * off, so effects keep evolving instead of repeating every loop. Off returns the playhead inside the project.
+   */
+  setRunOn(on: boolean): void;
+  /**
    * "Full-resolution frame": render the CURRENT frame once at final quality and proxy 1 (the Output's pixel-size grid when it has one),
    * whatever the playback proxy or a forced proxy says, and keep it on screen until the frame, the graph or the view changes or playback
    * starts (then the normal preview resumes). Pauses playback first. Nothing happens (returns false) when there is nothing to show, while
