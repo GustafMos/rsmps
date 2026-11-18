@@ -50,6 +50,7 @@ class WebAudioEngine implements AudioEngine {
   private transport: TransportState = { playing: false, seconds: 0, duration: 0, loop: false };
   private volume = 1;
   private sinkId = '';
+  private tap: MediaStreamAudioDestinationNode | null = null;
   private meters = new Map<string, [number, number]>();
   private signals = new Map<string, number>();
   private recState: RecordingState = { armed: false, recording: false, phase: 'idle', seconds: 0, countIn: 0, level: [0, 0], nodeId: null, error: null };
@@ -138,6 +139,15 @@ class WebAudioEngine implements AudioEngine {
   setVolume(volume: number): void {
     this.volume = Math.max(0, volume);
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.01);
+  }
+
+  outputStream(): MediaStream | null {
+    if (!this.ctx || !this.master) return null;
+    if (!this.tap) {
+      this.tap = this.ctx.createMediaStreamDestination();
+      this.master.connect(this.tap);
+    }
+    return this.tap.stream;
   }
 
   canChooseOutput(): boolean {

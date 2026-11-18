@@ -251,6 +251,14 @@ export const createIo: CreateIo = async () => {
     liveRecorder,
     addons: new AddonsImpl(desktop),
     capabilities: () => new Set([...(phone.available ? (['local-server'] as const) : []), ...(desktop ? (['desktop'] as const) : [])]),
+    stream: {
+      supported: !!desktop,
+      info: () => (desktop ? desktop.liveInfo() : Promise.resolve({ available: false, services: [], current: null, last: null })),
+      start: (req) => (desktop ? desktop.liveStart(req) : Promise.reject(new Error('Going live needs the desktop app.'))),
+      chunk: (id, bytes) => (desktop ? desktop.liveChunk(id, bytes) : Promise.reject(new Error('Going live needs the desktop app.'))),
+      stop: (id) => (desktop ? desktop.liveStop(id) : Promise.resolve({ available: false, services: [], current: null, last: null })),
+      audioStream: () => (audio.running ? audio.outputStream() : null),
+    },
     devices: {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),
       setAudioOutput: (id) => audio.setOutputDevice(id),

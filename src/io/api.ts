@@ -351,6 +351,18 @@ export interface AudioApi {
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
 }
 
+/** The main-process half of Go live (desktop/addons/live.mjs) plus the sound mix to record. The recording itself is made by the UI. */
+export interface StreamApi {
+  /** False in the web version: a web page cannot open the connection streaming services need. */
+  readonly supported: boolean;
+  info(): Promise<import('./desktop').LiveInfo>;
+  start(req: import('./desktop').LiveStartRequest): Promise<{ id: string; encoder: string; secure: boolean }>;
+  chunk(id: string, bytes: ArrayBuffer | ArrayBufferView): Promise<void>;
+  stop(id?: string): Promise<import('./desktop').LiveInfo>;
+  /** The sound mix as a live stream, or null when no sound is running (the stream then gets a silent track). */
+  audioStream(): MediaStream | null;
+}
+
 export interface DeviceApi {
   list(kind: 'audio-input' | 'midi-input' | 'video-input' | 'audio-output'): Promise<AudioDevice[]>;
   /**
@@ -730,6 +742,8 @@ export interface Io {
   audio: AudioApi;
   /** Hardware lists. Camera names appear after the user granted camera permission (before that: "Camera 1"…). */
   devices: DeviceApi;
+  /** Go live: send the output to a streaming service through the desktop app's FFmpeg. `supported` is false in the web version. */
+  stream: StreamApi;
   /** Phone as a camera through a QR code (LAN mode only). */
   phone: PhoneApi;
   /** Record a live picture input into a clip in the Media library (the Record button on Webcam, Phone Camera and URL / Stream). */

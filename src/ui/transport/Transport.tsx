@@ -12,6 +12,7 @@ import { useKeyboardTarget } from '../playKeys';
 import { RecordButton } from '../timeline/RecordButton';
 import { RenderPause } from './RenderPause';
 import { AudioOutputSelect } from './AudioOutputSelect';
+import { GoLiveButton } from '../stream/GoLiveDialog';
 import '../palette/studio.css';
 import './transport.css';
 
@@ -94,6 +95,7 @@ export function Transport() {
           </>
         )}
       </div>
+      <GoLiveButton />
       <ProcessesButton />
       <MemoryMeter />
     </footer>

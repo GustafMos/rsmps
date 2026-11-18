@@ -41,3 +41,8 @@
 
 /* where the sound plays: narrow, the device name is in the tooltip-free dropdown */
 .rs-tp__out { max-width: 150px; }
+
+/* on air */
+.rs-tp__live { color: #fff; background: #c8102e; border-color: #c8102e; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rs-tp__live:hover { background: #a50d26; }
+.rs-tp__livedot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #fff; margin-right: 6px; }

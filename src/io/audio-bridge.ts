@@ -18,6 +18,8 @@ export interface AudioBridge {
   /** Play through this output device ('' = system default). False when the browser cannot or the device refuses. Never throws. */
   setOutputDevice(id: string): Promise<boolean>;
   canChooseOutput(): boolean;
+  /** The sound mix as a live stream (null until audio runs), for streaming it with the picture. */
+  outputStream(): MediaStream | null;
   onDevicesChanged(listener: () => void): () => void;
   sendNote(nodeId: string, note: number, velocity: number, on: boolean): void;
   /** Feed a MediaStream (e.g. the phone's microphone) to a node's live input; null detaches. */
@@ -106,6 +108,7 @@ export function createAudioBridge(): AudioBridge {
       }
     },
     canChooseOutput: () => guard(false, (e) => e.canChooseOutput()),
+    outputStream: () => guard(null, (e) => e.outputStream()),
     onDevicesChanged: (l) => guard(() => undefined, (e) => e.onDevicesChanged(l)),
     sendNote: (id, n, v, on) => guard(undefined, (e) => e.sendNote(id, n, v, on)),
     setLiveStream: (id, stream) => guard(undefined, (e) => e.setLiveStream(id, stream)),

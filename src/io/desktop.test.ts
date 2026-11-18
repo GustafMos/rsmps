@@ -159,3 +159,31 @@ describe('files the app writes itself, and FFmpeg conversions that return a file
     await expect(web.convertStill('dpx', new Uint8Array(4), 1, 1)).rejects.toThrow(/desktop app/);
   });
 });
+
+describe('go live: what the main process reports', () => {
+  it('parses the state and tolerates anything else', async () => {
+    const { parseLiveInfo } = await import('./desktop');
+    const info = parseLiveInfo({ available: true, services: [{ id: 'twitch', label: 'Twitch' }, { nope: 1 }], current: { id: 'a', live: true, seconds: 12.5, wallSeconds: 13, fps: 30, kbps: 2900.4, speed: 1.01, error: null, settings: { key: 'never read' } }, last: null });
+    expect(info).toEqual({ available: true, services: [{ id: 'twitch', label: 'Twitch' }], current: { id: 'a', live: true, seconds: 12.5, wallSeconds: 13, fps: 30, kbps: 2900.4, speed: 1.01, error: null }, last: null });
+    expect(parseLiveInfo(null)).toEqual({ available: false, services: [], current: null, last: null });
+    expect(parseLiveInfo({ last: { id: 'b', error: 'Could not reach the streaming server.' } }).last).toMatchObject({ live: false, error: 'Could not reach the streaming server.' });
+  });
+  it('the client posts the pieces to the live endpoints and passes the reason of a failure on', async () => {
+    const { DesktopClient } = await import('./desktop');
+    const calls: { url: string; method?: string }[] = [];
+    const client = new DesktopClient(
+      async (url, init) => {
+        calls.push({ url, method: init?.method });
+        if (url.includes('live/chunk')) return new Response(JSON.stringify({ error: 'The stream key may be wrong.' }), { status: 410 });
+        if (url.includes('live/start')) return new Response(JSON.stringify({ id: 'S1', encoder: 'libx264', secure: true }), { status: 200 });
+        return new Response(JSON.stringify({ available: true, services: [], current: null, last: null }), { status: 200 });
+      },
+      'app://rsmps/__rsmps/',
+      () => true,
+    );
+    expect(await client.liveStart({ service: 'twitch', key: 'k', width: 1280, height: 720, fps: 30, videoKbps: 3000, hasAudio: true })).toEqual({ id: 'S1', encoder: 'libx264', secure: true });
+    await expect(client.liveChunk('S1', new Uint8Array([1, 2]))).rejects.toThrow(/stream key may be wrong/);
+    await client.liveStop('S1');
+    expect(calls.map((c) => `${c.method} ${c.url.replace('app://rsmps/__rsmps/', '')}`)).toEqual(['POST live/start', 'POST live/chunk?id=S1', 'POST live/stop?id=S1']);
+  });
+});

@@ -6,7 +6,7 @@ import { createStore } from './createStore';
 import type { GraphDoc } from '../../engine/types';
 import type { ShareReport } from '../../io/share';
 
-export type FeatureDialog = 'share' | 'queue' | 'templates' | 'stopmotion' | null;
+export type FeatureDialog = 'share' | 'queue' | 'templates' | 'stopmotion' | 'golive' | null;
 
 export interface IncomingShare {
   /** A decoded and sanitized shared graph waiting for the user's yes. */

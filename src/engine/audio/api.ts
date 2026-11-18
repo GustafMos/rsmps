@@ -124,6 +124,11 @@ export interface AudioEngine {
   setOutputDevice(id: string): Promise<boolean>;
   /** True when this browser can play to a chosen output device. */
   canChooseOutput(): boolean;
+  /**
+   * The sound mix as a live MediaStream (what the speakers get, after the volume), for recording or streaming it together
+   * with the picture. Null until the engine has started. The same stream is returned every time.
+   */
+  outputStream(): MediaStream | null;
   /** Call `listener` when devices are plugged or unplugged (or labels become available). Returns an unsubscribe function. */
   onDevicesChanged(listener: () => void): () => void;
   /**

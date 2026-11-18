@@ -163,6 +163,7 @@ async function handleInternal(request, rel, url) {
   if (rel === '/__rsmps/addons' || rel.startsWith('/__rsmps/addons/')) return handleAddons(request, rel);
   if (rel === '/__rsmps/export/ffmpeg' || rel.startsWith('/__rsmps/export/ffmpeg/') || rel.startsWith('/__rsmps/export/file/')) return handleExport(request, rel, url);
   if (rel === '/__rsmps/splat-train' || rel.startsWith('/__rsmps/splat-train/')) return handleSplatTrain(request, rel, url);
+  if (rel === '/__rsmps/live' || rel.startsWith('/__rsmps/live/')) return handleLive(request, rel, url);
   return new Response('Not found', { status: 404 });
 }
 
@@ -250,7 +251,9 @@ async function loadAddons() {
         return { colmap: colmap ? { path: colmap, gpu: !!cuda } : null, brush: await mgr.binary('brush') };
       },
     });
-    addons = { mgr, exporter, mod, splat, prep, bad, badCatalogue: bad && mod.parseCatalogue(bad.catalogue, { allowLocalHttp: true }), platformKey };
+    // Go live: the page's recording of its output, re-encoded by FFmpeg and sent to an RTMP address (desktop/addons/live.mjs)
+    const live = mod.createLiveService({ binary: () => mgr.binary('ffmpeg') });
+    addons = { mgr, exporter, live, mod, splat, prep, bad, badCatalogue: bad && mod.parseCatalogue(bad.catalogue, { allowLocalHttp: true }), platformKey };
     return addons;
   } catch (err) {
     addons = null;
@@ -369,6 +372,42 @@ async function handleExport(request, rel, url) {
     return new Response('Not found', { status: 404 });
   } catch (err) {
     if (err instanceof mod.ExportError) return json({ error: err.message }, err.status);
+    return json({ error: String(err?.message ?? err) }, 500);
+  }
+}
+
+// ---- Go live (desktop/addons/live.mjs) --------------------------------------------------------------------------------------
+
+const LIVE_MAX_CHUNK = 64 * 1024 * 1024;
+
+/**
+ * Same origin checks as every /__rsmps endpoint (handleInternal).
+ *   GET  live            what is possible here and what is running
+ *   POST live/start      { service, key, url, width, height, fps, videoKbps, audioKbps, hasAudio }
+ *   POST live/chunk?id=  the next piece of the page's recording (bytes)
+ *   POST live/stop?id=
+ */
+async function handleLive(request, rel, url) {
+  if (!addons) return json({ error: 'Add-ons are not available in this build.' }, 503);
+  const { mgr, live, mod } = addons;
+  try {
+    const action = rel.split('/')[3] ?? '';
+    if (action === '') {
+      if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
+      const b = await mgr.get('ffmpeg');
+      return json({ available: !!b?.installed, services: live.services(), ...live.status() });
+    }
+    if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+    if (action === 'start') return json(await live.start(await readJson(request)));
+    if (action === 'chunk') {
+      const body = await readBody(request);
+      if (body.byteLength > LIVE_MAX_CHUNK) return json({ error: 'That piece is too large.' }, 413);
+      return json(await live.chunk(String(url.searchParams.get('id') ?? ''), body));
+    }
+    if (action === 'stop') return json(await live.stop(url.searchParams.get('id') ?? undefined));
+    return new Response('Not found', { status: 404 });
+  } catch (err) {
+    if (err instanceof mod.LiveError) return json({ error: err.message }, err.status);
     return json({ error: String(err?.message ?? err) }, 500);
   }
 }
@@ -843,6 +882,7 @@ if (gotLock) {
   app.on('before-quit', () => {
     void phone?.stop();
     void addons?.exporter.disposeAll();
+    addons?.live?.dispose(); // never leave an FFmpeg streaming after the app is gone
     void addons?.splat?.disposeAll(); // kills a running COLMAP / Brush and deletes its work folder
   });
   app.on('window-all-closed', () => {
