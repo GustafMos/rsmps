@@ -35,6 +35,7 @@ import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/
 import { rateForFirstVideo } from '../lib/firstVideoRate';
 import { soundToWire } from '../lib/exportSound';
 import { makeWire, wireError } from '../lib/wireConvert';
+import { cameraNodeFor, isHandheld } from '../lib/handheld';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -706,6 +707,16 @@ export class Editor {
 
   /** Add a node (optionally wired). Returns its id. */
   addNodeAt(type: string, at: { x: number; y: number }, link?: AddMenuRequest['link'], params?: Record<string, unknown>): string | null {
+    // On a phone or tablet the camera is the device itself: the Webcam starts on the back camera, and Phone Camera (a second
+    // phone streamed to a computer) becomes the Webcam where the phone link does not exist (lib/handheld.ts).
+    if ((type === 'camera-in' || type === 'phone-camera') && isHandheld()) {
+      const cam = cameraNodeFor(type, true, this.io.capabilities().has('local-server'), params);
+      if (this.registry.get(cam.type)) {
+        if (cam.swapped) this.toast("Added a Webcam: on this device it opens the phone's own camera (back camera; change Side for the front one). Phone Camera links a second phone to a computer.", 'info');
+        type = cam.type;
+        params = cam.params;
+      }
+    }
     const def = this.registry.get(type);
     if (!def) return null;
     let id = '';

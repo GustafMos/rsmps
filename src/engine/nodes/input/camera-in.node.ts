@@ -1,5 +1,5 @@
 import { defineNode } from '../../define';
-import { cameraSource } from '../../lib/live-source';
+import { cameraSource, liveOrientOfNode } from '../../lib/live-source';
 
 /**
  * Live webcam. The host opens the camera lazily, shares one stream between nodes using the same device and
@@ -11,12 +11,24 @@ export default defineNode({
   id: 'camera-in',
   title: 'Webcam',
   category: 'input',
-  description: 'Live picture from a webcam or other capture device (not the 3D camera; see 3D Camera). Needs camera permission. Live preview only: to export, record it first.',
-  keywords: ['webcam', 'camera', 'live', 'video', 'phone', 'camera input', 'capture', 'usb camera'],
+  description: 'Live picture from a webcam, the camera of this phone or tablet, or another capture device (not the 3D camera; see 3D Camera). Needs camera permission. Live preview only: to export, record it first.',
+  keywords: ['webcam', 'camera', 'live', 'video', 'phone', 'phone camera', 'back camera', 'front camera', 'selfie', 'this device', 'tablet', 'camera input', 'capture', 'usb camera'],
   inputs: {},
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     device: { type: 'device', device: 'video-input', default: '', label: 'Camera' },
+    facing: {
+      type: 'enum',
+      default: 'auto',
+      label: 'Side',
+      options: [
+        { value: 'auto', label: 'Any' },
+        { value: 'back', label: 'Back camera' },
+        { value: 'front', label: 'Front camera' },
+      ],
+      hint: 'On a phone or tablet: which of its own cameras to open. Used while Camera is on the default; picking a camera by name overrides it. The back camera is never mirrored.',
+      visibleIf: (p) => !p.device,
+    },
     resolution: {
       type: 'enum',
       default: 'auto',
@@ -32,7 +44,7 @@ export default defineNode({
     freeze: { type: 'bool', default: false, label: 'Freeze', hint: 'Hold the current frame.' },
     liveTick: { type: 'string', default: '', label: 'Live tick', visibleIf: () => false },
   },
-  summary: (p) => (p.freeze ? 'frozen' : p.device ? 'camera' : 'default camera'),
+  summary: (p) => (p.freeze ? 'frozen' : p.device ? 'camera' : p.facing === 'back' ? 'back camera' : p.facing === 'front' ? 'front camera' : 'default camera'),
   async render(ctx) {
     void ctx.time.seconds; // live: re-render every frame
     const host = ctx.host;
@@ -42,7 +54,7 @@ export default defineNode({
     const frame = await host.liveFrame(source, maxSide);
     if (!frame) throw new Error('Waiting for the camera…');
     const unit = ctx.unitFor(frame.width, frame.height);
-    if (!ctx.params.mirror) return { image: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit } };
+    if (!liveOrientOfNode('camera-in', ctx.params).mirror) return { image: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit } };
     const image = ctx.gpu.pass({
       label: 'camera-mirror',
       size: { width: frame.width, height: frame.height, unit },

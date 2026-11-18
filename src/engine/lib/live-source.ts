@@ -26,7 +26,10 @@ type Params = Readonly<Record<string, unknown>>;
 /** Webcam: always a source (an empty device is the default camera). */
 export function cameraSource(p: Params): LiveSourceRequest {
   const size = CAMERA_SIZES[String(p.resolution ?? 'auto')];
-  return { kind: 'camera', deviceId: String(p.device ?? ''), ...size, freeze: !!p.freeze };
+  const deviceId = String(p.device ?? '');
+  // "Side" picks one of a phone's own cameras; a camera chosen by name wins over it.
+  const facing = deviceId ? undefined : p.facing === 'back' ? ('environment' as const) : p.facing === 'front' ? ('user' as const) : undefined;
+  return { kind: 'camera', deviceId, ...size, ...(facing ? { facing } : {}), freeze: !!p.freeze };
 }
 
 /** Phone Camera: null until a phone was linked. */
@@ -52,7 +55,8 @@ export function liveSourceOfNode(type: string, p: Params): LiveSourceRequest | n
 
 /** How the node shows the incoming picture: mirrored and / or turned clockwise in quarter turns. A recording applies the same. */
 export function liveOrientOfNode(type: string, p: Params): { mirror: boolean; turns: number } {
-  if (type === 'camera-in') return { mirror: !!p.mirror, turns: 0 };
+  // a back camera looks at the world, not at you: never mirrored
+  if (type === 'camera-in') return { mirror: !!p.mirror && !(p.facing === 'back' && !p.device), turns: 0 };
   if (type === 'phone-camera') {
     const turns = p.rotate === 'auto' || p.rotate === undefined ? 0 : Math.round(Number(p.rotate) / 90);
     return { mirror: !!p.mirror, turns: Number.isFinite(turns) ? ((turns % 4) + 4) % 4 : 0 };

@@ -8,7 +8,7 @@ const COPY: Record<Capability, { label: string; command: string; explain: (where
     command: 'npm run dev:lan',
     explain: (where) => {
       if (where === 'packaged') return 'The phone link is not available in this build of the app. Restart the app; if it is still missing, please report it.';
-      if (where === 'web') return 'This is the web version. This node needs the desktop app (which starts its phone link when you ask) or a copy running on your own computer with its local server: npm run dev:lan.';
+      if (where === 'web') return 'This is the web version. This node needs the desktop app (which starts its phone link when you ask) or a copy running on your own computer with its local server: npm run dev:lan. To use the camera of the phone or tablet this page is open on, add a Webcam node instead.';
       return 'The app is running without its local server. This node needs it: start the app with npm run dev:lan, or use the desktop app.';
     },
   },
