@@ -25,7 +25,7 @@ import type { AssetInfo, Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, Ou
 import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
 import { pushBelow, separateMoved } from '../lib/separate';
-import { inputType, outputType } from '../../engine/graph';
+import { inputType, outputType, upstream } from '../../engine/graph';
 import { createScanProject } from '../scan/session';
 import { buildLayeredScanGraph, guideRemovalStep } from '../scan/scanGraph';
 import { reconcileMediaEdits, type DescribeSource } from '../../engine/lib/media-edit-graph';
@@ -33,6 +33,7 @@ import { clipMap } from '../../engine/lib/media-time';
 import { DEFAULT_CLIP_SECONDS } from '../../engine/lib/media-edit';
 import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/audio/timeline';
 import { rateForFirstVideo } from '../lib/firstVideoRate';
+import { soundToWire } from '../lib/exportSound';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -733,6 +734,34 @@ export class Editor {
   }
 
   /**
+   * "Enable audio": when the picture comes from a video with sound (or a Media Timeline) and no Audio Output plays anything,
+   * add an Audio Output and wire that sound into it, so what is heard is what is exported. One undo step. Returns the new
+   * node's id, or null when nothing was needed.
+   */
+  ensureAudioOutput(): string | null {
+    const g0 = this.state.graph;
+    const src = soundToWire(g0, this.registry, (id) => this.io.library.assetInfo(id), this.state.item);
+    const out = this.registry.list().find((d) => d.category === 'output' && !!d.audio);
+    if (!src || !out || !this.level.nodes.some((n) => n.id === src.node.id)) return null; // the source sits inside a group: leave the graph alone
+    const inPort = Object.keys(out.inputs).find((k) => (out.inputs as InputSchema)[k].type === 'audio');
+    if (!inPort) return null;
+    let id = '';
+    this.editLevel((g) => {
+      const srcNode = g.nodes.find((n) => n.id === src.node.id)!;
+      // under the picture output this sound belongs to, else to the right of the source
+      const picture = g.nodes.find((n) => this.registry.get(n.type)?.category === 'output' && upstream(g, n.id).has(srcNode.id));
+      const at = picture ? { x: picture.x, y: picture.y + layoutFor(g, picture, defOf(this.registry, picture)).height + 40 } : { x: srcNode.x + layoutFor(g, srcNode, defOf(this.registry, srcNode)).width + 60, y: srcNode.y + 200 };
+      const added = addNode(g, this.registry, out.id, at);
+      if (connectError(added.graph, this.registry, { node: srcNode.id, port: src.port }, { node: added.node.id, port: inPort })) return g;
+      id = added.node.id;
+      return connect(added.graph, this.registry, { node: srcNode.id, port: src.port }, { node: added.node.id, port: inPort });
+    });
+    if (!id) return null;
+    this.toast('Audio Output added and wired: this is the sound you hear and the sound that is exported.', 'info');
+    return id;
+  }
+
+  /**
    * Insert a freshly added node into the chain after `srcId`: wire the source's first output into the new node's
    * first compatible input, then re-route every wire that left that output so it comes from the new node instead
    * (when the types fit), keeping layer order on multi inputs. Downstream nodes are pushed right when needed.
@@ -748,9 +777,12 @@ export class Editor {
     const newW = layoutFor(g, nn, ndef).width;
     const move = (gr: GraphDoc, id: string, x: number, y: number): GraphDoc => ({ ...gr, nodes: gr.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)) });
     if (!srcOuts.length) return g;
-    const [outPort, outDef] = srcOuts[0];
+    // The first output the new node can take: an image effect joins the picture chain, a sound effect the sound chain
+    // (Media In has both; the picture output comes first, so "the first output" alone left sound effects unwired).
+    const accepting = (type: string) => inputsAccepting(ndef, type as never).find((p) => p in ndef.inputs);
+    const [outPort, outDef] = srcOuts.find(([, o]) => accepting(o.type)) ?? srcOuts[0];
     const from = { node: srcId, port: outPort };
-    const inPort = inputsAccepting(ndef, outDef.type).find((p) => p in ndef.inputs);
+    const inPort = accepting(outDef.type);
     if (!inPort) return move(g, newId, src.x, src.y + layoutFor(g, src, sdef).height + 40); // a generator: just sits next to the selection
     const downstream = g.edges.filter((e) => e.from.node === srcId && e.from.port === outPort);
     let next = connect(g, this.registry, from, { node: newId, port: inPort });

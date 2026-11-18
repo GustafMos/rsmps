@@ -76,7 +76,13 @@ function TransportSheet({ onClose }: { onClose: () => void }) {
         <RecordButton compact />
         {(hasAudio || audio.needed) &&
           (!audio.running ? (
-            <button className="rs-btn rs-btn--primary" onClick={() => io.player.enableAudio().catch((e) => ed.toast(`Audio: ${e instanceof Error ? e.message : String(e)}`, 'error'))}>
+            <button
+              className="rs-btn rs-btn--primary"
+              onClick={() => {
+                ed.ensureAudioOutput(); // a clip with sound and no Audio Output yet: add one, wired
+                io.player.enableAudio().catch((e) => ed.toast(`Audio: ${e instanceof Error ? e.message : String(e)}`, 'error'));
+              }}
+            >
               <Icon name="volume" /> Enable audio{audio.micNodes > 0 ? ' + mic' : ''}
             </button>
           ) : (
