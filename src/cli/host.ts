@@ -226,7 +226,7 @@ export class NodeHost implements Host {
     }
   }
 
-  assetAudio(assetId: string): Promise<{ sampleRate: number; channels: Float32Array[] } | null> {
+  assetAudio(assetId: string): Promise<{ sampleRate: number; channels: Float32Array[]; video?: { duration: number; fps: number } } | null> {
     let p = this.audio.get(assetId);
     if (!p) {
       p = this.decodeAudio(assetId);
@@ -250,7 +250,8 @@ export class NodeHost implements Host {
       l[i] = view[i * 2];
       r[i] = view[i * 2 + 1];
     }
-    return { sampleRate, channels: [l, r] };
+    // Like the app: a video's sound carries the clip's length and frame rate, so Media In maps trim and speed exactly as the picture does.
+    return { sampleRate, channels: [l, r], ...(info.kind === 'video' && info.duration > 0 ? { video: { duration: info.duration, fps: info.fps || 24 } } : {}) };
   }
 
   close(): void {

@@ -5,11 +5,17 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 ## Unreleased
 
 ### Added
+- **The project takes the frame rate of its first video.** Adding the first video to a project that still has the default 24 fps sets the project to the clip's rate (25 for a 25 fps clip), in the same undo step. A rate you set yourself is never changed.
 - **Record on live picture inputs.** Webcam, Phone Camera and URL / Stream nodes have a Record button: the incoming picture is saved as a clip in Media (picture only, up to 30 minutes).
 - **Auto bitrate** on the Output for the built-in MP4 and WebM codecs: the first frames of an export are measured and the bitrate is set to what the picture needs. On by default; projects with a bitrate set by hand keep it.
 - **Frames** field next to Length in the transport: set the project length in frames.
 
 ### Fixed
+- **Ticking instead of sound** from videos recorded with uncompressed (Linear PCM) sound by phone apps such as Blackmagic Camera, in the preview and in every export. These files store the sound one recorded buffer per table entry; only one sample of each buffer was read. PCM sound in MP4 and MOV is now read from the file's own tables, which also fixes packed 24-bit sound that a file labels as 32-bit.
+- Sound in MP4 and M4A exports is handed to the browser's audio encoder in whole AAC frames. In browsers whose encoder pads each call with silence, the uneven pieces sent before were heard as a regular ticking.
+- Exported sound of a video was silent (and waveforms and Beat Detect went empty) after the clip had been played in the preview, when the file's sample rate equals the sound card's (usually 48 kHz): the player handed the library's decoded sound to the audio thread instead of a copy.
+- Sound of 5.1 and other surround files is folded down to stereo with the centre and surround channels; before only front left and right were used, so speech was missing.
+- Command line: with several batch items every exported video got the sound of the first item; a trimmed or speed-changed Media In now maps its sound exactly as the app does.
 - H.264 exports from Firefox no longer start clean and turn blocky after about two seconds on busy pictures (grain, dither, analog noise).
 - The "Use this value" button of the large-number warning did nothing in some fields.
 - The memory bar froze while rendering was off.

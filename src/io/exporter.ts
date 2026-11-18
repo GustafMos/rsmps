@@ -30,7 +30,7 @@ import { batchCount, enabledOutputs, outputNodes, upstream } from '../engine/gra
 import type { GraphDoc, ImageValue, MaskValue, NodeInstance } from '../engine/types';
 import type { ExportRequest, ExportedFile, Exporter } from './api';
 import type { AudioBridge } from './audio-bridge';
-import { fitAudio } from './audio-util';
+import { encoderChunkFrames, fitAudio } from './audio-util';
 import { conformImage, enlargeNearest, type PassFormat } from './frame-gpu';
 import { effectiveConform, isCustomFrame, pixelPlan, readFrameParams, resolveFrame } from './frame';
 import { encodeWav } from './wav';
@@ -499,7 +499,7 @@ export class ExporterImpl implements Exporter {
     output.addAudioTrack(source);
     await output.start();
     const total = pcm.channels[0].length;
-    const chunk = Math.round(pcm.sampleRate / 2);
+    const chunk = encoderChunkFrames(codec, pcm.sampleRate); // whole codec frames per call: see encoderChunkFrames
     for (let at = 0; at < total; at += chunk) {
       const n = Math.min(chunk, total - at);
       const data = new Float32Array(n * pcm.channels.length);
@@ -1225,7 +1225,8 @@ export class ExporterImpl implements Exporter {
     let audioSource: AudioSampleSource | null = null;
     let pcm: PcmAudio | null = null;
     let audioPos = 0;
-    const audioChunk = () => Math.max(1024, Math.round((pcm?.sampleRate ?? 48000) / 10));
+    let audioCodec: AudioCodec = 'aac';
+    const audioChunk = () => encoderChunkFrames(audioCodec, pcm?.sampleRate ?? 48000); // whole codec frames per call
     let chosen: { codec: VideoCodec; webm: boolean } | null = null;
     let outW = 0;
     let outH = 0;
@@ -1316,6 +1317,7 @@ export class ExporterImpl implements Exporter {
               const codecs: AudioCodec[] = chosen.webm ? ['opus', 'vorbis'] : ['aac', 'opus', 'mp3'];
               const codec = await getFirstEncodableAudioCodec(codecs, { numberOfChannels: pcm.channels.length, sampleRate: pcm.sampleRate }).catch(() => null);
               if (codec) {
+                audioCodec = codec;
                 audioSource = new AudioSampleSource({ codec, quality: new Quality({ bitrate: 160_000 }) });
                 output.addAudioTrack(audioSource);
               } else {

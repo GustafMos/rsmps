@@ -32,6 +32,7 @@ import { reconcileMediaEdits, type DescribeSource } from '../../engine/lib/media
 import { clipMap } from '../../engine/lib/media-time';
 import { DEFAULT_CLIP_SECONDS } from '../../engine/lib/media-edit';
 import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/audio/timeline';
+import { rateForFirstVideo } from '../lib/firstVideoRate';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -369,6 +370,12 @@ export class Editor {
   commit(next: GraphDoc, key?: string): void {
     const s = this.state;
     if (next === s.graph) return;
+    // The first video in a project that still has the default frame rate: the project takes the clip's rate (same undo step).
+    const clipRate = rateForFirstVideo(s.graph, next, (id) => this.io.library.assetInfo(id) ?? undefined);
+    if (clipRate) {
+      next = { ...next, project: { ...next.project, fps: clipRate } };
+      this.toast(`Project frame rate set to ${clipRate} fps to match the clip.`, 'info');
+    }
     // Media Timeline bookkeeping: new / removed / reordered wires update its edit, and a node that sets the project length sets it.
     next = withEffectiveDuration(reconcileMediaEdits(s.graph, next, this.describeSource), this.registry);
     if (next === s.graph) return;

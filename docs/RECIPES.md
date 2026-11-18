@@ -106,6 +106,24 @@ solid lines) and Upscale (edge-sharpened 2x). Put the **Scan** frames in through
 Only the clips visible at the current frame are evaluated, so a long edit of heavy sources costs the same as one clip.
 Fit decides how clips of another shape sit in the frame (Fit inside, Fill, Stretch); the Background color shows where no clip is.
 
+## Picture from one video, sound from another
+
+Two Media In nodes: one supplies the picture, the other only its sound.
+
+```
+Media In (video A).Image ─► (effects) ─► Output
+Media In (video B).Sound ─► (Volume, Reverb ...) ─► Audio Output
+```
+
+1. Add a **Media In** with video A and wire its **Image** into the Output (through any effects).
+2. Add a second **Media In** with video B. Leave its Image unconnected and wire its **Sound** into an **Audio Output**.
+3. Press play: you see A and hear B. The exported video carries B's sound; exporting the Audio Output on its own writes a
+   sound file (WAV by default).
+
+Each Media In has its own In / out trim, Start offset and Loop video, so the sound can start later or loop under a longer
+picture. Video A's own sound is not in the export: with an Audio Output in the graph, only what is wired into it is exported.
+To keep both, wire A's Sound into the same Audio Output as well (the wires are mixed).
+
 ## Weave several clips frame by frame
 
 Add a **Frame Interleave** (`frame-interleave`, category Time) and wire two or more videos into **Sources**; the wire order is the order of the sources (reorder the wires like layers). Only the one source that the current frame needs is evaluated, so the node costs one source evaluation per frame (two with Blend) and, with Blend 0 and sources of the project's size, no GPU pass at all: it hands on the picture it pulled. It has no sound: take that from one source or from a Media Timeline.

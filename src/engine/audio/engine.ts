@@ -6,7 +6,7 @@
 import type { Registry } from '../define';
 import type { GraphDoc } from '../types';
 import type { AudioAssetProvider, AudioDevice, AudioEngine, CreateAudioEngine, RecordedTake, RecordingState, TransportState } from './api';
-import { toAudioAsset } from './pcm';
+import { toAudioAsset, transferableChannels } from './pcm';
 import type { FromWorklet, ToWorklet } from './protocol';
 import { MAX_MICS, WORKLET_NAME } from './protocol';
 import { SlotAllocator } from './slots';
@@ -215,11 +215,8 @@ class WebAudioEngine implements AudioEngine {
         .then((pcm) => {
           if (!pcm || this.disposed) return;
           const a = toAudioAsset(pcm, ctx.sampleRate);
-          const mono = a.right === a.left;
-          this.post(
-            { type: 'asset', id, sampleRate: a.sampleRate, channels: mono ? [a.left] : [a.left, a.right], ...(a.video ? { video: a.video } : {}) },
-            mono ? [a.left.buffer] : [a.left.buffer, a.right.buffer],
-          );
+          const channels = transferableChannels(pcm, a); // never the provider's own arrays: a transfer would empty its cache
+          this.post({ type: 'asset', id, sampleRate: a.sampleRate, channels, ...(a.video ? { video: a.video } : {}) }, [...new Set(channels.map((c) => c.buffer as ArrayBuffer))]);
         })
         .catch((err) => console.warn('Could not load audio asset', id, err));
     }

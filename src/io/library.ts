@@ -20,6 +20,8 @@ import type { Gpu } from '../engine/gpu/gpu';
 import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
 import type { AssetProblem, LibraryAsset, MediaLibrary } from './api';
+import { mixToStereo } from './audio-util';
+import { pcmLayoutOf, readIsoPcm } from './iso-pcm';
 import { encodeWav } from './wav';
 import { idbAll, idbDelete, idbGet, idbPut } from './db';
 import type { SignalRouter } from './signals';
@@ -1232,9 +1234,21 @@ async function firstPositive(fns: (() => Promise<number | null>)[]): Promise<num
 }
 
 function audioBufferToPcm(buf: AudioBuffer): PcmAudio {
-  const channels: Float32Array[] = [];
-  for (let c = 0; c < Math.min(2, buf.numberOfChannels); c++) channels.push(new Float32Array(buf.getChannelData(c)));
+  const channels = Array.from({ length: Math.min(2, buf.numberOfChannels) }, () => new Float32Array(buf.length));
+  mixToStereo(channels, 0, Array.from({ length: buf.numberOfChannels }, (_, c) => buf.getChannelData(c))); // 5.1 and the like are folded down
   return { sampleRate: buf.sampleRate, channels };
+}
+
+/** PCM sound of an MP4 / MOV track, read by iso-pcm.ts. Null for other codecs and containers (and fragmented files). */
+async function decodeIsoPcm(blob: Blob, track: { codec: string | null; numberOfChannels: number; sampleRate: number; id: number }): Promise<PcmAudio | null> {
+  if (!pcmLayoutOf(track.codec) || !(track.sampleRate > 0)) return null;
+  const read = async (start: number, end: number) => new Uint8Array(await blob.slice(start, end).arrayBuffer());
+  const pcm = await readIsoPcm(read, blob.size, { codec: track.codec, channels: track.numberOfChannels, trackId: track.id }, MAX_AUDIO_SECONDS * track.sampleRate);
+  if (!pcm || pcm.channels[0].length === 0) return null;
+  if (pcm.channels.length <= 2) return { sampleRate: track.sampleRate, channels: pcm.channels };
+  const channels = [new Float32Array(pcm.channels[0].length), new Float32Array(pcm.channels[0].length)];
+  mixToStereo(channels, 0, pcm.channels);
+  return { sampleRate: track.sampleRate, channels };
 }
 
 /** Decode the primary audio track with mediabunny (used for video sound tracks). */
@@ -1243,6 +1257,10 @@ async function decodeTrackPcm(blob: Blob): Promise<PcmAudio | null> {
   try {
     const track = await input.getPrimaryAudioTrack();
     if (!track) return null;
+    // Uncompressed sound in MP4 / MOV is read from the file's own tables: the demuxer misreads the layout phone apps write
+    // (one entry per buffer), taking one sample out of each buffer, which is heard as ticking. See iso-pcm.ts.
+    const own = await decodeIsoPcm(blob, track).catch(() => null);
+    if (own) return own;
     const sink = new AudioBufferSink(track);
     const parts: { buffer: AudioBuffer; timestamp: number }[] = [];
     for await (const wrapped of sink.buffers(0, MAX_AUDIO_SECONDS)) parts.push(wrapped);
@@ -1257,9 +1275,12 @@ async function decodeTrackPcm(blob: Blob): Promise<PcmAudio | null> {
     const channels = Array.from({ length: nch }, () => new Float32Array(length));
     for (const { buffer, timestamp } of parts) {
       const at = Math.max(0, Math.round(timestamp * rate));
-      for (let c = 0; c < nch; c++) {
-        const src = buffer.getChannelData(Math.min(c, buffer.numberOfChannels - 1));
-        channels[c].set(src.subarray(0, Math.max(0, Math.min(src.length, length - at))), at);
+      // Packets are laid down by their own time stamps. More than two channels (5.1 ...) are folded down to stereo, centre included.
+      const src = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+      if (src.length <= 2) for (let c = 0; c < nch; c++) channels[c].set(src[Math.min(c, src.length - 1)].subarray(0, Math.max(0, Math.min(buffer.length, length - at))), at);
+      else {
+        for (let c = 0; c < nch; c++) channels[c].fill(0, at, Math.min(length, at + buffer.length)); // overlapping packets replace, like the plain copy
+        mixToStereo(channels, at, src);
       }
     }
     return { sampleRate: rate, channels };
