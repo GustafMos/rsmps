@@ -1026,9 +1026,14 @@ export class Library implements MediaLibrary {
   }
 
   /** Host.liveFrame: webcam / URL pictures (see live.ts). Throws readable errors. */
-  liveFrame(source: LiveSource, maxSide: number): Promise<Frame | null> {
-    return this.live.frame(source as LiveRequest, maxSide);
+  liveFrame(source: LiveSource, maxSide: number, at?: number): Promise<Frame | null> {
+    // asked for a time that is not the player's present: a time node (Retime's stop-motion) is holding that moment
+    const now = this.liveNow?.();
+    const hold = at !== undefined && now !== undefined ? { at, held: Math.abs(at - now) > 1e-6 } : undefined;
+    return this.live.frame(source as LiveRequest, maxSide, hold);
   }
+  /** The player's present, in project seconds. Set by createIo. */
+  liveNow: (() => number) | null = null;
 
   rasterizeText(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null {
     if (typeof OffscreenCanvas === 'undefined') return null;

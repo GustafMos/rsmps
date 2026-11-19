@@ -53,7 +53,7 @@ export default defineNode({
     const source = phoneSource(ctx.params);
     if (!source) throw new Error('Not linked to a phone yet. Use "Link a phone" in the inspector and scan the QR code.');
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
-    const frame = await host.liveFrame(source, maxSide);
+    const frame = await host.liveFrame(source, maxSide, ctx.time.seconds);
     if (!frame) throw new Error('Waiting for the phone picture…');
     const turns = ctx.params.rotate === 'auto' ? 0 : Number(ctx.params.rotate) / 90;
     const swap = turns % 2 === 1;

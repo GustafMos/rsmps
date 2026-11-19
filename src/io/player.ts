@@ -313,6 +313,15 @@ export class PlayerImpl implements Player {
     this.markChanged();
   }
 
+  /**
+   * The present, in project seconds: the time of the frame being rendered (the clock may already be a frame further on
+   * while a frame renders).
+   */
+  nowSeconds(): number {
+    const fps = this.view?.graph.project.fps ?? 0;
+    return fps > 0 ? (this.settledFrame >= 0 ? this.settledFrame : this.frame) / fps : 0;
+  }
+
   renderingSince(): number | null {
     return this.jobSince;
   }

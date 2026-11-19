@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.11.1] - 2026-11-19
+
+### Fixed
+- **Retime's stop-motion now works on a live camera.** A webcam, phone camera or network stream wired into Retime with "Stop-motion fps" set looked exactly the same as without it: stop-motion asks its input for the same held moment on several frames, and a live source only ever answered with the present. Live sources now keep the picture they took for a held moment until another moment is asked for, so the camera picture steps at the stop-motion rate. Playback has to be running, since time has to move for the picture to step.
+
 ## [0.11.0] - 2026-11-19
 
 ### Added

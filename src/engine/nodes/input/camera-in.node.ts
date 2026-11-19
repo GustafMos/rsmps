@@ -51,7 +51,7 @@ export default defineNode({
     if (!host.liveFrame) throw new Error('A live camera is not available here (exports and headless runs cannot use one). Record it first.');
     const source = cameraSource(ctx.params);
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
-    const frame = await host.liveFrame(source, maxSide);
+    const frame = await host.liveFrame(source, maxSide, ctx.time.seconds);
     if (!frame) throw new Error('Waiting for the camera…');
     const unit = ctx.unitFor(frame.width, frame.height);
     if (!liveOrientOfNode('camera-in', ctx.params).mirror) return { image: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit } };
