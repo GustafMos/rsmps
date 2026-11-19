@@ -369,6 +369,17 @@ export class Library implements MediaLibrary {
 
   /* ------------------------------- import/restore --------------------------- */
 
+  async fastCopy(assetId: string, opts: { maxSide: number; onProgress?: (fraction: number) => void; onNote?: (text: string) => void; signal?: AbortSignal }): Promise<AssetInfo> {
+    const info = this.infos.get(assetId);
+    const blob = this.blobs.get(assetId);
+    if (!info || !blob || info.kind !== 'video') throw new Error('Only a video clip can be converted.');
+    const { makeFastCopy } = await import('./fast-copy');
+    const file = await makeFastCopy(blob, info.name, info, opts);
+    const [made] = await this.add([file]);
+    if (!made) throw new Error('The fast copy could not be added to Media.');
+    return made;
+  }
+
   async add(files: File[]): Promise<AssetInfo[]> {
     const added: AssetInfo[] = [];
     const failures: string[] = [];
