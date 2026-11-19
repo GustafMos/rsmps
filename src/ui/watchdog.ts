@@ -1,16 +1,23 @@
 /**
- * Render watchdog. A graph edit starts a timer; the player finishing an evaluation (it publishes a fresh timings/errors
- * map) stops it. Slow: show "Rendering…" in the viewer after ~1.5 s and offer to undo the last change after ~5 s.
- * It also keeps a "pending edit" in localStorage so a reload after a render that never finished can offer to revert it.
+ * Render watchdog: notices a frame that will not finish. It watches the player's own "an evaluation is in flight since ..."
+ * (`Player.renderingSince`), so it only ever counts time in which something is really being rendered:
+ *   - about 1.5 s into one evaluation: "Rendering…" in the viewer;
+ *   - about 5 s: the "Rendering is taking long" bar with Undo last change;
+ *   - 15 s: rendering is paused (edits stay applied).
+ * An idle player counts nothing, whatever was edited: moving a node, editing a branch that is not on screen, or switching
+ * to another tab cannot trip it. Time spent in a hidden tab is not counted either (browsers stop drawing there).
+ * It also clears the "pending edit" (kept in localStorage so a reload after a render that never finished can offer to revert it)
+ * once a render has finished.
  */
 import { useEffect } from 'react';
 import { createStore } from './store/createStore';
 import type { AppCtx } from './store/context';
-import type { GraphDoc } from '../engine/types';
 import { PENDING_STORE_KEY, RENDER_LIMIT_MS, SLOW_NOTICE_MS, safetyStore, setPaused, undoLastChange } from './safety';
 
 export const PENDING_KEY = PENDING_STORE_KEY; // localStorage: it must survive a restart (safe mode reads it)
 export const watchStore = createStore<{ rendering: boolean }>({ rendering: false });
+export const RENDERING_NOTICE_MS = 1500;
+const TICK_MS = 500;
 
 export interface PendingEdit {
   nodeId: string;
@@ -29,65 +36,65 @@ export function clearPending(): void {
   }
 }
 
+/** What the watchdog remembers between looks. */
+export interface WatchState {
+  /** The evaluation being timed (its start, as the player reports it), or null. */
+  job: number | null;
+  /** Milliseconds of that evaluation seen while the tab was visible. */
+  busyMs: number;
+}
+
+export type WatchLevel = 'idle' | 'working' | 'rendering' | 'slow' | 'stuck';
+
+/**
+ * One look at the player. `since` is `Player.renderingSince()`, `dt` the time since the last look. Pure.
+ * A new evaluation starts the count again; no evaluation, paused rendering or a hidden tab count nothing.
+ */
+export function watchStep(prev: WatchState, input: { since: number | null; dt: number; hidden: boolean; paused: boolean }): { state: WatchState; level: WatchLevel } {
+  if (input.since === null || input.paused) return { state: { job: null, busyMs: 0 }, level: 'idle' };
+  const same = prev.job === input.since;
+  const busyMs = (same ? prev.busyMs : 0) + (same && !input.hidden ? Math.max(0, input.dt) : 0);
+  const level: WatchLevel = busyMs >= RENDER_LIMIT_MS ? 'stuck' : busyMs >= SLOW_NOTICE_MS ? 'slow' : busyMs >= RENDERING_NOTICE_MS ? 'rendering' : 'working';
+  return { state: { job: input.since, busyMs }, level };
+}
+
 export function useRenderWatchdog(app: AppCtx): void {
   useEffect(() => {
     const { ed, io } = app;
-    let lastGraph: GraphDoc = ed.state.graph;
-    let t1: ReturnType<typeof setTimeout> | undefined;
-    let t2: ReturnType<typeof setTimeout> | undefined;
-    let t3: ReturnType<typeof setTimeout> | undefined;
-    let waiting = false;
+    let state: WatchState = { job: null, busyMs: 0 };
+    let last = performance.now();
     let seen = io.player.getState();
 
-    const done = () => {
-      waiting = false;
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      if (safetyStore.get().slow) safetyStore.set((s) => ({ ...s, slow: false }));
-      if (watchStore.get().rendering) watchStore.set({ rendering: false });
-      clearPending();
+    const show = (rendering: boolean, slow: boolean) => {
+      if (watchStore.get().rendering !== rendering) watchStore.set({ rendering });
+      if (safetyStore.get().slow !== slow) safetyStore.set((s) => ({ ...s, slow }));
     };
-    const start = () => {
-      done();
-      if (safetyStore.get().paused || !ed.state.viewedNodeId || !io.player.getState().imageSize) return;
-      waiting = true;
-      t1 = setTimeout(() => waiting && watchStore.set({ rendering: true }), 1500);
-      t2 = setTimeout(() => {
-        if (!waiting) return;
-        safetyStore.set((s) => (s.slow ? s : { ...s, slow: true })); // the "Rendering is taking long" bar (SafetyBar in App.tsx)
-      }, SLOW_NOTICE_MS);
-      t3 = setTimeout(() => {
-        // Past the limit with the page still alive: stop rendering rather than leave the owner waiting. Edits stay applied.
-        if (!waiting) return;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      const step = watchStep(state, { since: io.player.renderingSince(), dt: now - last, hidden: typeof document !== 'undefined' && document.hidden, paused: safetyStore.get().paused });
+      last = now;
+      state = step.state;
+      if (step.level === 'stuck') {
+        // One frame has been rendering for 15 s with the page alive: stop rather than leave the owner waiting. Edits stay applied,
+        // and the remembered edit is KEPT: "Undo last change" needs it.
+        state = { job: null, busyMs: 0 };
+        show(false, false);
         setPaused(app, true);
-        ed.toast('Rendering took more than 15 seconds and was paused. The last change may be too heavy.', 'error', [
-          { label: 'Undo last change', run: () => void undoLastChange(app) },
-        ]);
-        // stop waiting but KEEP the remembered edit: "Undo last change" needs it
-        waiting = false;
-        clearTimeout(t1);
-        clearTimeout(t2);
-        if (watchStore.get().rendering) watchStore.set({ rendering: false });
-        if (safetyStore.get().slow) safetyStore.set((s) => ({ ...s, slow: false }));
-      }, RENDER_LIMIT_MS);
-    };
-
-    const offStore = ed.store.subscribe(() => {
-      const g = ed.state.graph;
-      if (g !== lastGraph) {
-        lastGraph = g;
-        start();
+        ed.toast('One frame took more than 15 seconds to render, so rendering was paused. The last change may be too heavy.', 'error', [{ label: 'Undo last change', run: () => void undoLastChange(app) }]);
+        return;
       }
-    });
+      show(step.level === 'rendering' || step.level === 'slow', step.level === 'slow');
+    }, TICK_MS);
+
+    // A render finished (the player published fresh timings / errors): the last edit did not hang it.
     const offPlayer = io.player.subscribe((s) => {
-      if (waiting && (s.timings !== seen.timings || s.errors !== seen.errors)) done();
+      if ((s.timings !== seen.timings || s.errors !== seen.errors) && !safetyStore.get().paused) clearPending();
       seen = s;
     });
     return () => {
-      offStore();
+      clearInterval(timer);
       offPlayer();
-      done();
+      show(false, false);
     };
   }, [app]);
 }

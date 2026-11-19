@@ -4,7 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.8.0] - 2026-11-19
+
 ### Added
+- **Beta notice.** A Beta badge next to the name, a note on the start screen and a section in About say that RSMPS is in early development and that many features are not fully tested, with a link to report a bug.
+- **Every version is released.** When the version number in `package.json` changes on the main branch, a GitHub Release with that version's notes from this file is made automatically.
 - **Recorder node** (Time): wire a picture through it and press Record in its settings: it shows that node in the viewer, starts playback and records what flows through it, with the sound that is playing, into a clip in Media (H.264 MP4, up to 30 minutes). It passes the picture on unchanged, so it can sit anywhere in a chain. "While recording": **Time runs on** (the clock keeps going until you stop, so effects keep changing instead of repeating every loop) or **Loop the project**.
 - **Time can run on past the project length.** With Loop off the loop progress keeps counting past 1 instead of jumping back, which the Recorder uses while recording; inside the project length nothing changes.
 - **Go live** (desktop app): stream the output with its sound to Twitch, YouTube or any RTMP address, from a button in the transport. The app records what the viewer shows together with the sound mix and FFmpeg (the add-on) sends it as H.264 + AAC at the size and bitrate you choose; a red LIVE clock shows the state and ends the stream. The stream key stays on the computer and is stored only on request. Not in the web version: a web page cannot open the connection streaming services use.
@@ -24,6 +28,9 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 - **Frames** field next to Length in the transport: set the project length in frames.
 
 ### Fixed
+- **"Rendering was paused" when nothing was rendering.** The watchdog started a 15-second countdown at every edit, also one that needs no new picture (moving a node, a change in a branch that is not on screen, edits while an export or a scan holds the renderer, a tab in the background), and paused rendering when no new frame arrived. It now times the frame that is actually being rendered: an idle app is never paused, time in a background tab is not counted, and only one frame that takes more than 15 seconds pauses rendering.
+- **Scan: leaving the scan tab no longer cancels or restarts the scan.** A scan project keeps its pages and a running scan while you work in another tab, says when it is ready, and shows the result at once when you return; before, leaving cancelled it and coming back analysed every photo again. The pages are released when the scan project is closed.
+- **Scan: the progress bar no longer stands at 100 % while the frames are still being put together.** Once every photo is read it shows a moving bar and says so.
 - **Audio to MIDI played many notes that were not sung.** Wide vibrato trilled between neighbouring notes, a slide or a scoop into a note played every note it passed, and the pitch dropping as a note died away started a new one. Notes now follow the settled pitch: a note starts when the voice holds still, and changes only when the voice holds another note and the centre of the pitch has moved there too. One sung note is one note (vibrato up to a semitone and a half, slides, scoops, fall-offs).
 - Adding a sound effect with a Media In (or any node with a picture and a sound output) selected now inserts it into the sound chain, like picture effects join the picture chain. Before it was left unwired.
 - **Ticking instead of sound** from videos recorded with uncompressed (Linear PCM) sound by phone apps such as Blackmagic Camera, in the preview and in every export. These files store the sound one recorded buffer per table entry; only one sample of each buffer was read. PCM sound in MP4 and MOV is now read from the file's own tables, which also fixes packed 24-bit sound that a file labels as 32-bit.

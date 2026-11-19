@@ -127,6 +127,8 @@ export class PlayerImpl implements Player {
   private raf = 0;
 
   private running = false;
+  /** performance.now() when the evaluation in flight began; null while nothing is being rendered. */
+  private jobSince: number | null = null;
   private kickQueued = false;
   private disposed = false;
 
@@ -309,6 +311,10 @@ export class PlayerImpl implements Player {
     this.dirty = true;
     this.kick();
     this.markChanged();
+  }
+
+  renderingSince(): number | null {
+    return this.jobSince;
   }
 
   /**
@@ -812,7 +818,12 @@ export class PlayerImpl implements Player {
         }
         const job = this.nextJob();
         if (!job) break;
-        await this.execute(job);
+        this.jobSince = performance.now();
+        try {
+          await this.execute(job);
+        } finally {
+          this.jobSince = null;
+        }
       }
     } finally {
       this.running = false;

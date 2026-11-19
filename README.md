@@ -13,6 +13,8 @@ results along their wires.
 
 > MIT licensed · local-first · no account · no upload · your media stays on your machine.
 
+> **Beta.** RSMPS is in early development. Many features are new and not fully tested. If something looks wrong or breaks, please [report it](https://github.com/GustafMos/rsmps/issues/new): every report helps.
+
 **Live demo:** <https://gustafmos.github.io/rsmps/> · **Versions:** [Releases](https://github.com/GustafMos/rsmps/releases) (source) · **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
 ---

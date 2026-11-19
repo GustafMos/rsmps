@@ -2,7 +2,8 @@ import { useState } from 'react';
 import pkg from '../../../package.json';
 import { isDesktop } from '../../io/desktop';
 import { isCheckEnabled, setCheckEnabled } from '../../io/updates';
-import { ABOUT, NOT_AFFILIATED } from '../aboutCopy';
+import { ABOUT, BETA, NOT_AFFILIATED } from '../aboutCopy';
+import { bugReportUrl } from '../lib/bugReport';
 import { useApp } from '../store/context';
 import { Dialog } from './Dialog';
 
@@ -16,6 +17,13 @@ export function AboutDialog() {
         <strong>{ABOUT.title}</strong>
         <p className="rs-dlg__note">Version {pkg.version}. {ABOUT.licence}</p>
         <p className="rs-dlg__note"><a href={ABOUT.source} target="_blank" rel="noopener noreferrer">{ABOUT.source}</a></p>
+      </div>
+      <div className="rs-dlg__sec">
+        <strong>{BETA.badge}</strong>
+        <p className="rs-dlg__note">{BETA.short} {BETA.ask}</p>
+        <div className="rs-dlg__row">
+          <a className="rs-btn" href={bugReportUrl()} target="_blank" rel="noopener noreferrer">Report a bug…</a>
+        </div>
       </div>
       {isDesktop() && (
         <div className="rs-dlg__sec">
