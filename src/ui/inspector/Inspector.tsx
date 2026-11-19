@@ -31,6 +31,7 @@ import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
 import { PhoneMotionPanel } from './PhoneMotionPanel';
 import { LiveRecordPanel } from './LiveRecordPanel';
+import { CameraPermissionPanel } from './CameraPermissionPanel';
 import { RecorderPanel } from './RecorderPanel';
 import { isLivePictureType } from '../../engine/lib/live-source';
 import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
@@ -221,6 +222,7 @@ function NodePanel({ id }: { id: string }) {
       {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
       {node.type === 'phone-motion' && !missing.length && <PhoneMotionPanel node={node} />}
+      {node.type === 'camera-in' && <CameraPermissionPanel />}
       {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}
       {node.type === 'recorder' && <RecorderPanel fullId={fullId} params={node.params} />}
       {def.playable && (

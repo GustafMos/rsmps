@@ -1181,12 +1181,12 @@ export class Library implements MediaLibrary {
   }
 
   /**
-   * After a device loss every texture handle here is invalid: forget them without releasing, and drop the live sources.
-   * Call after `Gpu.replaceDevice`.
+   * After a device loss every texture handle here is invalid: forget them without releasing. Live sources keep their
+   * camera or stream open and upload into new textures. Call after `Gpu.replaceDevice`.
    */
   onDeviceReset(): void {
     this.frames.clear();
-    this.live.closeAll();
+    this.live.onDeviceReset();
     this.pending.clear();
   }
 

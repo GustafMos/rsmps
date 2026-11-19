@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.9.1] - 2026-11-19
+
+### Added
+- **Webcam: "Allow camera" button.** The Webcam node's settings show whether the camera is allowed for this site and a button that makes the browser ask right now. If the camera is blocked, it says where to unblock it.
+
+### Fixed
+- **The camera permission question no longer appears at random moments.** The camera was closed and opened again whenever the graphics device was reset (phones do this, for example after the tab was in the background); it now stays open. A camera that was refused is not asked for again until you press "Allow camera", and a camera that fails for another reason (in use, unplugged) is retried every 5 seconds instead of on every frame.
+
 ## [0.9.0] - 2026-11-19
 
 ### Added

@@ -385,6 +385,10 @@ export interface DeviceApi {
   canChooseAudioOutput(): boolean;
   /** Returns an unsubscribe function. */
   onChanged(listener: () => void): () => void;
+  /** What the browser says about camera permission, without asking. 'unknown' where the browser does not tell. */
+  cameraPermission(): Promise<'granted' | 'denied' | 'prompt' | 'unknown'>;
+  /** Ask for camera permission now (call from a button press). After a refusal, cameras stay closed until this succeeds. */
+  askCamera(): Promise<{ ok: boolean; message?: string }>;
 }
 
 /** State of a phone link session (QR code). */
