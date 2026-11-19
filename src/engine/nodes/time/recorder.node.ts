@@ -32,6 +32,7 @@ export default defineNode({
       hint: 'Time runs on: the clock keeps going until you stop, so effects keep changing instead of repeating every loop (the project plays with Loop off; movements that are a cycle by nature, like a spin, still come round). Loop the project: plays as usual, repeating at the project length.',
     },
     sound: { type: 'bool', default: true, label: 'Record sound', hint: 'Include the sound that is playing (what the Audio Output plays). Needs audio to be on: Enable audio.' },
+    download: { type: 'bool', default: true, label: 'Save as a file', hint: 'When you stop, the clip is also saved as a video file on this device (the Downloads folder), ready to share. It is added to Media either way.' },
     size: {
       type: 'enum',
       default: '1920',
