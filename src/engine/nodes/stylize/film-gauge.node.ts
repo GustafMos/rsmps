@@ -75,6 +75,7 @@ export default defineNode({
     scratches: { type: 'number', default: 0.3, min: 0, max: 1, step: 0.01, label: 'Scratches', visibleIf: custom },
     vignette: { type: 'number', default: 0.45, min: 0, max: 1, step: 0.01, label: 'Dark corners', visibleIf: custom },
     gate: { type: 'bool', default: true, label: 'Gate edge', visibleIf: custom, hint: 'The soft, rounded black edge of the camera gate.' },
+    ownWeave: { type: 'bool', default: true, label: 'Gate weave', hint: 'Turn off when a Gate Weave node follows: that one moves the film in more detail (drift, frame jumps, tilt, slips).' },
     animated: { type: 'bool', default: true, label: 'Animated', hint: 'Off: one frozen frame of film.' },
     hold: { type: 'number', default: 1, min: 1, max: 6, step: 1, integer: true, label: 'Change every N', visibleIf: (p) => p.animated === true, hint: 'Grain, weave and dust change every N project frames. At 30 fps, 2 feels like film shot at 15 to 18 fps.' },
     seed: { type: 'number', default: 1, min: 0, max: 9999, step: 1, integer: true, label: 'Seed' },
@@ -87,7 +88,7 @@ export default defineNode({
     const base: GaugeLook = GAUGE_LOOKS[raw.gauge as string] ?? { label: 'Custom', soft: raw.soft, grain: raw.grain, grainSize: raw.grainSize, weave: raw.weave, flicker: raw.flicker, dust: raw.dust, scratches: raw.scratches, vignette: raw.vignette, gate: raw.gate };
     const k = raw.strength;
     const frame = raw.animated ? loopFrame(ctx.time, raw.hold) : 0;
-    const f = gaugeFrame(frame, raw.seed, base.weave * k, Math.min(1, base.flicker * k));
+    const f = gaugeFrame(frame, raw.seed, raw.ownWeave === false ? 0 : base.weave * k, Math.min(1, base.flicker * k));
     const soft = gaussianBlur(ctx.gpu, src, ((base.soft * k) / 100) * src.width);
     const image = ctx.gpu.pass({
       label: 'film-gauge',

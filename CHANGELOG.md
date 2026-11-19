@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.11.0] - 2026-11-19
+
+### Added
+- **Camera Shake node** (Transform): the movement of a camera in real hands: slow wander, quick tremor, tilt, the bob of steps and a slow in-and-out drift, with the motion blur a real shutter records (0.5 = a 180 degree shutter). Looks: Tripod breathing, Handheld steady, Handheld, Shoulder camera, Walking, Running, Long lens, Car ride, Documentary nervous, Earthquake, and Custom. Zooms in just enough to hide the edges (or mirror, repeat, transparent). Loops with the project.
+- **Gate Weave node** (Stylize): the unsteadiness of film in the machine, moving once per film frame: slow drift along the film, a jump every frame, a trace of tilt, wavering exposure, and on worn machines frames that slip and show the frame line. Looks: 35mm camera, 35mm projector, 16mm, Super 8, Worn projector, Hand cranked, Losing the loop, and Custom. Film speed can be the project rate or 24, 18, 16 or 12 frames a second.
+- **Light Leak node** (Stylize): warm glows creeping in from the edges that wander, swell and fade. Looks: Subtle warm, Warm leak, Red burn, End of the roll, Cool blue, Prism, Flash frames, and Custom.
+- **Film templates** on the start screen: Super 8 home movie, 16mm documentary and 35mm cinema, each a full chain (Camera Shake, Film Stock, Halation, Film Gauge, Gate Weave, and Light Leak for Super 8).
+- Film Gauge has a "Gate weave" switch, to turn its simple weave off when a Gate Weave node follows.
+
 ## [0.10.0] - 2026-11-19
 
 ### Added
