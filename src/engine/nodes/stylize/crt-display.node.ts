@@ -131,6 +131,7 @@ export default defineNode({
     glow: { type: 'number', default: 0.5, min: 0, max: 2, step: 0.01, label: 'Glow', group: 'Glow' },
     glowRadius: { type: 'number', default: 5, min: 0.5, max: 80, softMax: 40, step: 0.5, unit: 'px', label: 'Glow size', group: 'Glow' },
     halation: { type: 'number', default: 0.25, min: 0, max: 1, step: 0.01, label: 'Halation', group: 'Glow', hint: 'A faint wide reddish haze from glass scatter.' },
+    curved: { type: 'bool', default: true, label: 'Curved screen', group: 'Geometry', hint: 'Off: a flat picture that fills the whole frame, with no curvature, rounded corners or dark edge cut out. Works with every preset; the rest of the look stays.' },
     curveX: { type: 'number', default: 0.12, min: 0, max: 1, step: 0.01, label: 'Curvature X', group: 'Geometry' },
     curveY: { type: 'number', default: 0.12, min: 0, max: 1, step: 0.01, label: 'Curvature Y', group: 'Geometry' },
     overscan: { type: 'number', default: 0, min: -0.2, max: 0.3, step: 0.005, unit: 'norm', label: 'Overscan', group: 'Geometry', hint: 'Fraction of the picture hidden at the edges (negative shrinks the picture).' },
@@ -159,6 +160,8 @@ export default defineNode({
     const gpu = ctx.gpu;
     const p = { ...ctx.params } as Record<string, number | string | boolean> & typeof ctx.params;
     if (p.preset !== 'custom') Object.assign(p, PRESETS[p.preset] ?? {});
+    // Flat screen: after the preset, so it switches the curvature of any preset off.
+    if (p.curved === false) Object.assign(p, { curveX: 0, curveY: 0, cornerRadius: 0, bezelReflection: 0, edgeSoftness: 0.0005, overscan: Math.max(0, p.overscan as number) });
 
     // --- output size -------------------------------------------------------------------
     let scale = 1;

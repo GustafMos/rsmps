@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.11.2] - 2026-11-19
+
+### Added
+- **CRT Display: "Curved screen" switch** (Geometry). Off gives a flat picture that fills the whole frame: no curvature, no rounded corners, no dark edge cut out. It works with every preset (before, the curvature of a preset could only be removed by switching to Custom and setting everything by hand); scanlines, mask, glow and colour stay as they are.
+
 ## [0.11.1] - 2026-11-19
 
 ### Fixed

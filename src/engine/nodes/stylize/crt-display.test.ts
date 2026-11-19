@@ -136,3 +136,17 @@ describe('crt-display', () => {
     expect(still.motion).toBe(0);
   });
 });
+
+describe('crt-display flat screen', () => {
+  it('Curved screen off fills the frame to the corners with any preset; on, the corners are cut out', async () => {
+    const t = await harness();
+    const src = t.solid(160, 120, [200, 200, 200, 255]);
+    for (const preset of ['arcade', 'portable', 'consumer']) {
+      const curved = await t.pixels((await t.run('crt-display', { preset, outputScale: 'same' }, { image: src })).image as never);
+      const flat = await t.pixels((await t.run('crt-display', { preset, outputScale: 'same', curved: false }, { image: src })).image as never);
+      const lum = (c: number[]) => c[0] + c[1] + c[2];
+      expect(lum(flat.at(1, 1)) + lum(flat.at(158, 118))).toBeGreaterThan(lum(curved.at(1, 1)) + lum(curved.at(158, 118)) + 60);
+      expect(flat.at(0, 0)[3]).toBe(255);
+    }
+  });
+});
