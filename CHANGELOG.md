@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.12.0] - 2026-11-19
+
+### Added
+- **Media In: "Make fast copy".** Converts a video clip to the form that plays quickest in this app and switches the node to it: H.264 (decoded by the graphics chip on phones and computers; VP9 or VP8 where the browser has no H.264 encoder) with every frame a key frame, at 720p, 1080p or the original size. Camera and phone clips store a full picture only every second or two, so scrubbing, the loop wrapping round, playing backwards and effects that read several moments (Datamosh, Motion Smear, Echo, Time Displace, Retime) have to decode many frames to show one; in a fast copy every frame costs one decode. The file is larger than the original at the same size; the original stays in Media, and the sound is kept.
+
 ## [0.11.2] - 2026-11-19
 
 ### Added

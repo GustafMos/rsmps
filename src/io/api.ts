@@ -14,6 +14,11 @@ import type { BlankSheetOptions } from './print/blank';
 export interface MediaLibrary extends Host {
   /** Assets for the media panel. Working assets owned by a scan project are hidden unless `includeHidden`. */
   add(files: File[]): Promise<AssetInfo[]>;
+  /**
+   * Make a "fast copy" of a video asset (H.264 with every frame a key frame, longest side at most `maxSide`) and add it to
+   * the library as a new asset. The original stays. Rejects with a readable error, or an AbortError when `signal` fires.
+   */
+  fastCopy(assetId: string, opts: { maxSide: number; onProgress?: (fraction: number) => void; onNote?: (text: string) => void; signal?: AbortSignal }): Promise<AssetInfo>;
   remove(assetId: string): Promise<void>;
   list(opts?: { includeHidden?: boolean }): AssetInfo[];
   /** Small preview as an object URL (cached). */
