@@ -240,6 +240,7 @@ export const OUT_OF_SCOPE: Record<string, string> = {
   'camera-in': 'live webcam',
   'url-in': 'live stream',
   'audio-level': 'live audio level',
+  oscilloscope: 'live audio wave',
   'midi-trigger': 'live MIDI',
   'midi-value': 'live MIDI',
   'media-in': 'reads footage; its own loop / in-out mapping (lib/media-time)',

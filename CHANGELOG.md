@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.14.0] - 2026-11-19
+
+### Added
+- **Oscilloscope node** (Generate): draws the wave of a sound as a glowing line, like the screen of a sampler or a lab scope. Wire any sound in (a clip, the microphone, a synth, the output of effects). Time shown (2 to 250 ms), Steady (a held note stands still), styles Line, Filled, Mirrored and Dots, left to right or top to bottom, thickness, glow, line and glow colors, a background whose alpha lets it sit over another picture, and Pixel size for the blocky look of a small low-resolution screen. Works in exports like the other sound-to-picture nodes.
+
 ## [0.13.0] - 2026-11-19
 
 ### Added
