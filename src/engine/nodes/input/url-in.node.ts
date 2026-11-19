@@ -49,7 +49,7 @@ export default defineNode({
     if (!source) throw new Error('Enter an address (URL).');
     if (!host.liveFrame) throw new Error('Network pictures are not available here (exports and headless runs). Record it first.');
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
-    const frame = await host.liveFrame(source, maxSide);
+    const frame = await host.liveFrame(source, maxSide, ctx.time.seconds);
     if (!frame) throw new Error('Waiting for the first picture…');
     return { image: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit: ctx.unitFor(frame.width, frame.height) } };
   },

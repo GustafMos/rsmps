@@ -134,6 +134,10 @@ interface Entry {
   fresh: boolean;
   lastTime: number;
   uploadedBucket: string;
+  /** The picture kept for a held project time (see `frame`): its own texture, so the live one can go on changing. */
+  heldAt: number | null;
+  heldTexture: GPUTexture | null;
+  held: LiveFrame | null;
   refreshTimer: ReturnType<typeof setInterval> | null;
   rvfc: number;
   closed: boolean;
@@ -160,7 +164,13 @@ export class LiveSources {
     return this.entries.size > 0;
   }
 
-  async frame(req: LiveRequest, maxSide: number): Promise<LiveFrame | null> {
+  /**
+   * `hold`: the picture is asked for a project time that is not the present (`at`, seconds). A live source has no past, so
+   * what a time node gets is the picture taken when that time was first asked for, kept until another time is asked for.
+   * That is what makes Retime's stop-motion (and anything else that holds a time) work on a camera: the time stays the
+   * same for a few frames, and so does the picture.
+   */
+  async frame(req: LiveRequest, maxSide: number, hold?: { at: number; held: boolean }): Promise<LiveFrame | null> {
     const key = sourceKey(req);
     let e = this.entries.get(key);
     if (!e && req.kind === 'camera') {
@@ -174,7 +184,11 @@ export class LiveSources {
       this.ensureSweeper();
     }
     e.lastUsed = performance.now();
-    if (req.kind === 'phone') return this.phoneFrame(e, req.session, maxSide, !!req.freeze);
+    if (hold?.held && e.held && e.heldAt === hold.at) return e.held;
+    if (req.kind === 'phone') {
+      const live = await this.phoneFrame(e, req.session, maxSide, !!req.freeze);
+      return hold?.held ? ((await this.snapshot(e, maxSide, hold.at)) ?? live) : live;
+    }
     if (e.error) {
       const err = e.error;
       this.close(e); // the next request retries from scratch
@@ -189,7 +203,8 @@ export class LiveSources {
       throw err;
     }
     if (req.freeze && e.frame) return e.frame;
-    return this.upload(e, maxSide);
+    const live = await this.upload(e, maxSide);
+    return hold?.held ? ((await this.snapshot(e, maxSide, hold.at)) ?? live) : live;
   }
 
   /**
@@ -239,6 +254,9 @@ export class LiveSources {
       e.texture = null;
       e.frame = null;
       e.uploadedBucket = '';
+      e.heldAt = null;
+      e.heldTexture = null;
+      e.held = null;
       e.phoneVersion = -1;
       e.fresh = true;
     }
@@ -251,7 +269,7 @@ export class LiveSources {
   /* --------------------------------------- opening ------------------------------------------- */
 
   private open(key: string, req: LiveRequest): Entry {
-    const base = { key, req, phoneVersion: -1, stream: null, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', refreshTimer: null, rvfc: 0, closed: false } as const;
+    const base = { key, req, phoneVersion: -1, stream: null, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false } as const;
     if (req.kind === 'phone') {
       const e: Entry = { ...base, el: document.createElement('video'), isVideo: false, ready: Promise.resolve() };
       return e;
@@ -427,6 +445,30 @@ export class LiveSources {
     return e.frame;
   }
 
+  /** Take the picture the source shows right now into the entry's held texture, for project time `at`. Null while there is no picture. */
+  private async snapshot(e: Entry, maxSide: number, at: number): Promise<LiveFrame | null> {
+    const el = this.pictureOf(e);
+    if (!el) return null;
+    const dims = el as { videoWidth?: number; videoHeight?: number; naturalWidth?: number; naturalHeight?: number; width?: number; height?: number };
+    const nw = dims.videoWidth || dims.naturalWidth || dims.width || 0;
+    const nh = dims.videoHeight || dims.naturalHeight || dims.height || 0;
+    if (!nw || !nh) return null;
+    const { width, height } = targetSize(nw, nh, maxSide, this.gpu.device.limits.maxTextureDimension2D);
+    if (!e.heldTexture || e.heldTexture.width !== width || e.heldTexture.height !== height) {
+      if (e.heldTexture) this.gpu.release(e.heldTexture);
+      e.heldTexture = this.gpu.acquire(width, height, 'rgba8unorm');
+      this.gpu.retain(e.heldTexture);
+    }
+    try {
+      await uploadExternal(this.gpu.device, el as never, e.heldTexture, width, height, { width: nw, height: nh });
+    } catch {
+      return null;
+    }
+    e.held = { texture: e.heldTexture, width, height };
+    e.heldAt = at;
+    return e.held;
+  }
+
   /** The phone's video (WebRTC) or its latest JPEG frame, uploaded like the camera path. */
   private async phoneFrame(e: Entry, token: string, maxSide: number, freeze: boolean): Promise<LiveFrame | null> {
     const src = this.phone?.source(token) ?? null;
@@ -484,8 +526,11 @@ export class LiveSources {
       e.el.removeAttribute('src');
     }
     if (e.texture) this.gpu.release(e.texture);
+    if (e.heldTexture) this.gpu.release(e.heldTexture);
     e.texture = null;
     e.frame = null;
+    e.heldTexture = null;
+    e.held = null;
     if (this.entries.size === 0 && this.sweeper) {
       clearInterval(this.sweeper);
       this.sweeper = null;

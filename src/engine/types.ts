@@ -478,8 +478,10 @@ export interface Host {
   /**
    * Latest frame of a live picture source (webcam, network stream). Live-only: returns null when the source is
    * not running or in headless/export runs unless the host recorded it. `maxSide` as in assetFrame.
+   * `at`: the project time (seconds) this render is for. Pass `ctx.time.seconds`: when a time node asks for a moment that is
+   * not the present, the host keeps the picture it took for that moment, so stop-motion holds work on a live source.
    */
-  liveFrame?(source: LiveSource, maxSide: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
+  liveFrame?(source: LiveSource, maxSide: number, at?: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
   /**
    * Value of a named signal that a stream-domain (audio/MIDI) node publishes, at `seconds`:
    * loudness, pitch, note, gate… This is the bridge that lets sound drive picture parameters.

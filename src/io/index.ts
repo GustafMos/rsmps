@@ -73,6 +73,7 @@ export const createIo: CreateIo = async () => {
   let governor!: MemoryGovernor;
   const phoneAudio = new PhoneAudioRouter((id, stream) => audio.setLiveStream(id, stream));
   const player = new PlayerImpl({ gpu, gate, registry, audio, library, router, phoneAudio, memory: { snapshot: () => governor.snapshot(), relieve: () => void governor.freeMemory() } });
+  library.liveNow = () => player.nowSeconds();
   router.onExportEnd = () => player.invalidate();
   library.subscribe(() => player.invalidate());
 
