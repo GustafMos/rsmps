@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.9.0] - 2026-11-19
+
+### Added
+- **Lens Distortion node** (Filter): bends the picture like a lens (barrel / fisheye above 0, pincushion below), or, in Undistort mode, removes that bend from footage so straight lines are straight again. Undistort with the same amount exactly undoes Distort. Center, zoom, "Fill the frame" (zooms in just enough that no empty edge shows) and a choice of what shows outside the picture (transparent, repeated edge, mirror).
+- **Glints node** (Filter): star-shaped rays from the brightest points, like a star filter on a lens. Threshold, number of star points (2 = one anamorphic streak, 4 = cross, 6, 8 ...), length, angle, intensity, ray color and "Rays only" for blending them yourself. (Round bokeh discs were already there: Lens Blur, with its highlight gain.)
+- **Phone: the Graph tab shows the picture behind the nodes.** The picture fills the whole tab, the nodes float over it, and an eye button in the corner hides and shows the nodes. With the nodes hidden, touches reach the picture (zoom, pan, on-picture handles). Play and the time bar stay at the bottom.
+- **Phone: the viewer strip above the Inspector can be resized**: drag the grip on its lower edge. The height is remembered.
+
 ## [0.8.0] - 2026-11-19
 
 ### Added

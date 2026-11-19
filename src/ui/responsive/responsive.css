@@ -206,6 +206,19 @@ html[data-vp='tablet'] .rs-tp__scrub { flex: 1 1 240px; }
 .rs-pshell__viewer[data-mode='dock-folded'] { flex: none; border-bottom: 1px solid var(--line-strong); }
 .rs-pshell__viewer[data-mode='dock-folded'] .rs-pshell__vbody, .rs-pshell__viewer[data-mode='dock-folded'] .rs-ptp { display: none; }
 .rs-pshell__viewer[data-mode='hidden'] { display: none; }
+/* dock: its lower edge is a grip, drag to resize the strip */
+.rs-pshell__grip { flex: none; height: 18px; display: grid; place-items: center; background: var(--bg-2); border-top: 1px solid var(--line); touch-action: none; cursor: ns-resize; }
+.rs-pshell__grip span { width: 44px; height: 4px; border-radius: 2px; background: var(--line-strong); }
+.rs-pshell__grip:active span { background: var(--accent-hi); }
+/* Graph tab: the picture fills the whole tab and the nodes float over it. The graph bar stays on top, the transport at the bottom;
+   the eye button hides the nodes, and then touches reach the picture (zoom, pan, on-picture handles). */
+.rs-pshell__viewer[data-mode='behind'] { position: absolute; inset: 52px 0 0 0; z-index: 0; }
+.rs-pshell__viewer[data-mode='behind'] .rs-pshell__vhead, .rs-pshell__viewer[data-mode='behind'] .rs-viewer__bar { display: none; }
+.rs-pshell[data-vmode='behind'] .rs-pshell__main { position: relative; z-index: 1; margin-bottom: 56px; background: transparent; pointer-events: none; }
+.rs-pshell[data-vmode='behind'] .rs-pshell__main .rs-gtb, .rs-pshell[data-vmode='behind'] .rs-pshell__canvas, .rs-pshell[data-vmode='behind'] .rs-pshell__eye, .rs-pshell[data-vmode='behind'] .rs-pshell__graph > :not(.rs-pshell__canvas) { pointer-events: auto; }
+.rs-pshell[data-vmode='behind'] .rs-graph { background-color: color-mix(in srgb, var(--bg-0) 30%, transparent); background-image: none; }
+.rs-pshell__eye { position: absolute; right: var(--s-2); bottom: var(--s-2); z-index: 30; width: var(--touch); height: var(--touch); min-width: var(--touch); background: var(--bg-3); border: 1px solid var(--line-strong); box-shadow: var(--shadow-hard-sm); }
+.rs-pshell__eye.is-on { background: var(--accent); color: var(--text); }
 .rs-pshell__vhead { display: flex; align-items: center; gap: var(--s-1); height: 40px; padding: 0 var(--s-1) 0 var(--s-3); background: var(--bg-2); border-bottom: 1px solid var(--line); flex: none; }
 .rs-pshell__vhead .rs-btn--icon { width: 40px; height: 40px; min-width: 40px; }
 .rs-pshell__vhead .rs-btn.is-on { color: var(--yellow); background: transparent; border-color: transparent; }
