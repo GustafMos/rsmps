@@ -9,15 +9,32 @@ describe('phone shell', () => {
     expect(s.tab).toBe('media');
     expect(shellReducer(s, { type: 'tab', tab: 'media' })).toBe(s);
   });
-  it('shows the docked viewer strip only above Graph and Inspector, and only while pinned', () => {
+  it('shows the picture behind the nodes in Graph, and the docked strip above the Inspector and the node list while pinned', () => {
     const base = { ...DEFAULT_SHELL, dock: true };
     expect(viewerMode({ ...base, tab: 'view' })).toBe('full');
-    expect(viewerMode({ ...base, tab: 'graph' })).toBe('dock');
+    expect(viewerMode({ ...base, tab: 'graph' })).toBe('behind');
+    expect(viewerMode({ ...base, tab: 'graph', dock: false })).toBe('behind');
+    expect(viewerMode({ ...base, tab: 'graph', graphList: true })).toBe('dock');
+    expect(viewerMode({ ...base, tab: 'inspector' })).toBe('dock');
     expect(viewerMode({ ...base, tab: 'inspector', dockOpen: false })).toBe('dock-folded');
     expect(viewerMode({ ...base, tab: 'media' })).toBe('hidden');
     expect(viewerMode({ ...base, tab: 'more' })).toBe('hidden');
-    expect(viewerMode({ ...base, tab: 'graph', dock: false })).toBe('hidden');
-    expect(showsDock({ ...base, tab: 'graph' })).toBe(true);
+    expect(viewerMode({ ...base, tab: 'inspector', dock: false })).toBe('hidden');
+    expect(showsDock({ ...base, tab: 'graph' })).toBe(false);
+    expect(showsDock({ ...base, tab: 'inspector' })).toBe(true);
+  });
+  it('hides and shows the nodes; the node list always shows them', () => {
+    const s = run(DEFAULT_SHELL, { type: 'nodes' });
+    expect(s.nodesHidden).toBe(true);
+    expect(run(s, { type: 'nodes' }).nodesHidden).toBe(false);
+    expect(run(s, { type: 'list', on: true }).nodesHidden).toBe(false);
+  });
+  it('keeps the dragged strip height inside its limits and remembers it', () => {
+    expect(run(DEFAULT_SHELL, { type: 'dockSize', size: 0.95 }).dockSize).toBe(0.7);
+    expect(run(DEFAULT_SHELL, { type: 'dockSize', size: 0.01 }).dockSize).toBe(0.18);
+    const s = run({ ...DEFAULT_SHELL, dockOpen: false }, { type: 'dockSize', size: 0.5 });
+    expect(s).toMatchObject({ dockSize: 0.5, dockOpen: true });
+    expect(loadShell(() => serializeShell(s)).dockSize).toBe(0.5);
   });
   it('pinning the dock again re-opens a folded strip', () => {
     const s = run({ ...DEFAULT_SHELL, dock: false, dockOpen: false }, { type: 'dock', on: true });

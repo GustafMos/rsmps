@@ -16,6 +16,7 @@ import { NodeList } from './NodeList';
 import { PhoneTransport } from './PhoneTransport';
 import { dispatchShell, showTab, useShell } from './shellStore';
 import { PHONE_TABS, viewerMode, type PhoneTab } from './shellState';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useViewport } from './viewport';
 import '../graph-touch/graph-touch.css';
 import './responsive.css'; // last on purpose: same-specificity rules here must win over the components' own css
@@ -47,9 +48,12 @@ export function PhoneShell() {
   const pane: PhoneTab = landscape && shell.tab === 'view' ? 'graph' : shell.tab;
   const vmode = landscape ? 'side' : viewerMode(shell);
 
+  const behind = vmode === 'behind';
+  const nodesHidden = behind && shell.nodesHidden;
+
   const scanBody = mode === 'scan' && scanStage === 1;
   return (
-    <div className="rs-pshell" data-tab={shell.tab} data-pane={pane} data-vmode={vmode}>
+    <div className="rs-pshell" data-tab={shell.tab} data-pane={pane} data-vmode={vmode} data-nodes={nodesHidden ? 'off' : 'on'}>
       <PhoneBar />
       <SafetyBar />
       {mode === 'scan' && <ScanStepper />}
@@ -58,7 +62,7 @@ export function PhoneShell() {
         <div className="rs-pshell__scan"><ScanView /></div>
       ) : (
         <div className="rs-pshell__body">
-          <div className="rs-pshell__viewer" data-mode={vmode}>
+          <div className="rs-pshell__viewer" data-mode={vmode} style={vmode === 'dock' ? { flexBasis: `${shell.dockSize * 100}%` } : undefined}>
             <div className="rs-pshell__vhead">
               <span className="rs-caps">Viewer</span>
               <span className="rs-pshell__spacer" />
@@ -69,23 +73,35 @@ export function PhoneShell() {
                 </button>
               )}
               {vmode !== 'side' && (
-                <button className={`rs-btn rs-btn--icon rs-btn--ghost${shell.dock ? ' is-on' : ''}`} onClick={() => dispatchShell({ type: 'dock' })} aria-label="Pin the viewer above the graph and inspector" aria-pressed={shell.dock} title={shell.dock ? 'Unpin: the viewer only shows in the View tab' : 'Pin: keep the viewer above the graph and inspector'}>
+                <button className={`rs-btn rs-btn--icon rs-btn--ghost${shell.dock ? ' is-on' : ''}`} onClick={() => dispatchShell({ type: 'dock' })} aria-label="Pin the viewer above the inspector" aria-pressed={shell.dock} title={shell.dock ? 'Unpin: the viewer only shows in the View tab' : 'Pin: keep the viewer above the graph and inspector'}>
                   <Icon name="pin" size={16} />
                 </button>
               )}
             </div>
             <div className="rs-pshell__vbody"><Viewer /></div>
             <PhoneTransport />
+            {vmode === 'dock' && <DockGrip />}
           </div>
           <div className="rs-pshell__main">
             <section className="rs-pshell__pane rs-pshell__pane--graph" hidden={pane !== 'graph'}>
               <GraphToolbar />
               <div className="rs-pshell__graph">
-                <div className="rs-pshell__canvas" hidden={shell.graphList}>
+                <div className="rs-pshell__canvas" hidden={shell.graphList || nodesHidden}>
                   <GraphView />
                   <GraphTouchChip />
                 </div>
                 {shell.graphList && <NodeList />}
+                {behind && !timelineNode && (
+                  <button
+                    className={`rs-btn rs-btn--icon rs-pshell__eye${nodesHidden ? ' is-on' : ''}`}
+                    onClick={() => dispatchShell({ type: 'nodes' })}
+                    aria-pressed={nodesHidden}
+                    aria-label={nodesHidden ? 'Show the nodes' : 'Hide the nodes to see the whole picture'}
+                    title={nodesHidden ? 'Show the nodes' : 'Hide the nodes'}
+                  >
+                    <Icon name={nodesHidden ? 'eyeOff' : 'eye'} size={20} />
+                  </button>
+                )}
                 {timelineNode && (timelineIsMedia ? <MediaEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} /> : <TimelineEditor nodeId={timelineNode} onClose={() => ed.openTimeline(null)} />)}
               </div>
             </section>
@@ -103,6 +119,31 @@ export function PhoneShell() {
         </div>
       )}
       <TabBar />
+    </div>
+  );
+}
+
+/** The lower edge of the docked viewer strip: drag it up or down to make the picture smaller or larger. */
+function DockGrip() {
+  const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const body = e.currentTarget.closest('.rs-pshell__body');
+    if (!body) return;
+    const grip = e.currentTarget;
+    grip.setPointerCapture(e.pointerId);
+    const r = body.getBoundingClientRect();
+    const move = (ev: PointerEvent) => dispatchShell({ type: 'dockSize', size: (ev.clientY - r.top) / Math.max(1, r.height) });
+    const up = () => {
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  };
+  return (
+    <div className="rs-pshell__grip" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the viewer" onPointerDown={onDown}>
+      <span />
     </div>
   );
 }

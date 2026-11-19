@@ -13,8 +13,12 @@ export interface ShellState {
   dock: boolean;
   /** Phone: the docked strip is expanded (about 30 % of the height) rather than folded to its thin bar. */
   dockOpen: boolean;
+  /** Phone: height of the docked strip as a share of the area above the tab bar (drag its lower edge). */
+  dockSize: number;
   /** Phone, Graph tab: the outline (list of nodes) instead of the node canvas. */
   graphList: boolean;
+  /** Phone, Graph tab: the nodes are hidden so only the picture behind them shows (the eye button). Not remembered. */
+  nodesHidden: boolean;
   /** Touch: one-finger drag on empty graph space draws a selection box instead of panning. */
   selectMode: boolean;
   /** Tablet: a drawer that stays docked beside the work area (remembered). */
@@ -27,7 +31,9 @@ export const DEFAULT_SHELL: ShellState = {
   tab: 'graph',
   dock: true,
   dockOpen: true,
+  dockSize: 0.32,
   graphList: false,
+  nodesHidden: false,
   selectMode: false,
   pinned: { left: false, right: false },
   open: { left: false, right: false },
@@ -37,10 +43,16 @@ export type ShellAction =
   | { type: 'tab'; tab: PhoneTab }
   | { type: 'dock'; on?: boolean }
   | { type: 'dockOpen'; on?: boolean }
+  | { type: 'dockSize'; size: number }
   | { type: 'list'; on?: boolean }
+  | { type: 'nodes'; hidden?: boolean }
   | { type: 'select'; on?: boolean }
   | { type: 'panel'; side: Side; op: 'toggle' | 'open' | 'close' | 'pin' }
   | { type: 'closeOverlays' };
+
+export const DOCK_MIN = 0.18;
+export const DOCK_MAX = 0.7;
+export const clampDockSize = (v: number): number => (Number.isFinite(v) ? Math.min(DOCK_MAX, Math.max(DOCK_MIN, Math.round(v * 1000) / 1000)) : DEFAULT_SHELL.dockSize);
 
 const other = (s: Side): Side => (s === 'left' ? 'right' : 'left');
 
@@ -56,9 +68,17 @@ export function shellReducer(s: ShellState, a: ShellAction): ShellState {
       const on = a.on ?? !s.dockOpen;
       return on === s.dockOpen ? s : { ...s, dockOpen: on };
     }
+    case 'dockSize': {
+      const size = clampDockSize(a.size);
+      return size === s.dockSize ? s : { ...s, dockSize: size, dockOpen: true };
+    }
     case 'list': {
       const on = a.on ?? !s.graphList;
-      return on === s.graphList ? s : { ...s, graphList: on };
+      return on === s.graphList ? s : { ...s, graphList: on, nodesHidden: false };
+    }
+    case 'nodes': {
+      const hidden = a.hidden ?? !s.nodesHidden;
+      return hidden === s.nodesHidden ? s : { ...s, nodesHidden: hidden };
     }
     case 'select': {
       const on = a.on ?? !s.selectMode;
@@ -84,21 +104,30 @@ export function shellReducer(s: ShellState, a: ShellAction): ShellState {
   }
 }
 
-/** Which tab the viewer strip shows above: only the editing tabs, and only while pinned. */
-export function showsDock(s: ShellState): boolean {
-  return s.dock && (s.tab === 'graph' || s.tab === 'inspector');
+/** The Graph tab shows the picture full size behind the nodes (not behind the node list, which covers everything). */
+export function pictureBehind(s: ShellState): boolean {
+  return s.tab === 'graph' && !s.graphList;
 }
 
-/** The viewer is full-size in the View tab, a strip in the editing tabs while docked, otherwise out of sight. */
-export type ViewerMode = 'full' | 'dock' | 'dock-folded' | 'hidden';
+/** Which tab the viewer strip shows above: the Inspector and the node list, and only while pinned. */
+export function showsDock(s: ShellState): boolean {
+  return s.dock && !pictureBehind(s) && (s.tab === 'graph' || s.tab === 'inspector');
+}
+
+/**
+ * The viewer is full-size in the View tab, full-size behind the nodes in the Graph tab, a strip above the Inspector and the
+ * node list while docked, otherwise out of sight.
+ */
+export type ViewerMode = 'full' | 'behind' | 'dock' | 'dock-folded' | 'hidden';
 export function viewerMode(s: ShellState): ViewerMode {
   if (s.tab === 'view') return 'full';
+  if (pictureBehind(s)) return 'behind';
   if (!showsDock(s)) return 'hidden';
   return s.dockOpen ? 'dock' : 'dock-folded';
 }
 
 /** Keys persisted between visits. */
-export const PERSISTED_SHELL = ['dock', 'dockOpen', 'graphList', 'pinned'] as const;
+export const PERSISTED_SHELL = ['dock', 'dockOpen', 'dockSize', 'graphList', 'pinned'] as const;
 export const SHELL_KEY = 'rsmps.ui.shell';
 
 export function loadShell(read: (key: string) => string | null): ShellState {
@@ -111,6 +140,7 @@ export function loadShell(read: (key: string) => string | null): ShellState {
       ...DEFAULT_SHELL,
       dock: typeof p.dock === 'boolean' ? p.dock : DEFAULT_SHELL.dock,
       dockOpen: typeof p.dockOpen === 'boolean' ? p.dockOpen : DEFAULT_SHELL.dockOpen,
+      dockSize: typeof p.dockSize === 'number' ? clampDockSize(p.dockSize) : DEFAULT_SHELL.dockSize,
       graphList: typeof p.graphList === 'boolean' ? p.graphList : false,
       pinned: { left: pin.left === true, right: pin.right === true },
     };
