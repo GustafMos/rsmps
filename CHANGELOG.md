@@ -4,6 +4,13 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.15.0] - 2026-11-19
+
+### Added
+- **Fractal node** (Generate): Mandelbrot, Julia, Burning ship, Tricorn, Newton and Phoenix. Move, zoom (each step doubles; about 17 steps before the numbers run out of digits), rotate, detail, power (more arms), eight colour sets, colour bands, and motion that loops by construction: colour cycles, spin, zoom breathing and a Julia number that circles so the shape morphs. Wire a picture in and it is stamped along the fractal's own shapes.
+- **Fractal Mirror node** (Transform): folds, turns and enlarges your picture again and again, so it becomes a kaleidoscope inside a kaleidoscope. Rounds, enlarge, turn, shift, optional rosette petals, spin and breathing.
+- **Kaleidoscope Regions node** (Transform): cuts the picture into squares, hexagons, irregular cells or rings and makes every region its own kaleidoscope. Each region shows its own place (the picture stays readable, broken into facets) or the same spot (a wall of identical jewels); mirrors per region, zoom, turn, random turn, spin with neighbours turning opposite ways, dark facet edges.
+
 ## [0.14.0] - 2026-11-19
 
 ### Added
