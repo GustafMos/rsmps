@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.16.0] - 2026-11-19
+
+### Added
+- **Droste Spiral node** (Transform): the picture inside itself, for ever. Shrink ratio, spiral arms (0 = straight nesting, 1 = the classic spiral, more or negative for other windings), picture-frame or round copies, and an endless zoom in or out that loops exactly, plus spin.
+- **Hyperbolic Tiling node** (Transform): tiles a disc with copies of the picture that shrink toward the rim, like Escher's Circle Limit. Sides per tile and tiles per corner (raised by itself when the pair does not fit), picture zoom, disc size, spin, a drift that slides the middle of the disc out and back, picture spin, tile edges, and black, transparent or mirrored outside.
+- **Liquid Warp node** (Filter): melts the picture into flowing swirls. Looks: Under water, Melting, Marble, Acid trip and Custom (amount, swirl count, folds); strength, flow per loop, and a colour swirl like oil on water.
+- **Mandelbulb node** (Generate): a fractal in three dimensions that the camera circles while its shape breathes. Power, morph, camera distance, orbit, turn and height, the fractal colour sets, background (alpha 0 for transparent), detail, steps, and a Resolution setting (half by default) because it is heavy.
+- **Reaction Diffusion node** (Generate): living patterns like leopard spots, zebra stripes and coral that slowly morph. Pattern size, spots-to-maze, rounds, flow, two colours and an edge colour. Wire a picture in and the pattern grows along its shapes. Every frame is grown from scratch, so it loops and exports like any other node.
+
 ## [0.15.0] - 2026-11-19
 
 ### Added
