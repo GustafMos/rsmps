@@ -34,6 +34,7 @@ import { RecordingController } from './recording';
 import { SignalRouter } from './signals';
 import { ScanImpl } from './scan';
 import { installDepthAi } from './depth-ai';
+import { installDatamosh } from './datamosh-codec';
 
 /** Every asset id referenced by an `assets` param anywhere in the graph. */
 export function assetIdsOf(graph: import('../engine/types').GraphDoc, registry: Registry): Set<string> {
@@ -175,6 +176,7 @@ export const createIo: CreateIo = async () => {
   library.splatTrain = createSplatTrainHost() ?? undefined; // desktop app only: Splat from Video's COLMAP + Brush pipeline
   exporter.setProcesses(processes); // the export gate
   installDepthAi(); // AI Depth jobs find their model runtime here (nothing is loaded or downloaded until a job asks)
+  installDatamosh(); // Codec Datamosh jobs find the browser's video encoder and decoder here (nothing is created until a job asks)
   player.subscribe(() => processes.poke()); // playback started / stopped: held jobs continue
   void projects.activeId().then((id) => processes.setActiveProject(id)).catch(() => undefined);
   const bake = new BakeImpl({ engine, gpu, registry, gate, library, player, governor, activeProject: () => projects.activeId() }, processes);

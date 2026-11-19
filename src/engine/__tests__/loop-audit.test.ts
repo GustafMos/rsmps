@@ -240,6 +240,7 @@ export const OUT_OF_SCOPE: Record<string, string> = {
   'media-in': 'reads footage; its own loop / in-out mapping (lib/media-time)',
   freeze: 'constant moment: nothing to loop',
   cache: 'serves a bake of whatever it was fed',
+  'datamosh-real': 'serves a stored mosh of whatever it was fed; a decoded video stream has a first frame, so its loop seam is a key frame by nature',
   'white-balance': 'analysis frozen at one frame',
   palette: 'extraction frozen at one frame',
   'media-timeline': 'an edit decides what plays; its clips wrap through ctx.pull (tested in media-timeline.test.ts)',
