@@ -5,7 +5,7 @@
  */
 import { DEFAULT_PROJECT, type Edge, type GraphDoc, type NodeInstance, type ProjectSettings } from '../engine/types';
 
-export const TEMPLATE_GROUPS = ['Pixel art', 'Video art', '3D', 'Paper & scan', 'Audio-reactive', 'Color', 'Captions'] as const;
+export const TEMPLATE_GROUPS = ['Pixel art', 'Video art', '3D', 'Paper & scan', 'Audio-reactive', 'Color', 'Film', 'Captions'] as const;
 export type TemplateGroup = (typeof TEMPLATE_GROUPS)[number];
 
 export type TemplateNeeds = 'clip' | 'image' | 'sound' | 'photos';
@@ -271,6 +271,66 @@ export const TEMPLATES: Template[] = [
         OUT,
       ],
       ['src>ht', 'ht>out'],
+    ),
+  }),
+
+  /* ------------------------------------------ Film ------------------------------------------ */
+  make({
+    id: 'film-super8',
+    title: 'Super 8 home movie',
+    group: 'Film',
+    description: 'Warm consumer film, a wide red halo, heavy grain, dust, an unsteady gate at 18 frames a second, a held camera and light leaks. Put your clip in place of the first node.',
+    graph: build(
+      'Super 8 home movie',
+      [
+        { id: 'src', type: 'voronoi', params: { mode: 'cells', scale: 160, motion: 0 }, label: 'Replace with your clip' },
+        { id: 'shake', type: 'camera-shake', params: { look: 'calm' } },
+        { id: 'stock', type: 'film-stock', params: { stock: 'gold200', exposure: 0.3 } },
+        { id: 'halo', type: 'halation', params: { look: 'super8' } },
+        { id: 'gauge', type: 'film-gauge', params: { gauge: 'super8', ownWeave: false } },
+        { id: 'weave', type: 'gate-weave', params: { look: 'super8', rate: '18' } },
+        { id: 'leak', type: 'light-leak', params: { look: 'subtle' } },
+        OUT,
+      ],
+      ['src>shake', 'shake>stock', 'stock>halo', 'halo>gauge', 'gauge>weave', 'weave>leak', 'leak>out'],
+    ),
+  }),
+  make({
+    id: 'film-16-documentary',
+    title: '16mm documentary',
+    group: 'Film',
+    description: 'Black-and-white 16mm from the shoulder: classic 400 stock, a white halo, visible grain, a nervous camera and a gate that never sits still.',
+    graph: build(
+      '16mm documentary',
+      [
+        { id: 'src', type: 'voronoi', params: { mode: 'cells', scale: 160, motion: 0 }, label: 'Replace with your clip' },
+        { id: 'shake', type: 'camera-shake', params: { look: 'documentary' } },
+        { id: 'stock', type: 'film-stock', params: { stock: 'bw400' } },
+        { id: 'halo', type: 'halation', params: { look: 'bw' } },
+        { id: 'gauge', type: 'film-gauge', params: { gauge: 'film16', ownWeave: false } },
+        { id: 'weave', type: 'gate-weave', params: { look: 'film16' } },
+        OUT,
+      ],
+      ['src>shake', 'shake>stock', 'stock>halo', 'halo>gauge', 'gauge>weave', 'weave>out'],
+    ),
+  }),
+  make({
+    id: 'film-35-cinema',
+    title: '35mm cinema',
+    group: 'Film',
+    description: 'The quiet version: cinema daylight stock, the thin halo of 35mm, fine grain, a camera breathing on its tripod and a gate that is almost steady.',
+    graph: build(
+      '35mm cinema',
+      [
+        { id: 'src', type: 'voronoi', params: { mode: 'cells', scale: 160, motion: 0 }, label: 'Replace with your clip' },
+        { id: 'shake', type: 'camera-shake', params: { look: 'tripod' } },
+        { id: 'stock', type: 'film-stock', params: { stock: 'daylight250' } },
+        { id: 'halo', type: 'halation', params: { look: 'film35' } },
+        { id: 'gauge', type: 'film-gauge', params: { gauge: 'film35', ownWeave: false } },
+        { id: 'weave', type: 'gate-weave', params: { look: 'camera35' } },
+        OUT,
+      ],
+      ['src>shake', 'shake>stock', 'stock>halo', 'halo>gauge', 'gauge>weave', 'weave>out'],
     ),
   }),
 
