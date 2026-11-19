@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.9.2] - 2026-11-19
+
+### Changed
+- **Lens Distortion is much stronger and has looks.** A new Look setting with ready-made lenses: Wide lens, Action camera, Fisheye (the default), Extreme fisheye, Door peephole, Pincushion, and two corrections (Fix: phone wide lens, Fix: action camera). Custom shows mode, amount, zoom and the rest. The Amount range now reaches a full fisheye bulge; before, even the maximum was a mild bend that was hard to see on a real picture. Projects that used the node in 0.9.0 or 0.9.1 show the Fisheye look until Look is set to Custom.
+
 ## [0.9.1] - 2026-11-19
 
 ### Added
