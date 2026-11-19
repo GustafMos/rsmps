@@ -45,7 +45,8 @@ export function shakePose(look: ShakeLook, t: number, seed: number, loop: number
   let rot = ((look.tilt * Math.PI) / 180) * wander(t, look.speed * 0.8, look.rough, seed + 3, loop);
   if (look.bob > 0 && look.pace > 0) {
     // a step: down fast, up slower, never twice the same height; each second step tilts the other way
-    const pace = loop > 0 ? Math.max(1, Math.round(look.pace * loop)) / loop : look.pace;
+    // an even number of steps per loop: the tilt alternates left and right, so only a pair of steps repeats
+    const pace = loop > 0 ? (Math.max(1, Math.round((look.pace * loop) / 2)) * 2) / loop : look.pace;
     const ph = pace * t;
     const size = 0.75 + 0.25 * wander(t, 0.5, 0.4, seed + 5, loop);
     y += (look.bob / 100) * size * (0.5 - Math.abs(Math.sin(Math.PI * ph)));

@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.13.0] - 2026-11-19
+
+### Added
+- **Codec Datamosh node** (Filter): real datamoshing. The picture is compressed with a real video codec in the browser (H.264, or VP9 where that fails), the compressed stream is damaged on purpose and decoded again, so every block, smear and colour bleed is the codec's own. Remove key frames at cuts (found automatically) or at listed frames, so the new shot's motion moves the old shot's picture; Bloom repeats one delta frame so its motion piles up; "Key frame every" lets the picture heal; Compression makes the artefacts chunkier. It cannot be calculated live: press **Mosh** in the node's settings to render, mosh and store the whole project once (like a bake). Until then the picture passes through unchanged; after a change it says it is out of date and keeps showing the old mosh until you mosh again. Datamosh Span and Motion Smear remain as the live imitations.
+
+### Fixed
+- Camera Shake looks with steps (Walking, Running, Shoulder camera, Car ride, Earthquake) now join exactly at the end of a loop: the left-right tilt of steps needed an even number of steps per loop.
+
 ## [0.12.0] - 2026-11-19
 
 ### Added
