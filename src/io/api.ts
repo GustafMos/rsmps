@@ -10,6 +10,9 @@ import type { AssetInfo, GraphDoc, Host, ProcessLive, ProcessResult, Value } fro
 import type { PendingProcess, ProcessStatus } from '../engine/process';
 import type { BlankSheetOptions } from './print/blank';
 
+/** What a fast copy is encoded as. The HAP kinds: plain, better colour (HAP Q), with transparency (HAP Alpha). */
+export type FastCopyFormat = 'h264' | 'hap' | 'hap_q' | 'hap_alpha';
+
 /** The user's media. Implements the engine `Host`, persists files in IndexedDB so a reload keeps them. */
 export interface MediaLibrary extends Host {
   /** Assets for the media panel. Working assets owned by a scan project are hidden unless `includeHidden`. */
@@ -17,8 +20,10 @@ export interface MediaLibrary extends Host {
   /**
    * Make a "fast copy" of a video asset (H.264 with every frame a key frame, longest side at most `maxSide`) and add it to
    * the library as a new asset. The original stays. Rejects with a readable error, or an AbortError when `signal` fires.
+   * `format`: 'h264' (the default, made in the browser) or one of the HAP kinds, which only the desktop app can make
+   * (its FFmpeg writes them; see hap-copy.ts) and which reject with a readable error anywhere else.
    */
-  fastCopy(assetId: string, opts: { maxSide: number; onProgress?: (fraction: number) => void; onNote?: (text: string) => void; signal?: AbortSignal }): Promise<AssetInfo>;
+  fastCopy(assetId: string, opts: { maxSide: number; format?: FastCopyFormat; onProgress?: (fraction: number) => void; onNote?: (text: string) => void; signal?: AbortSignal }): Promise<AssetInfo>;
   remove(assetId: string): Promise<void>;
   list(opts?: { includeHidden?: boolean }): AssetInfo[];
   /** Small preview as an object URL (cached). */

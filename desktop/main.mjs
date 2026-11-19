@@ -164,6 +164,7 @@ async function handleInternal(request, rel, url) {
   if (rel === '/__rsmps/export/ffmpeg' || rel.startsWith('/__rsmps/export/ffmpeg/') || rel.startsWith('/__rsmps/export/file/')) return handleExport(request, rel, url);
   if (rel === '/__rsmps/splat-train' || rel.startsWith('/__rsmps/splat-train/')) return handleSplatTrain(request, rel, url);
   if (rel === '/__rsmps/live' || rel.startsWith('/__rsmps/live/')) return handleLive(request, rel, url);
+  if (rel === '/__rsmps/hap-convert' || rel.startsWith('/__rsmps/hap-convert/')) return handleHapConvert(request, rel, url);
   return new Response('Not found', { status: 404 });
 }
 
@@ -253,7 +254,9 @@ async function loadAddons() {
     });
     // Go live: the page's recording of its output, re-encoded by FFmpeg and sent to an RTMP address (desktop/addons/live.mjs)
     const live = mod.createLiveService({ binary: () => mgr.binary('ffmpeg') });
-    addons = { mgr, exporter, live, mod, splat, prep, bad, badCatalogue: bad && mod.parseCatalogue(bad.catalogue, { allowLocalHttp: true }), platformKey };
+    // Fast copy as HAP: a clip from Media re-encoded by FFmpeg and handed back to the page (desktop/addons/hap-convert.mjs)
+    const hapConvert = mod.createHapConvertService({ tmpRoot: join(tmpdir(), 'rsmps-hap-convert'), binary: () => mgr.binary('ffmpeg') });
+    addons = { mgr, exporter, live, hapConvert, mod, splat, prep, bad, badCatalogue: bad && mod.parseCatalogue(bad.catalogue, { allowLocalHttp: true }), platformKey };
     return addons;
   } catch (err) {
     addons = null;
@@ -408,6 +411,40 @@ async function handleLive(request, rel, url) {
     return new Response('Not found', { status: 404 });
   } catch (err) {
     if (err instanceof mod.LiveError) return json({ error: err.message }, err.status);
+    return json({ error: String(err?.message ?? err) }, 500);
+  }
+}
+
+// ---- Fast copy as HAP (desktop/addons/hap-convert.mjs) ----------------------------------------------------------------------
+
+/**
+ * Same origin checks as every /__rsmps endpoint (handleInternal).
+ *   GET  hap-convert                     is there an FFmpeg, and can it write HAP
+ *   POST hap-convert/start               { format, width, height, maxSide, duration, fps, ext } -> { id, width, height, estimate }
+ *   POST hap-convert/<id>/chunk          the next piece of the clip (bytes)
+ *   POST hap-convert/<id>/run            start FFmpeg
+ *   GET  hap-convert/<id>                { state, fraction, bytes, error }
+ *   GET  hap-convert/<id>/result?at=&length=   a piece of the finished file (bytes)
+ *   POST hap-convert/<id>/cancel         stop and delete the work folder (also the normal end)
+ */
+async function handleHapConvert(request, rel, url) {
+  if (!addons?.hapConvert) return json({ error: 'Add-ons are not available in this build.' }, 503);
+  const { hapConvert, mod } = addons;
+  const parts = rel.split('/').slice(3); // after /__rsmps/hap-convert
+  const get = request.method === 'GET';
+  try {
+    if (parts.length === 0) return get ? json(await hapConvert.info()) : new Response('Method not allowed', { status: 405 });
+    if (parts[0] === 'start') return request.method === 'POST' ? json(await hapConvert.start(await readJson(request))) : new Response('Method not allowed', { status: 405 });
+    const [id, action] = parts;
+    if (!action) return get ? json(hapConvert.status(id)) : new Response('Method not allowed', { status: 405 });
+    if (action === 'result') return get ? bytesResponse(hapConvert.read(id, Number(url.searchParams.get('at')), Number(url.searchParams.get('length')))) : new Response('Method not allowed', { status: 405 });
+    if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+    if (action === 'chunk') return json(hapConvert.chunk(id, await readBody(request)));
+    if (action === 'run') return json(hapConvert.run(id));
+    if (action === 'cancel') return json(hapConvert.cancel(id));
+    return new Response('Not found', { status: 404 });
+  } catch (err) {
+    if (err instanceof mod.HapConvertError) return json({ error: err.message }, err.status);
     return json({ error: String(err?.message ?? err) }, 500);
   }
 }
@@ -883,6 +920,7 @@ if (gotLock) {
     void phone?.stop();
     void addons?.exporter.disposeAll();
     addons?.live?.dispose(); // never leave an FFmpeg streaming after the app is gone
+    addons?.hapConvert?.disposeAll(); // nor one converting, nor its work folders
     void addons?.splat?.disposeAll(); // kills a running COLMAP / Brush and deletes its work folder
   });
   app.on('window-all-closed', () => {

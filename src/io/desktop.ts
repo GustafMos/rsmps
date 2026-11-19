@@ -335,6 +335,52 @@ export function parseLiveInfo(v: unknown): LiveInfo {
 }
 
 /** Last part of a path of either flavour (for the file name shown after a native save). */
+/* ------------------------------------------- fast copy as HAP ------------------------------------------ */
+
+/** The kinds of HAP the desktop app's FFmpeg writes: plain, better colour (larger), with transparency (larger). */
+export type HapKind = 'hap' | 'hap_q' | 'hap_alpha';
+
+export interface HapConvertInfo {
+  /** FFmpeg is installed. */
+  available: boolean;
+  /** ...and it has the `hap` encoder (not every build does). */
+  hap: boolean;
+}
+
+export interface HapConvertStart {
+  format: HapKind;
+  /** The clip as shown (after any rotation). */
+  width: number;
+  height: number;
+  /** Longest side of the copy. */
+  maxSide: number;
+  /** Seconds, for the progress and the size estimate. */
+  duration: number;
+  fps: number;
+  /** File extension of the clip, a hint for FFmpeg. */
+  ext: string;
+}
+
+export interface HapConvertStatus {
+  state: 'uploading' | 'running' | 'done' | 'error';
+  /** 0..1 of the encoding. */
+  fraction: number;
+  /** Size of the finished file. */
+  bytes: number;
+  error: string | null;
+}
+
+export function parseHapConvertInfo(v: unknown): HapConvertInfo {
+  const o = obj(v);
+  return { available: o.available === true, hap: o.available === true && o.hap === true };
+}
+
+export function parseHapConvertStatus(v: unknown): HapConvertStatus {
+  const o = obj(v);
+  const state = o.state === 'uploading' || o.state === 'running' || o.state === 'done' ? o.state : 'error';
+  return { state, fraction: Math.max(0, Math.min(1, num(o.fraction))), bytes: Math.max(0, num(o.bytes)), error: typeof o.error === 'string' ? o.error : state === 'error' ? 'The conversion failed.' : null };
+}
+
 export function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
@@ -406,6 +452,49 @@ export class DesktopClient implements FfmpegExportClient {
   }
   async liveStop(id?: string): Promise<LiveInfo> {
     return parseLiveInfo(await this.ok(`live/stop${id ? `?id=${encodeURIComponent(id)}` : ''}`, { method: 'POST' }));
+  }
+
+  /* Fast copy as HAP (desktop/addons/hap-convert.mjs) */
+  async hapInfo(): Promise<HapConvertInfo> {
+    return parseHapConvertInfo(await this.ok('hap-convert'));
+  }
+  async hapStart(req: HapConvertStart, signal?: AbortSignal): Promise<{ id: string; width: number; height: number }> {
+    const o = obj(await this.ok('hap-convert/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req), signal }, 'The conversion could not start.'));
+    if (!str(o.id)) throw new Error('The conversion could not start.');
+    return { id: str(o.id), width: num(o.width), height: num(o.height) };
+  }
+  /** The next piece of the clip, in order. */
+  async hapChunk(id: string, bytes: ArrayBuffer | ArrayBufferView, signal?: AbortSignal): Promise<void> {
+    await this.ok(`hap-convert/${encodeURIComponent(id)}/chunk`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: bytes as BodyInit, signal }, 'The clip could not be handed to FFmpeg.');
+  }
+  async hapRun(id: string, signal?: AbortSignal): Promise<HapConvertStatus> {
+    return parseHapConvertStatus(await this.ok(`hap-convert/${encodeURIComponent(id)}/run`, { method: 'POST', signal }, 'The conversion could not start.'));
+  }
+  async hapStatus(id: string, signal?: AbortSignal): Promise<HapConvertStatus> {
+    return parseHapConvertStatus(await this.ok(`hap-convert/${encodeURIComponent(id)}`, { signal }, 'The conversion was lost.'));
+  }
+  /** Bytes [at, at + length) of the finished file. */
+  async hapRead(id: string, at: number, length: number, signal?: AbortSignal): Promise<Uint8Array> {
+    if (!this.enabled()) throw new Error('This is only available in the desktop app.');
+    const res = await this.fetchFn(desktopUrl(`hap-convert/${encodeURIComponent(id)}/result?at=${Math.max(0, Math.floor(at))}&length=${Math.max(1, Math.floor(length))}`, this.base), { cache: 'no-store', signal });
+    if (!res.ok) {
+      let msg: unknown = null;
+      try {
+        msg = await res.json();
+      } catch {
+        /* not JSON */
+      }
+      throw new Error(errorText(msg, res.status, 'The converted clip could not be read.'));
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  /** Stop a conversion, or tidy up after one: the work folder is deleted either way. */
+  async hapCancel(id: string): Promise<void> {
+    try {
+      await this.call(`hap-convert/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    } catch {
+      /* gone either way */
+    }
   }
 
   /* FFmpeg export */
