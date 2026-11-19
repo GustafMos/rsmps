@@ -4,5 +4,6 @@ export { parseCatalogue, createAddonManager, probeAddon, probeFfmpeg, sha256File
 export { createSplatTrainService, SplatTrainError } from './splat-train.mjs';
 export { createExportService, ExportError } from './export.mjs';
 export { createLiveService, LiveError } from './live.mjs';
+export { createHapConvertService, HapConvertError } from './hap-convert.mjs';
 export { runAddonSmoke, prepareAddonSmoke } from './smoke.mjs';
 export { catalogueRaw };

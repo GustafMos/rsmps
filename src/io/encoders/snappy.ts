@@ -90,7 +90,8 @@ export function snappyEncode(src: Uint8Array): Uint8Array {
   return out.slice(0, o);
 }
 
-export function snappyDecode(src: Uint8Array): Uint8Array {
+/** Uncompressed size stated at the start of a Snappy block, and where the elements begin. */
+function snappyHeader(src: Uint8Array): { length: number; start: number } {
   let i = 0;
   let n = 0;
   let mul = 1;
@@ -101,8 +102,31 @@ export function snappyDecode(src: Uint8Array): Uint8Array {
     mul *= 128;
     if (!(b & 128)) break;
   }
-  const out = new Uint8Array(n);
-  let o = 0;
+  return { length: n, start: i };
+}
+
+/** Uncompressed size of a Snappy block (read from its header; nothing is decoded). */
+export function snappyLength(src: Uint8Array): number {
+  return snappyHeader(src).length;
+}
+
+export function snappyDecode(src: Uint8Array): Uint8Array {
+  const out = new Uint8Array(snappyLength(src));
+  snappyDecodeInto(src, out, 0);
+  return out;
+}
+
+/**
+ * Decode a Snappy block into `out` starting at `at` (HAP frames made of several chunks are decoded straight into one texture).
+ * Returns the number of bytes written.
+ */
+export function snappyDecodeInto(src: Uint8Array, out: Uint8Array, at = 0): number {
+  const head = snappyHeader(src);
+  const n = head.length;
+  if (at + n > out.length) throw new Error('snappy: the output does not fit');
+  const end = at + n;
+  let i = head.start;
+  let o = at;
   while (i < src.length) {
     const tag = src[i++];
     const kind = tag & 3;
@@ -114,7 +138,7 @@ export function snappyDecode(src: Uint8Array): Uint8Array {
         for (let k = 0; k < extra; k++) len += src[i++] * 2 ** (8 * k);
       }
       len += 1;
-      if (i + len > src.length || o + len > n) throw new Error('snappy: literal overruns');
+      if (i + len > src.length || o + len > end) throw new Error('snappy: literal overruns');
       out.set(src.subarray(i, i + len), o);
       i += len;
       o += len;
@@ -133,11 +157,13 @@ export function snappyDecode(src: Uint8Array): Uint8Array {
         offset = (src[i] | (src[i + 1] << 8) | (src[i + 2] << 16) | (src[i + 3] << 24)) >>> 0;
         i += 4;
       }
-      if (offset === 0 || offset > o || o + len > n) throw new Error('snappy: bad copy');
-      for (let k = 0; k < len; k++) out[o + k] = out[o + k - offset];
+      if (offset === 0 || offset > o - at || o + len > end) throw new Error('snappy: bad copy');
+      // A copy that does not overlap itself is one block move; an overlapping one repeats a pattern and must go byte by byte.
+      if (offset >= len) out.copyWithin(o, o - offset, o - offset + len);
+      else for (let k = 0; k < len; k++) out[o + k] = out[o + k - offset];
       o += len;
     }
   }
-  if (o !== n) throw new Error('snappy: length mismatch');
-  return out;
+  if (o !== end) throw new Error('snappy: length mismatch');
+  return n;
 }

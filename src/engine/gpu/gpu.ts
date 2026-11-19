@@ -1277,6 +1277,34 @@ function toHalf(value: number): number {
   return (sign | (exp << 10) | (mant >> 1)) + (mant & 1);
 }
 
+/**
+ * Things a graphics card may or may not be able to do, which the app uses when they are there and does without otherwise.
+ * `texture-compression-bc`: reading S3TC / BC compressed textures directly (desktop cards do, most phones do not). HAP video
+ * frames are such textures, so with it a HAP frame goes to the card as it is (src/io/hap-video.ts).
+ */
+export const OPTIONAL_FEATURES: readonly GPUFeatureName[] = ['texture-compression-bc'];
+
+/** The optional features this adapter has: only those may be asked for (asking for a missing one fails the whole request). */
+export function optionalFeatures(adapter: { features: { has(name: string): boolean } }): GPUFeatureName[] {
+  return OPTIONAL_FEATURES.filter((f) => adapter.features.has(f));
+}
+
+/** A device with the optional features the adapter offers. Never worse than a plain request: if asking for them fails, ask without. */
+export async function requestDeviceWithExtras(adapter: { features: { has(name: string): boolean }; requestDevice(desc?: GPUDeviceDescriptor): Promise<GPUDevice> }): Promise<GPUDevice> {
+  let extras: GPUFeatureName[] = [];
+  try {
+    extras = optionalFeatures(adapter);
+  } catch {
+    extras = [];
+  }
+  if (extras.length === 0) return adapter.requestDevice();
+  try {
+    return await adapter.requestDevice({ requiredFeatures: extras });
+  } catch {
+    return adapter.requestDevice();
+  }
+}
+
 /** Browser device. Throws a readable error when WebGPU is missing. */
 export async function createBrowserDevice(): Promise<GPUDevice> {
   if (typeof navigator === 'undefined' || !navigator.gpu) {
@@ -1284,7 +1312,7 @@ export async function createBrowserDevice(): Promise<GPUDevice> {
   }
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('No WebGPU adapter found.');
-  return adapter.requestDevice();
+  return requestDeviceWithExtras(adapter);
 }
 
 /** Node.js device (tests, CLI) through the `webgpu` package. */
@@ -1297,5 +1325,5 @@ export async function createHeadlessDevice(): Promise<GPUDevice> {
   (globalThis as Record<string, unknown>).__rsmpsGpuInstance = instance;
   const adapter = await instance.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) throw new Error('No WebGPU adapter found.');
-  return adapter.requestDevice();
+  return requestDeviceWithExtras(adapter);
 }
