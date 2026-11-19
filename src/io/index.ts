@@ -21,7 +21,7 @@ import type { CacheQuality } from './pixel-codec';
 import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
 import { Library } from './library';
-import { listVideoInputs, onVideoDevicesChanged } from './live';
+import { cameraPermission, listVideoInputs, onVideoDevicesChanged } from './live';
 import { LiveRecordController } from './live-record';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
@@ -263,6 +263,8 @@ export const createIo: CreateIo = async () => {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),
       setAudioOutput: (id) => audio.setOutputDevice(id),
       canChooseAudioOutput: () => audio.canChooseOutput(),
+      cameraPermission: () => cameraPermission(),
+      askCamera: () => library.live.askCamera(),
       onChanged: (l) => {
         const offs = [audio.onDevicesChanged(l), onVideoDevicesChanged(l)];
         return () => offs.forEach((off) => off());

@@ -99,6 +99,23 @@ export function cameraErrorMessage(err: unknown): string {
   return `The camera could not be opened (${(err as Error)?.message ?? String(err)}).`;
 }
 
+/** A camera that could not be opened (in use, unplugged) is tried again this often, not on every frame. */
+export const CAMERA_RETRY_MS = 5000;
+
+export type CameraPermission = 'granted' | 'denied' | 'prompt' | 'unknown';
+
+/** What the browser says about camera permission for this site, without asking. 'unknown' where it does not tell (Firefox, Safari). */
+export async function cameraPermission(): Promise<CameraPermission> {
+  try {
+    const st = await navigator.permissions.query({ name: 'camera' as PermissionName });
+    return st.state === 'granted' || st.state === 'denied' || st.state === 'prompt' ? st.state : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+export const CAMERA_BLOCKED = 'Camera permission was denied. Select the Webcam node and press "Allow camera", or allow the camera for this site in the browser\'s site settings.';
+
 /* ----------------------------------------- sources ---------------------------------------------- */
 
 interface Entry {
@@ -128,6 +145,13 @@ export class LiveSources {
   private devicesListeners = new Set<() => void>();
   /** Set by createIo when the phone link exists. */
   phone: PhoneProvider | null = null;
+  /**
+   * Set when the camera was refused. While set, cameras are not opened again on their own: every retry would be another
+   * permission question (or a silent failure) at a moment the user did not choose. `askCamera` (a button) clears it.
+   */
+  private cameraRefused = false;
+  /** Cameras that failed to open for another reason (in use, not found): not tried again before `until`, so a failing camera is not opened on every frame. */
+  private cameraFailed = new Map<string, { until: number; message: string }>();
 
   constructor(private gpu: Gpu) {}
 
@@ -139,6 +163,11 @@ export class LiveSources {
   async frame(req: LiveRequest, maxSide: number): Promise<LiveFrame | null> {
     const key = sourceKey(req);
     let e = this.entries.get(key);
+    if (!e && req.kind === 'camera') {
+      if (this.cameraRefused) throw new Error(CAMERA_BLOCKED);
+      const failed = this.cameraFailed.get(key);
+      if (failed && performance.now() < failed.until) throw new Error(failed.message);
+    }
     if (!e) {
       e = this.open(key, req);
       this.entries.set(key, e);
@@ -170,6 +199,7 @@ export class LiveSources {
   drawable(req: LiveRequest): CanvasImageSource | null {
     const key = sourceKey(req);
     let e = this.entries.get(key);
+    if (!e && req.kind === 'camera' && this.cameraRefused) return null;
     if (!e) {
       e = this.open(key, req);
       this.entries.set(key, e);
@@ -198,6 +228,20 @@ export class LiveSources {
     }
     const img = e.el as HTMLImageElement;
     return img.naturalWidth > 0 && img.naturalHeight > 0 ? img : null;
+  }
+
+  /**
+   * After a GPU device loss: the textures are gone with the old device (forget them, do not release), but cameras and streams
+   * stay open. Closing them would open the camera again a moment later, which on a phone can ask for permission again.
+   */
+  onDeviceReset(): void {
+    for (const e of this.entries.values()) {
+      e.texture = null;
+      e.frame = null;
+      e.uploadedBucket = '';
+      e.phoneVersion = -1;
+      e.fresh = true;
+    }
   }
 
   closeAll(): void {
@@ -299,7 +343,39 @@ export class LiveSources {
       this.watchFrames(e, video);
       this.devicesListeners.forEach((l) => l()); // labels become available after permission
     } catch (err) {
-      e.error = new Error(cameraErrorMessage(err));
+      const name = (err as { name?: string })?.name;
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        this.cameraRefused = true;
+        e.error = new Error(CAMERA_BLOCKED);
+      } else {
+        e.error = new Error(cameraErrorMessage(err));
+        this.cameraFailed.set(e.key, { until: performance.now() + CAMERA_RETRY_MS, message: e.error.message });
+      }
+    }
+  }
+
+  /**
+   * Ask for camera permission now. Call it from a button press: browsers show the question reliably only then. Cameras that
+   * failed are closed, so the nodes open them again on the next frame. Returns the outcome with a readable message on failure.
+   */
+  async askCamera(): Promise<{ ok: boolean; message?: string }> {
+    if (!navigator.mediaDevices?.getUserMedia) return { ok: false, message: 'This browser has no camera access (it needs a secure page: https or localhost).' };
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      stream.getTracks().forEach((t) => t.stop());
+      this.cameraRefused = false;
+      this.cameraFailed.clear();
+      for (const e of [...this.entries.values()]) if (e.req.kind === 'camera' && e.error) this.close(e);
+      this.devicesListeners.forEach((l) => l());
+      return { ok: true };
+    } catch (err) {
+      const name = (err as { name?: string })?.name;
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        this.cameraRefused = true;
+        const blocked = (await cameraPermission()) === 'denied';
+        return { ok: false, message: blocked ? 'The camera is blocked for this site, so the browser does not ask any more. Tap the icon left of the address, open Permissions (or Site settings), set Camera to Allow, then press this again.' : 'The camera was not allowed.' };
+      }
+      return { ok: false, message: cameraErrorMessage(err) };
     }
   }
 
