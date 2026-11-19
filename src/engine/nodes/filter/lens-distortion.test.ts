@@ -24,12 +24,12 @@ const checker = (x: number, y: number): [number, number, number, number] => {
 it('lens distortion bends the picture, and undistort with the same amount gives it back', async () => {
   const t = await harness();
   const src = t.fromFn(64, 64, checker);
-  expect((await t.run('lens-distortion', { amount: 0 }, { image: src })).image).toBe(src);
-  const bent = (await t.run('lens-distortion', { amount: 0.5, fill: false }, { image: src })).image;
+  expect((await t.run('lens-distortion', { preset: 'custom', amount: 0 }, { image: src })).image).toBe(src);
+  const bent = (await t.run('lens-distortion', { preset: 'custom', amount: 0.5, fill: false }, { image: src })).image;
   const bp = await t.pixels(bent as never);
   expect(bp.at(32, 32)[1]).toBeGreaterThan(90); // the centre stays
   expect(bp.at(0, 0)[3]).toBe(0); // barrel: the corners are empty
-  const back = await t.pixels((await t.run('lens-distortion', { mode: 'undistort', amount: 0.5, fill: false }, { image: bent as never })).image as never);
+  const back = await t.pixels((await t.run('lens-distortion', { preset: 'custom', mode: 'undistort', amount: 0.5, fill: false }, { image: bent as never })).image as never);
   const sp = await t.pixels(src as never);
   let diff = 0;
   let n = 0;
@@ -41,9 +41,18 @@ it('lens distortion bends the picture, and undistort with the same amount gives 
   expect(diff / n).toBeLessThan(6);
 });
 
+it('presets set the look: Fisheye bulges the centre and fills the frame', async () => {
+  const t = await harness();
+  const plain = t.fromFn(64, 64, (x) => [Math.round((x / 63) * 255), 0, 0, 255]);
+  const px = await t.pixels((await t.run('lens-distortion', { preset: 'fisheye' }, { image: plain })).image as never);
+  // the centre is magnified: a point a little right of the middle shows what was nearer the middle
+  expect(px.at(44, 32)[0]).toBeLessThan(170); // was 178
+  expect(px.at(0, 0)[3]).toBeGreaterThan(250);
+});
+
 it('Fill the frame leaves no transparent pixel', async () => {
   const t = await harness();
   const src = t.solid(48, 32, [200, 100, 50, 255]);
-  const px = await t.pixels((await t.run('lens-distortion', { amount: 0.7, fill: true }, { image: src })).image as never);
+  const px = await t.pixels((await t.run('lens-distortion', { preset: 'custom', amount: 0.7, fill: true }, { image: src })).image as never);
   for (const [x, y] of [[0, 0], [47, 0], [0, 31], [47, 31], [24, 0], [0, 16]]) expect(px.at(x, y)[3]).toBeGreaterThan(250);
 });

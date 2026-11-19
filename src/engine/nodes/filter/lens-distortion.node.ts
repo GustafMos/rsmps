@@ -6,7 +6,24 @@ import { defineNode } from '../../define';
  * barrel distortion (wide lenses, action cameras), positive k is pincushion (long lenses). The model has an exact inverse,
  * rd = 2 ru / (1 + sqrt(1 - 4 k ru²)), so Distort followed by Undistort with the same amount gives the picture back.
  */
-export const lensK = (amount: number): number => -0.5 * amount;
+/**
+ * Amount (-1..1) to k. Not linear: small amounts stay fine enough to correct a real lens, the top of the range is a full
+ * fisheye bulge. Pincushion (below 0) is kept gentler, it folds the picture over itself much sooner.
+ */
+export const lensK = (amount: number): number => (amount >= 0 ? -amount * (0.5 + 2.5 * amount) : -amount * (0.5 - 0.5 * amount));
+
+/** Looks: a preset sets mode, amount, fill, zoom and outside; choose Custom to set them yourself. */
+export const LENS_PRESETS: Record<string, { label: string; mode: 'distort' | 'undistort'; amount: number; fill: boolean; zoom: number; edge: 'clear' | 'repeat' | 'mirror' }> = {
+  wide: { label: 'Wide lens', mode: 'distort', amount: 0.3, fill: true, zoom: 1, edge: 'clear' },
+  action: { label: 'Action camera', mode: 'distort', amount: 0.5, fill: true, zoom: 1, edge: 'clear' },
+  fisheye: { label: 'Fisheye', mode: 'distort', amount: 0.8, fill: true, zoom: 1, edge: 'clear' },
+  extreme: { label: 'Extreme fisheye', mode: 'distort', amount: 1, fill: true, zoom: 1, edge: 'clear' },
+  peephole: { label: 'Door peephole', mode: 'distort', amount: 1, fill: false, zoom: 1.6, edge: 'clear' },
+  tele: { label: 'Pincushion', mode: 'distort', amount: -0.5, fill: true, zoom: 1, edge: 'clear' },
+  fixPhone: { label: 'Fix: phone wide lens', mode: 'undistort', amount: 0.15, fill: true, zoom: 1, edge: 'clear' },
+  fixAction: { label: 'Fix: action camera', mode: 'undistort', amount: 0.45, fill: true, zoom: 1, edge: 'clear' },
+};
+const custom = (p: Record<string, unknown>): boolean => p.preset === 'custom' || p.preset === undefined;
 
 /** Where an output position (centre units) reads the source. `null`: nothing of the source lands there. */
 export function lensSource(x: number, y: number, k: number, undistort: boolean): [number, number] | null {
@@ -63,16 +80,17 @@ export default defineNode({
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: true,
   params: {
-    mode: { type: 'enum', default: 'distort', options: [{ value: 'distort', label: 'Distort' }, { value: 'undistort', label: 'Undistort' }], label: 'Mode', hint: 'Distort adds the bend of a lens. Undistort removes it: the same amount undoes what Distort did.' },
-    amount: { type: 'number', default: 0.3, min: -1, max: 1, step: 0.005, label: 'Amount', hint: 'Above 0: barrel, the bulge of a wide lens. Below 0: pincushion. To correct footage, choose Undistort and raise this until straight lines are straight.' },
+    preset: { type: 'enum', default: 'fisheye', options: [...Object.entries(LENS_PRESETS).map(([value, v]) => ({ value, label: v.label })), { value: 'custom', label: 'Custom' }], label: 'Look', hint: 'Ready-made lenses. Choose Custom to set mode, amount and zoom yourself.' },
+    mode: { type: 'enum', visibleIf: custom, default: 'distort', options: [{ value: 'distort', label: 'Distort' }, { value: 'undistort', label: 'Undistort' }], label: 'Mode', hint: 'Distort adds the bend of a lens. Undistort removes it: the same amount undoes what Distort did.' },
+    amount: { type: 'number', visibleIf: custom, default: 0.5, min: -1, max: 1, step: 0.005, label: 'Amount', hint: 'Above 0: barrel, the bulge of a wide lens; 1 is a full fisheye. Below 0: pincushion. To correct footage, choose Undistort and raise this until straight lines are straight.' },
     center: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: 0, max: 1, step: 0.001, label: 'Center', hint: 'The middle of the lens. 0.5, 0.5 is the middle of the picture.' },
-    fill: { type: 'bool', default: true, label: 'Fill the frame', hint: 'Zooms in just enough that no empty edge shows.' },
-    zoom: { type: 'number', default: 1, min: 0.25, max: 4, step: 0.005, label: 'Zoom' },
-    edge: { type: 'enum', default: 'clear', options: [{ value: 'clear', label: 'Transparent' }, { value: 'repeat', label: 'Repeat the edge' }, { value: 'mirror', label: 'Mirror' }], label: 'Outside', hint: 'What shows where the bent picture does not reach.' },
+    fill: { type: 'bool', visibleIf: custom, default: true, label: 'Fill the frame', hint: 'Zooms in just enough that no empty edge shows.' },
+    zoom: { type: 'number', visibleIf: custom, default: 1, min: 0.25, max: 4, step: 0.005, label: 'Zoom' },
+    edge: { type: 'enum', visibleIf: custom, default: 'clear', options: [{ value: 'clear', label: 'Transparent' }, { value: 'repeat', label: 'Repeat the edge' }, { value: 'mirror', label: 'Mirror' }], label: 'Outside', hint: 'What shows where the bent picture does not reach.' },
   },
-  summary: (p) => `${p.mode === 'undistort' ? 'undistort' : 'distort'} ${p.amount}`,
+  summary: (p) => (LENS_PRESETS[p.preset as string] ? LENS_PRESETS[p.preset as string].label : `${p.mode === 'undistort' ? 'undistort' : 'distort'} ${p.amount}`),
   render(ctx) {
-    const p = ctx.params;
+    const p = { ...ctx.params, ...(LENS_PRESETS[ctx.params.preset as string] ?? {}) };
     const src = ctx.in.image;
     if (!src) return { image: src };
     if (Math.abs(p.amount) < 1e-4 && Math.abs(p.zoom - 1) < 1e-4) return { image: src };
