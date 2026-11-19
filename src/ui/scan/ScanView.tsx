@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { AssetInfo } from '../../engine/types';
 import type { ScanPageState, ScanProgressHooks, ScanResult } from '../../io/api';
 import { Icon } from '../components/Icon';
@@ -7,7 +7,8 @@ import { CheckField, SelectField, TextField } from '../components/fields';
 import { useApp } from '../store/context';
 import { PageCard } from './PageCard';
 import { useEd } from '../store/context';
-import { emptySession, loadSession, photoFiles, saveSession, type ScanSession } from './session';
+import { emptySession, loadSession, photoFiles, saveSession } from './session';
+import { pruneScanTabs, scanBarState, scanTab } from './scanTabs';
 import { MenuButton } from '../components/Menu';
 import { QUICK_KINDS, buildQuickGraph, type QuickKind } from './quickExport';
 import { TextureScan } from './TextureScan';
@@ -15,21 +16,21 @@ import { PhoneScanLine, PhoneScanPanel } from './PhoneScanPanel';
 import { encodeSpriteJpeg, type PhoneScanController } from '../../io/phone-scan';
 import './scan.css';
 
-/** Per-photo state while a scan runs: what each page card shows before its result exists. */
-interface Progress {
-  names: string[];
-  states: ScanPageState[];
-  completed: number;
-  total: number;
-  concurrency: number;
-}
-
 const STATE_TEXT: Record<ScanPageState, string> = { queued: 'Queued', scanning: 'Scanning…', done: 'Done', failed: 'Failed', cancelled: 'Canceled' };
 
 export function ScanView() {
   const { io, ed } = useApp();
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const tabId = useEd((s) => s.activeProject);
+  // Everything a scan project shows lives in its ScanTab (scanTabs.ts), not in this component: leaving the Scan screen keeps the
+  // analysed pages and lets a running scan finish, and coming back shows them at once.
+  const tab = scanTab(tabId ?? '');
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => tab.subscribe(redraw), [tab]);
+  const { progress, result, busy } = tab;
+  const { setProgress, setBusy, ref, session, timing, abortRef } = tab;
+  // scan projects that were closed: cancel their scans and release their pages
+  const openIds = useEd((s) => s.projects.map((p) => p.id).join(' '));
+  useEffect(() => void pruneScanTabs(openIds.split(' ').filter(Boolean)), [openIds]);
   /** Hooks for one scan run: progress into state, and a controller that Cancel and leaving the tab abort. */
   const track = useCallback((): ScanProgressHooks => {
     abortRef.current?.abort();
@@ -49,27 +50,21 @@ export function ScanView() {
         });
       },
     };
-  }, []);
+  }, [abortRef, setProgress]);
   const finishTracking = () => {
     abortRef.current = null;
     setProgress(null);
   };
-  const [result, setResult] = useState<ScanResult | null>(null);
-  const ref = useRef<ScanResult | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const [textureMode, setTextureMode] = useState(false);
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [phoneToken, setPhoneToken] = useState('');
   const phoneController = useRef<PhoneScanController | null>(null);
   /** Timing chosen in the Frames section: baked into the hidden working sequence, so the "Scanned frames" source plays with the right holds. */
-  const timing = useRef<{ shootOn: number; holds: (number | null)[] }>({ shootOn: 1, holds: [] });
   const timingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fileIn = useRef<HTMLInputElement>(null);
   const addIn = useRef<HTMLInputElement>(null);
-  const tabId = useEd((s) => s.activeProject);
   const tabName = useEd((s) => s.projects.find((p) => p.id === s.activeProject)?.name ?? 'Scan');
-  const session = useRef<ScanSession>(emptySession());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const persist = useCallback(() => {
     clearTimeout(saveTimer.current);
@@ -87,15 +82,24 @@ export function ScanView() {
         const asset = await io.scan.attach(tabId, r, { name: tabName, fps: r.report.fps || 12, layer, shootOn: timing.current.shootOn, holds: timing.current.holds.map((h) => h ?? 0) });
         if (layer === 0) {
           session.current.committedAssetId = asset.id;
-          // the clean-up graph may already exist: keep its length in step with the holds
-          if (ed.state.graph.nodes.length) ed.setProject({ duration: asset.duration });
+          // The clean-up graph may already exist: keep its length in step with the holds. Only while this scan project is the open
+          // one (a scan that finishes in the background must not change the project the owner is looking at): otherwise on return.
+          if (ed.state.activeProject !== tabId) tab.pendingDuration = asset.duration;
+          else if (ed.state.graph.nodes.length) ed.setProject({ duration: asset.duration });
         }
       }
       persist();
     } catch (err) {
       ed.toast(`Could not prepare the frames for clean-up: ${err instanceof Error ? err.message : String(err)}`, 'error');
     }
-  }, [io, ed, tabId, tabName, persist]);
+  }, [io, ed, tabId, tabName, persist, tab, session, timing]);
+  // back on this scan project: apply the length a background scan was waiting to set
+  useEffect(() => {
+    if (tab.pendingDuration === null || ed.state.activeProject !== tabId) return;
+    const d = tab.pendingDuration;
+    tab.pendingDuration = null;
+    if (ed.state.graph.nodes.length) ed.setProject({ duration: d });
+  });
   const onTiming = useCallback((t: { shootOn: number; holds: (number | null)[] }) => {
     const changed = t.shootOn !== timing.current.shootOn || JSON.stringify(t.holds) !== JSON.stringify(timing.current.holds);
     timing.current = t;
@@ -104,46 +108,30 @@ export function ScanView() {
       timingTimer.current = setTimeout(() => { if (ref.current) void attach(ref.current); }, 500);
     }
   }, [attach]);
-  const [restoredOptions, setRestoredOptions] = useState<Record<string, unknown>>({});
+  // what the Frames section starts from: the options stored with the scan (also after leaving the screen and coming back)
+  const restoredOptions = (session.current.options?.ui as Record<string, unknown>) ?? {};
 
-  // reopen a saved scan (also after a page reload)
+  // Open a saved scan: once per scan project (also after a page reload), not on every visit to the screen.
   useEffect(() => {
-    if (!tabId) return;
-    let live = true;
+    if (!tabId || tab.loaded) return;
+    tab.loaded = true;
     void loadSession(io, tabId).then(async (s) => {
-      if (!live) return;
       session.current = s;
       if (!s.photos.length) return;
-      setRestoredOptions((s.options?.ui as Record<string, unknown>) ?? {});
       setBusy('Restoring your scan…');
       try {
-        const r = await io.scan.restore(s, track());
-        if (live) replace(r);
-        else r.dispose();
+        tab.setResult(await io.scan.restore(s, track()));
       } catch (err) {
         if (!(err instanceof Error && err.name === 'AbortError')) ed.toast(`Could not restore the scan: ${err instanceof Error ? err.message : String(err)}`, 'error');
       } finally {
-        if (live) {
-          setBusy(null);
-          finishTracking();
-        }
+        setBusy(null);
+        finishTracking();
       }
     });
-    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
-  // dispose object URLs when leaving the tab
-  useEffect(() => () => ref.current?.dispose(), []);
-  // closing the Scan tab stops a scan in progress: queued photos are dropped and running ones terminated
-  useEffect(() => () => abortRef.current?.abort(), []);
-
-  const replace = useCallback((r: ScanResult | null) => {
-    const old = ref.current;
-    ref.current = r;
-    setResult(r);
-    if (old && old !== r) setTimeout(() => old.dispose(), 0);
-  }, []);
+  const replace = tab.setResult;
 
   const analyze = async (list: FileList | File[], append = false) => {
     const added = Array.from(list).filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|tiff?)$/i.test(f.name));
@@ -163,6 +151,8 @@ export function ScanView() {
     } finally {
       setBusy(null);
       finishTracking();
+      // finished while another tab was open: say so, the result is waiting in the scan project
+      if (ed.state.activeProject !== tabId && tab.result) ed.toast(`The scan in "${tabName}" is ready.`, 'ok');
     }
   };
 
@@ -215,6 +205,8 @@ export function ScanView() {
     ed.setMode('edit');
   };
 
+  const bar = scanBarState(busy, progress);
+
   return (
     <div
       className={`rs-sc${over ? ' is-drop' : ''}`}
@@ -242,13 +234,13 @@ export function ScanView() {
         {phoneOpen && <PhoneScanPanel token={phoneToken} onToken={setPhoneToken} onClose={() => setPhoneOpen(false)} />}
         {phoneToken && <PhoneScanLine token={phoneToken} hasResult={!!result} onPreview={() => phoneController.current?.requestPreview()} />}
 
-        {busy && (
+        {bar && (
           <div className="rs-sc__busy" role="status">
             <div className="rs-dlg__bar">
-              <div style={progress ? { width: `${Math.round((100 * progress.completed) / Math.max(1, progress.total))}%` } : { width: '100%', animation: 'rs-sc-pulse 1.2s steps(8) infinite' }} />
+              <div style={bar.percent !== null ? { width: `${bar.percent}%` } : { width: '100%', animation: 'rs-sc-pulse 1.2s steps(8) infinite' }} />
             </div>
-            <span>{progress ? `Scanning ${progress.completed} of ${progress.total} (${progress.concurrency} at a time)` : busy}</span>
-            {progress && <button className="rs-btn" onClick={() => abortRef.current?.abort()}>Cancel</button>}
+            <span>{bar.text}</span>
+            {progress && progress.completed < progress.total && <button className="rs-btn" onClick={() => abortRef.current?.abort()}>Cancel</button>}
           </div>
         )}
         {progress && (

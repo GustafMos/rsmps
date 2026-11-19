@@ -122,6 +122,12 @@ export interface Player {
   /** Proxy policy: 'auto' lowers resolution while playing to hold the project fps; a number forces it. */
   setProxy(mode: 'auto' | number): void;
   /**
+   * `performance.now()` at which the evaluation that is in flight right now began, or null when nothing is being rendered. One
+   * evaluation is one frame of the viewed node. For the watchdog: a number that stays the same for many seconds is a frame that
+   * will not finish; null means the player is idle, whatever was edited.
+   */
+  renderingSince(): number | null;
+  /**
    * Run on, for live recording: time keeps counting past the project length (no wrap, no stop) and the graph is evaluated with Loop
    * off, so effects keep evolving instead of repeating every loop. Off returns the playhead inside the project.
    */

@@ -1,3 +1,5 @@
+import { BETA } from '../aboutCopy';
+import { bugReportUrl } from '../lib/bugReport';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { OpenProject } from '../../io/api';
@@ -180,6 +182,10 @@ export function StartScreen() {
         <label className="rs-start__pref"><input type="checkbox" checked={show} onChange={(e) => setPref(e.target.checked)} /> Show this on start</label>
         <button className="rs-btn" onClick={dismissStart}>Start empty</button>
       </div>
+      <p className="rs-start__beta" role="note">
+        <span className="rs-start__betatag">{BETA.badge}</span> {BETA.short} {BETA.ask}{' '}
+        <a href={bugReportUrl()} target="_blank" rel="noopener noreferrer">Report a bug</a>
+      </p>
       <Actions />
       <Recent />
       <TemplateGallery />

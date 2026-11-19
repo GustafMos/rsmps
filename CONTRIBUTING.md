@@ -37,3 +37,17 @@ Audio nodes: see `src/engine/audio/README.md`. Plugins: see `docs/PLUGINS.md`.
 
 Please include the graph file (File → Save), source dimensions and type, browser/OS/GPU, steps to reproduce, and
 expected vs actual results.
+
+## Versions and releases
+
+Every change that reaches `main` is released. In the pull request:
+
+1. Raise `version` in `package.json` (and the two root entries of `package-lock.json`): the last number for fixes, the middle one for
+   new features.
+2. Put the change under a section for that version in `CHANGELOG.md`: `## [0.8.1] - 2026-11-20`, with `### Added` / `### Changed` /
+   `### Fixed`. Leave `## Unreleased` at the top, empty.
+
+When the pull request is merged, the "Release on version change" workflow makes the GitHub Release for that version from its
+CHANGELOG section. A version without a CHANGELOG section is not released (the workflow fails and says so). Desktop installers are
+built separately with the "Release" workflow.
+

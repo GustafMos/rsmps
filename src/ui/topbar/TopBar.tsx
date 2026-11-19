@@ -1,3 +1,5 @@
+import { bugReportUrl } from '../lib/bugReport';
+import { BETA } from '../aboutCopy';
 import { Icon } from '../components/Icon';
 import { MenuButton, type MenuItem } from '../components/Menu';
 import { useEffect, useState } from 'react';
@@ -38,8 +40,7 @@ export function TopBar() {
       })
       .catch(() => undefined);
   }, []);
-  const bugBody = ['## What happened', '', '', '## Steps', '1. ', '', '## Expected', '', '', '---', `App: RSMPS ${pkg.version}`, `Browser: ${navigator.userAgent}`, `GPU: ${gpu}`].join('\n');
-  const bugUrl = `https://github.com/GustafMos/rsmps/issues/new?body=${encodeURIComponent(bugBody)}`;
+  const bugUrl = bugReportUrl(gpu);
 
   const open = () => ed.openFileTab();
   const save = () => ed.saveFile();
@@ -104,6 +105,7 @@ export function TopBar() {
       <div className="rs-top__brand">
         <img src={`${import.meta.env.BASE_URL}ripscorpy-mark.png`} alt="" width={32} height={32} />
         <span className="rs-top__word">RSMPS</span>
+        <button className="rs-top__beta" onClick={() => ed.openDialog('about')} title={`${BETA.short} ${BETA.ask} Click for details.`}>{BETA.badge}</button>
       </div>
       <MenuButton items={fileItems} className="rs-btn rs-btn--ghost">File <Icon name="chevronDown" size={12} /></MenuButton>
       <MenuButton items={editItems} className="rs-btn rs-btn--ghost">Edit <Icon name="chevronDown" size={12} /></MenuButton>
