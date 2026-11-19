@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.10.0] - 2026-11-19
+
+### Added
+- **Halation node** (Filter): the red-orange glow film makes around bright lights. The default is modelled on 35mm film: it works on light (not display values), gives clipped whites their brightness back, spreads the light that bounces off the back of the film and adds it mostly to the red layer; an even surface is left untouched. Looks for 16mm, Super 8, 65mm, film without a backing layer and black-and-white film, and unrealistic ones (Neon city, Blood moon, Toxic, Ice, Fever dream, Meltdown). Custom shows light returned, spread, highlight stops, wide share and halo color.
+- **Film Stock node** (Color): 18 stocks from a model of how film layers answer light (layer mixing, per-layer speed and contrast, an S-curve with a soft shoulder, colour as dye density, a black that is not black): portrait, vivid, golden and cool green negatives, cinema tungsten and daylight, two slide films, bleach bypass, cross processed, expired, redscale, purple shift, infrared color and four black-and-white stocks. Exposure in stops, contrast, saturation, fade and strength. It is a parametric model tuned by eye, not measured data of real stocks.
+- **Film Gauge node** (Stylize): the feel of a film format and its projector: Super 8, 16mm, Super 16, 35mm, 65mm, plus Home movie and Lost reel. Softness, grain, gate weave, flicker, dust and hairs, scratches, dark corners and the rounded gate edge, all sized as a share of the picture so a look is the same at every resolution. "Change every N" gives the stutter of film shot at a lower frame rate.
+- For a full film look, chain them: Film Stock, then Halation, then Film Gauge.
+
 ## [0.9.3] - 2026-11-19
 
 ### Added
