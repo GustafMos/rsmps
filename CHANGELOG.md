@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.9.3] - 2026-11-19
+
+### Added
+- **Recorder: the clip is also saved as a file.** When you stop a recording, the clip is downloaded to this device as a video file (the Downloads folder) as well as added to Media. The new "Save as a file" setting on the Recorder node turns this off. "Save last clip as file" in the node's settings saves the last recording of this session again.
+
 ## [0.9.2] - 2026-11-19
 
 ### Changed

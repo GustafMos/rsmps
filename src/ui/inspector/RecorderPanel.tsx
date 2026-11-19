@@ -23,13 +23,18 @@ export function RecorderPanel({ fullId, params }: { fullId: string; params: Read
         >
           {recordLabel(ui, mine)}
         </button>
+        {ui.lastName && ui.phase === 'idle' && (
+          <button className="rs-btn" title={`Save ${ui.lastName} as a video file on this device`} onClick={() => recorder.saveLast()}>
+            Save last clip as file
+          </button>
+        )}
       </div>
       <p className="rs-insp__hint">
         {recording
           ? settings.time === 'run'
-            ? 'Recording. Time runs on until you stop; Stop saves the clip to Media.'
-            : 'Recording. The project loops; Stop saves the clip to Media.'
-          : 'Records what the viewer shows while this node is viewed, with the sound that is playing. Up to 30 minutes. Use the clip with Media In.'}
+            ? 'Recording. Time runs on until you stop; Stop saves the clip.'
+            : 'Recording. The project loops; Stop saves the clip.'
+          : 'Records what the viewer shows while this node is viewed, with the sound that is playing. Up to 30 minutes. The clip goes to Media (use it with Media In)' + (settings.download ? ' and is saved as a video file on this device.' : '.')}
       </p>
     </div>
   );

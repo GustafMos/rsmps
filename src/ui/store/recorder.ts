@@ -15,6 +15,8 @@ export interface RecorderUi {
   /** The Recorder node being recorded (its path id), or null. */
   nodeId: string | null;
   seconds: number;
+  /** File name of the last finished clip of this session, or null. */
+  lastName: string | null;
 }
 
 export interface RecorderSettings {
@@ -22,12 +24,14 @@ export interface RecorderSettings {
   sound: boolean;
   /** Longest side of the clip. */
   maxSide: number;
+  /** Also save the clip as a file on the device when the recording stops. */
+  download: boolean;
 }
 
 /** A Recorder node's settings, with defaults for anything missing or odd. */
 export function recorderSettings(params: Readonly<Record<string, unknown>>): RecorderSettings {
   const side = Number(params.size);
-  return { time: params.time === 'loop' ? 'loop' : 'run', sound: params.sound !== false, maxSide: side === 1280 || side === 3840 ? side : 1920 };
+  return { time: params.time === 'loop' ? 'loop' : 'run', sound: params.sound !== false, download: params.download !== false, maxSide: side === 1280 || side === 3840 ? side : 1920 };
 }
 
 /** What the Record button says. */
@@ -43,6 +47,8 @@ export interface RecorderEnv {
   /** A drawable that follows `canvas` (see the file header), and a way to release it. */
   follow(canvas: HTMLCanvasElement): { picture(): CanvasImageSource | null; dispose(): void };
   every(ms: number, fn: () => void): () => void;
+  /** Save a finished clip as a file on the device (the browser's download). */
+  saveFile(file: File): void;
 }
 
 export const browserRecorderEnv: RecorderEnv = {
@@ -74,14 +80,28 @@ export const browserRecorderEnv: RecorderEnv = {
     const t = window.setInterval(fn, ms);
     return () => window.clearInterval(t);
   },
+  saveFile(file) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
 };
 
 export class RecorderController {
-  readonly store: Store<RecorderUi> = createStore<RecorderUi>({ phase: 'idle', nodeId: null, seconds: 0 });
+  readonly store: Store<RecorderUi> = createStore<RecorderUi>({ phase: 'idle', nodeId: null, seconds: 0, lastName: null });
   private rec: LiveRecorder;
   private stops: (() => void)[] = [];
   private ranOn = false;
   private finishing: Promise<void> | null = null;
+  private download = true;
+  /** The last finished clip, kept so it can be saved as a file again (or for the first time). */
+  private last: File | null = null;
 
   constructor(
     private ed: Editor,
@@ -124,6 +144,7 @@ export class RecorderController {
       follow.dispose();
       return ed.toast(err instanceof Error ? err.message : String(err), 'error');
     }
+    this.download = settings.download;
     this.ranOn = settings.time === 'run';
     if (this.ranOn) io.player.setRunOn(true);
     io.player.seek(0);
@@ -132,7 +153,7 @@ export class RecorderController {
       () => follow.dispose(),
       this.env.every(500, () => this.store.set((s) => (s.phase === 'recording' ? { ...s, seconds: this.rec.elapsed } : s))),
     );
-    this.store.set(() => ({ phase: 'recording', nodeId, seconds: 0 }));
+    this.store.set((s) => ({ phase: 'recording', nodeId, seconds: 0, lastName: s.lastName }));
     if (settings.sound && !io.stream.audioStream()) ed.toast('Recording without sound: no sound is running. Press Enable audio and record again to include it.', 'info');
   }
 
@@ -146,18 +167,29 @@ export class RecorderController {
       if (this.ranOn) this.io.player.setRunOn(false);
       try {
         const take = await this.rec.stop();
-        const [asset] = await this.io.library.add([new File([take.blob], take.name, { type: take.blob.type })]);
+        const file = new File([take.blob], take.name, { type: take.blob.type });
+        this.last = file;
+        this.store.set((s) => ({ ...s, lastName: file.name }));
+        // the file first: it does not depend on the library, so the clip is on the device even if Media refuses it
+        if (this.download) this.env.saveFile(file);
+        const [asset] = await this.io.library.add([file]);
         if (!asset) throw new Error('The clip could not be added to Media.');
-        this.ed.toast(note ?? `Saved to Media: ${take.name} (${formatElapsed(take.seconds)}${take.hasAudio ? ', with sound' : ', picture only'}).`, 'ok');
+        const where = this.download ? 'Saved to your downloads and to Media' : 'Saved to Media';
+        this.ed.toast(note ?? `${where}: ${take.name} (${formatElapsed(take.seconds)}${take.hasAudio ? ', with sound' : ', picture only'}).`, 'ok');
       } catch (err) {
         this.ed.toast(`The recording was not saved: ${(error ?? (err instanceof Error ? err : new Error(String(err)))).message}`, 'error');
       }
       for (const off of this.stops.splice(0)) off();
-      this.store.set(() => ({ phase: 'idle', nodeId: null, seconds: 0 }));
+      this.store.set((s) => ({ phase: 'idle', nodeId: null, seconds: 0, lastName: s.lastName }));
       this.finishing = null;
     };
     this.finishing = run();
     return this.finishing;
+  }
+
+  /** Save the last finished clip as a file on the device (again, or for the first time). */
+  saveLast(): void {
+    if (this.last) this.env.saveFile(this.last);
   }
 
   /** Stop from outside (the node was deleted, the project closed). */
