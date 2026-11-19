@@ -53,6 +53,19 @@ The Audio Output's "Sound file" setting chooses the file made when it is exporte
 
 Measured on a plain 1080p test clip (your content will differ): HAP compresses at about 1 ms per frame on the GPU, and the decoded frames agree with the originals at more than 40 dB (PSNR) on typical pictures. GIF and APNG of flat art are tens of kilobytes per second; of photographs, megabytes.
 
+## Playing HAP clips
+
+HAP is also read, not only written: import a HAP `.mov` like any other clip. It works in every version of the app; it is aimed at the desktop app, where the graphics card does all the work.
+
+**How it plays.** A HAP frame is a compressed texture, not a coded picture, so it does not go through a video decoder. The app reads the frame from the file, undoes the optional Snappy compression (2 to 4 ms for a 1080p frame) and hands it to the graphics card. Every frame stands alone: scrubbing, looping, playing backwards and time effects cost the same as playing forwards, and many clips can play at once because nothing waits for one of the few hardware video decoders.
+
+- When the graphics card reads BC ("S3TC") textures, which desktop cards on Windows, macOS and Linux do, the frame is uploaded as it is and one small draw makes the picture (HAP Q is converted from its brightness and colour-difference form in that draw).
+- When it does not (most phones and tablets), the frame is decoded on the processor instead: the same picture, but about 25 to 45 ms per 1080p frame, so use smaller clips there.
+
+**What is read.** HAP, HAP Alpha, HAP Q and HAP Q Alpha, plain, Snappy-compressed or chunked (FFmpeg's `-chunks`), with sound in the same file. HAP Alpha-Only is shown as a grey picture. HAP R (BC7) plays only through the graphics card and has no thumbnail. HAP HDR (BC6) is not read. Tested against files written by FFmpeg and by this app, by comparing with FFmpeg's own decode.
+
+**Making HAP copies (desktop app).** The Fast copy section of Media In offers HAP, HAP Q and HAP Alpha next to H.264 when the app's FFmpeg can write HAP. Not every FFmpeg build can (it needs the `hap` encoder, which small "essentials" builds often leave out); the app asks its FFmpeg, and when the answer is no the choice is simply not shown. Locate a fuller build under Plugins, Official add-ons to get it. Choose HAP when several clips play at once, when a clip has transparency (HAP Alpha keeps it, the H.264 fast copy cannot) or when you have a desktop graphics card; HAP Q has cleaner colours. Sound is kept as uncompressed PCM. The files are large: about 30 MB a second at 1080p and 30 frames a second for HAP, twice that for HAP Q and HAP Alpha (Snappy usually makes them smaller). The copy is stored with your media like every imported clip, so a clip that would pass about 6 GB is refused with advice to choose a smaller size or trim it first. Sizes are rounded to multiples of 4 pixels, which HAP needs. To write a HAP file to disk instead, export with a HAP codec (above).
+
 ## Licences and names
 
 All the encoders the app writes itself are original code written from published specifications. HAP is an open specification (BSD 2-Clause, Vidvox). The patents on LZW (GIF) and S3TC (the texture compression inside HAP) have expired. Format names are trademarks of their owners and are used only to say which file is written; the "-compatible" names (ProRes, DXV, DNxHR, CineForm) mean the file follows the format and was written by FFmpeg.

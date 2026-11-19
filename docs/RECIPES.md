@@ -260,6 +260,15 @@ frame while playing forward.
 - **Motion Smear (Time), the datamosh look**: Media In straight into Motion Smear, New key frame every 24, Block size 16, Bleed 1.2. Each key frame is held and then
   dragged along the clip's measured motion, so shapes bleed and melt until the next key frame. Choose a refresh interval that divides the loop length
   so the loop seam lands on a key frame. Wire a second clip to Held frame to drag that picture along the first clip's motion.
+- **Codec Datamosh (Filter), the real datamosh**: Motion Smear and Datamosh Span imitate the look live; this one compresses the picture with a real video
+  codec (H.264; VP9 where the browser has no H.264 encoder), damages the compressed stream and decodes it again, so the blocks and smears are the codec's own.
+  It cannot be calculated live: until you press **Mosh** in the inspector the picture passes through unchanged; afterwards the stored result plays and the
+  nodes before it cost nothing. Classic cut mosh: two clips after each other (Media Timeline, or a Switch) into Codec Datamosh, Damage = Remove key frames,
+  Remove keys = At cuts, then Mosh. The second clip's motion now drags the first clip's picture around. The panel says how many cuts were found; raise Cut
+  sensitivity if it found none, or list the frames by hand (a dissolve is not a cut). Bloom: Damage = Both, Bloom starts = After each removed key, Bloom
+  repeats 12 to 40: the first motion of the new shot is applied again and again and the picture smears in that direction. Key frame every 48 lets the
+  picture heal twice a loop of 96 frames. Compression towards 1 and a smaller Longest side give coarser blocks. Change a setting and the node says it is
+  out of date and keeps showing the old mosh until you press Mosh again. An export asks for the mosh first if it is missing or out of date.
 
 ## Fall into a logo forever (Infinite Zoom)
 

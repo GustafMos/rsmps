@@ -23,7 +23,8 @@ export default defineConfig(() => {
     base: './',
     plugins,
     // CPU-heavy tests (scan, zip, GPU readback) run side by side; the 5 s default is too tight on a busy machine.
-    test: { testTimeout: 30_000 },
+    // .claude holds temporary working copies of the project: their tests are not this tree's tests
+    test: { testTimeout: 30_000, exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'] },
     worker: {
       format: 'es' as const,
     },

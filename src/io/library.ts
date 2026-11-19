@@ -19,8 +19,10 @@ import type { PcmAudio } from '../engine/audio/api';
 import type { Gpu } from '../engine/gpu/gpu';
 import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
-import type { AssetProblem, LibraryAsset, MediaLibrary } from './api';
+import type { AssetProblem, FastCopyFormat, LibraryAsset, MediaLibrary } from './api';
 import { mixToStereo } from './audio-util';
+import { hapName, hapToRgba } from './hap';
+import { HapPresenter, HapReader, type HapFramePlace } from './hap-video';
 import { pcmLayoutOf, readIsoPcm } from './iso-pcm';
 import { encodeWav } from './wav';
 import { idbAll, idbDelete, idbGet, idbPut } from './db';
@@ -313,6 +315,11 @@ export class Library implements MediaLibrary {
   private elementAssets = new Set<string>();
   private pools = new Map<string, ElementPool>();
   private problems = new Map<string, AssetProblem>();
+  /** HAP clips: served from their compressed textures, never through a video decoder (see hap-video.ts). */
+  private hapReaders = new Map<string, HapReader>();
+  /** Clips found to be HAP only when the video decoder refused them (imported before the app could read HAP). */
+  private hapFound = new Set<string>();
+  private hapPresenter: HapPresenter | null = null;
   private forceElement = forceVideoElement();
   private poolSweeper: ReturnType<typeof setInterval> | null = null;
   /** True while an export runs: video frames must be frame-exact (seek path only, never real-time playback). */
@@ -369,12 +376,19 @@ export class Library implements MediaLibrary {
 
   /* ------------------------------- import/restore --------------------------- */
 
-  async fastCopy(assetId: string, opts: { maxSide: number; onProgress?: (fraction: number) => void; onNote?: (text: string) => void; signal?: AbortSignal }): Promise<AssetInfo> {
+  async fastCopy(assetId: string, opts: { maxSide: number; format?: FastCopyFormat; onProgress?: (fraction: number) => void; onNote?: (text: string) => void; signal?: AbortSignal }): Promise<AssetInfo> {
     const info = this.infos.get(assetId);
     const blob = this.blobs.get(assetId);
     if (!info || !blob || info.kind !== 'video') throw new Error('Only a video clip can be converted.');
-    const { makeFastCopy } = await import('./fast-copy');
-    const file = await makeFastCopy(blob, info.name, info, opts);
+    let file: File;
+    if (opts.format && opts.format !== 'h264') {
+      // HAP is written by the desktop app's FFmpeg (the browser has no encoder for it)
+      const { makeHapCopy } = await import('./hap-copy');
+      file = await makeHapCopy(blob, info.name, info, { ...opts, format: opts.format });
+    } else {
+      const { makeFastCopy } = await import('./fast-copy');
+      file = await makeFastCopy(blob, info.name, info, opts);
+    }
     const [made] = await this.add([file]);
     if (!made) throw new Error('The fast copy could not be added to Media.');
     return made;
@@ -578,6 +592,8 @@ export class Library implements MediaLibrary {
     this.frames.dropGroups(`${assetId}|`);
     this.readers.get(assetId)?.dispose();
     this.readers.delete(assetId);
+    this.dropHap(assetId);
+    this.hapFound.delete(assetId);
     this.dropElements(assetId);
     this.problems.delete(assetId);
     this.audio.delete(assetId);
@@ -659,7 +675,9 @@ export class Library implements MediaLibrary {
         ]);
         let codec = '';
         try {
-          codec = codecLabel(await vtrack.getCodec(), await vtrack.getCodecParameterString().catch(() => null));
+          // HAP is not a codec the demuxer knows by name: it is recognised by its sample entry ("Hap1", "HapY" ...) and played from its
+          // compressed textures (hap-video.ts). The label is what later sends the clip down that path.
+          codec = hapName(await vtrack.getInternalCodecId().catch(() => null)) ?? codecLabel(await vtrack.getCodec(), await vtrack.getCodecParameterString().catch(() => null));
         } catch {
           codec = '';
         }
@@ -789,6 +807,7 @@ export class Library implements MediaLibrary {
   private decodeVideoFrame(info: AssetInfo, size: { bucket: number; width: number; height: number }, group: string, t: number): Promise<Frame | null> {
     const blob = this.blobs.get(info.id);
     if (!blob) return Promise.resolve(null);
+    if (this.isHap(info)) return this.hapFrame(info, size, group, t);
     let reader = this.readers.get(info.id);
     if (!reader) {
       reader = new VideoReader(blob, info.fps || 24);
@@ -814,14 +833,100 @@ export class Library implements MediaLibrary {
       if (this.infos.has(info.id)) this.frames.put(group, got.start, got.end, this.bytesOf(frame), frame);
       return frame;
     })
-      .catch((err) => {
+      .catch(async (err) => {
         // WebCodecs could not decode this video (phone HEVC, 10-bit...) and never produced a frame: use the browser's player.
         if (r.served > 0 || !this.infos.has(info.id)) throw err;
-        this.elementAssets.add(info.id);
         r.dispose();
-        this.readers.delete(info.id);
+        if (this.readers.get(info.id) === r) this.readers.delete(info.id);
+        // ...unless it turns out to be a HAP clip imported before the app could read HAP (its stored label does not say so)
+        if (!this.elementAssets.has(info.id) && (await this.sniffHap(info))) return this.hapFrame(info, size, group, t);
+        this.elementAssets.add(info.id);
         return this.elementFrame(info, size, group, t);
       });
+  }
+
+  /* ------------------------------ HAP: frames that are already textures ------------------------- */
+
+  private isHap(info: AssetInfo): boolean {
+    return this.hapFound.has(info.id) || /^HAP\b/.test((info as LibraryAsset).codec ?? '');
+  }
+
+  private hapReader(info: AssetInfo): HapReader | null {
+    let reader = this.hapReaders.get(info.id);
+    if (!reader) {
+      const blob = this.blobs.get(info.id);
+      if (!blob) return null;
+      reader = new HapReader(blob);
+      this.hapReaders.set(info.id, reader);
+    }
+    return reader;
+  }
+
+  private dropHap(assetId: string): void {
+    this.hapReaders.get(assetId)?.dispose();
+    this.hapReaders.delete(assetId);
+  }
+
+  /** Is this clip HAP after all? Asked only once the ordinary decoder has refused it. */
+  private async sniffHap(info: AssetInfo): Promise<boolean> {
+    if (this.isHap(info)) return true;
+    const reader = this.hapReader(info);
+    if (!reader) return false;
+    try {
+      await reader.init();
+    } catch {
+      this.dropHap(info.id);
+      return false;
+    }
+    if (!this.infos.has(info.id)) return false;
+    this.hapFound.add(info.id);
+    return true;
+  }
+
+  /**
+   * A frame of a HAP clip: find it in the file, read it, put it on a texture. No decoder state, so any frame costs the same
+   * and requests for different frames run side by side; two requests for the same frame share one read.
+   */
+  private async hapFrame(info: AssetInfo, size: { bucket: number; width: number; height: number }, group: string, t: number): Promise<Frame | null> {
+    const reader = this.hapReader(info);
+    if (!reader) return null;
+    const place: HapFramePlace | null = await reader.locate(t);
+    if (!place || !this.infos.has(info.id)) return null;
+    const hit = this.frames.find(group, t);
+    if (hit) return hit;
+    const key = `${group}#hap${place.packet.timestamp}`;
+    let p = this.pending.get(key);
+    if (!p) {
+      p = (async () => {
+        const data = await reader.read(place);
+        if (!this.infos.has(info.id)) return null;
+        const presenter = (this.hapPresenter ??= new HapPresenter(this.gpu));
+        const texture = presenter.present(data, reader.width, reader.height, size.width, size.height);
+        this.gpu.retain(texture);
+        const frame: Frame = { texture, width: size.width, height: size.height };
+        this.frames.put(group, place.start, place.end, this.bytesOf(frame), frame);
+        return frame;
+      })().finally(() => this.pending.delete(key));
+      this.pending.set(key, p);
+    }
+    return p;
+  }
+
+  /** Thumbnail of a HAP clip: one frame decoded on the CPU (small and rare, so not worth a trip through the GPU and back). */
+  private async hapThumbnail(info: AssetInfo): Promise<Blob | null> {
+    const reader = this.hapReader(info);
+    if (!reader) return null;
+    const place = await reader.locate(Math.min(1, info.duration * 0.1));
+    if (!place) return null;
+    const pixels = hapToRgba(await reader.read(place), reader.width, reader.height);
+    const full = new OffscreenCanvas(reader.width, reader.height);
+    full.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer as ArrayBuffer, pixels.byteOffset, pixels.length), reader.width, reader.height), 0, 0);
+    const k = Math.min(1, THUMB_SIDE / Math.max(reader.width, reader.height));
+    const w = Math.max(1, Math.round(reader.width * k));
+    const h = Math.max(1, Math.round(reader.height * k));
+    const canvas = new OffscreenCanvas(w, h);
+    canvas.getContext('2d')!.drawImage(full, 0, 0, w, h);
+    return canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
   }
 
   /* ------------------------- video through an HTMLVideoElement (fallback) ------------------------ */
@@ -1000,6 +1105,11 @@ export class Library implements MediaLibrary {
       return URL.createObjectURL(await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 }));
     }
     if (info.kind === 'video') {
+      if (this.isHap(info)) {
+        // never the browser's player for HAP: it cannot play it, and would mark the clip as unusable
+        const made = await this.hapThumbnail(info).catch(() => null);
+        return made ? URL.createObjectURL(made) : null;
+      }
       let reader = this.readers.get(info.id);
       if (!reader) {
         reader = new VideoReader(blob, info.fps || 24);
@@ -1012,6 +1122,7 @@ export class Library implements MediaLibrary {
         } catch {
           out = null; // WebCodecs cannot decode it: try the browser's own player
         }
+        if (!out && (await this.sniffHap(info))) out = await this.hapThumbnail(info).catch(() => null);
       }
       out ??= await this.elementThumbnail(info);
       return out ? URL.createObjectURL(out) : null;
@@ -1085,6 +1196,7 @@ export class Library implements MediaLibrary {
       this.frames.dropGroups(`${id}|`);
       this.readers.get(id)?.dispose();
       this.readers.delete(id);
+      this.dropHap(id);
       this.dropElements(id);
       this.bytes.delete(id);
       this.bytesSize.delete(id);
@@ -1203,6 +1315,7 @@ export class Library implements MediaLibrary {
   onDeviceReset(): void {
     this.frames.clear();
     this.live.onDeviceReset();
+    this.hapPresenter?.reset();
     this.pending.clear();
   }
 
@@ -1218,6 +1331,9 @@ export class Library implements MediaLibrary {
   dispose(): void {
     for (const r of this.readers.values()) r.dispose();
     this.readers.clear();
+    for (const id of [...this.hapReaders.keys()]) this.dropHap(id);
+    this.hapPresenter?.dispose();
+    this.hapPresenter = null;
     for (const id of [...this.pools.keys()]) this.dropElements(id);
     this.frames.clear();
   }
