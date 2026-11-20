@@ -43,6 +43,7 @@ import { DatamoshPanel } from './DatamoshPanel';
 import { ProcessPanel } from './ProcessPanel';
 import { SplatTrainPanel } from './SplatTrainPanel';
 import { DepthAiPanel } from './DepthAiPanel';
+import { StyleAiPanel } from './StyleAiPanel';
 import { GroupPanel } from './GroupPanel';
 import { defOf, GROUP_TYPE } from '../../engine/group';
 import './inspector.css';
@@ -221,7 +222,7 @@ function NodePanel({ id }: { id: string }) {
           {(!wired.has('recordAudio') || !wired.has('recordMidi')) && <p className="rs-insp__hint">Nothing is wired into the record inputs yet: these buttons add the source node and connect it. Then arm a track (the ● button) and press Record.</p>}
         </div>
       )}
-      {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : node.type === 'datamosh-real' ? <DatamoshPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
+      {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : node.type === 'datamosh-real' ? <DatamoshPanel node={node} /> : node.type === 'style-transfer-ai' ? <StyleAiPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
       {node.type === 'phone-motion' && !missing.length && <PhoneMotionPanel node={node} />}
       {node.type === 'camera-in' && <CameraPermissionPanel />}

@@ -47,13 +47,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Optional AI model (not included, downloaded only on request)
+## Optional AI models (not included, downloaded only on request)
 
 | Model | License | Source |
 | --- | --- | --- |
 | Depth Anything V2 Small (ONNX export by onnx-community, pinned revision `4472b7362082ad9968fee890ca0f1e5aca36b93d`) | Apache-2.0 | <https://huggingface.co/onnx-community/depth-anything-v2-small> |
+| AdaIN style transfer, encoder and decoder (`adain-vgg.onnx`, `adain-decoder.onnx`; weights of naoto0804/pytorch-AdaIN, ONNX export by axinc-ai/ailia-models, pinned revision `ca79d77e034b14bb99a4b2a6e3670c70cbcfb679`) | MIT | <https://huggingface.co/Bildaro/lintabsort-aidan> |
 
 Depth Anything V2 Small © the Depth Anything authors, Apache-2.0 (<https://huggingface.co/depth-anything/Depth-Anything-V2-Small>). The model file is not part of RSMPS, is never bundled and is never downloaded unless you press Download in Plugins > AI models. It runs on your own computer and nothing is uploaded. The larger Depth Anything V2 models (Base, Large, Giant) are licensed CC-BY-NC and are deliberately not offered.
+
+AdaIN style transfer (Xun Huang and Serge Belongie, "Arbitrary Style Transfer in Real-time with Adaptive Instance Normalization", 2017): weights © 2018 Naoto Inoue, MIT (<https://github.com/naoto0804/pytorch-AdaIN>). The encoder is the first layers of VGG-19 © Visual Geometry Group, University of Oxford, whose original weights were published under CC BY 4.0. Used by the AI Style Transfer node; the two files are not part of RSMPS, are never bundled and are never downloaded unless you press Download (in the node's panel or in Plugins > AI models).
 
 ## Optional add-on programs for Splat from Video (desktop app)
 

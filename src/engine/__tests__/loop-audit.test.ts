@@ -261,6 +261,7 @@ export const OUT_OF_SCOPE: Record<string, string> = {
   freeze: 'constant moment: nothing to loop',
   cache: 'serves a bake of whatever it was fed',
   'datamosh-real': 'serves a stored mosh of whatever it was fed; a decoded video stream has a first frame, so its loop seam is a key frame by nature',
+  'style-transfer-ai': 'serves a stored painting of a transition from A to B; "A to B and back" loops, "A to B over the loop" jumps back to A at the wrap by design',
   'white-balance': 'analysis frozen at one frame',
   palette: 'extraction frozen at one frame',
   'media-timeline': 'an edit decides what plays; its clips wrap through ctx.pull (tested in media-timeline.test.ts)',
