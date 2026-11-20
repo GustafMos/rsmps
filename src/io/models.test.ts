@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DEPTH_AI_MODEL } from '../engine/lib/depth-ai-bridge';
-import { DEPTH_ANYTHING_V2_SMALL_ID, MODEL_CATALOGUE, modelEntry, type ModelEntry } from './model-catalogue';
+import { DEPTH_ANYTHING_V2_SMALL_ID, MODEL_CATALOGUE, STYLE_AI_MODEL_IDS, modelEntry, type ModelEntry } from './model-catalogue';
+import { STYLE_AI_MODEL } from '../engine/lib/style-ai-bridge';
 import { MemoryModelBackend, ModelStore, describeNetworkError } from './models';
 
 const FILE = new Uint8Array(1000).map((_, i) => (i * 7) % 251);
@@ -47,18 +48,37 @@ const make = (f: ReturnType<typeof fakeFetch>, backend = new MemoryModelBackend(
   ({ store: new ModelStore({ fetch: f.fn, backend, sha256: fakeHash, catalogue: [ENTRY], retryDelayMs: 0, ...extra }), backend });
 
 describe('model catalogue', () => {
-  it('pins one Apache-2.0 model by revision, size and checksum, and offers nothing non-commercial', () => {
-    expect(MODEL_CATALOGUE).toHaveLength(1);
+  it('pins every model by revision, size and checksum, with a permissive licence, and offers nothing non-commercial', () => {
+    expect(MODEL_CATALOGUE.map((m) => m.id)).toEqual([DEPTH_ANYTHING_V2_SMALL_ID, STYLE_AI_MODEL.encoder, STYLE_AI_MODEL.decoder]);
+    for (const m of MODEL_CATALOGUE) {
+      expect(m.revision, m.id).toMatch(/^[0-9a-f]{40}$/);
+      expect(m.sha256, m.id).toMatch(/^[0-9a-f]{64}$/);
+      expect(m.url, m.id).toBe(`${m.sourceUrl}/resolve/${m.revision}/${m.file}`);
+      expect(m.url.startsWith('https://huggingface.co/'), m.id).toBe(true);
+      expect(['Apache-2.0', 'MIT'], m.id).toContain(m.license.name);
+      expect(m.license.url, m.id).toMatch(/^https:\/\//);
+      expect(m.attribution, m.id).toContain(m.license.name);
+    }
     const m = modelEntry(DEPTH_ANYTHING_V2_SMALL_ID)!;
-    expect(m.url).toContain(`/resolve/${DEPTH_AI_MODEL.revision}/`);
     expect(m.revision).toBe(DEPTH_AI_MODEL.revision);
-    expect(m.revision).toMatch(/^[0-9a-f]{40}$/);
-    expect(m.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(m.bytes).toBeGreaterThan(40_000_000);
-    expect(m.url.startsWith('https://huggingface.co/')).toBe(true);
     expect(m.license.name).toBe('Apache-2.0');
     expect(m.attribution).toBe('Depth Anything V2 Small © the Depth Anything authors, Apache-2.0');
     expect(JSON.stringify(MODEL_CATALOGUE)).not.toMatch(/base|large|giant|CC-BY-NC/i);
+  });
+
+  it('the style transfer model is two MIT files from one pinned revision, checked on the real files', () => {
+    expect(STYLE_AI_MODEL_IDS).toEqual([STYLE_AI_MODEL.encoder, STYLE_AI_MODEL.decoder]);
+    const enc = modelEntry(STYLE_AI_MODEL.encoder)!;
+    const dec = modelEntry(STYLE_AI_MODEL.decoder)!;
+    expect([enc.revision, dec.revision]).toEqual([STYLE_AI_MODEL.revision, STYLE_AI_MODEL.revision]);
+    expect([enc.file, enc.bytes, enc.sha256]).toEqual(['adain-vgg.onnx', 14025860, 'ac62bbef78a38bd952364c6db91048ab9703ebc7ee45ebb06e6438e5f5da4de4']);
+    expect([dec.file, dec.bytes, dec.sha256]).toEqual(['adain-decoder.onnx', 14026124, 'a549863dfcf18f747d615794cb58a663d2fc829fa36c3fef18355c1e7f4843db']);
+    expect([enc.license.name, dec.license.name]).toEqual(['MIT', 'MIT']);
+    // the encoder is VGG-19's first layers: its authors are credited too
+    expect(enc.attribution).toMatch(/Naoto Inoue, MIT.*Visual Geometry Group.*CC BY 4\.0/);
+    // the picture goes in as it is: no mean / spread correction on our side
+    expect([enc.mean, enc.std, enc.inputMultiple]).toEqual([[0, 0, 0], [1, 1, 1], STYLE_AI_MODEL.stride]);
   });
 });
 

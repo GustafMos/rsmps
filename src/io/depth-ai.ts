@@ -39,7 +39,7 @@ export interface OrtLike {
 export const ORT_DIR = 'ort/';
 export const ORT_MODULE = 'ort.webgpu.min.mjs';
 
-async function defaultLoadOrt(): Promise<OrtLike> {
+export async function defaultLoadOrt(): Promise<OrtLike> {
   const base = new URL(ORT_DIR, typeof document !== 'undefined' ? document.baseURI : self.location.href).href;
   const ort = (await import(/* @vite-ignore */ base + ORT_MODULE)) as unknown as OrtLike;
   ort.env.wasm.wasmPaths = base;

@@ -1,0 +1,317 @@
+/**
+ * AI Style Transfer node contract, on the real GPU with a RAM library and a FAKE model (the real one is 27 MB and is not in the
+ * repository). The fake behaves like the model where the node depends on it: the encoder shrinks a 512 x 512 picture to 64 x 64
+ * feature cells (its three colour planes become three feature maps, the other 509 stay empty) and the decoder enlarges them again,
+ * so "decode(encode(picture))" is the picture, and what the node does between the two (blend the contents, move the statistics from
+ * A's to B's) shows in the stored frames. The node's whole path is exercised: plan, render A and B small, tiles, AdaIN, store, serve.
+ */
+import { afterEach, describe, expect, it } from 'vitest';
+import { defineNode } from '../engine/define';
+import { addNode, connect, createGraph, setParam } from '../engine/graph';
+import { withProcessResult } from '../engine/process';
+import { STYLE_AI_MESSAGES, STYLE_AI_MODEL, setStyleAiService, type StyleAiService } from '../engine/lib/style-ai-bridge';
+import styleTransferAi from '../engine/nodes/filter/style-transfer-ai.node';
+import { harness } from '../engine/testing';
+import type { GraphDoc, Host, ImageValue, ProcessLive } from '../engine/types';
+import { EvalGate } from './gate';
+import { MemoryProcessLibrary, ProcessRuntime } from './processes';
+
+const FPS = 12;
+const FRAMES = 12;
+const W = 32;
+const H = 16;
+const T = STYLE_AI_MODEL.tile;
+const CELLS = T / STYLE_AI_MODEL.stride;
+
+interface Fake {
+  ready: boolean;
+  opens: number;
+  encodes: number;
+  decodes: number;
+  /** Mean of the red plane of every picture the encoder was given (proof of the value range and plane order). */
+  reds: number[];
+  /** Throw this at the nth decode (counted from 1). */
+  failAt?: { n: number; error: Error };
+  onDecode?: (n: number) => void;
+}
+
+const newFake = (over: Partial<Fake> = {}): Fake => ({ ready: true, opens: 0, encodes: 0, decodes: 0, reds: [], ...over });
+
+function fakeService(f: Fake): StyleAiService {
+  const n = T * T;
+  const cells = CELLS * CELLS;
+  return {
+    modelReady: async () => f.ready,
+    async open() {
+      f.opens++;
+      return {
+        provider: 'fake',
+        async encode(rgb) {
+          expect(rgb.length).toBe(3 * n);
+          f.encodes++;
+          let red = 0;
+          for (let i = 0; i < n; i++) red += rgb[i];
+          f.reds.push(red / n);
+          const out = new Float32Array(STYLE_AI_MODEL.channels * cells);
+          for (let c = 0; c < 3; c++)
+            for (let y = 0; y < CELLS; y++)
+              for (let x = 0; x < CELLS; x++) {
+                let s = 0;
+                for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) s += rgb[c * n + (y * 8 + j) * T + x * 8 + i];
+                out[c * cells + y * CELLS + x] = s / 64;
+              }
+          return out;
+        },
+        async decode(features) {
+          expect(features.length).toBe(STYLE_AI_MODEL.channels * cells);
+          f.decodes++;
+          f.onDecode?.(f.decodes);
+          if (f.failAt?.n === f.decodes) throw f.failAt.error;
+          const out = new Float32Array(3 * n);
+          for (let c = 0; c < 3; c++) for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) out[c * n + y * T + x] = features[c * cells + (y >> 3) * CELLS + (x >> 3)];
+          return out;
+        },
+        toBlob: async (rgba) => new Blob([rgba as BlobPart]),
+      };
+    },
+  };
+}
+
+async function setup() {
+  const lib = new MemoryProcessLibrary();
+  const renders = { a: 0, b: 0 };
+  // A: a red field with a white bar that moves right by 2 pixels per frame. B: a still, blue, brighter towards the right.
+  const srcA = defineNode({
+    id: 'style-src-a',
+    title: 'shot a',
+    category: 'generate',
+    description: 'red with a moving bar',
+    inputs: {},
+    outputs: { image: { type: 'image' } },
+    params: { gain: { type: 'number', default: 1 } },
+    render(ctx) {
+      renders.a++;
+      return {
+        image: ctx.gpu.pass({
+          size: { width: Math.round(W * ctx.proxy), height: Math.round(H * ctx.proxy), unit: 1 },
+          uniforms: { f: ctx.time.frame % FRAMES, g: ctx.params.gain },
+          wgsl: `fn fx(uv: vec2f, px: vec2f) -> vec4f {
+            let x = uv.x * ${W}.0;
+            let bar = step(u.f * 2.0, x) * step(x, u.f * 2.0 + 4.0);
+            return vec4f(mix(vec3f(0.8, 0.1, 0.1) * u.g, vec3f(1.0), bar), 1.0);
+          }`,
+        }),
+      };
+    },
+  });
+  const srcB = defineNode({
+    id: 'style-src-b',
+    title: 'shot b',
+    category: 'generate',
+    description: 'a still blue gradient',
+    inputs: {},
+    outputs: { image: { type: 'image' } },
+    params: {},
+    render(ctx) {
+      renders.b++;
+      return {
+        image: ctx.gpu.pass({
+          size: { width: Math.round(W * ctx.proxy), height: Math.round(H * ctx.proxy), unit: 1 },
+          wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return vec4f(0.1, 0.2 + 0.4 * uv.x, 0.5 + 0.4 * uv.x, 1.0); }',
+        }),
+      };
+    },
+  });
+  const host: Host = {
+    assetInfo: (id) => lib.assetInfo(id),
+    assetFrame: (id, s) => lib.assetFrame(id, s),
+    assetBytes: (id) => lib.assetBytes(id),
+    processLive: (n): ProcessLive | null => rt.live(n),
+  };
+  const t = await harness([srcA, srcB, styleTransferAi], host);
+  lib.gpu = t.gpu;
+  lib.onChange = () => t.engine.clear();
+  const rt: ProcessRuntime = new ProcessRuntime({ engine: t.engine, gpu: t.gpu, registry: t.registry, gate: new EvalGate(t.engine), library: lib, host, encode: async (img) => new Blob([(await t.gpu.readRaw(img)) as BlobPart]) });
+  let g: GraphDoc = createGraph('style');
+  g = { ...g, project: { ...g.project, width: W, height: H, fps: FPS, duration: FRAMES / FPS, loop: true } };
+  const a = addNode(g, t.registry, 'style-src-a');
+  const b = addNode(a.graph, t.registry, 'style-src-b');
+  const s = addNode(b.graph, t.registry, 'style-transfer-ai');
+  g = connect(s.graph, t.registry, { node: a.node.id, port: 'image' }, { node: s.node.id, port: 'a' });
+  g = connect(g, t.registry, { node: b.node.id, port: 'image' }, { node: s.node.id, port: 'b' });
+  const ids = { a: a.node.id, b: b.node.id, style: s.node.id };
+  // The transition takes the middle half of the project: frames 0..3 are A, 4..8 are painted, 9..11 are B.
+  g = setParam(g, ids.style, 'drive', 'span');
+  /** The middle row of the picture at a frame, as a list of [r, g, b]. */
+  const row = async (graph: GraphDoc, node: string, frame: number, proxy = 1) => {
+    const r = await t.engine.evaluate({ graph, node, seconds: frame / FPS, proxy });
+    expect([...r.errors.values()]).toEqual([]);
+    const img = r.value as ImageValue;
+    const px = await t.pixels(img);
+    const out: number[][] = [];
+    for (let x = 0; x < img.width; x++) out.push(px.at(x, Math.floor(img.height / 2)).slice(0, 3));
+    return { px: out, width: img.width, height: img.height };
+  };
+  const render = async (graph: GraphDoc) => withProcessResult(graph, t.registry, ids.style, await rt.run(graph, ids.style));
+  return { t, lib, rt, g, ids, row, render, renders };
+}
+
+const far = (a: number[][], b: number[][]) => a.reduce((m, p, i) => Math.max(m, ...p.map((v, k) => Math.abs(v - b[i][k]))), 0);
+
+afterEach(() => setStyleAiService(null));
+
+describe('AI Style Transfer node', () => {
+  it('before it is rendered it shows A, a plain dissolve, then B; the model is never touched and an export is told the render is missing', async () => {
+    const fake = newFake();
+    setStyleAiService(fakeService(fake));
+    const { rt, g, ids, row } = await setup();
+    expect(rt.status(g, ids.style)?.state).toBe('none');
+    for (const f of [0, 3]) expect((await row(g, ids.style, f)).px).toEqual((await row(g, ids.a, f)).px);
+    for (const f of [9, 11]) expect((await row(g, ids.style, f)).px).toEqual((await row(g, ids.b, f)).px);
+    // the middle of the transition: half A, half B
+    const mid = (await row(g, ids.style, 6)).px;
+    const a = (await row(g, ids.a, 6)).px;
+    const b = (await row(g, ids.b, 6)).px;
+    for (const x of [1, 30]) for (let k = 0; k < 3; k++) expect(Math.abs(mid[x][k] - (a[x][k] + b[x][k]) / 2)).toBeLessThanOrEqual(2);
+    expect(fake.opens).toBe(0);
+    expect(rt.pending(g, [ids.style]).length).toBe(1);
+  });
+
+  it('the job refuses with a clear sentence when there is no runtime (command line) or the model is not downloaded', async () => {
+    const { rt, g, ids } = await setup();
+    setStyleAiService(null);
+    await expect(rt.run(g, ids.style)).rejects.toThrow(STYLE_AI_MESSAGES.noRuntime);
+    expect(rt.status(g, ids.style)?.state).toBe('failed');
+    const fake = newFake({ ready: false });
+    setStyleAiService(fakeService(fake));
+    await expect(rt.run(g, ids.style)).rejects.toThrow(STYLE_AI_MESSAGES.noModel);
+    expect(fake.opens).toBe(0); // it does not even load the runtime, and it never downloads
+  });
+
+  it('a transition with no frame between A and B says so instead of storing nothing', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { rt, g, ids } = await setup();
+    await expect(rt.run(setParam(g, ids.style, 'start', 100), ids.style)).rejects.toThrow(STYLE_AI_MESSAGES.noFrames);
+  });
+
+  it('rendered: the ends are exactly A and B, the middle is the network’s painting and neither picture nor their dissolve', async () => {
+    const fake = newFake();
+    setStyleAiService(fakeService(fake));
+    const { rt, g, ids, row, render } = await setup();
+    const before = (await row(g, ids.style, 6)).px;
+    const done = await render(g);
+    expect(rt.status(done, ids.style)?.state).toBe('done');
+    expect(rt.pending(done, [ids.style])).toEqual([]);
+    expect(rt.status(done, ids.style)?.result?.meta).toMatchObject({ model: 'AdaIN', revision: STYLE_AI_MODEL.revision, provider: 'fake', drive: 'span', first: 4, count: 5, frames: FRAMES, width: W, height: H, tiles: 1, item: null });
+    // the painting is stored at the work size: longest side 512, the shape of the frame
+    expect(rt.status(done, ids.style)?.result?.items.frames).toMatchObject({ kind: 'sequence', frames: 5, width: 512, height: 256 });
+
+    for (const f of [0, 3]) expect((await row(done, ids.style, f)).px).toEqual((await row(g, ids.a, f)).px);
+    for (const f of [9, 11]) expect((await row(done, ids.style, f)).px).toEqual((await row(g, ids.b, f)).px);
+
+    const mid = await row(done, ids.style, 6);
+    expect([mid.width, mid.height]).toEqual([W, H]);
+    const a = (await row(g, ids.a, 6)).px;
+    const b = (await row(g, ids.b, 6)).px;
+    expect(far(mid.px, before)).toBeGreaterThan(20);
+    expect(far(mid.px, a)).toBeGreaterThan(20);
+    expect(far(mid.px, b)).toBeGreaterThan(20);
+
+    // A moves, so it is encoded for every frame that still needs it (4..7); B is a still: once. One decode per painted frame.
+    expect(fake.encodes).toBe(5);
+    expect(fake.decodes).toBe(5);
+    // the encoder was given 0..1 values, red plane first: A is mostly red 0.8, B has red 0.1
+    expect(fake.reds[0]).toBeGreaterThan(0.75);
+    expect(fake.reds[0]).toBeLessThan(0.9);
+    expect(fake.reds[1]).toBeCloseTo(0.1, 1);
+  });
+
+  it('style arrives before the shapes: early in the transition A’s bar is still where it was, but the colours are already B’s', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { g, ids, row, render } = await setup();
+    // "Ends fade" at its shortest, so frame 5 (a third of the way) shows the painting alone
+    const done = await render(setParam(g, ids.style, 'fade', 0.02));
+    const early = (await row(done, ids.style, 5)).px;
+    const a = (await row(g, ids.a, 5)).px;
+    // the bar of A at frame 5 covers x 10..14: still the brightest part of the row in the painting
+    const lum = (p: number[]) => p[0] + p[1] + p[2];
+    expect(lum(early[12])).toBeGreaterThan(lum(early[25]) + 30);
+    // but the field is no longer A's red
+    expect(early[25][0]).toBeLessThan(a[25][0] - 40);
+    expect(early[25][2]).toBeGreaterThan(a[25][2] + 40);
+  });
+
+  it('served from the store: with the painting alone on screen A and B are not evaluated, and a looping project wraps', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { t, g, ids, row, render, renders } = await setup();
+    const done = await render(g);
+    t.engine.clear();
+    const n = { ...renders };
+    const mid = (await row(done, ids.style, 6)).px;
+    expect((await row(done, ids.style, 6 + FRAMES)).px).toEqual(mid);
+    expect(renders).toEqual(n);
+  });
+
+  it('"Painting" and "Ends fade" act on the stored result: no new render, and Painting 0 is the plain dissolve', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { rt, g, ids, row, render } = await setup();
+    const dissolve = (await row(g, ids.style, 6)).px;
+    const done = await render(g);
+    const off = setParam(done, ids.style, 'strength', 0);
+    expect(rt.status(off, ids.style)?.state).toBe('done');
+    expect(far((await row(off, ids.style, 6)).px, dissolve)).toBeLessThanOrEqual(1);
+    const half = setParam(done, ids.style, 'strength', 0.5);
+    const full = (await row(done, ids.style, 6)).px;
+    const mixed = (await row(half, ids.style, 6)).px;
+    for (const x of [2, 28]) for (let k = 0; k < 3; k++) expect(Math.abs(mixed[x][k] - (full[x][k] + dissolve[x][k]) / 2)).toBeLessThanOrEqual(2);
+    expect(rt.status(setParam(done, ids.style, 'fade', 0.4), ids.style)?.state).toBe('done');
+  });
+
+  it('a settings or upstream change makes it stale; the old painting stays on screen until it is rendered again', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { rt, g, ids, row, render } = await setup();
+    const done = await render(g);
+    for (const [key, value] of [['drive', 'loop'], ['start', 10], ['length', 30], ['size', '768'], ['steady', 0.8]] as const) {
+      expect(rt.status(setParam(done, ids.style, key, value), ids.style)?.state, key).toBe('stale');
+    }
+    const edited = setParam(done, ids.a, 'gain', 0.5);
+    expect(rt.status(edited, ids.style)?.state).toBe('stale');
+    expect((await row(edited, ids.style, 6)).px).toEqual((await row(done, ids.style, 6)).px);
+    expect(rt.pending(edited, [ids.style]).length).toBe(1); // an export asks for a fresh render
+    // a stale painting keeps the timing it was made with, also when the timing settings changed since
+    const moved = setParam(done, ids.style, 'start', 10);
+    expect((await row(moved, ids.style, 6)).px).toEqual((await row(done, ids.style, 6)).px);
+    const again = await render(edited);
+    expect(rt.status(again, ids.style)?.state).toBe('done');
+  });
+
+  it('cancel stores nothing', async () => {
+    const ctl = new AbortController();
+    setStyleAiService(fakeService(newFake({ onDecode: (n) => n === 2 && ctl.abort() })));
+    const { lib, rt, g, ids } = await setup();
+    await expect(rt.run(g, ids.style, { signal: ctl.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(lib.assets.size).toBe(0);
+    expect(rt.status(g, ids.style)?.state).toBe('none');
+  });
+
+  it('a model that stops half way: the sentence reaches the user, nothing is stored, the dissolve is still shown', async () => {
+    setStyleAiService(fakeService(newFake({ failAt: { n: 3, error: new Error(STYLE_AI_MESSAGES.memory) } })));
+    const { lib, rt, g, ids, row } = await setup();
+    const before = (await row(g, ids.style, 6)).px;
+    await expect(rt.run(g, ids.style)).rejects.toThrow(STYLE_AI_MESSAGES.memory);
+    expect(rt.status(g, ids.style)?.state).toBe('failed');
+    expect(lib.assets.size).toBe(0);
+    expect((await row(g, ids.style, 6)).px).toEqual(before);
+  });
+
+  it('A to B over the loop paints every frame but the first, which is A itself; a smaller preview is served smaller', async () => {
+    const fake = newFake();
+    setStyleAiService(fakeService(fake));
+    const { rt, g, ids, row, render } = await setup();
+    const done = await render(setParam(g, ids.style, 'drive', 'loop'));
+    expect(rt.status(done, ids.style)?.result?.meta).toMatchObject({ drive: 'loop', first: 1, count: 11 });
+    expect((await row(done, ids.style, 0)).px).toEqual((await row(g, ids.a, 0)).px);
+    const half = await row(done, ids.style, 6, 0.5);
+    expect([half.width, half.height]).toEqual([16, 8]);
+  });
+});
