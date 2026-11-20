@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.18.0] - 2026-11-20
+
+### Added
+- **Glass node** (Filter): a piece of glass held in front of the picture, with light followed through it. For every pixel a ray is bent on the way into the glass, walked through it and bent again on the way out, separately for red, green and blue, so the picture is thrown aside and split into colour fringes the way real glass does it; the surface also mirrors (more at grazing angles) and glints. 14 shapes: tilted strips (wedge strips that each show a shifted copy), reeded glass, prism, sphere, cube, diamond, long crystal, lens, ring, cylinder, hexagon bar, flat pane, wavy pane, pyramid. Size, position, strip count and angle, thickness; tilt, turn and roll with a whole-turn spin on each; hand sway and drift, as if the glass were held in front of the lens (loops with the project); bending strength, colour split, picture distance, reflection, glint, frosting and glass colour. Outside the glass the picture is untouched.
+
 ## [0.17.0] - 2026-11-20
 
 ### Added

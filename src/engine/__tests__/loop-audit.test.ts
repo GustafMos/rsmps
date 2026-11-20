@@ -166,6 +166,8 @@ export const ROWS: Row[] = [
   { id: 'grain', note: 'hold 7', params: { amount: 0.5, hold: 7, animated: true }, input: 'img', exact: true },
   { id: 'paper-texture', note: 'boil 5 poses hold 3 (random pose jumps vary in size)', tol: 2, params: { amount: 1, boil: 0.1, boilPoses: 5, boilHold: 3 }, input: 'img', extra: (t) => ({ texture: t.fromFn(24, 24, (x, y) => [((x * 7 + y * 13) % 255) | 0, 90, 200, 255]) }), exact: true },
   { id: 'paper-texture', note: 'boil 4 poses hold 1', params: { amount: 1, boil: 0.1, boilPoses: 4, boilHold: 1 }, input: 'img', extra: (t) => ({ texture: t.fromFn(24, 24, (x, y) => [((x * 7 + y * 13) % 255) | 0, 90, 200, 255]) }), exact: true },
+  { id: 'glass', note: 'strips, hand sway and drift', params: { sway: 10, drift: 0.05 }, input: 'img', exact: true, lengths: [24, 37] },
+  { id: 'glass', note: 'prism spinning on two axes', params: { shape: 'prism', sway: 0, drift: 0, spinTurn: 1, spinRoll: 2 }, input: 'img', exact: true, lengths: [24] },
   { id: 'droste', note: 'zoom 1 with one arm', params: { zoom: 1, arms: 1 }, input: 'img', exact: true },
   { id: 'droste', note: 'zoom -2 spin 1 round', params: { zoom: -2, spin: 1, shape: 'round' }, input: 'img', exact: true },
   { id: 'hyperbolic', note: 'spin 1 and drift', params: { spin: 1, drift: 0.3 }, input: 'img', exact: true },
