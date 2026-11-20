@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.17.0] - 2026-11-20
+
+### Added
+- **Style Melt node** (Filter): a transition in the manner of the "AI style transfer" transitions of late-2010s music videos. Picture A is first repainted with the colours and texture of picture B (in shuffled patches that run along A's outlines), then its shapes melt into B's, and B settles into itself; progress 0 is exactly A and 1 is exactly B. Drive it with the Progress setting (wire a number to animate it) or let it run A to B, or A to B and back, over the loop. Strength, patch size, shuffle, follow outlines, texture size, texture boost and churn. It is made without a neural network: it rearranges the texture that is there instead of inventing new texture, so it is the same family of look, not the same thing.
+
 ## [0.16.0] - 2026-11-19
 
 ### Added

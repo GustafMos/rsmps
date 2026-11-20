@@ -157,6 +157,8 @@ export const ROWS: Row[] = [
   { id: 'parallax', note: 'sway-h cycles 3', params: { motion: 'sway-h', amount: 8, cycles: 3 }, input: 'two', exact: true },
   { id: 'parallax', note: 'circle cycles 3', params: { motion: 'circle', amount: 8, cycles: 3 }, input: 'two', exact: true },
   { id: 'parallax', note: 'figure-eight cycles 5', params: { motion: 'figure-eight', amount: 8, cycles: 5 }, input: 'two', exact: true },
+  { id: 'style-melt', note: 'held at 40 %, patches churn', params: { progress: 0.4, churn: 1 }, input: 'two', exact: true },
+  { id: 'style-melt', note: 'A to B and back over the loop', params: { drive: 'pingpong', churn: 1 }, input: 'two', exact: true },
   { id: 'transition-auto', note: 'ping-pong, start 0.37', params: { mode: 'bayer-4', cell: 1, start: 0.37, duration: 0.21, pingPong: true, holdB: 0.13 }, input: 'two', exact: true },
   { id: 'custom-shader', note: 'default animated glow', params: {}, input: 'none', exact: true },
   // ---- per-frame hashes / events ----------------------------------------------------------------------------------
