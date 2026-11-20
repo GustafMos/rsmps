@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.18.1] - 2026-11-20
+
+### Fixed
+- **Glass: coloured pixel noise in the strips and in reeded glass.** The tilted strips were far too steep a wedge, and steeper the more strips there were, so almost every ray was trapped inside the glass and came out somewhere different for every pixel. The wedge is now an angle of its own (new **Wedge** setting, 8 degrees by default, 0 = flat strips), the pane ends on a whole strip instead of part-way through one, and reeded glass is a pane with gentle ridges instead of whole round rods. A ray that is still trapped after two bounces now shows what lies straight behind instead of noise. Projects that used the strips will look calmer: raise Wedge for a stronger throw.
+
 ## [0.18.0] - 2026-11-20
 
 ### Added
