@@ -10,10 +10,20 @@ import { FRACTAL_PALETTES } from './fractal.node';
  * The camera circles and the power swings in whole cycles per loop. It is the most expensive node of the fractal family:
  * the cost is pixels x steps x rounds, so it is rendered at half size by default and enlarged.
  */
-const MARCH_WGSL = /* wgsl */ `
+/** tex = the variant with a picture wrapped round the bulb (its colour, and optionally its relief). */
+const marchWgsl = (tex: boolean): string => /* wgsl */ `
 fn pal(t: f32) -> vec3f { return clamp(u.pa + u.pb * cos(TAU * (u.pc * t + u.pd)), vec3f(0.0), vec3f(1.0)); }
 // distance to the surface (never more than the truth), and how near the travelling point came to the middle
-fn bulb(p: vec3f) -> vec2f {
+${
+  tex
+    ? `// the picture wrapped round the bulb like a map round a globe: longitude across, latitude down
+fn wrapUv(p: vec3f) -> vec2f {
+  let r = max(length(p), 1.0e-6);
+  return vec2f(fract(atan2(p.y, p.x) / TAU * u.texScale + u.texTurn), acos(clamp(p.z / r, -1.0, 1.0)) / PI);
+}`
+    : ''
+}
+fn bulbCore(p: vec3f) -> vec2f {
   var z = p;
   var dr = 1.0;
   var r = 0.0;
@@ -29,6 +39,20 @@ fn bulb(p: vec3f) -> vec2f {
     trap = min(trap, length(z));
   }
   return vec2f(0.5 * log(max(r, 1.0e-6)) * r / dr, trap);
+}
+fn bulb(p: vec3f) -> vec2f {
+  let d = bulbCore(p);
+  ${
+    tex
+      ? `// relief: bright parts of the picture stand out of the surface, dark parts sink in. The step is shortened to
+  // match, because the true surface may now be nearer than the plain bulb says.
+  if (u.relief != 0.0) {
+    let l = luma(textureSampleLevel(pic, smp, wrapUv(p), 0.0).rgb);
+    return vec2f((d.x - u.relief * (l - 0.5)) * 0.6, d.y);
+  }`
+      : ''
+  }
+  return d;
 }
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let aspect = u.size.x / u.size.y;
@@ -67,7 +91,8 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let diff = max(dot(nor, light), 0.0);
   let spec = pow(max(dot(reflect(-light, nor), -rd), 0.0), 24.0);
   let ao = pow(clamp(1.0 - steps / u.steps, 0.0, 1.0), 1.6);
-  let base = pal(trap * u.density + u.cycle);
+  var base = pal(trap * u.density + u.cycle);
+  ${tex ? 'let tx = textureSampleLevel(pic, smp, wrapUv(pos), 0.0); base = mix(base, unpremul(tx).rgb, u.texMix * tx.a);' : ''}
   let rgb = base * (0.4 + 0.85 * diff) * mix(0.35, 1.0, ao) + vec3f(spec) * 0.4 * ao;
   return vec4f(clamp(rgb, vec3f(0.0), vec3f(1.0)), 1.0);
 }`;
@@ -77,8 +102,8 @@ export default defineNode({
   title: 'Mandelbulb',
   category: 'generate',
   description: 'A fractal in three dimensions: a knobbly, endlessly detailed bulb that the camera circles while its shape slowly swings. Heavy: lower Resolution or Steps if playback stutters.',
-  keywords: ['mandelbulb', 'fractal', '3d', 'mandelbrot', 'trippy', 'psychedelic', 'raymarch', 'alien', 'bulb', 'visuals', 'vj', 'math'],
-  inputs: { size: { type: 'image', label: 'Size from' } },
+  keywords: ['mandelbulb', 'fractal', '3d', 'texture', 'video on 3d', 'displace', 'mandelbrot', 'trippy', 'psychedelic', 'raymarch', 'alien', 'bulb', 'visuals', 'vj', 'math'],
+  inputs: { image: { type: 'image', label: 'Texture' }, size: { type: 'image', label: 'Size from' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     power: { type: 'number', default: 8, min: 2, max: 16, step: 0.05, label: 'Power', hint: '8 is the classic bulb. Lower is rounder, higher has more knobs.' },
@@ -91,6 +116,10 @@ export default defineNode({
     density: { type: 'number', default: 0.5, min: 0.1, max: 8, step: 0.01, label: 'Color bands' },
     cycle: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, label: 'Color cycles', hint: 'Times the colours run through per loop.' },
     background: { type: 'color', default: [0.05, 0.06, 0.1, 1], label: 'Background', hint: 'Alpha 0 = transparent, to put the bulb over a picture.' },
+    texMix: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Texture amount', group: 'Texture', hint: 'With a picture or video wired into Texture: how much of the surface colour comes from it instead of the colour set.' },
+    texScale: { type: 'number', default: 1, min: 1, max: 8, step: 1, integer: true, label: 'Texture repeats', group: 'Texture', hint: 'How many times the picture goes round the bulb.' },
+    texSpin: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, label: 'Texture spin', group: 'Texture', hint: 'Whole trips of the picture round the bulb per loop.' },
+    relief: { type: 'number', default: 0, min: -0.5, max: 0.5, step: 0.005, label: 'Relief', group: 'Texture', hint: 'Bright parts of the picture push the surface out, dark parts pull it in (the other way round below 0). A video makes the surface move.' },
     rounds: { type: 'number', default: 8, min: 3, max: 16, step: 1, integer: true, label: 'Detail', hint: 'Rounds of the formula. More = finer surface, more cost.' },
     steps: { type: 'number', default: 64, min: 16, max: 200, step: 1, integer: true, label: 'Steps', hint: 'How far the ray is followed into the creases. More = deeper detail, more cost.' },
     resolution: {
@@ -115,10 +144,16 @@ export default defineNode({
     const ph = ctx.time.phase;
     const TAU = Math.PI * 2;
     const bg = p.background as number[];
+    const pic = ctx.in.image;
     const small = ctx.gpu.pass({
       label: 'mandelbulb',
       size,
+      textures: pic ? { pic } : {},
       uniforms: {
+        texMix: p.texMix,
+        texScale: Math.round(p.texScale),
+        texTurn: ph * Math.round(p.texSpin),
+        relief: p.relief,
         power: Math.max(1.5, p.power + p.morph * Math.sin(ph * TAU)),
         rounds: Math.round(p.rounds),
         steps: Math.round(p.steps),
@@ -133,7 +168,7 @@ export default defineNode({
         bg: [bg[0], bg[1], bg[2]],
         clear: (bg[3] ?? 1) < 0.5,
       },
-      wgsl: MARCH_WGSL,
+      wgsl: marchWgsl(!!pic),
     });
     if (k === 1) return { image: small };
     const image = ctx.gpu.pass({ label: 'mandelbulb-up', size: out, textures: { src: small }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smp, uv, 0.0); }' });
