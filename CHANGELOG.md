@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.20.0] - 2026-11-20
+
+### Added
+- **AI Style Transfer node** (Filter): the real neural version of the style-transfer transition. Picture A is repainted by a neural network in the texture and colours of picture B and becomes B. It runs in your browser (nothing is uploaded) with the AdaIN model: two files, 27 MB together, downloaded once after you press "Download the model", checked against a fingerprint, MIT licensed (the encoder is the first layers of VGG-19). It cannot run live: press **Render** in the node's settings to paint the transition once and store it, like Codec Datamosh; before that the node shows a plain dissolve from A to B with the same timing. Driven by: A to B over the loop, A to B and back, or a part of the project. Longest side 512, 768 or 896 (larger = more squares per frame = slower), Steady (blends each painted frame with the one before, against flicker), and Painting and Ends fade, which act on the stored result without rendering again. Expect several seconds per frame on a computer's processor and more on a phone. Style Melt remains as the instant, non-AI imitation.
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
