@@ -68,19 +68,30 @@ fn hash31(p: vec3f) -> f32 {
   return fract((q.x + q.y) * q.z);
 }
 
-/** Smooth value noise, 0..1. */
+/**
+ * Smooth value noise, 0..1.
+ *
+ * The corners of a noise square are numbered with whole numbers (vec2i / vec3i) and only then turned into the
+ * decimal numbers the hash takes. Written as hash(floor(p) + vec(1, 0)) a graphics driver is free to merge that
+ * "+ 1" into the first multiplication inside the hash (a fused multiply-add), which rounds a hair differently from
+ * hashing the same corner as some other square's floor(p). The hash ends in a fract, so a hair is enough to
+ * flip it from 0.999 to 0.001: one corner then has two values and a square of the noise shows a hard edge.
+ * A whole-number addition cannot be merged or rounded, so every square now feeds the hash the identical number.
+ */
+fn latticeHash2(i: vec2i) -> f32 { return hash21(vec2f(i)); }
+fn latticeHash3(i: vec3i) -> f32 { return hash31(vec3f(i)); }
 fn vnoise(p: vec2f) -> f32 {
-  let i = floor(p); let f = fract(p);
+  let i = vec2i(floor(p)); let f = fract(p);
   let w = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash21(i), hash21(i + vec2f(1.0, 0.0)), w.x),
-             mix(hash21(i + vec2f(0.0, 1.0)), hash21(i + vec2f(1.0, 1.0)), w.x), w.y);
+  return mix(mix(latticeHash2(i), latticeHash2(i + vec2i(1, 0)), w.x),
+             mix(latticeHash2(i + vec2i(0, 1)), latticeHash2(i + vec2i(1, 1)), w.x), w.y);
 }
 fn vnoise3(p: vec3f) -> f32 {
-  let i = floor(p); let f = fract(p);
+  let i = vec3i(floor(p)); let f = fract(p);
   let w = f * f * (3.0 - 2.0 * f);
   return mix(
-    mix(mix(hash31(i), hash31(i + vec3f(1, 0, 0)), w.x), mix(hash31(i + vec3f(0, 1, 0)), hash31(i + vec3f(1, 1, 0)), w.x), w.y),
-    mix(mix(hash31(i + vec3f(0, 0, 1)), hash31(i + vec3f(1, 0, 1)), w.x), mix(hash31(i + vec3f(0, 1, 1)), hash31(i + vec3f(1, 1, 1)), w.x), w.y),
+    mix(mix(latticeHash3(i), latticeHash3(i + vec3i(1, 0, 0)), w.x), mix(latticeHash3(i + vec3i(0, 1, 0)), latticeHash3(i + vec3i(1, 1, 0)), w.x), w.y),
+    mix(mix(latticeHash3(i + vec3i(0, 0, 1)), latticeHash3(i + vec3i(1, 0, 1)), w.x), mix(latticeHash3(i + vec3i(0, 1, 1)), latticeHash3(i + vec3i(1, 1, 1)), w.x), w.y),
     w.z);
 }
 /**

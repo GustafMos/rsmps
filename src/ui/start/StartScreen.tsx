@@ -35,8 +35,19 @@ export async function openTemplate(app: ReturnType<typeof useApp>, t: Template):
   if (blank && before && ed.state.activeProject !== before) await ed.closeTab(before).catch(() => undefined);
 }
 
+/** Start with nothing but an Output node: the project keeps its settings (size, frame rate, length), every other node goes. */
+export async function startBare(app: ReturnType<typeof useApp>): Promise<void> {
+  const { ed, io } = app;
+  const g = ed.state.graph;
+  const before = ed.state.activeProject;
+  const blank = !!before && isBlankGraph(g, io.registry);
+  dismissStart(); // the new project is blank too: without this the start screen would cover it again at once
+  await ed.newProjectTab({ schema: 'rsmps/graph', version: 2, name: 'Untitled', project: { ...g.project }, nodes: [{ id: 'out', type: 'image-out', x: 0, y: 0, params: {} }], edges: [] });
+  if (blank && before && ed.state.activeProject !== before) await ed.closeTab(before).catch(() => undefined);
+}
+
 /** The icon a template's group shows on its tile while there is no picture (yet). */
-const GROUP_ICON: Record<string, IconName> = { 'Pixel art': 'grid', 'Video art': 'video', '3D': 'cube', 'Paper & scan': 'image', 'Audio-reactive': 'audio', Color: 'palette', Captions: 'file' };
+const GROUP_ICON: Record<string, IconName> = { Film: 'video', 'Pixel art': 'grid', 'Video art': 'video', '3D': 'cube', 'Paper & scan': 'image', 'Audio-reactive': 'audio', Color: 'palette', Captions: 'file' };
 
 function Tile({ t, onOpen }: { t: Template; onOpen: () => void }) {
   const app = useApp();
@@ -154,8 +165,11 @@ export function TemplatesDialog() {
  */
 export function StartScreen() {
   const { io } = useApp();
-  const blank = useEd((s) => s.mode === 'edit' && !s.switching && !!s.activeProject && isBlankGraph(s.graph, io.registry));
+  // Blank AND untouched: a project you emptied yourself (opened a template, deleted its nodes) has something to undo, and is
+  // your work in progress, not a fresh start. Without this the start screen came back the moment the last node was deleted.
+  const blank = useEd((s) => s.mode === 'edit' && !s.switching && !!s.activeProject && !s.canUndo && !s.canRedo && isBlankGraph(s.graph, io.registry));
   const dismissed = useSelector(featureStore, (s) => s.startDismissed);
+  const app = useApp();
   const [show, setShow] = useState(readPref);
   const [host, setHost] = useState<Element | null>(null);
   useEffect(() => setHost(document.querySelector('.rs-center')), [blank]);
@@ -180,7 +194,18 @@ export function StartScreen() {
         <h2>Start something</h2>
         <span className="rs-start__spacer" />
         <label className="rs-start__pref"><input type="checkbox" checked={show} onChange={(e) => setPref(e.target.checked)} /> Show this on start</label>
-        <button className="rs-btn" onClick={dismissStart}>Start empty</button>
+      </div>
+      <div className="rs-start__hero">
+        <button className="rs-start__big rs-start__big--main" onClick={dismissStart}>
+          <Icon name="plus" size={28} />
+          <span className="rs-start__bigtitle">Start empty</span>
+          <span className="rs-start__bigdesc">A Media In for your clip or picture, wired to an Output. Add nodes in between.</span>
+        </button>
+        <button className="rs-start__big" onClick={() => void startBare(app)}>
+          <Icon name="export" size={28} />
+          <span className="rs-start__bigtitle">Only an Output</span>
+          <span className="rs-start__bigdesc">Nothing but the Output node: for generators, text, 3D or sound, with no clip to begin from.</span>
+        </button>
       </div>
       <p className="rs-start__beta" role="note">
         <span className="rs-start__betatag">{BETA.badge}</span> {BETA.short} {BETA.ask}{' '}

@@ -25,3 +25,15 @@
 .rs-start__beta { margin: 0 0 var(--s-4); padding: var(--s-2) var(--s-3); border: 1px solid var(--line-strong); border-left: 3px solid var(--yellow); border-radius: var(--r); color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.5; }
 .rs-start__beta a { color: var(--text); }
 .rs-start__betatag { color: var(--yellow); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-right: var(--s-1); }
+
+/* the two ways to begin with nothing: first and largest, so they are not hunted for among the templates */
+.rs-start__hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--s-3); margin-bottom: var(--s-4); }
+.rs-start__big { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: var(--s-3); row-gap: 2px; align-items: center; text-align: left; min-height: 96px; padding: var(--s-4); background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r); color: var(--text); cursor: pointer; box-shadow: var(--shadow-hard-sm); }
+.rs-start__big > svg { grid-row: 1 / span 2; }
+.rs-start__big:hover { background: var(--bg-3); border-color: var(--accent-hi); }
+.rs-start__big:focus-visible { box-shadow: var(--focus); }
+.rs-start__big--main { background: var(--accent); border-color: var(--accent-hi); }
+.rs-start__big--main:hover { background: var(--accent-hi); }
+.rs-start__bigtitle { font-size: var(--fs-lg); font-weight: 700; align-self: end; }
+.rs-start__bigdesc { color: var(--text-dim); font-size: var(--fs-sm); align-self: start; }
+.rs-start__big--main .rs-start__bigdesc { color: var(--text); opacity: 0.85; }
