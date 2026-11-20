@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.19.0] - 2026-11-20
+
+### Added
+- **Mandelbulb: a picture or video as its texture** (a first test of pictures as surface inputs). Wire anything into the new Texture input and it is wrapped round the bulb like a map round a globe: Texture amount mixes it with the colour set, Texture repeats and Texture spin place and turn it, and **Relief** lets the picture's bright and dark push the surface out and in, so a video makes the bulb itself move.
+
 ## [0.18.3] - 2026-11-20
 
 ### Added

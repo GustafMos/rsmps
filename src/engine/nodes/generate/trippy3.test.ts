@@ -39,3 +39,30 @@ it('reaction diffusion: an even two-colour pattern with both colours present, at
   expect(flips / 12).toBeGreaterThan(4);
   expect(flips / 12).toBeLessThan(30);
 });
+
+it('mandelbulb with a picture wired in: the surface takes the picture’s colour, and relief changes its shape', async () => {
+  const t = await harness();
+  const size = t.solid(64, 48, [0, 0, 0, 255]);
+  const green = t.solid(16, 8, [0, 255, 0, 255]);
+  const plain = await t.pixels((await t.run('mandelbulb', { resolution: 'full', steps: 48 }, { size })).image as never);
+  const tex = await t.pixels((await t.run('mandelbulb', { resolution: 'full', steps: 48 }, { size, image: green })).image as never);
+  let greener = 0;
+  let n = 0;
+  for (let y = 14; y < 34; y += 2)
+    for (let x = 22; x < 42; x += 2) {
+      const a = plain.at(x, y);
+      const b = tex.at(x, y);
+      if (b[1] > b[0] + 15 && b[1] > b[2] + 15) greener++;
+      n++;
+      void a;
+    }
+  expect(greener / n).toBeGreaterThan(0.5);
+  expect(tex.at(1, 1)).toEqual(plain.at(1, 1)); // the background is not textured
+  // relief from a picture that is bright on one half moves the outline
+  const half = t.fromFn(32, 16, (x) => (x < 16 ? [255, 255, 255, 255] : [0, 0, 0, 255]));
+  const flat = await t.pixels((await t.run('mandelbulb', { resolution: 'full', steps: 48, texMix: 0 }, { size, image: half })).image as never);
+  const bumpy = await t.pixels((await t.run('mandelbulb', { resolution: 'full', steps: 48, texMix: 0, relief: 0.4 }, { size, image: half })).image as never);
+  let moved = 0;
+  for (let y = 2; y < 46; y += 2) for (let x = 2; x < 62; x += 2) if (Math.abs(flat.at(x, y)[0] - bumpy.at(x, y)[0]) + Math.abs(flat.at(x, y)[2] - bumpy.at(x, y)[2]) > 40) moved++;
+  expect(moved).toBeGreaterThan(30);
+}, 120000);
