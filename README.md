@@ -245,6 +245,12 @@ uploaded**. The larger Depth Anything V2 models are non-commercial and are not o
 uses a result you made in the app, or the quick Depth from Picture guess. Credit: "Depth Anything V2 Small © the Depth
 Anything authors, Apache-2.0"; the runtime is [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (MIT).
 
+The **AI Style Transfer** node (a transition that repaints one shot in the style of the next) uses AdaIN (MIT, two files,
+27 MB together) under the same rules: downloaded only when you press Download in the node's panel or in Plugins > AI
+models, a pinned version checked against known SHA-256 sums, run locally, nothing uploaded. It is rendered once in a job
+and stored with the project. Credit: "AdaIN style transfer, weights © Naoto Inoue, MIT; encoder from VGG-19 © Visual
+Geometry Group, University of Oxford".
+
 ## Command line
 
 Batch rendering without a browser, including formats browsers cannot encode (ProRes-compatible 4444 with alpha):
