@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.18.3] - 2026-11-20
+
+### Added
+- **Start screen: "Start empty" and "Only an Output" are the first and largest choices.** Start empty keeps the usual Media In wired to an Output; Only an Output starts with nothing but the Output node, for generators, text, 3D or sound.
+
+### Fixed
+- **Noise: a square with a hard corner in the picture on some graphics cards.** The corners of a noise square were numbered in a way a graphics driver may round a hair differently from one square to the next, and the noise's hash turns a hair into a completely different value: one corner then had two values. The corners are now numbered with whole numbers, which cannot round. This is in the shared noise, so it also covers Liquid Warp, Light Leak, Style Melt, Reaction Diffusion and every other node built on it. Pictures are unchanged where they were already right.
+- **The start screen no longer comes back when you empty a project.** Opening a template and deleting everything but the Output threw you back to the template picker. It now only shows for a project nothing has been done to yet.
+
 ## [0.18.2] - 2026-11-20
 
 ### Fixed
