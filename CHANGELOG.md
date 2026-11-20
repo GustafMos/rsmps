@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.18.2] - 2026-11-20
+
+### Fixed
+- **Glass: the sparkling lines along the strip joints, and the effect being too weak after 0.18.1.** The strips are now fused into one piece of glass with a stepped face, so light no longer crosses thin air gaps between them. A new **Edges** setting follows several rays per pixel (Smooth = 4, the default; Best = 9; Fast = 1), which turns what is left at the edges of any glass shape into clean lines. The strips are strong again by default (Wedge 16 degrees, range up to 40; more colour split; the picture stands further behind the glass), this time without the noise.
+
 ## [0.18.1] - 2026-11-20
 
 ### Fixed

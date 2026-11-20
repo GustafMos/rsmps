@@ -78,10 +78,12 @@ fn shape(p: vec3f) -> f32 {
     let pitch = 2.0 / n;
     let slot = clamp(floor((p.x + 1.0) / pitch), 0.0, n - 1.0);
     var d = 1.0e9;
-    for (var j = -1; j <= 1; j++) {
+    for (var j = -2; j <= 2; j++) {
       let idx = slot + f32(j);
       if (idx < 0.0 || idx > n - 1.0) { continue; }
-      d = min(d, strip(vec3f(p.x + 1.0 - (idx + 0.5) * pitch, p.y, p.z), pitch * 0.49));
+      // wide enough to reach into its neighbours whatever its angle: the strips fuse into ONE piece of glass with a
+      // stepped face, so light never has to cross a thin air gap between two strips (that was the sparkle at the joints)
+      d = min(d, strip(vec3f(p.x + 1.0 - (idx + 0.5) * pitch, p.y, p.z), pitch * 0.52 / max(cos(u.detail), 0.35)));
     }
     return d;
   }
@@ -173,9 +175,11 @@ fn through(p0: vec3f, rd: vec3f, n0: vec3f, ior: f32, aspect: f32) -> vec2f {
   // differs from pixel to pixel, so show what lies straight behind instead of noise
   return landing(p0, rd, aspect);
 }
-fn fx(uv: vec2f, px: vec2f) -> vec4f {
+// one ray through the point px of the frame (pixels, need not be a pixel centre)
+fn shade(px: vec2f) -> vec4f {
   let aspect = u.size.x / u.size.y;
-  let src0 = textureSampleLevel(src, smpNearest, uv, 0.0);
+  let uv = px / u.size;
+  let src0 = textureSampleLevel(src, smp, uv, 0.0);
   let s = (uv - 0.5) * vec2f(aspect, -1.0) * 2.0;
   let ro = vec3f(0.0, 0.0, u.cam);
   let rd = normalize(vec3f(s, -u.cam));
@@ -215,6 +219,21 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   col += u.glint * pow(max(dot(rr, lamp), 0.0), 48.0);
   let a = max(max(r.a, g.a), b.a);
   return premul(vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), max(a, src0.a)));
+}
+// Several rays per pixel, spread over the pixel. At an edge of the glass neighbouring rays take very different paths;
+// one ray per pixel shows that as a jagged, sparkling line, the average of several as a clean one.
+fn fx(uv: vec2f, px: vec2f) -> vec4f {
+  let n = i32(u.rays);
+  if (n <= 1) { return shade(px); }
+  var acc = vec4f(0.0);
+  for (var j = 0; j < n; j++) {
+    for (var i = 0; i < n; i++) {
+      // a slightly turned grid, so no row of samples lines up with a vertical or horizontal edge
+      let o = (vec2f(f32(i), f32(j)) + 0.5) / f32(n) - 0.5;
+      acc += shade(px + vec2f(o.x + o.y * 0.25, o.y - o.x * 0.25));
+    }
+  }
+  return acc / f32(n * n);
 }`;
 
 const hasCount = (p: Record<string, unknown>) => p.shape === 'louvres' || p.shape === 'rods' || p.shape === 'waves';
@@ -235,8 +254,8 @@ export default defineNode({
     position: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: -0.5, max: 1.5, step: 0.005, label: 'Position' },
     count: { type: 'number', default: 7, min: 1, max: 40, step: 1, integer: true, label: 'Strips', visibleIf: hasCount },
     detail: { type: 'number', default: 25, min: -80, max: 80, step: 0.5, unit: 'deg', label: 'Strip angle', hint: 'How far each strip is turned on its own axis (for the wavy pane: how much the waves wander).', visibleIf: (p) => p.shape === 'louvres' || p.shape === 'waves' },
-    wedge: { type: 'number', default: 8, min: 0, max: 25, step: 0.5, unit: 'deg', label: 'Wedge', hint: 'How much each strip is a thin prism: thicker at one edge. 0 = flat strips that only nudge the picture. More throws the picture further aside and splits its colours more.', visibleIf: (p) => p.shape === 'louvres' },
-    thickness: { type: 'number', default: 0.1, min: 0.01, max: 0.6, step: 0.005, label: 'Thickness', visibleIf: hasThick },
+    wedge: { type: 'number', default: 16, min: 0, max: 40, step: 0.5, unit: 'deg', label: 'Wedge', hint: 'How much each strip is a thin prism: thicker at one edge. 0 = flat strips that only nudge the picture. More throws the picture further aside and splits its colours more.', visibleIf: (p) => p.shape === 'louvres' },
+    thickness: { type: 'number', default: 0.16, min: 0.01, max: 0.6, step: 0.005, label: 'Thickness', visibleIf: hasThick },
     tilt: { type: 'number', default: 8, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Tilt', hint: 'Leaning toward or away from you.', group: 'Turn' },
     turn: { type: 'number', default: -18, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Turn', hint: 'Turning left or right.', group: 'Turn' },
     roll: { type: 'number', default: 4, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Roll', hint: 'Turning like a steering wheel.', group: 'Turn' },
@@ -247,12 +266,24 @@ export default defineNode({
     swaySpeed: { type: 'number', default: 0.3, min: 0.05, max: 4, step: 0.05, label: 'Sway speed', group: 'Motion', visibleIf: (p) => (p.sway as number) > 0 },
     drift: { type: 'number', default: 0.03, min: 0, max: 0.5, step: 0.005, label: 'Hand drift', hint: 'The glass also moves about by this share of the picture.', group: 'Motion' },
     ior: { type: 'number', default: 1.5, min: 1, max: 2.6, step: 0.01, label: 'Bending', hint: 'How strongly the glass bends light. Water 1.33, window glass 1.5, diamond 2.4. 1 = no bending.', group: 'Glass' },
-    dispersion: { type: 'number', default: 0.04, min: 0, max: 0.4, step: 0.002, label: 'Color split', hint: 'How differently red and blue bend: the rainbow fringes.', group: 'Glass' },
-    distance: { type: 'number', default: 1.2, min: 0.05, max: 6, step: 0.01, label: 'Picture distance', hint: 'How far behind the glass the picture stands. Further = the glass throws the picture further aside.', group: 'Glass' },
+    dispersion: { type: 'number', default: 0.07, min: 0, max: 0.4, step: 0.002, label: 'Color split', hint: 'How differently red and blue bend: the rainbow fringes.', group: 'Glass' },
+    distance: { type: 'number', default: 2, min: 0.05, max: 6, step: 0.01, label: 'Picture distance', hint: 'How far behind the glass the picture stands. Further = the glass throws the picture further aside.', group: 'Glass' },
     mirror: { type: 'number', default: 1, min: 0, max: 4, step: 0.01, label: 'Reflection', group: 'Glass' },
     glint: { type: 'number', default: 0.5, min: 0, max: 3, step: 0.01, label: 'Glint', group: 'Glass' },
     frost: { type: 'number', default: 0, min: 0, max: 1, step: 0.005, label: 'Frosted', group: 'Glass' },
     tint: { type: 'color', default: [1, 1, 1, 1], label: 'Glass color', group: 'Glass' },
+    quality: {
+      type: 'enum',
+      default: 'smooth',
+      options: [
+        { value: 'fast', label: 'Fast, 1 ray' },
+        { value: 'smooth', label: 'Smooth, 4 rays' },
+        { value: 'best', label: 'Best, 9 rays' },
+      ],
+      label: 'Edges',
+      group: 'Glass',
+      hint: 'Rays followed per pixel. One is fastest but the edges of the glass sparkle; four or nine make them clean and cost that many times more.',
+    },
     seed: { type: 'number', default: 1, min: 0, max: 999, step: 1, integer: true, label: 'Seed', group: 'Motion', hint: 'Another number, another sway.' },
   },
   summary: (p) => `${GLASS_SHAPES[p.shape as string]?.label ?? p.shape} · bending ${p.ior}`,
@@ -296,6 +327,7 @@ export default defineNode({
         back: p.distance,
         cam: 4,
         reach: scale * 1.9 + 0.2,
+        rays: p.quality === 'fast' ? 1 : p.quality === 'best' ? 3 : 2,
         mirror: p.mirror,
         glint: p.glint,
         frost: p.frost * 0.6,
