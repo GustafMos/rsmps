@@ -49,29 +49,51 @@ fn sdBox(p: vec3f, b: vec3f) -> f32 {
   let q = abs(p) - b;
   return length(max(q, vec3f(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
 }
+// one strip: a shallow wedge (thicker at one edge), so its faces are not parallel and it throws the picture aside like a
+// thin prism instead of only nudging it like a window pane. An exact distance (a convex shape cut from planes).
+fn strip(p: vec3f, half: f32) -> f32 {
+  let c = cos(u.detail);
+  let s = sin(u.detail);
+  let q = vec2f(p.x * c - p.z * s, p.x * s + p.z * c);
+  // the two faces lean toward each other: normals (-+slope, +-1) normalised
+  // The lean is an angle of its own (the Wedge setting), not a share of the thickness: tied to the thickness it grew
+  // with the number of strips until almost every ray was trapped inside and came out as coloured noise.
+  // The strip is never thinner than a fifth of its thickness at the thin edge.
+  let slope = min(u.wedge, 0.8 * u.thick / half);
+  let inv = 1.0 / sqrt(1.0 + slope * slope);
+  let front = (q.y - u.thick - slope * q.x) * inv;
+  let back = (-q.y - u.thick - slope * q.x) * inv;
+  let m = max(max(abs(q.x) - half, abs(p.y) - 1.0), max(front, back));
+  return m;
+}
 fn rot2(p: vec2f, a: f32) -> vec2f { let c = cos(a); let s = sin(a); return vec2f(p.x * c - p.y * s, p.x * s + p.y * c); }
 // distance from a point (in the glass's own space, about -1..1) to its surface; negative inside
 fn shape(p: vec3f) -> f32 {
   let k = i32(u.shape);
   let n = max(1.0, u.count);
   if (k == 0) {
-    // flat strips side by side, each turned on its long axis
+    // Flat strips side by side, each turned on its long axis. A point can be nearest to the strip NEXT to the one whose
+    // slot it is in (the strips are turned, so they reach over the slot lines): measure to this strip and both neighbours.
+    // Only whole strips exist, so the pane ends on a strip, never part-way through one.
     let pitch = 2.0 / n;
-    let c = (fract(p.x / pitch + 0.5) - 0.5) * pitch;
-    let q = rot2(vec2f(c, p.z), u.detail);
-    // each strip is a shallow wedge (thicker at one edge): its faces are not parallel, so it throws the picture aside
-    // like a prism instead of only nudging it like a window pane
-    let half = pitch * 0.47;
-    let th = u.thick * (1.0 + 0.7 * q.x / half);
-    let strip = max(max(abs(q.x) - half, abs(p.y) - 1.0), abs(q.y) - th);
-    return max(strip, abs(p.x) - 1.0) * 0.6;
+    let slot = clamp(floor((p.x + 1.0) / pitch), 0.0, n - 1.0);
+    var d = 1.0e9;
+    for (var j = -1; j <= 1; j++) {
+      let idx = slot + f32(j);
+      if (idx < 0.0 || idx > n - 1.0) { continue; }
+      d = min(d, strip(vec3f(p.x + 1.0 - (idx + 0.5) * pitch, p.y, p.z), pitch * 0.49));
+    }
+    return d;
   }
   if (k == 1) {
-    // round rods side by side: reeded glass
+    // Reeded glass: a pane with a flat back and a front of gentle ridges. (Whole round rods looked right from the
+    // front only: toward the edge of a rod the light is bent past all reason and comes out as noise.)
     let pitch = 2.0 / n;
-    let c = (fract(p.x / pitch + 0.5) - 0.5) * pitch;
-    let rod = length(vec2f(c, p.z / max(u.thick * 4.0, 0.05) * pitch * 0.5)) - pitch * 0.52;
-    return max(max(rod, abs(p.x) - 1.0), abs(p.y) - 1.0) * 0.6;
+    let c = (fract((p.x + 1.0) / pitch) - 0.5) * pitch;
+    let depth = pitch * 0.22;
+    let front = p.z - u.thick - depth * (cos(c / pitch * TAU) - 1.0) * 0.5 - depth;
+    // the ridge is at most this steep, which is what keeps the distance from being overestimated
+    return max(max(front * 0.82, -p.z - u.thick), max(abs(p.x) - 1.0, abs(p.y) - 1.0));
   }
   if (k == 2) {
     // triangular prism lying along y
@@ -128,6 +150,8 @@ fn through(p0: vec3f, rd: vec3f, n0: vec3f, ior: f32, aspect: f32) -> vec2f {
   var d = refract(rd, n0, 1.0 / ior);
   if (dot(d, d) < 0.5) { d = rd; }
   var p = p0 - n0 * 0.004;
+  // glass thinner than the step in (a knife edge): there is no inside to walk, the ray goes straight on
+  if (map(p) > 0.0) { return landing(p0, rd, aspect); }
   // up to two inside bounces: a ray that cannot get out (total reflection) is mirrored back in
   for (var b = 0; b < 2; b++) {
     var t = 0.0;
@@ -138,13 +162,16 @@ fn through(p0: vec3f, rd: vec3f, n0: vec3f, ior: f32, aspect: f32) -> vec2f {
       if (t > 6.0) { break; }
     }
     p = p + d * t;
-    let n = -normalAt(p);
+    // step back inside a hair before reading the slope: right on an edge the slope is undefined and gives noise
+    let n = -normalAt(p - d * 0.002);
     let o = refract(d, n, ior);
     if (dot(o, o) > 0.5) { return landing(p + o * 0.004, o, aspect); }
     d = reflect(d, n);
     p = p + d * 0.006;
   }
-  return landing(p, d, aspect);
+  // still trapped after two bounces (a ray that came in through an edge): where it ends up is anybody's guess and
+  // differs from pixel to pixel, so show what lies straight behind instead of noise
+  return landing(p0, rd, aspect);
 }
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let aspect = u.size.x / u.size.y;
@@ -208,6 +235,7 @@ export default defineNode({
     position: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: -0.5, max: 1.5, step: 0.005, label: 'Position' },
     count: { type: 'number', default: 7, min: 1, max: 40, step: 1, integer: true, label: 'Strips', visibleIf: hasCount },
     detail: { type: 'number', default: 25, min: -80, max: 80, step: 0.5, unit: 'deg', label: 'Strip angle', hint: 'How far each strip is turned on its own axis (for the wavy pane: how much the waves wander).', visibleIf: (p) => p.shape === 'louvres' || p.shape === 'waves' },
+    wedge: { type: 'number', default: 8, min: 0, max: 25, step: 0.5, unit: 'deg', label: 'Wedge', hint: 'How much each strip is a thin prism: thicker at one edge. 0 = flat strips that only nudge the picture. More throws the picture further aside and splits its colours more.', visibleIf: (p) => p.shape === 'louvres' },
     thickness: { type: 'number', default: 0.1, min: 0.01, max: 0.6, step: 0.005, label: 'Thickness', visibleIf: hasThick },
     tilt: { type: 'number', default: 8, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Tilt', hint: 'Leaning toward or away from you.', group: 'Turn' },
     turn: { type: 'number', default: -18, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Turn', hint: 'Turning left or right.', group: 'Turn' },
@@ -262,6 +290,7 @@ export default defineNode({
         count: p.count,
         detail: p.detail * deg,
         thick: p.thickness,
+        wedge: Math.tan((Math.max(0, p.wedge) * Math.PI) / 180),
         ior: Math.max(1.0001, p.ior),
         disp: Math.min(p.dispersion, Math.max(0, p.ior - 1.0001)),
         back: p.distance,
