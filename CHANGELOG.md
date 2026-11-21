@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.21.1] - 2026-11-21
+
+### Fixed
+- **Webcam: its microphone was never opened unless the project also had a Microphone node.** The check "does this project need a microphone at all" only looked for Microphone nodes, so a Webcam on its own stayed silent whatever was wired and whether or not Hear myself was on. Both checks now use one list. The "Enable audio" button also says "+ mic" when a Webcam's sound is wired.
+
 ## [0.21.0] - 2026-11-21
 
 ### Added

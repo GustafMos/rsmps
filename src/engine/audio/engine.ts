@@ -20,6 +20,16 @@ function graphUses(graph: GraphDoc, registry: Registry, typeId: string): boolean
   return graph.nodes.some((n) => n.type === typeId && !!registry.get(n.type)?.audio);
 }
 
+/**
+ * Nodes that need a microphone opened for them: every Microphone node, and a Webcam once one of its sound outputs is
+ * wired (adding a camera for its picture must not ask for the microphone). One list for "should we ask at all" and for
+ * "which streams to open", so the two cannot disagree: they did, and a Webcam without a Microphone node stayed silent.
+ */
+export function micNodesOf(graph: GraphDoc, registry: Registry): GraphDoc['nodes'] {
+  const camHeard = (id: string) => graph.edges.some((e) => e.from.node === id && (e.from.port === 'audio' || e.from.port === 'tap'));
+  return graph.nodes.filter((n) => (n.type === 'microphone' || (n.type === 'camera-in' && camHeard(n.id))) && !!registry.get(n.type)?.audio);
+}
+
 class WebAudioEngine implements AudioEngine {
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
@@ -274,7 +284,7 @@ class WebAudioEngine implements AudioEngine {
     if (!graph || !registry || !ctx || !node) return;
     for (const id of [...this.liveStreams.keys()]) if (!graph.nodes.some((n) => n.id === id)) this.setLiveStream(id, null); // node removed
     this.attachAllStreams();
-    if (graphUses(graph, registry, 'microphone') || this.mics.size) await this.acquireMic(); // also closes streams of removed nodes
+    if (micNodesOf(graph, registry).length > 0 || this.mics.size) await this.acquireMic(); // also closes streams of removed nodes
     if (graphUses(graph, registry, 'midi-device')) await this.acquireMidi();
   }
 
@@ -298,10 +308,7 @@ class WebAudioEngine implements AudioEngine {
   private async reconcileMics(): Promise<void> {
     const { graph, registry, ctx, node } = this;
     if (!graph || !registry || !ctx || !node || !navigator.mediaDevices?.getUserMedia) return;
-    // A Webcam's microphone is opened only while one of its sound outputs is wired: adding a camera for its picture
-    // must not ask for the microphone.
-    const camHeard = (id: string) => graph.edges.some((e) => e.from.node === id && (e.from.port === 'audio' || e.from.port === 'tap'));
-    const wanted = graph.nodes.filter((n) => (n.type === 'microphone' || (n.type === 'camera-in' && camHeard(n.id))) && registry.get(n.type)?.audio);
+    const wanted = micNodesOf(graph, registry);
     // close streams of removed nodes or whose settings changed
     const want = new Map<string, { key: string; device: string; opts: MediaTrackConstraints }>();
     for (const n of wanted) {
