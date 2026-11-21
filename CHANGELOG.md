@@ -4,6 +4,16 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.21.0] - 2026-11-21
+
+### Added
+- **Recorder: a Sound input.** Wire any sound into the Recorder and that is what the clip carries, whether or not you also hear it (it no longer has to reach an Audio Output to be recorded). The Recorder passes the sound on through a Sound output, so it can sit in a sound chain the way it sits in a picture chain. With nothing wired in it records the sound that is playing, as before, and says so.
+- **Webcam: sound outputs.** The Webcam node has a Sound output and a Silent tap, fed by a microphone of your choice (new Sound settings: Microphone, Input gain, Hear myself, Noise gate). The microphone is opened, and its permission asked for, only once one of those outputs is wired. Wire the Silent tap into a Recorder to record the camera with its sound without hearing yourself.
+- **Record button in the viewer.** While the project has a Recorder node, a Record / Stop button sits in the top right corner of the viewer: it works the Recorder you are viewing, or the first one.
+
+### Fixed
+- The audio node list check in the test suite had been failing since the Oscilloscope was added (its category was not on the list).
+
 ## [0.20.0] - 2026-11-20
 
 ### Added

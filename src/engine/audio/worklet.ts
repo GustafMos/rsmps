@@ -84,6 +84,10 @@ class RsmpsProcessor extends AudioWorkletProcessor {
     if (!out || out.length === 0) return true;
     const outL = out[0];
     const outR = out[1];
+    // second output: the record bus (what is wired into Recorder nodes), played by nothing
+    const rec = outputs[1];
+    const recL = rec && rec.length > 0 ? rec[0] : undefined;
+    const recR = rec && rec.length > 1 ? rec[1] : undefined;
     const inp = inputs[0];
     const micL = inp && inp.length > 0 ? inp[0] : undefined;
     const micR = inp && inp.length > 1 ? inp[1] : micL;
@@ -99,7 +103,7 @@ class RsmpsProcessor extends AudioWorkletProcessor {
         const n = Math.min(BLOCK_SIZE, total - p);
         const l = outL.subarray(p, p + n);
         if (outR) {
-          this.runner.process(l, outR.subarray(p, p + n), n, micL?.subarray(p, p + n), micR?.subarray(p, p + n), total <= BLOCK_SIZE ? slots : undefined);
+          this.runner.process(l, outR.subarray(p, p + n), n, micL?.subarray(p, p + n), micR?.subarray(p, p + n), total <= BLOCK_SIZE ? slots : undefined, recL?.subarray(p, p + n), recR?.subarray(p, p + n));
         } else {
           const tmpR = this.scratch.subarray(0, n);
           this.runner.process(l, tmpR, n, micL?.subarray(p, p + n), micR?.subarray(p, p + n), total <= BLOCK_SIZE ? slots : undefined);

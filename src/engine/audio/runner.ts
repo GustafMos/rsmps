@@ -427,9 +427,14 @@ export class AudioGraphRunner {
     micL?: Float32Array | null,
     micR?: Float32Array | null,
     slotMics?: ([Float32Array, Float32Array] | null)[],
+    /** The record bus (see `AudioKernel.recordTap`): filled when given. */
+    recL?: Float32Array | null,
+    recR?: Float32Array | null,
   ): void {
     outL.fill(0, 0, frames);
     outR.fill(0, 0, frames);
+    recL?.fill(0, 0, frames);
+    recR?.fill(0, 0, frames);
     if (frames > this.blockSize) throw new Error(`frames ${frames} exceeds block size ${this.blockSize}`);
     const tm = this.time;
     tm.seconds = tm.sample / this.sampleRate;
@@ -539,6 +544,21 @@ export class AudioGraphRunner {
         }
         pn.peak[0] = peakL;
         pn.peak[1] = peakR;
+      }
+    }
+
+    if (recL && recR) {
+      for (const pn of this.order) {
+        if (!pn.kernel.recordTap) continue;
+        const src = pn.io.in.audio;
+        if (!src) continue;
+        for (let i = 0; i < frames; i++) {
+          const l = src[0][i];
+          const r = src[1][i];
+          // never a NaN into a recording
+          recL[i] += l - l === 0 ? l : 0;
+          recR[i] += r - r === 0 ? r : 0;
+        }
       }
     }
 

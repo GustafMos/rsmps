@@ -11,6 +11,7 @@ import { trackPointer } from '../lib/drag';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { safetyStore } from '../safety';
 import { getLive } from '../store/live';
+import { recordLabel, recorderForViewer, recorderSettings } from '../store/recorder';
 import { PaintOverlay } from './PaintOverlay';
 import { PointsOverlay } from './PointsOverlay';
 import { FrameControl, useFrameMenuItems } from './FrameControl';
@@ -376,6 +377,7 @@ export function Viewer() {
         <canvas ref={canvas} className="rs-viewer__canvas" style={{ width: iw, height: ih }} />
         <CompareOverlay stage={stage} box={box} />
       </div>
+      <ViewerRecordButton />
 
       {emptyMsg && (
         <div className="rs-viewer__empty">
@@ -421,4 +423,39 @@ export function Viewer() {
 function nameOf(ed: ReturnType<typeof useApp>['ed'], id: string): string {
   const n = ed.state.graph.nodes.find((x) => x.id === id);
   return n ? n.label || ed.registry.get(n.type)?.title || n.type : id;
+}
+
+/**
+ * Record / Stop in the corner of the viewer, shown while the project has a Recorder node: the same button as the one in the
+ * Recorder's settings, so a take can be started without leaving the picture.
+ */
+function ViewerRecordButton() {
+  const { io, ed } = useApp();
+  const recorder = getLive({ io, ed }).recorder;
+  const ui = useSelector(recorder.store, (s) => s);
+  // identity of the Recorder to use, as a string so the selector result is stable between renders
+  const pick = useEd((s) => {
+    const r = recorderForViewer(s.graph.nodes, s.viewedNodeId);
+    return r ? r.id : '';
+  });
+  const params = useEd((s) => s.graph.nodes.find((n) => n.id === pick)?.params);
+  if (!pick || !params) return null;
+  // while a take runs the button belongs to the node being recorded, whichever that is
+  const target = ui.phase !== 'idle' && ui.nodeId ? ui.nodeId : pick;
+  const mine = ui.nodeId === target;
+  const recording = mine && ui.phase === 'recording';
+  return (
+    <button
+      className={`rs-viewer__rec${recording ? ' is-on' : ''}`}
+      disabled={ui.phase === 'saving'}
+      title={recording ? 'Stop and save the clip' : 'Record through the Recorder node: shows it in the viewer, starts playback and records picture and sound'}
+      aria-label={recording ? 'Stop recording' : 'Record'}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onClick={() => recorder.toggle(target, recorderSettings(params))}
+    >
+      <span className="rs-viewer__recdot" />
+      {recordLabel(ui, mine)}
+    </button>
+  );
 }

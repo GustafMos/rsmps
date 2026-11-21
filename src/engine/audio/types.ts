@@ -134,6 +134,12 @@ export interface AudioKernel<S = any> { // eslint-disable-line @typescript-eslin
    * consumes its outputs. For nodes with a side effect on the host (the Timeline records what is wired to it).
    */
   runWhenFed?: boolean;
+  /**
+   * What is wired into this node's `audio` input is added to the host's RECORD bus, a second stereo output next to the
+   * master mix that nothing plays. The Recorder uses it: a recording carries the sound wired into the Recorder, whether or
+   * not that sound also goes to the speakers. Use together with `runWhenFed`.
+   */
+  recordTap?: boolean;
   /** Fill `io.inWires` (one block per wire) in addition to the summed `io.in`. Costs nothing for other kernels. */
   perWire?: boolean;
   /**

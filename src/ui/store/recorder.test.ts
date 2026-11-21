@@ -20,7 +20,7 @@ describe('Recorder settings and button', () => {
   });
 });
 
-function setup(opts: { audio?: boolean; canvas?: boolean; startError?: string; cameraBusy?: boolean } = {}) {
+function setup(opts: { audio?: boolean; canvas?: boolean; startError?: string; cameraBusy?: boolean; wired?: boolean } = {}) {
   const log: string[] = [];
   const toasts: string[] = [];
   const added: File[] = [];
@@ -40,13 +40,13 @@ function setup(opts: { audio?: boolean; canvas?: boolean; startError?: string; c
     },
   };
   const ed = {
-    state: { graph: { project: { fps: 30 } } },
+    state: { graph: { project: { fps: 30 }, edges: opts.wired ? [{ to: { node: 'rec1', port: 'audio' } }] : [] } },
     setViewed: (id: string) => log.push(`view ${id}`),
     toast: (m: string) => void toasts.push(m),
   } as unknown as Editor;
   const io = {
     liveRecorder: { state: opts.cameraBusy ? 'recording' : 'idle' },
-    stream: { audioStream: () => (opts.audio === false ? null : { getAudioTracks: () => [{ kind: 'audio' }] }) },
+    stream: { audioStream: () => (opts.audio === false ? null : { getAudioTracks: () => [{ kind: 'audio' }] }), recordStream: () => ({ getAudioTracks: () => [{ kind: 'record-bus' }] }) },
     player: { setRunOn: (on: boolean) => log.push(`runOn ${on}`), seek: (s: number) => log.push(`seek ${s}`), play: () => log.push('play'), pause: () => log.push('pause') },
     library: { add: async (files: File[]) => (added.push(...files), files.map((f) => ({ id: 'asset', name: f.name }))) },
   } as unknown as Io;
@@ -126,5 +126,41 @@ describe('recording a Recorder node', () => {
     expect(t.added).toHaveLength(1);
     expect(t.toasts.at(-1)).toMatch(/reached its limit/);
     expect(t.ctl.store.get().phase).toBe('idle');
+  });
+});
+
+describe('recorder: sound wiring and the viewer button', () => {
+  it('knows when a sound is wired into a Recorder', async () => {
+    const { hasSoundWired } = await import('./recorder');
+    const g = { edges: [{ to: { node: 'rec1', port: 'audio' } }, { to: { node: 'rec2', port: 'image' } }] };
+    expect(hasSoundWired(g, 'rec1')).toBe(true);
+    expect(hasSoundWired(g, 'grp/rec1')).toBe(true);
+    expect(hasSoundWired(g, 'rec2')).toBe(false);
+    expect(hasSoundWired(g, 'xrec1')).toBe(false);
+  });
+  it('the viewer button uses the viewed Recorder, else the first one, else there is none', async () => {
+    const { recorderForViewer } = await import('./recorder');
+    const nodes = [
+      { id: 'a', type: 'blur', params: {} },
+      { id: 'r1', type: 'recorder', params: {} },
+      { id: 'r2', type: 'recorder', params: {} },
+    ];
+    expect(recorderForViewer(nodes, 'r2')?.id).toBe('r2');
+    expect(recorderForViewer(nodes, 'a')?.id).toBe('r1');
+    expect(recorderForViewer(nodes, null)?.id).toBe('r1');
+    expect(recorderForViewer([nodes[0]], null)).toBeNull();
+  });
+});
+
+describe('recorder: which sound is recorded', () => {
+  beforeEach(() => vi.stubGlobal('File', class { constructor(public parts: unknown[], public name: string, public opts: { type: string }) {} }));
+  it('with a sound wired into the Recorder it records that sound; otherwise the sound that is playing', async () => {
+    const wired = setup({ wired: true });
+    wired.ctl.toggle('rec1', RUN);
+    expect(wired.started()!.audio!()).toEqual({ kind: 'record-bus' });
+    const plain = setup();
+    plain.ctl.toggle('rec1', RUN);
+    expect(plain.started()!.audio!()).toEqual({ kind: 'audio' });
+    expect(plain.toasts.at(-1)).toMatch(/wire it into the Recorder/);
   });
 });

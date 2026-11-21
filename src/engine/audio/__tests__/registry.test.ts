@@ -9,12 +9,13 @@ import { snapToScale, stepInScale } from '../scales';
 import { SR, audioRegistry, rms, sine, toneAmp } from '../testing';
 
 const EXPECTED = {
-  input: ['media-in', 'phone-camera'],
+  input: ['camera-in', 'media-in', 'phone-camera'],
+  generate: ['oscilloscope'],
   'audio-source': ['audio-file', 'audio-timeline', 'microphone', 'oscillator'],
   output: ['audio-out'],
   'audio-fx': ['chorus', 'compressor', 'delay', 'distortion', 'eq', 'filter', 'flanger', 'gain', 'gate', 'limiter', 'mixer', 'pitch-shift', 'reverb', 'stereo-width', 'tremolo'],
   math: ['audio-level', 'midi-trigger', 'midi-value'],
-  time: ['media-timeline'],
+  time: ['media-timeline', 'recorder'],
   synth: ['arpeggiator', 'audio-to-midi', 'bass', 'chip-synth', 'chord', 'drum', 'drum-machine', 'fm-synth', 'midi-device', 'midi-keyboard', 'midi-transpose', 'organ', 'pluck', 'sampler', 'strings-pad', 'synth'],
 } as const;
 
@@ -33,14 +34,15 @@ describe('node definitions', () => {
 
   it.each(defs.map((d) => [d.id, d] as const))('%s is a valid, well-formed audio node', (_id, def) => {
     expect(validateDef(def)).toEqual([]);
-    // bridge nodes (category math) also have a frame-domain render that reads Host.signal; everything else is stream-only
-    if (def.category === 'math' || def.category === 'input' || def.category === 'time') expect(typeof def.render).toBe('function');
+    // bridge nodes (category math, and the Oscilloscope in generate) also have a frame-domain render that reads Host.signal;
+    // inputs and the Recorder have a picture side too; everything else is stream-only
+    if (def.category === 'math' || def.category === 'input' || def.category === 'time' || def.category === 'generate') expect(typeof def.render).toBe('function');
     else expect(def.render).toBeUndefined();
     expect(typeof def.audio!.create).toBe('function');
     expect(typeof def.audio!.process).toBe('function');
     expect(def.description.length).toBeGreaterThan(15);
-    for (const i of Object.values(def.inputs as Record<string, { type: string }>)) expect(def.category === 'time' ? ['image', 'audio'] : ['audio', 'midi']).toContain(i.type);
-    for (const o of Object.values(def.outputs as Record<string, { type: string }>)) expect(def.category === 'math' ? ['number'] : def.category === 'input' || def.category === 'time' ? ['image', 'audio'] : ['audio', 'midi']).toContain(o.type);
+    for (const i of Object.values(def.inputs as Record<string, { type: string }>)) expect(def.category === 'time' || def.category === 'generate' ? ['image', 'audio'] : ['audio', 'midi']).toContain(i.type);
+    for (const o of Object.values(def.outputs as Record<string, { type: string }>)) expect(def.category === 'math' ? ['number'] : def.category === 'input' || def.category === 'time' || def.category === 'generate' ? ['image', 'audio'] : ['audio', 'midi']).toContain(o.type);
     // every param has a plain-English label and sane numeric bounds
     for (const [key, p] of Object.entries(def.params as Record<string, ParamDef>)) {
       expect(p.label, `${def.id}.${key} needs a label`).toBeTruthy();
