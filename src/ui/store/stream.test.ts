@@ -80,6 +80,7 @@ function setup(opts: { audio?: boolean; startError?: string; canvas?: boolean; t
       return { available: true, services: [], current: null, last: null };
     },
     audioStream: () => (opts.audio === false ? null : ({ getAudioTracks: () => [{ kind: 'audio', stop: () => stopped.push('AUDIO TRACK STOPPED') }] } as unknown as MediaStream)),
+    recordStream: () => null,
   };
   const timers: (() => void)[] = [];
   const videoTrack = { kind: 'video', stop: vi.fn() };

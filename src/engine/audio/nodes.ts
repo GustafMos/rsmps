@@ -6,7 +6,7 @@
 import { Registry } from '../define';
 
 const modules = import.meta.glob(
-  ['../nodes/audio-source/*.node.ts', '../nodes/audio-fx/*.node.ts', '../nodes/synth/*.node.ts', '../nodes/bridge/*.node.ts', '../nodes/input/media-in.node.ts', '../nodes/input/phone-camera.node.ts', '../nodes/time/media-timeline.node.ts'],
+  ['../nodes/audio-source/*.node.ts', '../nodes/audio-fx/*.node.ts', '../nodes/synth/*.node.ts', '../nodes/bridge/*.node.ts', '../nodes/input/media-in.node.ts', '../nodes/input/phone-camera.node.ts', '../nodes/input/camera-in.node.ts', '../nodes/time/recorder.node.ts', '../nodes/time/media-timeline.node.ts'],
   { eager: true },
 ) as Record<string, Record<string, unknown>>;
 

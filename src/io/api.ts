@@ -382,6 +382,8 @@ export interface StreamApi {
   stop(id?: string): Promise<import('./desktop').LiveInfo>;
   /** The sound mix as a live stream, or null when no sound is running (the stream then gets a silent track). */
   audioStream(): MediaStream | null;
+  /** Only the sound wired into Recorder nodes, as a live stream (null when no sound is running). What a Recorder with sound wired in records. */
+  recordStream(): MediaStream | null;
 }
 
 export interface DeviceApi {

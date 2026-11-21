@@ -263,6 +263,7 @@ export const createIo: CreateIo = async () => {
       chunk: (id, bytes) => (desktop ? desktop.liveChunk(id, bytes) : Promise.reject(new Error('Going live needs the desktop app.'))),
       stop: (id) => (desktop ? desktop.liveStop(id) : Promise.resolve({ available: false, services: [], current: null, last: null })),
       audioStream: () => (audio.running ? audio.outputStream() : null),
+      recordStream: () => (audio.running ? audio.recordStream() : null),
     },
     devices: {
       list: (kind) => (kind === 'video-input' ? listVideoInputs() : audio.listDevices(kind)),

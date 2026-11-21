@@ -34,6 +34,17 @@ export function recorderSettings(params: Readonly<Record<string, unknown>>): Rec
   return { time: params.time === 'loop' ? 'loop' : 'run', sound: params.sound !== false, download: params.download !== false, maxSide: side === 1280 || side === 3840 ? side : 1920 };
 }
 
+/** True when something is wired into the Sound input of Recorder `nodeId` (a plain id, or the last part of a path id). */
+export function hasSoundWired(graph: { edges: readonly { to: { node: string; port: string } }[] }, nodeId: string): boolean {
+  return graph.edges.some((e) => e.to.port === 'audio' && (e.to.node === nodeId || nodeId.endsWith(`/${e.to.node}`)));
+}
+
+/** The Recorder the viewer's Record button works: the one being viewed if it is a Recorder, else the first one in the project. */
+export function recorderForViewer(nodes: readonly { id: string; type: string; params: Readonly<Record<string, unknown>> }[], viewedId: string | null): { id: string; params: Readonly<Record<string, unknown>> } | null {
+  const recs = nodes.filter((n) => n.type === 'recorder');
+  return recs.find((n) => n.id === viewedId) ?? recs[0] ?? null;
+}
+
 /** What the Record button says. */
 export function recordLabel(ui: RecorderUi, mine: boolean): string {
   if (mine && ui.phase === 'recording') return `Stop ${formatElapsed(ui.seconds)}`;
@@ -133,12 +144,14 @@ export class RecorderController {
     if (!canvas) return ed.toast('There is no viewer to record from.', 'error');
     const follow = this.env.follow(canvas);
     const fps = ed.state.graph.project.fps;
+    const wired = hasSoundWired(ed.state.graph, nodeId);
     try {
       this.rec.start(() => follow.picture(), {
         fps,
         label: 'Recorder',
         maxSide: settings.maxSide,
-        audio: settings.sound ? () => io.stream.audioStream()?.getAudioTracks()[0] ?? null : undefined,
+        // A Recorder with sound wired into it records exactly that sound (the record bus); otherwise the sound that is playing.
+        audio: settings.sound ? () => (wired ? io.stream.recordStream() : io.stream.audioStream())?.getAudioTracks()[0] ?? null : undefined,
       });
     } catch (err) {
       follow.dispose();
@@ -155,6 +168,7 @@ export class RecorderController {
     );
     this.store.set((s) => ({ phase: 'recording', nodeId, seconds: 0, lastName: s.lastName }));
     if (settings.sound && !io.stream.audioStream()) ed.toast('Recording without sound: no sound is running. Press Enable audio and record again to include it.', 'info');
+    else if (settings.sound && !wired) ed.toast('Recording the sound that is playing. To record one particular sound, wire it into the Recorder\'s Sound input.', 'info');
   }
 
   /** Stop and save. `note` is shown instead of the usual message (a limit was reached); `error` when the recording broke. */

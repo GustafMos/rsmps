@@ -129,6 +129,8 @@ export interface AudioEngine {
    * with the picture. Null until the engine has started. The same stream is returned every time.
    */
   outputStream(): MediaStream | null;
+  /** The record bus as a live MediaStream: only the sound wired into Recorder nodes, unaffected by the volume. Null until the engine has started. */
+  recordStream(): MediaStream | null;
   /** Call `listener` when devices are plugged or unplugged (or labels become available). Returns an unsubscribe function. */
   onDevicesChanged(listener: () => void): () => void;
   /**

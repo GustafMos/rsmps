@@ -51,6 +51,7 @@ class WebAudioEngine implements AudioEngine {
   private volume = 1;
   private sinkId = '';
   private tap: MediaStreamAudioDestinationNode | null = null;
+  private recTap: MediaStreamAudioDestinationNode | null = null;
   private meters = new Map<string, [number, number]>();
   private signals = new Map<string, number>();
   private recState: RecordingState = { armed: false, recording: false, phase: 'idle', seconds: 0, countIn: 0, level: [0, 0], nodeId: null, error: null };
@@ -93,7 +94,7 @@ class WebAudioEngine implements AudioEngine {
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     this.ctx = ctx;
     await ctx.audioWorklet.addModule(workletUrl);
-    const node = new AudioWorkletNode(ctx, WORKLET_NAME, { numberOfInputs: MAX_MICS, numberOfOutputs: 1, outputChannelCount: [2] });
+    const node = new AudioWorkletNode(ctx, WORKLET_NAME, { numberOfInputs: MAX_MICS, numberOfOutputs: 2, outputChannelCount: [2, 2] });
     node.port.onmessage = (e: MessageEvent<FromWorklet>) => {
       const m = e.data;
       if (m.type === 'meters') {
@@ -139,6 +140,19 @@ class WebAudioEngine implements AudioEngine {
   setVolume(volume: number): void {
     this.volume = Math.max(0, volume);
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.01);
+  }
+
+  /**
+   * The record bus as a live stream: only the sound wired into Recorder nodes, at full level whatever the volume
+   * setting is. Null while the engine is not running.
+   */
+  recordStream(): MediaStream | null {
+    if (!this.ctx || !this.node) return null;
+    if (!this.recTap) {
+      this.recTap = this.ctx.createMediaStreamDestination();
+      this.node.connect(this.recTap, 1);
+    }
+    return this.recTap.stream;
   }
 
   outputStream(): MediaStream | null {
@@ -284,12 +298,17 @@ class WebAudioEngine implements AudioEngine {
   private async reconcileMics(): Promise<void> {
     const { graph, registry, ctx, node } = this;
     if (!graph || !registry || !ctx || !node || !navigator.mediaDevices?.getUserMedia) return;
-    const wanted = graph.nodes.filter((n) => n.type === 'microphone' && registry.get(n.type)?.audio);
+    // A Webcam's microphone is opened only while one of its sound outputs is wired: adding a camera for its picture
+    // must not ask for the microphone.
+    const camHeard = (id: string) => graph.edges.some((e) => e.from.node === id && (e.from.port === 'audio' || e.from.port === 'tap'));
+    const wanted = graph.nodes.filter((n) => (n.type === 'microphone' || (n.type === 'camera-in' && camHeard(n.id))) && registry.get(n.type)?.audio);
     // close streams of removed nodes or whose settings changed
     const want = new Map<string, { key: string; device: string; opts: MediaTrackConstraints }>();
     for (const n of wanted) {
       const p = n.params as Record<string, unknown>;
-      const device = typeof p.device === 'string' ? p.device : '';
+      // a Webcam's `device` is its camera; its microphone is chosen separately
+      const dev = n.type === 'camera-in' ? p.micDevice : p.device;
+      const device = typeof dev === 'string' ? dev : '';
       const opts = {
         echoCancellation: p.echoCancellation === true,
         noiseSuppression: p.noiseSuppression === true,
