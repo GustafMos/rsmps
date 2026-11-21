@@ -749,7 +749,9 @@ export class PlayerImpl implements Player {
     this.deps.router.fps = graph.project.fps;
     this.audioNeeded = this.hasSig || audio.hasAudio(graph, registry) || phoneAudioWired(graph);
     this.deps.phoneAudio?.setGraph(graph);
-    this.micNodes = graph.nodes.filter((n) => n.type === 'microphone' && !n.bypass).length;
+    // nodes the browser will ask the microphone for: Microphone nodes, and a Webcam whose sound is wired
+    const camHeard = (id: string) => graph.edges.some((e) => e.from.node === id && (e.from.port === 'audio' || e.from.port === 'tap'));
+    this.micNodes = graph.nodes.filter((n) => !n.bypass && (n.type === 'microphone' || (n.type === 'camera-in' && camHeard(n.id)))).length;
   }
 
   private fps(): number {
