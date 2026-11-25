@@ -227,7 +227,9 @@ export function defaultParams(def: AnyNodeDef): Record<string, unknown> {
   return out;
 }
 
-function coerceParam(p: ParamDef, raw: unknown): unknown {
+function coerceParam(p: ParamDef, value: unknown): unknown {
+  // A node saved before this param existed (see `ParamBase.absent`).
+  const raw = value === undefined && p.absent !== undefined ? p.absent : value;
   switch (p.type) {
     case 'number': {
       let n = typeof raw === 'number' && Number.isFinite(raw) ? raw : p.default;

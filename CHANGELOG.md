@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.24.0] - 2026-11-25
+
+### Added
+- **AI Style Transfer: much stronger looks.** A new **Look** setting: Painterly (the result so far), **Material** (the picture is rebuilt out of actual pieces of the other picture, arranged along its own shapes), **Hallucination** (material, repainted twice, with the pieces crawling; the default for new nodes) and Custom, which shows Material, Piece size, Style strength (up to 2), Passes (up to 3) and Crawl.
+- **A Style input.** Wire any third picture in and it becomes the material both shots dissolve into in the middle of the transition: A, then the style's hallucination, then B. A strongly textured picture (eyes, scales, feathers, cells) gives by far the strongest result; two smooth photos painted with each other stay murky.
+- **Texture size** (Half / As it is / Double): how coarse the borrowed material is. Half gives a dense swarm, Double big strokes.
+- **Held, no transition** under "Driven by": repaints a whole clip with the Style picture (or B) instead of making a transition. This is also what happens when B is not wired.
+- **Crawl** makes the pieces reshuffle from frame to frame; Steady is its opposite. Nodes saved before this version keep the Painterly look and their stored results.
+
 ## [0.23.0] - 2026-11-25
 
 ### Added

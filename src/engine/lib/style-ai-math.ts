@@ -24,7 +24,8 @@ const smooth = (a: number, b: number, v: number) => {
 /* When                                                                                                                */
 /* ------------------------------------------------------------------------------------------------------------------ */
 
-export type StyleDrive = 'loop' | 'pingpong' | 'span';
+/** 'hold' = no transition at all: the painting is held over the whole project (the node as a plain effect on one clip). */
+export type StyleDrive = 'loop' | 'pingpong' | 'span' | 'hold';
 
 export interface StyleTiming {
   drive: StyleDrive;
@@ -40,6 +41,8 @@ export interface StyleTiming {
 export function styleProgress(frame: number, t: StyleTiming): number {
   const n = Math.max(1, Math.round(t.frames));
   const f = Math.min(n - 1, Math.max(0, frame));
+  // Held: every frame is "in the middle", so every frame is painted and none is one of the real pictures.
+  if (t.drive === 'hold') return 0.5;
   if (t.drive === 'span') {
     const len = Math.max(1, t.length * n);
     return clamp01((f - t.start * n) / len);
@@ -334,6 +337,52 @@ export function adainMix(fa: Float32Array | null, fb: Float32Array | null, sa: S
     if (fa && fb && wa > 0 && wb > 0) for (let i = 0; i < n; i++) out[o + i] = ((fa[o + i] - ma) * ka + (fb[o + i] - mb) * kb) * std + mean;
     else if (fa && wa > 0) for (let i = 0; i < n; i++) out[o + i] = (fa[o + i] - ma) * ka * std + mean;
     else if (fb) for (let i = 0; i < n; i++) out[o + i] = (fb[o + i] - mb) * kb * std + mean;
+  }
+  return out;
+}
+
+/** Statistics between two pictures' (`k` 0 = `a`, 1 = `b`). `k` may pass 1: the style is then over-applied (a spread never drops under a small positive value). */
+export function mixStats(a: StyleStats, b: StyleStats, k: number, out?: StyleStats): StyleStats {
+  const n = a.mean.length;
+  const o = out ?? { mean: new Float32Array(n), std: new Float32Array(n) };
+  for (let c = 0; c < n; c++) {
+    o.mean[c] = a.mean[c] + (b.mean[c] - a.mean[c]) * k;
+    o.std[c] = Math.max(1e-3, a.std[c] + (b.std[c] - a.std[c]) * k);
+  }
+  return o;
+}
+
+/**
+ * The first half of `adainMix` by itself: both pictures' features brought to mean 0 and spread 1 and blended by `shape` (0 = A's
+ * content, 1 = B's). This is "what is where" with the style taken out, the form the style swap compares cells in. `fa` / `fb` may
+ * be null where their weight is zero.
+ */
+export function whitenMix(fa: Float32Array | null, fb: Float32Array | null, sa: StyleStats, sb: StyleStats, shape: number, out: Float32Array, channels: number = CHANNELS, cells: number = CELLS): Float32Array {
+  const n = cells * cells;
+  const wb = fb ? (fa ? clamp01(shape) : 1) : 0;
+  const wa = fa ? 1 - wb : 0;
+  for (let c = 0; c < channels; c++) {
+    const ka = wa / sa.std[c];
+    const kb = wb / sb.std[c];
+    const ma = sa.mean[c];
+    const mb = sb.mean[c];
+    const o = c * n;
+    if (fa && fb && wa > 0 && wb > 0) for (let i = 0; i < n; i++) out[o + i] = (fa[o + i] - ma) * ka + (fb[o + i] - mb) * kb;
+    else if (fa && wa > 0) for (let i = 0; i < n; i++) out[o + i] = (fa[o + i] - ma) * ka;
+    else if (fb) for (let i = 0; i < n; i++) out[o + i] = (fb[o + i] - mb) * kb;
+    else out.fill(0, o, o + n);
+  }
+  return out;
+}
+
+/** The second half: give features at mean 0 and spread 1 the mean and spread of `target`. `out` may be `z`. */
+export function colourBy(z: Float32Array, target: StyleStats, out: Float32Array, channels: number = CHANNELS, cells: number = CELLS): Float32Array {
+  const n = cells * cells;
+  for (let c = 0; c < channels; c++) {
+    const std = target.std[c];
+    const mean = target.mean[c];
+    const o = c * n;
+    for (let i = 0; i < n; i++) out[o + i] = z[o + i] * std + mean;
   }
   return out;
 }
