@@ -4,6 +4,12 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.25.0] - 2026-11-25
+
+### Added
+- **Droste Spiral: more shapes.** Copy shape now offers Picture frame, Round, Square, Diamond, Hexagon, Triangle, Star, Flower and Heart (with a Points setting for star and flower). **Petals** scallops every turn of the spiral into a flower or a cog (with depth and a spin per loop), and **Whirl** turns the copies more the further in they are, so even straight nesting becomes a whirlpool.
+- **Droste Spiral: a Driver input.** Wire any picture in (Noise, an Oscilloscope, a clip) and its bright and dark parts push the spiral in and out ("Driver push") and round its middle ("Driver turn"). The push happens at every size at once, so the whole tunnel breathes with the driver. "Driver reads" chooses whether the driver lies over the frame or is wrapped along the spiral so the same disturbance repeats in every copy. Mid-grey leaves the spiral alone. Number settings such as Shrink, Rotate and Whirl can still be wired to numbers (a sound level, for example).
+
 ## [0.24.0] - 2026-11-25
 
 ### Added

@@ -50,3 +50,29 @@ it('liquid warp moves the picture and strength 0 leaves it alone', async () => {
   expect(diff).toBeGreaterThan(800);
   expect((await t.run('liquid-warp', { strength: 0 }, { image: src })).image).toBe(src);
 });
+
+it('droste: every copy shape renders; a mid-grey driver changes nothing and a patterned one bends the spiral', async () => {
+  const t = await harness();
+  const src = t.fromFn(96, 64, scene);
+  for (const shape of ['frame', 'round', 'square', 'diamond', 'hexagon', 'triangle', 'star', 'flower', 'heart']) {
+    const px = await t.pixels((await t.run('droste', { shape, zoom: 0 }, { image: src })).image as never);
+    expect(px.at(48, 32)[3], shape).toBe(255);
+    expect(px.at(2, 2)[3], shape).toBe(255);
+  }
+  const plain = await t.pixels((await t.run('droste', { zoom: 0 }, { image: src })).image as never);
+  const grey = await t.pixels((await t.run('droste', { zoom: 0, drive: 1, driveTurn: 1 }, { image: src, driver: t.solid(8, 8, [128, 128, 128, 255]) })).image as never);
+  const stripes = t.fromFn(96, 64, (x) => (x % 16 < 8 ? [255, 255, 255, 255] : [0, 0, 0, 255]));
+  const bent = await t.pixels((await t.run('droste', { zoom: 0, drive: 0.5 }, { image: src, driver: stripes })).image as never);
+  let same = 0;
+  let moved = 0;
+  let n = 0;
+  for (let y = 3; y < 61; y += 4)
+    for (let x = 3; x < 93; x += 4) {
+      same += Math.abs(plain.at(x, y)[0] - grey.at(x, y)[0]);
+      moved += Math.abs(plain.at(x, y)[0] - bent.at(x, y)[0]);
+      n++;
+    }
+  // 128 of 255 is a hair above the middle, so "nothing" is "next to nothing"
+  expect(same / n).toBeLessThan(6);
+  expect(moved / n).toBeGreaterThan(8);
+});
