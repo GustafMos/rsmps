@@ -157,6 +157,8 @@ export const ROWS: Row[] = [
   { id: 'parallax', note: 'sway-h cycles 3', params: { motion: 'sway-h', amount: 8, cycles: 3 }, input: 'two', exact: true },
   { id: 'parallax', note: 'circle cycles 3', params: { motion: 'circle', amount: 8, cycles: 3 }, input: 'two', exact: true },
   { id: 'parallax', note: 'figure-eight cycles 5', params: { motion: 'figure-eight', amount: 8, cycles: 5 }, input: 'two', exact: true },
+  { id: 'depth-scan', note: 'scan wave, 1 sweep', params: { sweep: 1 }, input: 'two', exact: true },
+  { id: 'depth-scan', note: 'contours flowing backwards, 6 lines', params: { style: 'contours', count: 6, sweep: -2 }, input: 'two', exact: true },
   { id: 'style-melt', note: 'held at 40 %, patches churn', params: { progress: 0.4, churn: 1 }, input: 'two', exact: true },
   { id: 'style-melt', note: 'A to B and back over the loop', params: { drive: 'pingpong', churn: 1 }, input: 'two', exact: true },
   { id: 'transition-auto', note: 'ping-pong, start 0.37', params: { mode: 'bayer-4', cell: 1, start: 0.37, duration: 0.21, pingPong: true, holdB: 0.13 }, input: 'two', exact: true },
@@ -290,7 +292,7 @@ const inputsFor = (t: Harness, row: Row): Record<string, never> => {
   const ring = t.fromFn(SIZE, SIZE, (x, y) => (Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y) < 6 ? [200, (x * 8) & 255, (y * 8) & 255, 255] : [0, 0, 0, 0]));
   const still2 = t.fromFn(SIZE, SIZE, (x, y) => [(y * 8) & 255, 40, (x * 8) & 255, 255]);
   const base: Record<string, unknown> =
-    row.input === 'img' ? { image: still } : row.input === 'ring' ? { image: ring } : row.input === 'mov' ? { image: { node: 'audit-bar' } } : row.input === 'two' ? (row.id === 'parallax' ? { background: still, layers: [still2] } : { a: still, b: still2 }) : {};
+    row.input === 'img' ? { image: still } : row.input === 'ring' ? { image: ring } : row.input === 'mov' ? { image: { node: 'audit-bar' } } : row.input === 'two' ? (row.id === 'depth-scan' ? { image: still, depth: still2 } : row.id === 'parallax' ? { background: still, layers: [still2] } : { a: still, b: still2 }) : {};
   return { ...base, ...(row.extra ? row.extra(t) : {}) } as never;
 };
 
