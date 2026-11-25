@@ -341,7 +341,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
   const sockType = paramSocketType(def, keyName);
   const { ed, io } = useApp();
   const label = p.label ?? keyName;
-  const value = node.params[keyName] ?? p.default;
+  const value = node.params[keyName] ?? p.absent ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, keyName, v);
   const isCode = p.type === 'string' && p.kind === 'code';
   const stacked = (p.type === 'vec2' && p.range) || p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && (p.multiline || p.kind === 'code'));

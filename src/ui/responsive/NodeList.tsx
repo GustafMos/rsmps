@@ -34,7 +34,7 @@ export function NodeList() {
     if (!n || !def?.summary) return '';
     try {
       const params: Record<string, unknown> = {};
-      for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = n.params[k] ?? p.default;
+      for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = n.params[k] ?? p.absent ?? p.default;
       const frames = Math.max(1, Math.round(project.duration * project.fps));
       return def.summary(params, wiredOf.get(id) ?? new Set<string>(), { loop: !!project.loop, frames, fps: project.fps });
     } catch {

@@ -69,5 +69,6 @@ export const STYLE_AI_MESSAGES = {
     'AI Style Transfer needs the model runtime, which only the app has (the browser or the desktop app). Render it there once: the result is saved with the project, and exports and the command line then use it.',
   noModel: 'The style transfer model is not on this computer yet. Press Download the model in this node’s panel (two files, 27 MB, MIT), or open Plugins, AI models. Nothing is downloaded until you do.',
   noFrames: 'With these settings no frame lies between picture A and picture B, so there is nothing to render. Make the transition longer, or the project.',
+  noMaterial: 'Nothing to paint with: connect a picture to B (a transition from A to B) or to Style (A repainted with that picture’s material).',
   memory: 'The computer ran out of memory while the model was running. Choose a smaller Longest side, close other tabs, and render again.',
 } as const;

@@ -7,7 +7,9 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineNode } from '../engine/define';
+import { resolveNodeParams } from '../engine/engine';
 import { addNode, connect, createGraph, setParam } from '../engine/graph';
+import { stableStringify } from '../engine/lib/stable-json';
 import { withProcessResult } from '../engine/process';
 import { STYLE_AI_MESSAGES, STYLE_AI_MODEL, setStyleAiService, type StyleAiService } from '../engine/lib/style-ai-bridge';
 import styleTransferAi from '../engine/nodes/filter/style-transfer-ai.node';
@@ -122,13 +124,31 @@ async function setup() {
       };
     },
   });
+  // Style: a still of hard green and yellow stripes (no red, no blue: unlike A and B).
+  const srcS = defineNode({
+    id: 'style-src-s',
+    title: 'style picture',
+    category: 'generate',
+    description: 'green and yellow stripes',
+    inputs: {},
+    outputs: { image: { type: 'image' } },
+    params: {},
+    render(ctx) {
+      return {
+        image: ctx.gpu.pass({
+          size: { width: Math.round(W * ctx.proxy), height: Math.round(H * ctx.proxy), unit: 1 },
+          wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { let k = step(0.5, fract(uv.x * 4.0)); return vec4f(mix(vec3f(0.0, 0.6, 0.0), vec3f(0.9, 0.9, 0.0), k), 1.0); }',
+        }),
+      };
+    },
+  });
   const host: Host = {
     assetInfo: (id) => lib.assetInfo(id),
     assetFrame: (id, s) => lib.assetFrame(id, s),
     assetBytes: (id) => lib.assetBytes(id),
     processLive: (n): ProcessLive | null => rt.live(n),
   };
-  const t = await harness([srcA, srcB, styleTransferAi], host);
+  const t = await harness([srcA, srcB, srcS, styleTransferAi], host);
   lib.gpu = t.gpu;
   lib.onChange = () => t.engine.clear();
   const rt: ProcessRuntime = new ProcessRuntime({ engine: t.engine, gpu: t.gpu, registry: t.registry, gate: new EvalGate(t.engine), library: lib, host, encode: async (img) => new Blob([(await t.gpu.readRaw(img)) as BlobPart]) });
@@ -136,12 +156,17 @@ async function setup() {
   g = { ...g, project: { ...g.project, width: W, height: H, fps: FPS, duration: FRAMES / FPS, loop: true } };
   const a = addNode(g, t.registry, 'style-src-a');
   const b = addNode(a.graph, t.registry, 'style-src-b');
-  const s = addNode(b.graph, t.registry, 'style-transfer-ai');
+  const m = addNode(b.graph, t.registry, 'style-src-s');
+  const s = addNode(m.graph, t.registry, 'style-transfer-ai');
   g = connect(s.graph, t.registry, { node: a.node.id, port: 'image' }, { node: s.node.id, port: 'a' });
   g = connect(g, t.registry, { node: b.node.id, port: 'image' }, { node: s.node.id, port: 'b' });
-  const ids = { a: a.node.id, b: b.node.id, style: s.node.id };
+  const ids = { a: a.node.id, b: b.node.id, material: m.node.id, style: s.node.id };
+  /** The graph as it is when the node is new: nothing set but the wires (A and B). */
+  const fresh = g;
   // The transition takes the middle half of the project: frames 0..3 are A, 4..8 are painted, 9..11 are B.
   g = setParam(g, ids.style, 'drive', 'span');
+  // The mildest look, the one the node had before it had looks: the tests of the strong looks set their own.
+  g = setParam(g, ids.style, 'look', 'painterly');
   /** The middle row of the picture at a frame, as a list of [r, g, b]. */
   const row = async (graph: GraphDoc, node: string, frame: number, proxy = 1) => {
     const r = await t.engine.evaluate({ graph, node, seconds: frame / FPS, proxy });
@@ -153,7 +178,7 @@ async function setup() {
     return { px: out, width: img.width, height: img.height };
   };
   const render = async (graph: GraphDoc) => withProcessResult(graph, t.registry, ids.style, await rt.run(graph, ids.style));
-  return { t, lib, rt, g, ids, row, render, renders };
+  return { t, lib, rt, g, fresh, ids, row, render, renders };
 }
 
 const far = (a: number[][], b: number[][]) => a.reduce((m, p, i) => Math.max(m, ...p.map((v, k) => Math.abs(v - b[i][k]))), 0);
@@ -313,5 +338,154 @@ describe('AI Style Transfer node', () => {
     expect((await row(done, ids.style, 0)).px).toEqual((await row(g, ids.a, 0)).px);
     const half = await row(done, ids.style, 6, 0.5);
     expect([half.width, half.height]).toEqual([16, 8]);
+  });
+
+  /* ---------------------------------------------------------------------------------------------------------------- */
+  /* Looks, the Style input, held                                                                                      */
+  /* ---------------------------------------------------------------------------------------------------------------- */
+
+  it('a new node has the strong look; a node saved before looks existed keeps Painterly and its stored result is not called out of date', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { t, rt, g, fresh, ids, render } = await setup();
+    const def = t.registry.get('style-transfer-ai')!;
+    const node = fresh.nodes.find((n) => n.id === ids.style)!;
+    expect(node.params.look).toBe('hallucination');
+    // an old project: the node has no value for any of the new settings
+    const old = { ...node.params };
+    for (const k of ['look', 'material', 'pieces', 'push', 'passes', 'crawl', 'texture']) delete old[k];
+    expect(resolveNodeParams(def, old)).toMatchObject({ look: 'painterly', texture: '1' });
+    // its signature is the one the node had then, character for character
+    const p = resolveNodeParams(def, { ...old, drive: 'span' });
+    const then = `${stableStringify({ drive: 'span', start: 25, length: 50, size: '512', steady: 0.3, model: STYLE_AI_MODEL.encoder, rev: STYLE_AI_MODEL.revision })}|sig-a|sig-b`;
+    expect(def.process!.signature(p as never, { a: 'sig-a', b: 'sig-b' })).toBe(then);
+    expect(def.process!.signature(p as never, { a: 'sig-a', b: 'sig-b', style: '' })).toBe(then);
+    // and every new setting that changes the painting changes it
+    const done = await render(g);
+    for (const [key, value] of [['look', 'material'], ['look', 'hallucination'], ['texture', '2'], ['drive', 'hold']] as const) {
+      expect(rt.status(setParam(done, ids.style, key, value), ids.style)?.state, key).toBe('stale');
+    }
+    const customLook = setParam(done, ids.style, 'look', 'custom');
+    expect(rt.status(customLook, ids.style)?.state).toBe('stale');
+    const again = await render(customLook);
+    for (const [key, value] of [['material', 0.5], ['pieces', 0.1], ['push', 1.5], ['passes', 3], ['crawl', 0.9]] as const) {
+      expect(rt.status(setParam(again, ids.style, key, value), ids.style)?.state, key).toBe('stale');
+    }
+    // a custom look that is the Painterly one is the same painting
+    let same = setParam(done, ids.style, 'look', 'custom');
+    for (const [key, value] of [['material', 0], ['push', 1], ['passes', 1]] as const) same = setParam(same, ids.style, key, value);
+    expect(rt.status(same, ids.style)?.state).toBe('done');
+    // wiring a Style picture changes it too
+    expect(rt.status(connect(done, t.registry, { node: ids.material, port: 'image' }, { node: ids.style, port: 'style' }), ids.style)?.state).toBe('stale');
+  });
+
+  it('Material: the middle of the transition is built from B’s cells only; Hallucination runs the network again on its own painting', async () => {
+    const fake = newFake();
+    setStyleAiService(fakeService(fake));
+    const { rt, g, ids, row, render } = await setup();
+    const material = await render(setParam(setParam(g, ids.style, 'look', 'material'), ids.style, 'steady', 0));
+    expect(rt.status(material, ids.style)?.result?.meta).toMatchObject({ method: 'swap', material: 1, passes: 1, source: 'pair', drive: 'span' });
+    // one decode per painted frame, as for Painterly: the swap costs no run of the network
+    expect(fake.decodes).toBe(5);
+    // frame 6 (the middle): every pixel is a colour that exists in B (red 0.1, green and blue rising together), none is A's red or white
+    const mid = (await row(material, ids.style, 6)).px;
+    for (const px of mid) {
+      expect(px[0]).toBeLessThan(40);
+      expect(px[2] - px[1]).toBeGreaterThan(55);
+      expect(px[2] - px[1]).toBeLessThan(100);
+    }
+    // ...but laid out by A: the bar of A (x 12..16 at frame 6) took B's brightest cells, the field B's darker ones
+    expect(mid[14][2]).toBeGreaterThan(mid[26][2] + 30);
+
+    const before = { e: fake.encodes, d: fake.decodes };
+    const strong = await render(setParam(g, ids.style, 'look', 'hallucination'));
+    expect(rt.status(strong, ids.style)?.result?.meta).toMatchObject({ method: 'swap', passes: 2 });
+    // five frames; the frames in the middle are painted twice (and the painting encoded in between), those at the very ends once
+    expect(fake.decodes - before.d).toBeGreaterThan(5);
+    expect(fake.decodes - before.d).toBeLessThanOrEqual(10);
+    expect(fake.encodes - before.e).toBeGreaterThan(5);
+  });
+
+  it('a picture wired to Style is the material of the middle: A and B both turn into it, and it is not B’s', async () => {
+    const fake = newFake();
+    setStyleAiService(fakeService(fake));
+    const { t, rt, g, ids, row, render } = await setup();
+    let wiredG = connect(g, t.registry, { node: ids.material, port: 'image' }, { node: ids.style, port: 'style' });
+    wiredG = setParam(setParam(wiredG, ids.style, 'look', 'material'), ids.style, 'steady', 0);
+    const done = await render(wiredG);
+    expect(rt.status(done, ids.style)?.result?.meta).toMatchObject({ method: 'swap', source: 'style', drive: 'span', first: 4, count: 5 });
+    // the ends are still exactly A and B
+    expect((await row(done, ids.style, 3)).px).toEqual((await row(g, ids.a, 3)).px);
+    expect((await row(done, ids.style, 9)).px).toEqual((await row(g, ids.b, 9)).px);
+    // the middle is made of the style's green and yellow: no blue to speak of, a lot of green
+    for (const px of (await row(done, ids.style, 6)).px) {
+      expect(px[2]).toBeLessThan(40);
+      expect(px[1]).toBeGreaterThan(120);
+    }
+    // the style picture is a still: encoded once, next to A (frames 4..7 while it has a say) and B (once)
+    expect(fake.encodes).toBe(4 + 1 + 1);
+  });
+
+  it('held: no transition, every frame of the project is A repainted; without a render it is plain A; "Painting" mixes', async () => {
+    const fake = newFake();
+    setStyleAiService(fakeService(fake));
+    const { rt, g, ids, row, render } = await setup();
+    const held = setParam(setParam(setParam(g, ids.style, 'drive', 'hold'), ids.style, 'look', 'material'), ids.style, 'steady', 0);
+    for (const f of [0, 6, 11]) expect((await row(held, ids.style, f)).px).toEqual((await row(g, ids.a, f)).px);
+    const done = await render(held);
+    expect(rt.status(done, ids.style)?.result?.meta).toMatchObject({ drive: 'hold', source: 'hold', first: 0, count: FRAMES, method: 'swap' });
+    // also the first and the last frame are the painting (B's colours laid out by A), not A
+    for (const f of [0, 6, 11]) {
+      const px = (await row(done, ids.style, f)).px;
+      const a = (await row(g, ids.a, f)).px;
+      expect(far(px, a)).toBeGreaterThan(60);
+      for (const q of px) expect(q[0]).toBeLessThan(40);
+    }
+    const half = (await row(setParam(done, ids.style, 'strength', 0.5), ids.style, 6)).px;
+    const full = (await row(done, ids.style, 6)).px;
+    const a = (await row(g, ids.a, 6)).px;
+    for (const x of [2, 28]) for (let k = 0; k < 3; k++) expect(Math.abs(half[x][k] - (full[x][k] + a[x][k]) / 2)).toBeLessThanOrEqual(2);
+    expect((await row(setParam(done, ids.style, 'strength', 0), ids.style, 6)).px).toEqual(a);
+  });
+
+  it('nothing wired to B: with a Style picture it is held by itself; with neither the job says what is missing', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { t, rt, g, ids, row } = await setup();
+    const noB: GraphDoc = { ...g, edges: g.edges.filter((e) => !(e.to.node === ids.style && e.to.port === 'b')) };
+    await expect(rt.run(noB, ids.style)).rejects.toThrow(STYLE_AI_MESSAGES.noMaterial);
+    // unrendered and without B: picture A as it is, on every frame
+    expect((await row(noB, ids.style, 6)).px).toEqual((await row(g, ids.a, 6)).px);
+    const styled = setParam(connect(noB, t.registry, { node: ids.material, port: 'image' }, { node: ids.style, port: 'style' }), ids.style, 'look', 'material');
+    const done = withProcessResult(styled, t.registry, ids.style, await rt.run(styled, ids.style));
+    // "Driven by" still says a part of the project, but there is nothing to go to
+    expect(rt.status(done, ids.style)?.result?.meta).toMatchObject({ drive: 'hold', source: 'hold', count: FRAMES });
+    for (const px of (await row(done, ids.style, 0)).px) expect(px[1]).toBeGreaterThan(120);
+  });
+
+  it('Crawl makes a still picture move: without it every held frame of two stills is the same painting, with it they differ and the loop closes', async () => {
+    setStyleAiService(fakeService(newFake()));
+    const { t, rt, g, ids } = await setup();
+    // B (a still gradient) repainted with the Style stripes: nothing moves in either.
+    let base: GraphDoc = { ...g, edges: g.edges.filter((e) => e.to.node !== ids.style) };
+    base = connect(base, t.registry, { node: ids.b, port: 'image' }, { node: ids.style, port: 'a' });
+    base = connect(base, t.registry, { node: ids.material, port: 'image' }, { node: ids.style, port: 'style' });
+    base = setParam(setParam(base, ids.style, 'look', 'custom'), ids.style, 'steady', 0);
+    base = setParam(setParam(base, ids.style, 'passes', 1), ids.style, 'pieces', 0);
+    const frames = async (graph: GraphDoc) => {
+      const done = withProcessResult(graph, t.registry, ids.style, await rt.run(graph, ids.style));
+      const out: string[] = [];
+      for (const f of [0, 1, 6]) {
+        const r = await t.engine.evaluate({ graph: done, node: ids.style, seconds: f / FPS, proxy: 1 });
+        const px = await t.pixels(r.value as ImageValue);
+        const all: number[] = [];
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) all.push(...px.at(x, y).slice(0, 3));
+        out.push(all.join(','));
+      }
+      return out;
+    };
+    const steady = await frames(setParam(base, ids.style, 'crawl', 0));
+    expect(steady[1]).toBe(steady[0]);
+    expect(steady[2]).toBe(steady[0]);
+    const crawling = await frames(setParam(base, ids.style, 'crawl', 1));
+    expect(crawling[2]).not.toBe(crawling[0]);
   });
 });

@@ -179,6 +179,12 @@ interface ParamBase {
   /** Hide the control unless this returns true. */
   visibleIf?: (params: Record<string, unknown>) => boolean;
   hint?: string;
+  /**
+   * The value for a node that has NO value stored for this param, where that must differ from `default`. A new node gets every
+   * `default` written into it (`addNode`), so a missing value means the node was saved before the param existed. Set it when a new
+   * param's default would change what such old nodes do (a new look that is on by default): old projects then stay as they were.
+   */
+  absent?: unknown;
 }
 export interface NumberParam extends ParamBase {
   type: 'number';
