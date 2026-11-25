@@ -6,6 +6,7 @@ import {
   interpPlan,
   normaliseDepth,
   processedFrames,
+  resizeChannels,
   alignChain,
   clipRange,
   robustRange,
@@ -13,6 +14,7 @@ import {
   toU16,
   type DepthRange,
 } from '../../lib/depth-ai-math';
+import { cropRgba, mergeTiles, tileCrop, tileLayout, tileScale } from '../../lib/depth-ai-tiles';
 import { depthHeuristicDefaults, depthMaskPass, depthPreviewPass, renderDepthHeuristic, type DepthHeuristicCtx } from '../../lib/depth-heuristic';
 import { stableStringify } from '../../lib/stable-json';
 import type { ImageValue, NodeGpu, ProcessView } from '../../types';
@@ -32,9 +34,16 @@ import type { ImageValue, NodeGpu, ProcessView } from '../../types';
  * Output convention is Depth from Picture's (lib/depth.ts): r = g = b = d in 0..1, white = near, rgba16float: a drop-in for Picture to Splats,
  * Lens Blur, Depth Slice and Image to 3D relief.
  *
+ * FINE DETAIL. The model's output is soft (a few hundred pixels across, thin things lost), so two things sharpen it, neither a new model:
+ *  - "Edge detail", when the depth is SHOWN (no re-run, like the levels): the enlarged depth is filtered with the picture as the guide
+ *    (refine, below), which moves each depth edge onto the picture's edge. It only ever averages depth values, so it cannot paint the
+ *    picture's texture into a flat surface.
+ *  - "Detail", in the JOB: the model also runs on overlapping tiles and their fine detail is laid over the whole-picture result
+ *    (lib/depth-ai-tiles.ts). 4 or 9 more model runs per frame; the stored map is 1.6 or 2.4 times larger per side.
+ *
  * LIMITS, said plainly: the temporal blend has no motion compensation (the optical-flow code needs a node render, a process job has none), so it
- * backs off where pixels change fast; depth edges are as sharp as the model's output (about half the picture size at 518), enlarged with a smooth
- * filter; the job reads each frame back once (the GPU shrinks it first, the model input is normalised on the CPU).
+ * backs off where pixels change fast; a thing the model did not see at all (a single hair at Standard detail) is not invented by Edge detail,
+ * which only moves edges that are there; the job reads each frame back once (the GPU shrinks it first, the model input is normalised on the CPU).
  */
 
 /** Frames of this node kept decoded (one clip at a time: a clip's depth is tens of MB). */
@@ -49,6 +58,9 @@ interface Meta {
   still: boolean;
   item: number | null;
 }
+
+/** Tiles per side for the Detail setting (1 = Standard, also for anything unknown). */
+const tilesOf = (detail: unknown): number => (detail === '2' ? 2 : detail === '3' ? 3 : 1);
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
@@ -67,6 +79,91 @@ async function loadFrames(ps: ProcessView): Promise<Uint16Array | null> {
     frameMemo.set(key, p);
   }
   return p;
+}
+
+/** Edge detail: how different two picture colours may be (0..1 per channel) and still count as the same surface. */
+const EDGE_COLOUR = 0.04;
+/** Edge detail: depth change per 1/518 of the long side above which a place counts as "on a soft edge" and is trusted less. */
+const EDGE_CALM = 0.02;
+
+/**
+ * Edge detail: enlarge the stored depth to the picture's size with the PICTURE as the guide (a joint bilateral filter).
+ *
+ * Every output pixel is a weighted average of the depth around it, where a neighbour counts when (a) it is close, (b) the picture has
+ * about the same colour there as here, so depth is not averaged across a visible edge and the depth edge lands on the picture's edge, and
+ * (c) the depth map is calm there: the model's own edges are a soft ramp a few texels wide, and the values ON that ramp belong to neither
+ * side. Without (c) the ramp survives as a glow around every object; with it both sides take their value from just beyond the ramp.
+ *
+ * A pixel is moved only when the picture explains why: there is a picture edge within reach, and the pixel's depth lies between its
+ * own side and the far side of that edge. Elsewhere the depth is left as it is.
+ *
+ * Because the result is always an average of depth values, a flat surface stays flat whatever is printed on it: the picture decides only
+ * the weights, its brightness never enters the depth.
+ */
+function refine(gpu: NodeGpu, tex: { texture: GPUTexture }, meta: Meta, src: ImageValue, p: { edge: number; edgeReach: number }): ImageValue {
+  // depth and how steep it is, at the stored size. Steepness is measured per 1/518 of the long side, so a tiled (larger) map is judged alike.
+  const grad = gpu.pass({
+    label: 'ai depth steepness',
+    size: { width: meta.w, height: meta.h, unit: 1 },
+    format: 'rgba16float',
+    textures: { dp: tex },
+    uniforms: { k: Math.max(meta.w, meta.h) / 518 },
+    wgsl: /* wgsl */ `
+fn fx(uv: vec2f, px: vec2f) -> vec4f {
+  let t = 1.0 / u.size;
+  let c = textureSampleLevel(dp, smp, uv, 0.0).r;
+  let gx = textureSampleLevel(dp, smp, uv + vec2f(t.x, 0.0), 0.0).r - textureSampleLevel(dp, smp, uv - vec2f(t.x, 0.0), 0.0).r;
+  let gy = textureSampleLevel(dp, smp, uv + vec2f(0.0, t.y), 0.0).r - textureSampleLevel(dp, smp, uv - vec2f(0.0, t.y), 0.0).r;
+  return vec4f(c, 0.5 * length(vec2f(gx, gy)) * u.k, 0.0, 1.0);
+}`,
+  });
+  const out = gpu.pass({
+    label: 'ai depth edge detail',
+    size: src,
+    format: 'rgba16float',
+    textures: { dp: grad, pic: src },
+    uniforms: { amount: p.edge, reach: p.edgeReach / 100, colour: 1 / (2 * EDGE_COLOUR * EDGE_COLOUR), calm: 1 / (EDGE_CALM * EDGE_CALM) },
+    wgsl: /* wgsl */ `
+fn fx(uv: vec2f, px: vec2f) -> vec4f {
+  let here = textureSampleLevel(pic, smp, uv, 0.0).rgb;
+  let d0 = textureSampleLevel(dp, smp, uv, 0.0).r;
+  // 9 x 9 taps spread over the reach (a share of the long side, so a preview at a smaller size looks like the export)
+  let tap = u.reach * max(u.size.x, u.size.y) / 4.0 / u.size;
+  var acc = 0.0;
+  var ws = 0.0;
+  var across = 0.0;
+  var wa = 0.0;
+  var wn = 0.0;
+  for (var j = -4; j <= 4; j++) {
+    for (var i = -4; i <= 4; i++) {
+      let o = vec2f(f32(i), f32(j));
+      let q = uv + o * tap;
+      let dc = textureSampleLevel(pic, smp, q, 0.0).rgb - here;
+      let s = textureSampleLevel(dp, smp, q, 0.0);
+      let close = exp(-dot(o, o) / 8.0);
+      let alike = exp(-dot(dc, dc) * u.colour);
+      let w = close * alike * (1.0 / (1.0 + s.g * s.g * u.calm) + 0.001);
+      acc += w * s.r;
+      ws += w;
+      // what lies on the OTHER side of the picture's edges around here, and how much of the surroundings that is
+      across += close * (1.0 - alike) * s.r;
+      wa += close * (1.0 - alike);
+      wn += close;
+    }
+  }
+  let mine = acc / max(ws, 1e-6);
+  let other = across / max(wa, 1e-6);
+  // Move this pixel only when the picture explains it: its depth must lie BETWEEN its own side and what is across a picture edge, which
+  // is what a soft edge in the wrong place looks like. A thin dark leg before a dark wall is not that: around it the picture shows no
+  // edge (or only edges to things that are just as far), so nothing says the leg is a mistake, and averaging would dissolve it.
+  let between = smoothstep(0.0, 0.00002, (d0 - mine) * (other - d0));
+  let edge = smoothstep(0.03, 0.15, wa / wn);
+  let v = clamp(mix(d0, mine, u.amount * edge * between), 0.0, 1.0);
+  return vec4f(v, v, v, 1.0);
+}`,
+  });
+  gpu.recycle(grad);
+  return out;
 }
 
 /** One-pass level remap shared by the served result and the stand-in: near / far levels and invert. */
@@ -130,6 +227,38 @@ export default defineNode({
       label: 'Smoothing in time',
       hint: 'Blends each frame with its neighbors so depth does not shimmer. It backs off where a pixel changes fast (moving edges). The overall near-to-far range is always kept steady across the clip.',
     },
+    detail: {
+      type: 'enum',
+      default: '1',
+      label: 'Detail',
+      hint: 'High detail also runs the model on overlapping parts of the picture, each at the full Model size, and lays their fine detail (hair, fingers, wires) over the whole-picture result. High is 4 more model runs per frame, Very high is 9 more, and the stored depth is 1.6 or 2.4 times larger per side. It helps most when the picture is larger than the Model size.',
+      options: [
+        { value: '1', label: 'Standard' },
+        { value: '2', label: 'High, 2 x 2 tiles' },
+        { value: '3', label: 'Very high, 3 x 3 tiles' },
+      ],
+    },
+    edge: {
+      type: 'number',
+      default: 1,
+      min: 0,
+      max: 1,
+      step: 0.05,
+      label: 'Edge detail',
+      group: 'Output',
+      hint: 'Moves the soft edges of the depth onto the edges of the picture, so outlines are crisp and sit where the picture has them. 0 is off: the plain enlarged depth. It never copies the picture into the depth, and changing it does not re-run the model.',
+    },
+    edgeReach: {
+      type: 'number',
+      default: 1,
+      min: 0.2,
+      max: 4,
+      step: 0.1,
+      unit: '%',
+      label: 'Edge reach',
+      group: 'Output',
+      hint: 'How far Edge detail looks for the matching edge of the picture, as a share of the long side. Raise it when edges are still soft or sit beside the outline, lower it when small parts take the depth of what is behind them.',
+    },
     nearLevel: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Near level', group: 'Output', hint: 'Output value of the nearest depth. Move both levels toward each other for a shallower scene. Changing it does not re-run the model.' },
     farLevel: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Far level', group: 'Output', hint: 'Output value of the farthest depth.' },
     invert: { type: 'bool', default: false, label: 'Invert', group: 'Output', hint: 'Black = near.' },
@@ -141,12 +270,17 @@ export default defineNode({
     // A picture could be processed by itself (cheap), but a clip is not, and the node cannot know which it is when it is declared: always the user's choice.
     auto: false,
     required: 'once-run',
-    signature: (p, sigs) => `${stableStringify({ size: p.size, every: p.every, temporal: p.temporal, model: DEPTH_AI_MODEL.id, rev: DEPTH_AI_MODEL.revision })}|${sigs.image}`,
+    // Detail is part of the signature only when it is not Standard: a result made before the setting existed is a Standard result and stays valid.
+    signature: (p, sigs) =>
+      `${stableStringify({ size: p.size, every: p.every, temporal: p.temporal, model: DEPTH_AI_MODEL.id, rev: DEPTH_AI_MODEL.revision, ...(tilesOf(p.detail) > 1 ? { detail: tilesOf(p.detail) } : {}) })}|${sigs.image}`,
     estimate: (p, project) => {
       const total = Math.max(1, Math.round(project.duration * project.fps));
       const frames = processedFrames(total, p.every).length;
-      const long = Number(p.size);
-      return { frames, bytes: Math.round(frames * long * (long * 0.5625) * 2), note: 'about 30 to 70 ms per frame on a modern GPU, seconds per frame without WebGPU' };
+      const n = tilesOf(p.detail);
+      const long = Number(p.size) * tileScale(n);
+      const bytes = Math.round(frames * long * (long * 0.5625) * 2);
+      if (n === 1) return { frames, bytes, note: 'about 30 to 70 ms per frame on a modern GPU, seconds per frame without WebGPU' };
+      return { frames, bytes, note: `${n * n + 1} model runs per frame, each about 30 to 70 ms on a modern GPU, seconds without WebGPU` };
     },
     async run(job) {
       const svc = getDepthAiService();
@@ -156,7 +290,9 @@ export default defineNode({
       const long = Number(p.size) || 518;
       const total = job.frames;
       const engine = await svc.open(job.signal);
-      const proxy = Math.min(1, Math.max(0.05, long / Math.max(job.canvas.width, job.canvas.height)));
+      const tilesPerSide = tilesOf(p.detail);
+      // With tiles the picture is fetched as large as the detailed map (never larger than the project): the tiles are cut out of it.
+      const proxy = Math.min(1, Math.max(0.05, (long * tileScale(tilesPerSide)) / Math.max(job.canvas.width, job.canvas.height)));
 
       const grab = async (f: number) => {
         const pulled = await job.pull('image', { frame: f, proxy, quality: 'final' });
@@ -198,7 +334,21 @@ export default defineNode({
         await job.yield();
         const f = list[i];
         const g = await grab(f);
-        const r = await engine.infer(g.rgba, g.width, g.height, long, job.signal);
+        const whole = await engine.infer(g.rgba, g.width, g.height, long, job.signal);
+        let r = whole;
+        if (tilesPerSide > 1) {
+          // High detail: the same model on overlapping parts of the picture, merged onto the whole-picture result (lib/depth-ai-tiles.ts)
+          const layout = tileLayout(whole.width, whole.height, tilesPerSide);
+          const outs: Float32Array[] = [];
+          for (const tile of layout.tiles) {
+            await job.yield();
+            const rect = tileCrop(layout, tile, g.width, g.height);
+            const t = await engine.infer(cropRgba(g.rgba, g.width, rect), rect.width, rect.height, long, job.signal);
+            // a part's size can round to another multiple of 14 than the whole picture's
+            outs.push(t.width === whole.width && t.height === whole.height ? t.data : resizeChannels(t.data, t.width, t.height, whole.width, whole.height, 1));
+          }
+          r = { data: mergeTiles(whole.data, layout, outs).data, width: layout.width, height: layout.height };
+        }
         if (i === 0) size = { w: r.width, h: r.height };
         else if (r.width !== size.w || r.height !== size.h) throw new Error(`Frame ${f + 1} has another size than the first; AI Depth needs one picture size over the clip.`);
         raws.push(r.data);
@@ -232,13 +382,14 @@ export default defineNode({
           model: DEPTH_AI_MODEL.id,
           revision: DEPTH_AI_MODEL.revision,
           provider: engine.provider,
+          detail: tilesPerSide,
           clipRange: [Number(range.lo.toFixed(4)), Number(range.hi.toFixed(4))],
           ranges: ranges.map((r) => [Number(r.lo.toFixed(4)), Number(r.hi.toFixed(4))]),
         },
       };
     },
   },
-  summary: (p) => `${p.size} px${p.every > 1 ? ` · every ${p.every}` : ''}`,
+  summary: (p) => `${p.size} px${tilesOf(p.detail) > 1 ? ` · ${tilesOf(p.detail)} x ${tilesOf(p.detail)} tiles` : ''}${p.every > 1 ? ` · every ${p.every}` : ''}`,
   async render(ctx) {
     const { gpu } = ctx;
     const src = ctx.in.image;
@@ -261,7 +412,7 @@ export default defineNode({
           rgba[i * 4 + 3] = 1;
         }
         const tex = gpu.dataTexture(rgba, meta.w, meta.h);
-        const up = gpu.pass({
+        const up = p.edge > 0 ? refine(gpu, tex, meta, src, p) : gpu.pass({
           label: 'ai depth enlarge',
           size: src,
           format: 'rgba16float',
