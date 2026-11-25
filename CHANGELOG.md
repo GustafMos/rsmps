@@ -4,6 +4,13 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.23.0] - 2026-11-25
+
+### Added
+- **AI Depth: Edge detail** (on by default). The depth map is enlarged with the picture as a guide, so its soft, blobby edges snap onto the real edges of the picture (hair lines, rims, ropes). It only moves depth edges where the picture has an edge and never copies the picture's texture into the depth. "Edge detail" 0 gives the old result exactly; "Edge reach" sets how far an edge may move. It works on the stored result, so changing it does not run the model again. AI depth in existing projects looks crisper after this update.
+- **AI Depth: Detail** (Standard / High, 2 x 2 tiles / Very high, 3 x 3 tiles). The model also looks at overlapping close-ups of the picture and their fine detail is merged into the whole-picture depth, which recovers things the single run loses entirely: strands of hair, bicycle spokes, thin ropes. 4 or 9 more model runs per frame, and a larger stored result.
+- No new depth model: Depth Anything V2 Base and Large, Distill-Any-Depth, Depth Pro and others were tried or checked. At the same input size none is visibly sharper at its edges than the current model (they share the same patch grid), and the better-known larger ones are licensed for non-commercial use only.
+
 ## [0.22.0] - 2026-11-25
 
 ### Added
