@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.22.0] - 2026-11-25
+
+### Added
+- **Depth Scan node** (Filter): scanner effects that move through the depth of a picture. Wire the picture into Image and a depth map (AI Depth, Depth Estimate, or any grey picture) into Depth. Styles: **Scan wave** (a sheet of light at one distance, sweeping from near to far and outlining everything it passes, with an afterglow), **Contours** (lines of equal distance flowing through the scene), **Grid**, **Dots** (a laser-scanner point cloud, larger where the scene is near) and **Scanlines** (thicker where the scene is near), the last three pushed aside by the depth so they wrap round the shapes. Sweeps per loop in either direction, or a Position you can wire a number into (a sound level, for example); number of waves, line thickness, afterglow, density, depth push, colour, colour by depth, glow. The picture can stay, be dimmed, be hidden, or be **revealed** by the wave as it passes. For lines drawn in relief by a depth map, Scan Line Relief already takes one in its Height input.
+
 ## [0.21.1] - 2026-11-21
 
 ### Fixed
