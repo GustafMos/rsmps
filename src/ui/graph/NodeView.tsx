@@ -96,7 +96,7 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
     if (!def?.summary) return '';
     try {
       const params: Record<string, unknown> = {};
-      for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.default;
+      for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.absent ?? p.default;
       const [lp, fr, fp] = clockKey.split('|').map(Number);
       return def.summary(params, wired, { loop: lp === 1, frames: fr, fps: fp });
     } catch {
@@ -373,7 +373,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
   const { ed } = useApp();
   const p = row.def;
   const label = p.label ?? row.key;
-  const value = node.params[row.key] ?? p.default;
+  const value = node.params[row.key] ?? p.absent ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, row.key, v);
   let control: React.ReactNode;
   if (isWired) {

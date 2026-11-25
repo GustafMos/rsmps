@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { STYLE_AI_MESSAGES, STYLE_AI_MODEL } from '../engine/lib/style-ai-bridge';
 import { adainMix, addTile, featureStats, joinFrame, packTile, styleStages, styleTiles, styleWorkSize, toRgba } from '../engine/lib/style-ai-math';
+import { STYLE_LOOKS, crawlField, paintStyleFrame, styleScratch, type StyleMaterial } from '../engine/lib/style-ai-swap';
 import type { OrtLike, OrtSessionLike } from './depth-ai';
 import { STYLE_AI_MODEL_IDS, modelEntry } from './model-catalogue';
 import { MemoryModelBackend, ModelStore } from './models';
@@ -172,7 +173,8 @@ describe('style transfer runtime', () => {
  *
  * Add STYLE_AI_OUT=/some/folder to get the pictures as PNG. It checks the files against the catalogue, runs the two networks on the
  * processor through this runtime, and checks what the node relies on: decode(encode(picture)) is that picture again, and giving A's
- * features B's statistics moves A's colours to B's while A's shapes stay.
+ * features B's statistics moves A's colours to B's while A's shapes stay; and for the strong looks, that A rebuilt from B's cells
+ * (style swap) still decodes to a picture, in B's colours, that moves on with a second pass and with the crawl.
  */
 const DIR = process.env.STYLE_AI_MODEL_DIR ?? '';
 const files = STYLE_AI_MODEL_IDS.map((id) => join(DIR, modelEntry(id)!.file));
@@ -291,6 +293,45 @@ describe.skipIf(!present)('the real AdaIN model (only when STYLE_AI_MODEL_DIR ha
         return p[i] + p[i + 1] + p[i + 2];
       };
       expect(lum(styled, 470, 110)).toBeGreaterThan(lum(styled, 250, 60));
+
+      // The strong looks (style swap): A rebuilt from B's cells. The decoder was trained on AdaIN's output; a picture assembled from
+      // another picture's cells must still come out as a picture, in that picture's colours, and further from A with every pass.
+      const scratch = styleScratch();
+      const material: StyleMaterial = { feats: fb, stats: sb, cw: Math.min(64, cw), ch: Math.min(64, ch) };
+      const held = async (look: { material: number; pieces: number; passes: number; crawl: number }, phase = 0) => {
+        const bias = look.crawl > 0 ? crawlField(phase, look.crawl, 1, fb.length, new Float32Array(fb.length * 4096)) : null;
+        const r = await paintStyleFrame({ engine, width: size.width, height: size.height, tiles, a: { feats: fa, stats: sa }, b: null, base: sa, material, recipe: { shape: 0, lead: 1, swap: look.material, passes: look.passes, crawl: look.crawl }, pieces: look.pieces, bias, scratch });
+        return toRgba(joinFrame(r.acc, r.weight, null, 0), size.width, size.height);
+      };
+      const t1 = Date.now();
+      const swapped = await held(STYLE_LOOKS.material);
+      const swapSeconds = (Date.now() - t1) / 1000;
+      const twice = await held({ ...STYLE_LOOKS.material, passes: 2 });
+      const crawlA = await held({ ...STYLE_LOOKS.material, crawl: 1 }, 0);
+      const crawlB = await held({ ...STYLE_LOOKS.material, crawl: 1 }, 0.25);
+      await save(`a-made-of-b-swap-${long}.png`, swapped, size.width, size.height);
+      await save(`a-made-of-b-swap-2-passes-${long}.png`, twice, size.width, size.height);
+      await save(`a-made-of-b-swap-crawl-0-${long}.png`, crawlA, size.width, size.height);
+      await save(`a-made-of-b-swap-crawl-25-${long}.png`, crawlB, size.width, size.height);
+      console.log(`style swap ${size.width}x${size.height}: one pass (matching + 1 decode per tile) took ${swapSeconds.toFixed(1)} s`);
+      // a picture, not noise or a flat field: its values spread, and stay in range
+      const spread = (p: Uint8ClampedArray) => {
+        const m = (mean(p, 0) + mean(p, 1) + mean(p, 2)) / 3;
+        let v = 0;
+        for (let i = 0; i < p.length; i++) if (i % 4 !== 3) v += (p[i] - m) ** 2;
+        return Math.sqrt(v / (p.length * 0.75));
+      };
+      expect(spread(swapped)).toBeGreaterThan(25);
+      // in B's colours: B is orange (red far above blue), A is blue and green. The swap takes B's cells, so no blue is left over.
+      expect(mean(swapped, 0) - mean(swapped, 2)).toBeGreaterThan(80);
+      // not the same picture as plain AdaIN, and not B itself
+      expect(diff(swapped, styled)).toBeGreaterThan(15);
+      expect(diff(swapped, pb)).toBeGreaterThan(15);
+      // a second pass moves on
+      expect(diff(twice, swapped)).toBeGreaterThan(5);
+      // the crawl repaints the same picture from other pieces a quarter of a turn later
+      expect(diff(crawlA, crawlB)).toBeGreaterThan(5);
+      expect(mean(crawlB, 0) - mean(crawlB, 2)).toBeGreaterThan(80);
     }
   });
 });
