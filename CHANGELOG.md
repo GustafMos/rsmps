@@ -4,6 +4,12 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.41.0] - 2026-11-26
+
+### Added
+- **3D Scan: Save scan for a computer.** The 3D Scan panel can save a scan as one zip file that standard tools open directly: the photos, the known camera positions as a COLMAP model and as a transforms.json (nerfstudio / instant-ngp style), the raw scan, and a README with copy-paste commands. The object sits at the origin, y up, in metres. Where the phone stored depth, a rough point cloud is included for viewers. **Load scan file** opens such a zip in RSMPS on another device.
+- **Splat from Video can use a 3D Scan (desktop app).** Pick a scan under "From a 3D Scan" and Reconstruct uses the saved camera positions instead of solving them, with an optional "Refine cameras"; if the saved positions do not fit the photos it says so and solves them from the pictures as before. The camera conventions are proven by tests, but this path has not been run against the real COLMAP and Brush tools yet.
+
 ## [0.40.0] - 2026-11-26
 
 ### Added

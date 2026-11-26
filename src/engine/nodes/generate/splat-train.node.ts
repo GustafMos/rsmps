@@ -2,6 +2,8 @@ import { defineNode } from '../../define';
 import { cameraAt, pathKeyOf, poseOf, sceneFrame, toTool, transformCloud, mulMV, intrinsicsOf, type CameraPath, type ColmapCamera, type ColmapImage } from '../../lib/colmap';
 import { candidateTimes, lumaThumb, selectFrames, sharpnessOf, type FrameCandidate } from '../../lib/frame-select';
 import { parsePly, SplatError, writeSplatPly } from '../../lib/splat-ply';
+import { colmapTextForSizes } from '../../lib/scan-export';
+import { isScanData, normalizeScan } from '../../lib/scan-data';
 import { cameraThroughXform, clearSplatFrame, renderSplatScene, sceneXform, SPLAT_LOOK_PARAMS, SPLAT_XFORM, type SplatSceneParams } from '../../lib/splat-scene';
 import type { SplatCloud } from '../../lib/splat-cloud';
 import { stableStringify } from '../../lib/stable-json';
@@ -89,7 +91,9 @@ export default defineNode({
   outputs: { image: { type: 'image', label: 'Image' }, depth: { type: 'image', label: 'Depth' }, camera: { type: 'camera', label: 'Solved camera' } },
   optionalOutputs: ['depth', 'camera'],
   params: {
-    photos: { type: 'assets', default: [], accept: 'image-video', batch: false, label: 'Photos', group: 'Source', hint: 'A photo set instead of the clip: pictures taken while walking around the subject, all used (in this order). Leave empty to use the Clip input.' },
+    photos: { type: 'assets', default: [], accept: 'image-video', batch: false, label: 'Photos', group: 'Source', hint: 'A photo set instead of the clip: pictures taken while walking around the subject, all used (in this order). Leave empty to use the Clip input. A 3D Scan chosen below is used instead of both.' },
+    scan: { type: 'json', default: null, label: 'Scan', visibleIf: () => false },
+    refine: { type: 'bool', default: false, label: 'Refine cameras', group: 'Source', hint: 'Only with a 3D Scan: also correct small errors in the phone\'s saved camera positions before training. Slower; try it when the result looks doubled or soft.', visibleIf: (p) => isScanData(p.scan) },
     frames: { type: 'number', default: 80, min: 10, max: 300, step: 1, integer: true, label: 'Frames', group: 'Source', hint: 'How many frames of the clip to use. They are spread along the camera movement (a stretch where the camera stands still gives none) and the sharpest frame of each stretch is taken.' },
     maxSide: { type: 'number', default: 1280, min: 480, max: 2560, step: 16, integer: true, label: 'Max side', group: 'Source', hint: 'Frames are made at most this many pixels on their long side before solving and training.' },
     rangeStart: { type: 'number', default: 0, min: 0, max: 3600, step: 0.1, unit: 's', label: 'Use from', group: 'Source', hint: 'Start of the part of the clip to use.' },
@@ -138,6 +142,8 @@ export default defineNode({
     minOpacity: { ...SPLAT_LOOK_PARAMS.minOpacity, default: 0 },
   },
   summary: (p, wired) => {
+    const n = isScanData(p.scan) ? normalizeScan(p.scan).shots.length : 0;
+    if (n) return `3D Scan, ${n} photos · ${p.trainQuality}`;
     const src = (p.photos as string[]).length ? `${(p.photos as string[]).length} photos` : wired && !wired.has('image') ? 'no clip' : `${p.frames} frames`;
     return `${src} · ${p.trainQuality}`;
   },
@@ -147,15 +153,18 @@ export default defineNode({
     standIn: 'bypass',
     required: 'always',
     gpu: true,
-    signature: (p, sigs) => `${stableStringify({ photos: p.photos, frames: p.frames, maxSide: p.maxSide, rangeStart: p.rangeStart, rangeEnd: p.rangeEnd, q: p.trainQuality, m: p.matcher, s: p.solver })}|${(p.photos as string[]).length ? '' : sigs.image}`,
-    estimate: (p) => ({ frames: (p.photos as string[]).length || p.frames, note: 'COLMAP + Brush run on this computer; minutes to an hour' }),
+    signature: (p, sigs) => `${stableStringify({ scan: isScanData(p.scan) ? p.scan : null, refine: p.refine, photos: p.photos, frames: p.frames, maxSide: p.maxSide, rangeStart: p.rangeStart, rangeEnd: p.rangeEnd, q: p.trainQuality, m: p.matcher, s: p.solver })}|${(p.photos as string[]).length || isScanData(p.scan) ? '' : sigs.image}`,
+    estimate: (p) => ({ frames: (isScanData(p.scan) ? normalizeScan(p.scan).shots.length : 0) || (p.photos as string[]).length || p.frames, note: 'COLMAP + Brush run on this computer; minutes to an hour' }),
     async run(job) {
       const p = job.params;
       const host = job.host.splatTrain;
       if (!host) throw new Error('Splat from Video runs only in the RSMPS desktop app: it starts COLMAP and Brush on your computer.');
       const st = await host.status();
       if (!st.available) throw new Error(`Missing add-on${st.missing.length > 1 ? 's' : ''}: ${st.missing.map((m) => ADDON_NAMES[m] ?? m).join(' and ')}. Install ${st.missing.length > 1 ? 'them' : 'it'} in Plugins > Official add-ons (nothing is downloaded until you press Install there).`);
-      const photos = p.photos as string[];
+      // a 3D Scan (picked in the panel) brings its photos AND where the phone was for each; it wins over Photos and the Clip
+      const scan = isScanData(p.scan) ? normalizeScan(p.scan) : null;
+      if (scan && scan.shots.length < 3) throw new Error('The chosen 3D Scan has fewer than 3 photos.');
+      const photos = scan ? scan.shots.map((s) => s.asset) : (p.photos as string[]);
       let frameTimes: number[];
       let proxy = 1;
       const pick = (f: number, note: string) => job.progress(0.08 * f, note);
@@ -186,9 +195,10 @@ export default defineNode({
         }
       };
       const out = await host.train({
-        settings: { input: photos.length ? 'photos' : 'video', quality: p.trainQuality as 'draft', matcher: p.matcher as 'auto', solver: p.solver as 'auto', keepPoses: p.keepPoses },
+        settings: { input: scan ? 'scan' : photos.length ? 'photos' : 'video', quality: p.trainQuality as 'draft', matcher: p.matcher as 'auto', solver: p.solver as 'auto', keepPoses: p.keepPoses, refine: !!scan && p.refine },
         frameCount: frameTimes.length,
         frame,
+        ...(scan ? { known: (sizes: { width: number; height: number }[]) => colmapTextForSizes(scan, sizes, sizes.map((_, i) => frameName(i))) } : {}),
         signal: job.signal,
         onProgress: (f, note) => job.progress(0.08 + 0.9 * f, note),
       });

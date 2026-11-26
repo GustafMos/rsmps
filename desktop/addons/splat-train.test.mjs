@@ -23,7 +23,7 @@ const P = { db: 'W/database.db', images: 'W/images', sparse: 'W/sparse', dense: 
 describe('arguments', () => {
   it('only fixed choices and clamped numbers survive from the renderer', () => {
     const s = cleanSettings({ quality: 'ultra; rm -rf /', matcher: '--evil', solver: 'global', threads: 1e9, input: 'photos' });
-    expect(s).toEqual({ quality: 'normal', input: 'photos', matcher: 'auto', solver: 'global', keepPoses: true, singleCamera: true, threads: 64 });
+    expect(s).toEqual({ quality: 'normal', input: 'photos', matcher: 'auto', solver: 'global', keepPoses: true, refine: false, singleCamera: true, threads: 64 });
   });
   it('video = sequential, photo sets = exhaustive up to 150 images', () => {
     expect(matcherFor(cleanSettings({ input: 'video' }), 80)).toBe('sequential');

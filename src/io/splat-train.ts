@@ -92,16 +92,18 @@ export class SplatTrainClient implements SplatTrainHost {
     try {
       let size = '';
       let same = true;
+      const sizes: { width: number; height: number }[] = [];
       for (let i = 0; i < req.frameCount; i++) {
         if (signal.aborted) throw new DOMException('Cancelled.', 'AbortError');
         const f = await req.frame(i);
         same &&= !size || size === `${f.width}x${f.height}`;
         size = `${f.width}x${f.height}`;
+        sizes.push({ width: f.width, height: f.height });
         const jpeg = await this.encode(f.pixels, f.width, f.height);
         await this.call(`/${id}/frame?name=${encodeURIComponent(`frame_${String(i).padStart(4, '0')}.jpg`)}`, { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: jpeg as BodyInit }, 'The desktop app did not accept a frame.');
         req.onProgress((0.08 * (i + 1)) / req.frameCount, `Sending frames: ${i + 1} of ${req.frameCount}`);
       }
-      await this.call(`/${id}/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...req.settings, singleCamera: same }) }, 'The reconstruction could not start.');
+      await this.call(`/${id}/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...req.settings, singleCamera: same, ...(req.settings.input === 'scan' && req.known ? { known: req.known(sizes) } : {}) }) }, 'The reconstruction could not start.');
       let v: SplatJobView;
       for (;;) {
         await sleep(this.poll, signal);

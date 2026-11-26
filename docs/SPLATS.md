@@ -67,6 +67,36 @@ Other findings that set the defaults:
 - **Min opacity 0.02** (Gaussian Splat's default) punched holes in the trained sky (21.2 dB instead of 24.4 dB through the node), so
   Splat from Video defaults to 0.
 
+## From a 3D Scan (experimental)
+
+A scan taken with the phone already knows where the phone was for every photo, so COLMAP does not have to solve the cameras. The photos
+and positions come from the **3D Scan** node (Android Chrome, AR view); the desktop app does the rest.
+
+**On the phone.** Add a 3D Scan node, open its inspector and press *Start scan*. Aim at the surface beside the object and tap, fit the dome
+to the object, press Start and walk slowly all the way round, then lower and higher. Coverage needed: at least about 40 photos, neighbouring
+photos no more than about 15 degrees apart, at least two heights (the panel's coverage map shows what is missing; red = no photo from there).
+Keep the object still, the light even, and the photos sharp. Then press **Save scan for a computer**: one zip file is downloaded.
+
+**On the computer.** Open RSMPS (the desktop app), add a 3D Scan node and press **Load scan file** (pick the zip). The photos go into Media
+and the node holds the scan. Add a **Splat from Video** node, open its inspector and, under *From a 3D Scan*, press *Use ... (N photos)*.
+Then press **Reconstruct** as usual. *Refine cameras* (off by default) also corrects small errors in the saved positions; try it if the
+result looks doubled or soft. A chosen scan is used instead of Photos and the Clip input.
+
+**What happens.** The photos are sent like a photo set; the saved camera model is written as a COLMAP text model (PINHOLE, one image per
+photo, world-to-camera poses in metres, object centre at the origin; conventions in `src/engine/lib/scan-export.ts`, proved by
+`scan-export.test.ts`). COLMAP then runs `feature_extractor`, a matcher (exhaustive up to 150 photos, else sequential), and
+`point_triangulator` with that model as input instead of `mapper`; with *Refine cameras* also `bundle_adjuster`. The usual
+`image_undistorter` and Brush steps follow, unchanged. If the triangulation fails or finds hardly any points, the job says "The saved camera
+positions did not fit the photos; solving them from the pictures instead." and continues with the normal solver on the same photos.
+
+**Not verified.** COLMAP and Brush were not available when this was written: the argument lists are tested, and the steps are tested
+against fake programs, but the real `point_triangulator` / `bundle_adjuster` options and output were not run. If a COLMAP version rejects an
+option, the job falls back to the normal solver and shows the sentence above; the job's log (`logs/triangulate.log` in the job folder) has
+the reason.
+
+**Without the desktop app.** The zip also opens directly in other tools: it holds `images/`, a COLMAP text model in `sparse/0/`, a
+`transforms.json` and a `README.txt` with copy-paste commands for COLMAP with known poses, Brush, nerfstudio and gsplat.
+
 ## What you need
 
 - The **desktop app**. The web version cannot start programs on your computer; the node says so. The command line cannot run it either.
