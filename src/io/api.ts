@@ -495,7 +495,7 @@ export interface PhoneApi {
   /** Addresses a phone could use to reach this computer, best first (physical Wi-Fi, then Tailscale, then others). Offer them in a dropdown. */
   addresses(): Promise<PhoneAddress[]>;
   /** `address` = the `url` of one of `addresses()` (default: the first). The QR code always uses the protocol and port of THIS page's server. */
-  createSession(opts?: { address?: string; /** What the phone page should do: 'camera' (default), 'scan' or 'controller'. Goes into the link as `&mode=`. */ mode?: 'camera' | 'scan' | 'controller' }): Promise<PhoneSessionInfo>;
+  createSession(opts?: { address?: string; /** What the phone page should do: 'camera' (default), 'scan' or 'controller'. Goes into the link as `&mode=`. */ mode?: import('../phone/link-modes').PhoneMode }): Promise<PhoneSessionInfo>;
   state(token: string): PhoneState;
   /** One plain sentence about what is happening or what to try ("Your phone reached this computer...", the firewall checklist, why it closed). */
   detail(token: string): string;
@@ -510,11 +510,13 @@ export interface PhoneApi {
   /** The newest session with a phone linked right now (reuse it instead of showing a second QR code). Absent on implementations without a phone link. */
   linked?(): string | null;
   /** What the phone of a session does (`mode`) and whether a camera picture flows (`media`; null before its hello). */
-  link?(token: string): { mode: 'camera' | 'scan' | 'controller'; media: 'video' | 'none' | 'refused' | null } | null;
+  link?(token: string): { mode: import('../phone/link-modes').PhoneMode; media: 'video' | 'none' | 'refused' | null } | null;
   /** Ask a linked phone to change what it does (the phone answers with a new hello). */
-  setMode?(token: string, mode: 'camera' | 'scan' | 'controller'): void;
+  setMode?(token: string, mode: import('../phone/link-modes').PhoneMode): void;
   /** Scan with phone: photos in, statuses and preview out (see phone-scan.ts). */
   scan?: import('./phone-scan').PhoneScanStore;
+  /** Stop motion with the phone as the capture rig (see phone-stopmotion.ts). */
+  stopmotion?: import('./phone-stopmotion').PhoneStopMotionStore;
 }
 
 export type { AddonInfo, AddonState } from './desktop';

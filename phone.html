@@ -78,6 +78,34 @@
       #previewScrub { flex: 1 1 auto; }
       #previewMissing { margin: 0; padding-left: 18px; color: #fbbf24; }
       body.scanning { overflow: hidden; }
+      /* stop motion capture screen (mode stopmotion): live camera, faint last shots, big shutter */
+      #sm { position: fixed; inset: 0; z-index: 25; background: #000; display: flex; flex-direction: column; }
+      #sm[hidden] { display: none; }
+      #smStage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+      #smVideo, #smOnion img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      #smOnion { position: absolute; inset: 0; pointer-events: none; }
+      #smInfo { position: absolute; left: 10px; right: 10px; top: calc(8px + env(safe-area-inset-top)); display: flex; gap: 8px; align-items: center; justify-content: space-between; font-weight: 600; text-shadow: 0 1px 3px #000; }
+      #smInfo span { background: rgba(15,23,42,.72); border-radius: 10px; padding: 6px 10px; }
+      #smNote { position: absolute; left: 10px; right: 10px; top: calc(52px + env(safe-area-inset-top)); text-align: center; font-size: 14px; background: rgba(146,64,14,.85); border-radius: 10px; padding: 6px 10px; }
+      #smNote:empty { display: none; }
+      #smBar { flex: 0 0 auto; background: #0d0f14; padding: 6px 12px calc(10px + env(safe-area-inset-bottom)); }
+      #smStrip { display: flex; gap: 6px; overflow-x: auto; min-height: 50px; padding: 4px 0; }
+      .smShot { position: relative; flex: 0 0 auto; width: 64px; height: 46px; border-radius: 6px; background: #1e293b; border: 2px solid #f59e0b; overflow: hidden; }
+      .smShot.stored { border-color: #22c55e; }
+      .smShot.failed { border-color: #ef4444; }
+      .smShot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .smShot b { position: absolute; right: 2px; bottom: 0; font-size: 14px; color: #22c55e; text-shadow: 0 0 3px #000; }
+      #smRow { display: flex; align-items: center; gap: 10px; }
+      #smRow > button { flex: 1 1 0; padding: 12px 6px; }
+      #smShutter { flex: 0 0 82px !important; width: 82px; height: 82px; border-radius: 50%; padding: 0 !important; border: 5px solid #e8ecf4; background: #fff; }
+      #smShutter:active { background: #cbd5e1; }
+      #smShutter:disabled { opacity: .5; }
+      #smBack { position: absolute; right: 10px; top: calc(52px + env(safe-area-inset-top)); z-index: 2; flex: none; padding: 8px 12px; }
+      #smMore { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0 0; font-size: 14px; align-items: center; }
+      #smMore label { display: flex; align-items: center; gap: 6px; }
+      #smMore input[type=number] { width: 70px; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: inherit; }
+      #smMore button, #smMore select { flex: 0 1 auto; padding: 8px 10px; }
+      body.smOpen { overflow: hidden; }
       small { display: block; padding: 0 16px 8px; color: #94a3b8; text-align: center; }
     </style>
   </head>
@@ -87,6 +115,7 @@
       <button id="modeCamera" type="button" aria-pressed="false">Camera</button>
       <button id="modeScan" type="button" aria-pressed="false">Scan</button>
       <button id="modeController" type="button" aria-pressed="false">Controller only</button>
+      <button id="modeStopmotion" type="button" aria-pressed="false">Stop motion</button>
     </div>
     <video id="preview" autoplay muted playsinline></video>
     <small id="detail"></small>
@@ -145,6 +174,33 @@
         <div id="previewNote" style="text-align:center;color:#fbbf24;font-size:13px;min-height:1.2em"></div>
         <ul id="previewMissing"></ul>
         <button id="previewBack" type="button">Back to the camera (shoot more)</button>
+      </div>
+    </section>
+    <section id="sm" hidden>
+      <div id="smStage">
+        <video id="smVideo" autoplay muted playsinline></video>
+        <div id="smOnion"></div>
+        <div id="smInfo"><span id="smCount">Shot 0</span><span id="smLink">Linking…</span></div>
+        <div id="smNote"></div>
+        <button id="smBack" type="button">Close</button>
+      </div>
+      <div id="smBar">
+        <div id="smStrip" role="list" aria-label="Shots from this phone"></div>
+        <div id="smRow">
+          <button id="smUndo" type="button">Undo last</button>
+          <button id="smShutter" type="button" aria-label="Take picture"></button>
+          <button id="smAuto" type="button">Auto shoot</button>
+        </div>
+        <div id="smMore">
+          <label><input id="smOnionOn" type="checkbox" /> Onion skin</label>
+          <input id="smOnionStrength" type="range" min="0" max="1" step="0.05" aria-label="Onion skin strength" style="flex:1 1 90px" />
+          <label>Every <input id="smEvery" type="number" min="0.2" max="600" step="0.1" aria-label="Seconds between pictures" /> s</label>
+          <label>Stop after <input id="smStopAfter" type="number" min="0" max="9999" step="1" aria-label="Stop after this many pictures, 0 for no limit" /></label>
+          <select id="smSize" aria-label="Shot size"><option value="0">Full size</option><option value="1080">1080</option><option value="720">720</option></select>
+          <button id="smLock" type="button">Lock exposure and focus</button>
+          <button id="smFlip" type="button">Front or back camera</button>
+        </div>
+        <small style="padding:6px 0 0">Pictures go only to your own computer over this link.</small>
       </div>
     </section>
     <script type="module" src="/src/phone/main.ts"></script>

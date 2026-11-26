@@ -4,7 +4,8 @@
  * desktop with WebRTC (host candidates only). If the desktop asks for it (WebRTC did not connect), it sends JPEG frames over
  * the WebSocket instead. `?fake=1` streams a generated animation instead of the camera (for testing without a phone).
  *
- * Modes (see link-modes.ts): `camera` (default), `scan` (photograph printed sheets, scan-mode.ts) and `controller` (motion / touch only).
+ * Modes (see link-modes.ts): `camera` (default), `scan` (photograph printed sheets, scan-mode.ts), `controller` (motion / touch only) and
+ * `stopmotion` (the phone is the capture rig for the Stop Motion node: stopmotion.ts, stopmotion-view.ts; it also sends the live camera).
  * The link completes with a typed `hello {mode, media}` message, so it does not need camera or microphone frames: a refused camera or
  * "Controller only" still links.
  */
@@ -14,6 +15,9 @@ import { createMotion } from './motion';
 import { modeFromSearch, parseModeMsg, thirdStepLabel, type PhoneMedia, type PhoneMode } from './link-modes';
 import { createScanMode } from './scan-mode';
 import { isScanFrame } from './scan-protocol';
+import { createStopMotionPhone } from './stopmotion';
+import { browserStillEnv, captureStill, makeThumb, setCameraLock } from './stopmotion-camera';
+import { createStopMotionView } from './stopmotion-view';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusEl = $('status');
@@ -54,11 +58,48 @@ const scan = createScanMode({
   buffered: () => ws?.bufferedAmount ?? 0,
   isOpen: () => ws?.readyState === WebSocket.OPEN,
 });
+/** Stop motion capture rig: shots go to the computer over the same socket (stopmotion-protocol.ts). */
+const smHost = {
+  video: document.getElementById('smVideo') as HTMLVideoElement,
+  track: () => stream?.getVideoTracks()[0] ?? null,
+};
+const smStill = browserStillEnv(smHost.video, smHost.track);
+const sm = createStopMotionPhone({
+  send: (m) => send(m),
+  isOpen: () => ws?.readyState === WebSocket.OPEN,
+  buffered: () => ws?.bufferedAmount ?? 0,
+  now: () => performance.now(),
+  later: (ms, fn) => {
+    const t = setTimeout(fn, Math.max(0, ms));
+    return () => clearTimeout(t);
+  },
+  wakeLock: async () => {
+    try {
+      const wl = (navigator as unknown as { wakeLock?: { request(t: 'screen'): Promise<{ release(): Promise<void> }> } }).wakeLock;
+      const lock = wl ? await wl.request('screen') : null;
+      return lock ? () => void lock.release().catch(() => undefined) : null;
+    } catch {
+      return null;
+    }
+  },
+  still: (maxSide) => captureStill(smStill, maxSide),
+  thumb: (still) => makeThumb(new Blob([still.bytes as BlobPart], { type: still.mime })),
+  lock: (on) => setCameraLock(smHost.track(), on),
+  newSid: () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (x) => x.toString(36).padStart(2, '0')).join('').slice(0, 12),
+});
+const smView = createStopMotionView(sm, { switchCamera: () => switchBtn.click(), close: () => void setMode('camera') });
 const stepsEl = document.getElementById('steps') as HTMLElement;
 const steps: Record<string, 'ok' | 'bad' | 'wait'> = { reached: 'wait', accepted: 'wait', video: 'wait' };
 const STEP_TEXT: Record<string, string> = { reached: 'Reached your computer', accepted: 'Code accepted', video: 'Video connected' };
 const controlsEl = $<HTMLElement>('controls');
-const modeButtons: Record<PhoneMode, HTMLButtonElement> = { camera: $('modeCamera'), scan: $('modeScan'), controller: $('modeController') };
+const modeButtons: Record<PhoneMode, HTMLButtonElement> = {
+  camera: $('modeCamera'),
+  scan: $('modeScan'),
+  controller: $('modeController'),
+  stopmotion: $('modeStopmotion'),
+};
+/** Modes that show the camera and send it to the computer as the live picture. */
+const showsCamera = (m: PhoneMode): boolean => m === 'camera' || m === 'stopmotion';
 
 /** "Reached your computer / Code accepted / Video connected": which of the steps worked, so a failure says where it stopped. */
 function setStep(name: keyof typeof steps, value: 'ok' | 'bad' | 'wait'): void {
@@ -195,6 +236,7 @@ async function openCamera(initial = false): Promise<void> {
   torchBtn.hidden = !caps.torch;
   torchOn = false;
   if (pc) for (const s of pc.getSenders()) if (s.track?.kind === 'video' && track) await s.replaceTrack(track);
+  smView.setStream(stream);
 }
 
 async function keepAwake(): Promise<void> {
@@ -273,6 +315,7 @@ function connect(): void {
     motion.onOpen(); // the computer learns which sensors this phone has
     sendHello();
     scan.onOpen();
+    if (mode === 'stopmotion') sm.onOpen();
   };
   sock.onmessage = (ev) => {
     if (typeof ev.data !== 'string') {
@@ -286,18 +329,19 @@ function connect(): void {
       return;
     }
     if (scan.onMessage(msg)) return;
+    if (mode === 'stopmotion' && sm.onMessage(msg)) return;
     chain = chain
       .then(async () => {
         if (msg.type === 'ready') {
           setStep('reached', 'ok');
           setStep('accepted', 'ok');
-          status(mode === 'camera' && media === 'video' ? 'Code accepted. Waiting for the computer…' : mode === 'scan' ? 'Linked: scan mode' : mode === 'controller' ? 'Controller linked' : 'Linked without a picture', mode === 'camera' && media === 'video' ? 'wait' : 'ok');
+          status(showsCamera(mode) && media === 'video' ? 'Code accepted. Waiting for the computer…' : mode === 'scan' ? 'Linked: scan mode' : mode === 'controller' ? 'Controller linked' : 'Linked without a picture', showsCamera(mode) && media === 'video' ? 'wait' : 'ok');
           if (media !== 'video') setStep('video', 'ok');
         }
         else if (msg.type === 'mode') {
           const m = parseModeMsg(msg);
           if (m) await setMode(m.mode);
-        } else if (msg.type === 'offer' && msg.sdp && mode === 'camera' && stream) await onOffer(msg.sdp);
+        } else if (msg.type === 'offer' && msg.sdp && showsCamera(mode) && stream) await onOffer(msg.sdp);
         else if (msg.type === 'ice' && msg.candidate) await pc?.addIceCandidate(msg.candidate).catch(() => undefined);
         else if (msg.type === 'use-jpeg') {
           pc?.close();
@@ -310,6 +354,7 @@ function connect(): void {
   sock.onclose = (ev) => {
     stopJpeg();
     if (sock === ws) scan.onClose(); // an upload in progress waits for the reconnect and resumes
+    if (sock === ws && mode === 'stopmotion') sm.onClose(); // shots on the way are kept and resumed
     if (sock !== ws) return;
     const why = closeMessage(ev.code);
     if (why?.final) {
@@ -334,8 +379,9 @@ function sendHello(): void {
 function showMode(): void {
   (Object.keys(modeButtons) as PhoneMode[]).forEach((m) => modeButtons[m].setAttribute('aria-pressed', String(m === mode)));
   const cam = mode === 'camera';
-  preview.hidden = !cam;
+  preview.hidden = !showsCamera(mode); // in stop motion it stays under the capture screen (the fallback frames are taken from it)
   controlsEl.hidden = !cam;
+  smView.show(mode === 'stopmotion');
   document.body.classList.toggle('has-camera', cam);
   STEP_TEXT.video = thirdStepLabel(mode, media);
   setStep('video', steps.video);
@@ -354,17 +400,19 @@ function stopCameraStream(): void {
 async function setMode(next: PhoneMode): Promise<void> {
   const same = next === mode;
   mode = next;
-  if (mode !== 'camera') {
+  if (!showsCamera(mode)) {
     stopCameraStream();
     media = 'none';
   }
+  if (mode !== 'stopmotion') sm.leave();
   if (mode === 'scan') {
     status('Scan mode', 'ok', 'Photograph each printed sheet. Photos go to your computer.');
     await scan.enter();
   } else {
     scan.leave();
   }
-  if (mode === 'camera' && (!same || !stream)) {
+  if (showsCamera(mode) && (!same || !stream)) {
+    if (mode === 'stopmotion' && Number(resSel.value) < 1080) resSel.value = '1080'; // the live picture and the fallback still
     status('Asking for the camera…', 'wait', 'Please allow camera access.');
     try {
       await openCamera(true);
@@ -379,8 +427,10 @@ async function setMode(next: PhoneMode): Promise<void> {
     status('Controller linked', 'ok', 'No picture is sent. Use Start motion below for gyroscope and touch.');
   }
   showMode();
+  if (mode === 'stopmotion') sm.enter();
   if (ws?.readyState === WebSocket.OPEN) {
     sendHello();
+    if (mode === 'stopmotion') sm.onOpen(); // after the hello: the computer learns the mode first
     if (media !== 'video') setStep('video', 'ok'); // the typed handshake is the link: no picture is needed
   }
 }
@@ -397,6 +447,7 @@ async function start(): Promise<void> {
   } else if (mode === 'controller') {
     status('Controller', 'wait', 'Connecting to your computer…');
   } else {
+    if (mode === 'stopmotion') resSel.value = '1080';
     status('Asking for the camera…', 'wait', 'Please allow camera access.');
     try {
       await openCamera(true);
@@ -409,6 +460,7 @@ async function start(): Promise<void> {
     }
   }
   showMode();
+  if (mode === 'stopmotion') sm.enter();
   void keepAwake();
   await ping();
   connect();
@@ -463,6 +515,6 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('online', () => {
   if (!closedForGood && ws?.readyState !== WebSocket.OPEN) connect();
 });
-for (const m of ['camera', 'scan', 'controller'] as PhoneMode[]) modeButtons[m].onclick = () => void setMode(m).catch((err) => status('Could not switch', 'bad', String((err as Error).message ?? err)));
+for (const m of Object.keys(modeButtons) as PhoneMode[]) modeButtons[m].onclick = () => void setMode(m).catch((err) => status('Could not switch', 'bad', String((err as Error).message ?? err)));
 $('scanExit').onclick = () => void setMode('camera');
 void start();
