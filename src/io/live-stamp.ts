@@ -42,23 +42,56 @@ export function stampLive(graph: GraphDoc, live: Set<string>, tick: number): Gra
   return g;
 }
 
-/** Hidden param of Stop Motion that the player stamps while paused: the node then shows the live picture (Shoot view) in "Automatic". */
+/** Hidden param of Stop Motion that the player stamps while paused and the node is selected: the node then shows the live picture (Shoot view) in "Automatic". */
 export const SHOOT_VIEW_PARAM = 'shootView';
 export const STOP_MOTION_ID = 'stop-motion';
 
 /**
- * Ids of the Stop Motion nodes the player may put in Shoot view: those that do not feed a Media Timeline (a timeline always gets
- * the animation, so its cuts look the same paused and playing).
+ * Ids of the Stop Motion nodes the player may put in Shoot view while paused ("Show: Automatic"): only the SELECTED one, so a Stop
+ * Motion shows its animation unless you are working in it. With several nodes selected the primary one (the last in `selection`)
+ * counts, and only if it is a Stop Motion. A Stop Motion that feeds a Media Timeline on the way to the viewed picture is never
+ * included (the timeline always gets the animation, so its cuts look the same paused and playing); viewing the Stop Motion itself
+ * is not affected, because the timeline is not part of what is shown then.
  */
-export function shootNodeIds(graph: GraphDoc): Set<string> {
+export function shootNodeIds(graph: GraphDoc, selection: readonly string[], viewed: string | null): Set<string> {
   const ids = new Set<string>();
-  for (const n of graph.nodes) if (n.type === STOP_MOTION_ID) ids.add(n.id);
-  if (ids.size === 0) return ids;
-  for (const t of graph.nodes) {
-    if (t.type !== 'media-timeline') continue;
-    for (const id of upstream(graph, t.id)) ids.delete(id);
+  const primary = selection[selection.length - 1];
+  if (!primary || !graph.nodes.some((n) => n.id === primary && n.type === STOP_MOTION_ID)) return ids;
+  ids.add(primary);
+  if (viewed) {
+    const shown = upstream(graph, viewed);
+    for (const t of graph.nodes) {
+      if (t.type !== 'media-timeline' || (t.id !== viewed && !shown.has(t.id))) continue;
+      for (const id of upstream(graph, t.id)) ids.delete(id);
+    }
   }
   return ids;
+}
+
+/** Stop Motion nodes that show their live picture right now: Show "Live with onion skin", or Automatic and stamped while paused. */
+export function shootingIds(graph: GraphDoc, stamped: Set<string>, paused: boolean): Set<string> {
+  const ids = new Set<string>();
+  for (const n of graph.nodes) {
+    if (n.type !== STOP_MOTION_ID) continue;
+    const show = n.params.show;
+    if (show === 'live' || (show !== 'loop' && paused && stamped.has(n.id))) ids.add(n.id);
+  }
+  return ids;
+}
+
+/**
+ * The graph as far as live pictures are concerned: a Stop Motion that shows its animation does not read its Picture input, so the
+ * edge into it is dropped (the camera behind it is then not needed and can close). A Stop Motion without shots passes its input
+ * through, so it keeps its edge.
+ */
+export function withoutIdleStopMotionInputs(graph: GraphDoc, shooting: Set<string>): GraphDoc {
+  const idle = new Set<string>();
+  for (const n of graph.nodes) {
+    if (n.type !== STOP_MOTION_ID || shooting.has(n.id)) continue;
+    if (Array.isArray(n.params.shots) && n.params.shots.length > 0) idle.add(n.id);
+  }
+  if (idle.size === 0) return graph;
+  return { ...graph, edges: graph.edges.filter((e) => !(idle.has(e.to.node) && e.to.port === 'image')) };
 }
 
 /** Copy of the graph in which the given Stop Motion nodes are in Shoot view (the picture while paused). */

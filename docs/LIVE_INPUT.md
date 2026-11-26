@@ -80,6 +80,18 @@ The player gives each live node a hidden `liveTick` value that grows with every 
 cache cannot serve a frozen picture, and while paused it keeps re-rendering at the project fps as long as a live node
 feeds the viewed node. The RAM frame cache is bypassed for such graphs.
 
+### Stop Motion: live picture only while selected
+
+A Stop Motion node set to **Show: Automatic** shows the live picture (with the onion skin if Onion skin is on) only while the node is
+**selected** and the project is **paused**. In every other case, paused or playing, it shows the animation at the current time, exactly what an
+export would show. Clicking another node or the empty graph returns it to the animation at once. With several nodes selected, the last
+selected one is the primary: it shows its live picture only if it is a Stop Motion. A Stop Motion that feeds a Media Timeline on the way to the
+viewed picture always gives the animation (the cuts must look the same paused and playing); viewing the Stop Motion itself is not affected.
+"Live with onion skin" and "The animation" ignore all this. While the animation shows, the node does not read its Picture input, so a camera
+behind it is not treated as live (the player stops re-rendering for it and the camera can close). Auto shoot and the phone link keep taking
+pictures when the node is deselected: they read the source node directly, never the Stop Motion output, so no onion skin is baked into a shot.
+The Take picture and Auto buttons in the viewer appear only while a Stop Motion is selected.
+
 ## Phone as a camera (QR)
 
 Use a phone as a live camera without any app: scan a QR code, allow the camera, and the picture appears in the **Phone Camera**

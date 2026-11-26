@@ -58,13 +58,15 @@ export function Root() {
         let lastItem = -1;
         let lastActive: string | null | undefined;
         let lastPaused: boolean | null = null;
+        let lastSel: readonly string[] | null = null;
         let lastSaved: GraphDoc | null = null;
         let lastThumb = Date.now();
         const sync = () => {
           const s = ed.state;
           const active = resolveActiveOutput(s, io.registry);
           const paused = safetyStore.get().paused;
-          if (s.graph === lastGraph && s.viewedNodeId === lastView && s.item === lastItem && active === lastActive && paused === lastPaused) return;
+          if (s.graph === lastGraph && s.viewedNodeId === lastView && s.item === lastItem && active === lastActive && paused === lastPaused && s.selection === lastSel) return;
+          lastSel = s.selection;
           lastActive = active;
           lastPaused = paused;
           const graphChanged = s.graph !== lastGraph;
@@ -73,7 +75,7 @@ export function Root() {
           lastGraph = s.graph;
           lastView = s.viewedNodeId;
           lastItem = s.item;
-          pushView(io.player, { graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active }, paused);
+          pushView(io.player, { graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active, selection: s.selection }, paused);
           void graphChanged;
           if (edited && s.activeProject && !s.switching) {
             if (ed.skipSave) ed.skipSave = false;
