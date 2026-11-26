@@ -6,7 +6,7 @@ import { cameraSource, parseCameraExtra } from '../../engine/lib/live-source';
 import { fromUnit, hasTorch, modesOf, rangeOf, toUnit, type Range } from '../../io/camera-controls';
 import type { CameraInfo } from '../../io/live';
 
-const EMPTY: CameraInfo = { open: false, capabilities: {}, settings: {}, digitalZoom: 1, error: '', reducedTo: null, note: '', deviceId: '' };
+const EMPTY: CameraInfo = { open: false, capabilities: {}, settings: {}, digitalZoom: 1, error: '', reducedTo: null, note: '', deviceId: '', turnLine: '', canRefresh: false };
 
 const fmt = (v: number): string => (Math.abs(v) >= 100 ? String(Math.round(v)) : String(Math.round(v * 100) / 100));
 
@@ -43,7 +43,11 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
     const read = () => setInfo(io.devices.cameraInfo(JSON.parse(sourceText)));
     read();
     const t = setInterval(read, 1000);
-    return () => clearInterval(t);
+    io.devices.viewCamera(JSON.parse(sourceText)); // under Role Automatic the Webcam being looked at is the main camera
+    return () => {
+      clearInterval(t);
+      io.devices.viewCamera(null);
+    };
   }, [io, sourceText]);
 
   const { devices } = useDevices('video-input');
@@ -133,8 +137,13 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
     <div className="rs-insp__sec" data-camera-controls>
       <div className="rs-caps">Camera</div>
       <p className="rs-insp__hint" data-camera-status role="status">
-        {info.open ? `Using ${camName || (sideWord ? `the ${sideWord} camera` : 'the default camera')} · zoom ${fmt(zoomNow)}x${w && h ? ` · ${w} × ${h}` : ''}` : 'The camera is not open right now.'}
+        {info.turnLine ? info.turnLine : info.open ? `Using ${camName || (sideWord ? `the ${sideWord} camera` : 'the default camera')} · zoom ${fmt(zoomNow)}x${w && h ? ` · ${w} × ${h}` : ''}` : 'The camera is not open right now.'}
       </p>
+      {info.canRefresh && (
+        <div className="rs-insp__actions">
+          <button className="rs-btn" onClick={() => io.devices.refreshCamera(JSON.parse(sourceText))}>Refresh now</button>
+        </div>
+      )}
       {info.note && <p className="rs-insp__hint" data-camera-reduced>{info.note}.</p>}
       {info.error && <p className="rs-insp__hint" role="alert">{info.error}</p>}
       <div className="rs-insp__actions">

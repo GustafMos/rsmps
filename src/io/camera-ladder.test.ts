@@ -89,12 +89,15 @@ describe('two device cameras at once', () => {
 
   it('a phone that never allows two cameras: plain message, the first camera keeps working, no loop', async () => {
     setup('never');
+    const STOP = { clash: 'stop', role: 'auto', every: 5, settle: 3 } as const; // the setting that keeps the 0.45.0 behaviour
+    const FRONT = { kind: 'camera', deviceId: 'front0', turns: STOP } as const;
     live.drawable(BACK);
     await tick(10);
     live.drawable(FRONT);
     await tick(100);
     await expect(live.frame(FRONT, 0)).rejects.toThrow(CLASH_MESSAGE);
     expect(CLASH_MESSAGE).toMatch(/could not run these two cameras at the same time/);
+    expect(CLASH_MESSAGE).toMatch(/Take turns/);
     expect(live.cameraInfo(BACK).open).toBe(true);
     expect(kit.live()).toHaveLength(1);
     expect(kit.live()[0].settings.deviceId).toBe('back0');

@@ -1162,6 +1162,10 @@ export class Library implements MediaLibrary {
   liveBlocked(source: LiveSource): boolean {
     return source.kind === 'camera' && this.live.camerasBlocked;
   }
+  /** Host.liveWaiting: a camera that takes turns and has not been visited yet. */
+  liveWaiting(source: LiveSource): boolean {
+    return source.kind === 'camera' && this.live.waitingForTurn(source as LiveRequest);
+  }
   /** Host.arCameraFrame: the camera picture of the open AR view (see world-ar/camera-feed.ts). */
   arCameraFrame(): ArCameraState {
     return this.arCamera.ask();

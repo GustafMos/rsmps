@@ -3,6 +3,7 @@
  * The nodes use these in `render` and the live recorder uses them to find the same stream, so the two cannot disagree. Pure.
  */
 import type { CameraControls, LiveSource } from '../types';
+import { turnSettingsOf } from '../../io/camera-turns';
 
 export type LiveSourceRequest = LiveSource & { freeze?: boolean };
 
@@ -70,7 +71,7 @@ export function cameraSource(p: Params): LiveSourceRequest {
 
 /** The Webcam source as the node asks for it: the stream plus what to do to the camera itself (`projectFps` feeds "Match project"). */
 export function cameraRequest(p: Params, projectFps: number): LiveSourceRequest {
-  return { ...(cameraSource(p) as Extract<LiveSourceRequest, { kind: 'camera' }>), controls: cameraControlsOf(p, projectFps) };
+  return { ...(cameraSource(p) as Extract<LiveSourceRequest, { kind: 'camera' }>), controls: cameraControlsOf(p, projectFps), turns: turnSettingsOf(p) };
 }
 
 /** Phone Camera: null until a phone was linked. */

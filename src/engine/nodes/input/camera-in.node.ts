@@ -60,6 +60,54 @@ export default defineNode({
       ],
       hint: 'How many pictures per second to ask the camera for. Match project asks for the project frame rate. A rate the camera cannot do is replaced by the nearest one it can; the inspector shows what it really delivers. The picture is shown at the project frame rate at most.',
     },
+    clash: {
+      type: 'enum',
+      default: 'turns',
+      label: 'When cameras clash',
+      group: 'Two cameras',
+      options: [
+        { value: 'turns', label: 'Take turns' },
+        { value: 'always', label: 'Always take turns' },
+        { value: 'stop', label: 'Stop with a message' },
+      ],
+      hint: 'Many phone browsers can open only one camera at a time. Take turns: the page keeps one camera (the main one) open, and now and then closes it for a moment to take a new picture from each other camera. Every Webcam keeps showing its last picture meanwhile, and the main camera freezes for a moment during each visit. Always take turns does this even when the phone could run both. Stop with a message: the Webcam shows an error instead.',
+    },
+    role: {
+      type: 'enum',
+      default: 'auto',
+      label: 'Role',
+      group: 'Two cameras',
+      options: [
+        { value: 'auto', label: 'Automatic' },
+        { value: 'main', label: 'Main camera' },
+        { value: 'visited', label: 'Visited camera' },
+      ],
+      hint: 'Only matters when cameras take turns. The main camera stays live; a visited camera gets a new picture now and then. Automatic: the Webcam whose settings you are looking at is the main one, otherwise the one that started first. If two Webcams both say Main camera, the one that started first wins and the other says so in its settings.',
+      visibleIf: (p) => p.clash !== 'stop',
+    },
+    every: {
+      type: 'number',
+      default: 5,
+      min: 0,
+      max: 120,
+      step: 1,
+      unit: 's',
+      label: 'Refresh every',
+      group: 'Two cameras',
+      hint: 'How often a visited camera gets a new picture, in seconds. Each visited camera uses its own value; the main camera ignores it. 0 means only when you press Refresh now (the first picture is still taken once by itself). Each visit pauses the main camera for about a second.',
+      visibleIf: (p) => p.clash !== 'stop',
+    },
+    settle: {
+      type: 'number',
+      default: 3,
+      min: 0,
+      max: 30,
+      step: 1,
+      label: 'Settle frames',
+      group: 'Two cameras',
+      hint: 'How many pictures to let go by after a visited camera opens before one is kept, so the exposure has settled and the picture is not dark. More is brighter but makes each visit longer.',
+      visibleIf: (p) => p.clash !== 'stop',
+    },
     mirror: { type: 'bool', default: true, label: 'Mirror', hint: 'Flip horizontally, like a mirror (natural for a front camera).' },
     freeze: { type: 'bool', default: false, label: 'Freeze', hint: 'Hold the current frame.' },
     zoom: { type: 'number', default: 1, min: 0.5, max: 30, step: 0.01, label: 'Zoom', group: 'Camera controls', hint: 'Uses the zoom of the camera itself when it has one (see Camera controls below for its range), otherwise the picture is cropped and enlarged about the centre. Never below 1x on a camera without zoom.' },
@@ -85,16 +133,20 @@ export default defineNode({
     const host = ctx.host;
     if (!host.liveFrame) throw new Error('A live camera is not available here (exports and headless runs cannot use one). Record it first.');
     const source = cameraRequest(ctx.params, ctx.time.fps);
-    if (host.liveBlocked?.(source)) {
-      // the AR view owns the camera: nothing here, so what is merged over it shows over the phone's own camera picture
+    const nothing = (label: string) => {
       const width = Math.max(1, Math.round(ctx.canvas.width));
       const height = Math.max(1, Math.round(ctx.canvas.height));
-      const image = ctx.gpu.pass({ label: 'camera-blocked', size: { width, height, unit: ctx.unitFor(width, height) }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return vec4f(0.0); }' });
-      return { image };
-    }
+      return { image: ctx.gpu.pass({ label, size: { width, height, unit: ctx.unitFor(width, height) }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return vec4f(0.0); }' }) };
+    };
+    // the AR view owns the camera: nothing here, so what is merged over it shows over the phone's own camera picture
+    if (host.liveBlocked?.(source)) return nothing('camera-blocked');
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
     const frame = await host.liveFrame(source, maxSide, ctx.time.seconds);
-    if (!frame) throw new Error('Waiting for the camera…');
+    if (!frame) {
+      // two cameras take turns and this one has not had its first visit yet: nothing to show, but not an error
+      if (host.liveWaiting?.(source)) return nothing('camera-waiting');
+      throw new Error('Waiting for the camera…');
+    }
     const unit = ctx.unitFor(frame.width, frame.height);
     const mirror = liveOrientOfNode('camera-in', ctx.params).mirror;
     // a camera without a zoom of its own: crop and enlarge about the centre (never below 1x)

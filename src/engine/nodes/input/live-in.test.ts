@@ -182,3 +182,39 @@ it('camera-in turns Frame rate into the rate to ask for, and Match project into 
   expect(rates[2]).toBeUndefined();
   expect((seen[2] as unknown as { controls: Record<string, unknown> }).controls).toMatchObject({ torch: true, focus: 'manual', focusDistance: 0.25 });
 });
+
+it('camera-in gives a transparent picture before the first visit of a camera that takes turns, and the held picture after', async () => {
+  let held = false;
+  const base = await harness();
+  const host: Host = {
+    ...nullHost,
+    liveWaiting: () => !held,
+    async liveFrame() {
+      if (!held) return null;
+      const img = base.solid(8, 4, [0, 255, 0, 255]);
+      return { texture: img.texture, width: 8, height: 4 };
+    },
+  };
+  const t = await harness([], host);
+  const before = await t.run('camera-in', { mirror: false });
+  const px0 = await t.pixels(before.image as never);
+  expect(px0.at(0, 0)).toEqual([0, 0, 0, 0]);
+  held = true;
+  const after = await t.run('camera-in', { mirror: false });
+  expect((await t.pixels(after.image as never)).at(0, 0)).toEqual([0, 255, 0, 255]);
+});
+
+it('camera-in still says it is waiting when no turns are involved', async () => {
+  const t = await harness([], { ...nullHost, async liveFrame() { return null; } });
+  await expect(t.run('camera-in', {})).rejects.toThrow(/Waiting for the camera/);
+});
+
+it('camera-in passes its Take turns settings to the host', async () => {
+  const seen: LiveSource[] = [];
+  const base = await harness();
+  const t = await harness([], liveHost(base, seen));
+  await t.run('camera-in', { clash: 'stop', role: 'visited', every: 9, settle: 2 });
+  expect(seen[0]).toMatchObject({ turns: { clash: 'stop', role: 'visited', every: 9, settle: 2 } });
+  await t.run('camera-in', {});
+  expect(seen[1]).toMatchObject({ turns: { clash: 'turns', role: 'auto', every: 5, settle: 3 } });
+});
