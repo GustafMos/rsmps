@@ -51,7 +51,7 @@ export function pairKey(a: string, b: string): string {
 export const PAIR_FAIL_MS = 60_000;
 
 export const CLASH_MESSAGE =
-  "This phone's browser could not run these two cameras at the same time (tried smaller picture sizes). Other apps can because they are not web pages. You can use a second phone through Phone Camera instead.";
+  "This phone's browser could not run these two cameras at the same time (tried smaller picture sizes). Other apps can because they are not web pages. Set When cameras clash to Take turns, or use a second phone through Phone Camera instead.";
 
 export const sizeText = (s: Size): string => `${s.width} × ${s.height}`;
 

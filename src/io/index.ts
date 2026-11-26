@@ -297,6 +297,8 @@ export const createIo: CreateIo = async () => {
       cameraInfo: (source) => library.live.cameraInfo(source),
       applyCamera: (source, controls) => library.live.applyCamera(source, controls),
       testCamerasTogether: () => library.live.testCamerasTogether(),
+      refreshCamera: (source) => library.live.refreshNow(source as never),
+      viewCamera: (source) => library.live.viewCamera(source as never),
       measureCameras: () => library.live.measureCameras(),
       renameCamera: (id, name) => renameCamera(id, name),
       onChanged: (l) => {

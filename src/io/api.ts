@@ -446,6 +446,10 @@ export interface DeviceApi {
   applyCamera(source: LiveSource, controls: CameraControls): { ok: boolean; message?: string };
   /** Try every back camera with every front camera at 1080p, 720p and 480p: which pairs work at which size, in plain words. Whatever was open is opened again afterwards. */
   testCamerasTogether(): Promise<{ ok: boolean; message?: string; lines: string[] }>;
+  /** Cameras that take turns: visit this camera now (Refresh now). False when it is not a visited camera. */
+  refreshCamera(source: LiveSource): boolean;
+  /** Tell the page which Webcam is being looked at (its inspector is open), or null: under Role Automatic that camera is the main one. */
+  viewCamera(source: LiveSource | null): void;
   /** Open each camera briefly to learn what it reports (zoom range, largest picture, torch), so the camera names say more. */
   measureCameras(): Promise<{ ok: boolean; measured: number; message?: string }>;
   /** Give a camera a name of the owner's choosing (empty clears it). Shown everywhere that camera is listed. */

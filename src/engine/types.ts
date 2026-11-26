@@ -514,6 +514,8 @@ export interface Host {
    * still shows. Remote sources (a phone link, a network address) are never blocked.
    */
   liveBlocked?(source: LiveSource): boolean;
+  /** True while a device camera that takes turns with another has not had its first visit yet: the node gives a transparent picture instead of an error. */
+  liveWaiting?(source: LiveSource): boolean;
   /**
    * The AR view's camera picture (World AR Camera's Picture output). Calling it also tells the host the picture is in use, so the
    * AR view only copies camera frames while something asks. `session` false = no AR view is open (use the ordinary camera);
@@ -605,7 +607,7 @@ export interface CameraControls {
 
 /** A live picture source for `Host.liveFrame`. */
 export type LiveSource =
-  | { kind: 'camera'; deviceId: string; width?: number; height?: number; facing?: 'user' | 'environment'; controls?: CameraControls }
+  | { kind: 'camera'; deviceId: string; width?: number; height?: number; facing?: 'user' | 'environment'; controls?: CameraControls; turns?: { clash: 'turns' | 'always' | 'stop'; role: 'auto' | 'main' | 'visited'; every: number; settle: number } }
   | { kind: 'url'; url: string; mode?: 'auto' | 'image' | 'mjpeg' | 'video'; refresh?: number }
   /** A phone streaming its camera through the LAN phone link (QR code). `session` is the pairing token. */
   | { kind: 'phone'; session: string };

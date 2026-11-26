@@ -84,6 +84,8 @@ export interface Kit {
   rule: Rule;
   /** When set, every getUserMedia fails with this error name. */
   failWith: string | null;
+  /** getUserMedia fails with NotReadableError for these devices only. */
+  failIds: Set<string>;
   visibility: 'visible' | 'hidden';
   fire(type: string): void;
   live(): FakeTrack[];
@@ -98,6 +100,7 @@ export function installCameras(rule: Rule, devices: FakeDevice[] = PHONE, caps: 
     gum: [],
     rule,
     failWith: null,
+    failIds: new Set(),
     visibility: 'visible',
     fire: (type) => (handlers.get(type) ?? []).forEach((h) => h()),
     live: () => kit.tracks.filter((t) => !t.stopped),
@@ -129,6 +132,7 @@ export function installCameras(rule: Rule, devices: FakeDevice[] = PHONE, caps: 
         const fm = typeof v.facingMode === 'string' ? v.facingMode : (v.facingMode as { exact?: string } | undefined)?.exact;
         const dev = (exact ? devices.find((d) => d.id === exact) : fm ? devices.find((d) => d.facing === fm) : undefined) ?? (exact || fm ? undefined : devices[0]);
         if (!dev) return fail('OverconstrainedError');
+        if (kit.failIds.has(dev.id)) return fail('NotReadableError');
         const width = num(v.width) ?? 1920;
         const height = num(v.height) ?? Math.round((width * 9) / 16);
         const live = kit.live();

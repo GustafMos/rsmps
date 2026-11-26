@@ -16,6 +16,7 @@ import {
   CHEAP_FIX_MS, CLASH_MESSAGE, GAVE_UP_MESSAGE, MUTE_GRACE_MS, PAIR_FAIL_MS, RESTART_BACKOFF_MS, SIZE_HD, SIZE_SD, STUCK_MS, TEST_SIZES,
   describePairTests, isClashError, ladderRungs, pairKey, reducedNote, type PairOutcome, type PairTest, type Selector, type Size,
 } from './camera-ladder';
+import { DEFAULT_TURNS, FIRST_FRAME_MS, MAIN_DWELL_MS, ONE_AT_A_TIME_LINE, RECORDING_QUIET_MS, RELEASE_GAP_MS, RETURN_RETRY_MS, TURN_TICK_MS, resolveRoles, turnLine, visitBackoff, type Roles, type TurnSettings } from './camera-turns';
 
 type UrlMode = 'auto' | 'image' | 'mjpeg' | 'video';
 export type LiveRequest = LiveSource & { freeze?: boolean };
@@ -50,6 +51,10 @@ export interface CameraInfo {
   note: string;
   /** The id the browser gives this camera ('' when unknown). */
   deviceId: string;
+  /** Cameras that take turns: what this camera is doing in plain words ('' when it does not take turns). */
+  turnLine: string;
+  /** Cameras that take turns: this camera is a visited one, so Refresh now works. */
+  canRefresh: boolean;
 }
 
 /** Applying camera constraints is slow: at most one in flight, and the next one waits at least this long, keeping only the latest wish. */
@@ -205,6 +210,17 @@ interface Entry {
   /** Running smaller than asked so that another camera fits; and the size to go back to. */
   reduced: Size | null;
   original: Size | null;
+  /** Taking turns (see camera-turns.ts): this camera shares the one-camera-at-a-time schedule; it has no stream of its own right now; what its node says. */
+  turn: boolean;
+  turnIdle: boolean;
+  turns: TurnSettings;
+  /** The size the node last asked for (the schedule takes its pictures at the same size). */
+  maxSide: number;
+  /** When a visit last gave this camera a picture (0 = never), when it may be visited again after a failure, failures in a row, Refresh now was pressed. */
+  lastGoodAt: number;
+  backoffUntil: number;
+  fails: number;
+  asked: boolean;
 }
 
 export class LiveSources {
@@ -232,6 +248,16 @@ export class LiveSources {
   private gaveUp = new Map<string, string>();
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private pageOff: (() => void) | null = null;
+  /** Taking turns: the timer, a visit or a change of main camera is going on, who is main, who is looked at, the measured costs. */
+  private turnTimer: ReturnType<typeof setInterval> | null = null;
+  private turnBusy = false;
+  private roles: Roles = { main: '', visited: [], lostMain: [] };
+  private viewedKey = '';
+  private mainSince = 0;
+  private lastDrawable = -1e9;
+  private visiting = '';
+  private visitMs: number | null = null;
+  private returnMs: number | null = null;
 
   get camerasBlocked(): boolean {
     return this.camerasSuspended;
@@ -245,6 +271,7 @@ export class LiveSources {
       for (const e of [...this.entries.values()]) if (e.req.kind === 'camera') this.close(e);
     }
     this.cameraFailed.clear(); // a camera that failed meanwhile is tried afresh
+    this.mainSince = 0;
     this.gaveUp.clear();
   }
 
@@ -265,8 +292,9 @@ export class LiveSources {
     if (req.kind !== 'camera') return this.frameOf(req, maxSide, hold);
     if (req.controls) this.noteControls(sourceKey(req), req.controls);
     const f = await this.frameOf(req, maxSide, hold);
-    if (!f || !req.controls) return f;
     const e = this.entries.get(sourceKey(req));
+    if (e && req.turns) e.turns = req.turns;
+    if (!f || !req.controls) return f;
     return e?.caps && digitalZoomFor(req.controls.zoom, e.caps) === 1 ? { ...f, nativeZoom: true } : f;
   }
 
@@ -286,7 +314,10 @@ export class LiveSources {
       this.ensureSweeper();
     }
     e.lastUsed = performance.now();
+    e.maxSide = maxSide;
     if (hold?.held && e.held && e.heldAt === hold.at) return e.held;
+    // taking turns and not the open camera right now: the picture it gave last (none before its first visit)
+    if (req.kind === 'camera' && e.turn && e.turnIdle) return e.held;
     if (req.kind === 'phone') {
       const live = await this.phoneFrame(e, req.session, maxSide, !!req.freeze);
       return hold?.held ? ((await this.snapshot(e, maxSide, hold.at)) ?? live) : live;
@@ -324,7 +355,14 @@ export class LiveSources {
       this.ensureSweeper();
     }
     e.lastUsed = performance.now();
-    return this.pictureOf(e);
+    this.lastDrawable = performance.now(); // a recording is asking: the schedule leaves the cameras alone meanwhile
+    return e.turn && e.turnIdle ? null : this.pictureOf(e);
+  }
+
+  /** A camera that takes turns and has not been visited yet: the node gives a transparent picture. */
+  waitingForTurn(req: LiveRequest): boolean {
+    const e = this.entries.get(sourceKey(req));
+    return !!e && e.turn && e.turnIdle && !e.held;
   }
 
   /** True when a source is open and has a picture right now. Never opens anything (no camera prompt). */
@@ -370,6 +408,8 @@ export class LiveSources {
     for (const c of this.ctl.values()) if (c.timer) clearTimeout(c.timer);
     this.ctl.clear();
     this.pageOff?.();
+    if (this.turnTimer) clearInterval(this.turnTimer);
+    this.turnTimer = null;
   }
 
   /* --------------------------------------- camera controls ----------------------------------- */
@@ -420,6 +460,8 @@ export class LiveSources {
       reducedTo,
       note: reducedTo ? reducedNote(reducedTo, together) : '',
       deviceId: e?.deviceId || String(settings.deviceId ?? ''),
+      turnLine: e ? this.turnLineOf(e) : '',
+      canRefresh: !!e && e.turn && this.roles.main !== e.key,
     };
   }
 
@@ -505,7 +547,7 @@ export class LiveSources {
   /* --------------------------------------- opening ------------------------------------------- */
 
   private open(key: string, req: LiveRequest): Entry {
-    const base = { key, req, phoneVersion: -1, stream: null, track: null, caps: null, initial: {}, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false, seq: ++this.seqCounter, opened: false, deviceId: '', mutedAt: 0, lastFrameAt: performance.now(), lastSeenTime: -1, stalledAt: 0, trackEnded: false, recStage: 0, recAt: 0, restarting: false, reduced: null, original: null } as const;
+    const base = { key, req, phoneVersion: -1, stream: null, track: null, caps: null, initial: {}, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false, seq: ++this.seqCounter, opened: false, deviceId: '', mutedAt: 0, lastFrameAt: performance.now(), lastSeenTime: -1, stalledAt: 0, trackEnded: false, recStage: 0, recAt: 0, restarting: false, reduced: null, original: null, turn: false, turnIdle: false, turns: (req.kind === 'camera' && req.turns) || DEFAULT_TURNS, maxSide: 0, lastGoodAt: 0, backoffUntil: 0, fails: 0, asked: false } as const;
     if (req.kind === 'phone') {
       const e: Entry = { ...base, el: document.createElement('video'), isVideo: false, ready: Promise.resolve() };
       return e;
@@ -609,7 +651,8 @@ export class LiveSources {
       }
       await this.attachStream(e, video, stream);
     } catch (err) {
-      this.failOpen(e, err);
+      if ((err as { name?: string })?.name === 'ClashError' && e.turns.clash !== 'stop' && !e.closed) this.joinTurns(e);
+      else this.failOpen(e, err);
     }
   }
 
@@ -645,8 +688,12 @@ export class LiveSources {
     const other = others[0];
     const pk = pairKey(e.deviceId || req.deviceId || req.facing || 'default', this.identity(other));
     const known = this.pairs.get(pk);
+    const turning = e.turns.clash !== 'stop';
+    // asked to always take turns: do not even try two at once
+    if (turning && (e.turns.clash === 'always' || others.some((o) => o.turns.clash === 'always'))) throw Object.assign(new Error(CLASH_MESSAGE), { name: 'ClashError' });
     if (known && !known.ok) {
-      if (performance.now() - known.at < PAIR_FAIL_MS) throw Object.assign(new Error(CLASH_MESSAGE), { name: 'ClashError' });
+      // taking turns: the memory does not run out (the Restart button clears it); otherwise the pair is tried again after a minute
+      if (turning || performance.now() - known.at < PAIR_FAIL_MS) throw Object.assign(new Error(CLASH_MESSAGE), { name: 'ClashError' });
     } else if (known?.ok) {
       const rung = ladderRungs(this.sameSelector(req), this.altSelector(req, other)).find((r) => r.id === known.rung);
       if (rung) {
@@ -868,6 +915,7 @@ export class LiveSources {
     if (this.camerasSuspended || this.parked || pageHidden()) return;
     for (const e of [...this.entries.values()]) {
       if (e.req.kind !== 'camera' || e.closed || e.error || !e.opened || e.restarting) continue;
+      if (e.turn && (this.turnBusy || e.turnIdle)) continue; // closed on purpose by the schedule: not stuck, nothing to recover
       if (resume) {
         e.lastFrameAt = now;
         e.recAt = 0;
@@ -943,7 +991,8 @@ export class LiveSources {
       await this.attachStream(e, video, stream);
     } catch (err) {
       const name = (err as { name?: string })?.name;
-      if (name === 'NotAllowedError' || name === 'SecurityError') {
+      if (name === 'ClashError' && e.turns.clash !== 'stop' && !e.closed) this.joinTurns(e);
+      else if (name === 'NotAllowedError' || name === 'SecurityError') {
         this.cameraRefused = true;
         this.gaveUp.set(e.key, CAMERA_BLOCKED);
         this.close(e);
@@ -1057,7 +1106,11 @@ export class LiveSources {
     } finally {
       restore();
     }
-    return { ok: true, rows, lines: describePairTests(rows) };
+    const lines = describePairTests(rows);
+    if (rows.length && rows.every((r) => !r.works.length)) lines.push(ONE_AT_A_TIME_LINE);
+    else if (rows.length && rows.every((r) => r.works.length === TEST_SIZES.length)) lines.push('These cameras can run together at every size: no need to take turns.');
+    else if (rows.length) lines.push('Some pairs work only at smaller sizes: the page lowers the picture size by itself when it needs to.');
+    return { ok: true, rows, lines };
   }
 
   /** Open every camera briefly, one after the other, to learn what each reports (zoom range, largest picture, torch). Whatever was open is opened again afterwards. */
@@ -1103,6 +1156,248 @@ export class LiveSources {
       e.rvfc = v.requestVideoFrameCallback!(tick);
     };
     e.rvfc = v.requestVideoFrameCallback(tick);
+  }
+
+  /* ------------------------------------- taking turns ----------------------------------------- */
+
+  private turnGroup(): Entry[] {
+    return [...this.entries.values()].filter((x) => x.turn && !x.closed && x.req.kind === 'camera');
+  }
+
+  /** Two cameras clashed: from now on they share the one-camera-at-a-time schedule. */
+  private joinTurns(e: Entry): void {
+    e.turn = true;
+    e.turnIdle = true;
+    for (const o of this.deviceCameras(e)) o.turn = true;
+    if (!this.turnTimer) this.turnTimer = setInterval(() => this.turnTick(), TURN_TICK_MS);
+  }
+
+  /** The Webcam whose inspector is open (null: none). Under Role Automatic that camera is the main one. */
+  viewCamera(req: LiveRequest | null): void {
+    this.viewedKey = req && req.kind === 'camera' ? sourceKey(req) : '';
+  }
+
+  /** Refresh now: the next turn is for this camera. False when it is not a visited camera. */
+  refreshNow(req: LiveRequest): boolean {
+    const e = this.entries.get(sourceKey(req));
+    if (!e || !e.turn || this.roles.main === e.key) return false;
+    e.asked = true;
+    e.backoffUntil = 0;
+    return true;
+  }
+
+  private turnLineOf(e: Entry): string {
+    if (!e.turn) return '';
+    const role = this.roles.main === e.key ? 'main' : 'visited';
+    return turnLine({
+      role,
+      lostMain: this.roles.lostMain.includes(e.key),
+      live: !!e.stream,
+      every: e.turns.every,
+      age: e.lastGoodAt ? performance.now() - e.lastGoodAt : null,
+      visitMs: this.visitMs,
+      returnMs: this.returnMs,
+      visiting: this.visiting !== '' && (role === 'main' || this.visiting === e.key),
+      failed: e.fails > 0 && performance.now() < e.backoffUntil,
+    });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  private turnsPaused(): boolean {
+    return this.camerasSuspended || this.parked || this.cameraRefused;
+  }
+
+  private visitDue(v: Entry, now: number): boolean {
+    if (v.asked) return true;
+    if (now < v.backoffUntil) return false;
+    if (now - v.lastUsed > IDLE_CLOSE_MS) return false; // nobody looks at this camera
+    if (!v.lastGoodAt) return true; // the first picture is taken once, whatever Refresh every says
+    return v.turns.every > 0 && now - v.lastGoodAt >= v.turns.every * 1000;
+  }
+
+  private turnTick(): void {
+    if (this.turnBusy) return;
+    const group = this.turnGroup();
+    if (group.length < 2) {
+      this.endTurns(group);
+      return;
+    }
+    const now = performance.now();
+    if (this.turnsPaused() || pageHidden() || group.some((x) => x.restarting)) return;
+    this.roles = resolveRoles(group.map((x) => ({ key: x.key, role: x.turns.role, seq: x.seq, viewed: x.key === this.viewedKey })));
+    const main = group.find((x) => x.key === this.roles.main);
+    if (!main) return;
+    for (const x of group) if (x !== main) x.turnIdle = true;
+    if (!main.stream || group.some((x) => x !== main && x.stream)) {
+      void this.runTurn(() => this.bringMain(main, group));
+      return;
+    }
+    if (now - this.mainSince < MAIN_DWELL_MS || now - this.lastDrawable < RECORDING_QUIET_MS) return;
+    const due = group.filter((x) => x !== main && this.visitDue(x, now)).sort((a, b) => a.lastGoodAt - b.lastGoodAt);
+    if (due.length) void this.runTurn(() => this.visit(main, due[0]));
+  }
+
+  private async runTurn(fn: () => Promise<void>): Promise<void> {
+    this.turnBusy = true;
+    try {
+      await fn();
+    } catch {
+      /* a failed turn is only a missing picture: the next tick looks again */
+    } finally {
+      this.visiting = '';
+      this.turnBusy = false;
+    }
+  }
+
+  /** Fewer than two cameras share the schedule any more: the remaining one is simply an ordinary camera. */
+  private endTurns(group: Entry[]): void {
+    for (const x of group) {
+      x.turn = false;
+      x.turnIdle = false;
+    }
+    this.roles = { main: '', visited: [], lostMain: [] };
+    if (!group.length) {
+      if (this.turnTimer) clearInterval(this.turnTimer);
+      this.turnTimer = null;
+      return;
+    }
+    const e = group[0];
+    if (!e.stream && !e.restarting && !this.turnsPaused()) void this.runTurn(async () => void (await this.reopen(e)));
+  }
+
+  /** Keep the picture of a camera that is about to be closed, for its node to go on showing. */
+  private async keepPicture(e: Entry): Promise<void> {
+    if (e.stream && this.pictureOf(e)) await this.snapshot(e, e.maxSide, -1);
+  }
+
+  /** Make `main` the one open camera (the first time, after a change of roles, or when it was lost). */
+  private async bringMain(main: Entry, group: Entry[]): Promise<void> {
+    for (const x of group) {
+      if (x === main || !x.stream) continue;
+      await this.keepPicture(x);
+      x.turnIdle = true;
+      this.releaseStream(x);
+    }
+    if (!main.stream) {
+      await this.sleep(RELEASE_GAP_MS);
+      const t = performance.now();
+      const ok = await this.reopen(main);
+      if (ok) this.returnMs = performance.now() - t;
+    }
+    if (main.stream) main.turnIdle = false;
+    this.mainSince = performance.now();
+  }
+
+  /** One visit: the main camera pauses, the visited camera gives one picture, the main camera comes back. */
+  private async visit(main: Entry, v: Entry): Promise<void> {
+    const t0 = performance.now();
+    this.visiting = v.key;
+    await this.keepPicture(main);
+    main.turnIdle = true;
+    this.releaseStream(main);
+    await this.sleep(RELEASE_GAP_MS);
+    let got = false;
+    try {
+      got = !this.turnsPaused() && (await this.takePicture(v));
+    } catch (err) {
+      const name = (err as { name?: string })?.name;
+      if (name === 'NotAllowedError' || name === 'SecurityError') this.cameraRefused = true;
+    }
+    const t1 = performance.now();
+    v.asked = false;
+    if (got) {
+      v.fails = 0;
+      v.lastGoodAt = t1;
+      v.backoffUntil = 0;
+      this.visitMs = t1 - t0;
+    } else {
+      v.fails++;
+      v.backoffUntil = t1 + visitBackoff(v.fails); // the main camera comes back at once; this one is tried again later
+    }
+    await this.sleep(RELEASE_GAP_MS);
+    const ok = this.turnsPaused() ? false : await this.reopen(main);
+    if (ok) {
+      this.returnMs = performance.now() - t1;
+      main.turnIdle = false;
+    }
+    this.mainSince = performance.now();
+  }
+
+  /** Open a camera directly (no ladder, no memory of earlier clashes, no failure cooldown), a few times if it is slow to come back. */
+  private async reopen(e: Entry): Promise<boolean> {
+    for (let i = 0; ; i++) {
+      try {
+        const stream = await this.gum(this.primaryConstraints(e, e.req as Extract<LiveRequest, { kind: 'camera' }>));
+        if (e.closed || this.turnsPaused()) {
+          stream.getTracks().forEach((t) => t.stop());
+          return false;
+        }
+        await this.attachStream(e, this.newVideo(), stream);
+        return true;
+      } catch (err) {
+        const name = (err as { name?: string })?.name;
+        if (name === 'NotAllowedError' || name === 'SecurityError' || i >= RETURN_RETRY_MS.length) {
+          e.turnIdle = false;
+          this.failOpen(e, err);
+          return false;
+        }
+        await this.sleep(RETURN_RETRY_MS[i]);
+        if (e.closed || this.turnsPaused()) return false;
+      }
+    }
+  }
+
+  /** Open the visited camera, wait for a real picture (and a few more so the exposure has settled), keep it, close the camera. */
+  private async takePicture(v: Entry): Promise<boolean> {
+    const stream = await this.gum(this.primaryConstraints(v, v.req as Extract<LiveRequest, { kind: 'camera' }>));
+    const video = this.newVideo();
+    try {
+      if (v.closed || this.turnsPaused()) return false;
+      const settings = (stream.getVideoTracks?.()[0]?.getSettings?.() ?? {}) as Record<string, unknown>;
+      if (settings.deviceId) v.deviceId = String(settings.deviceId);
+      video.srcObject = stream;
+      await video.play().catch(() => undefined);
+      if (!(await this.waitPicture(video, v.turns.settle))) return false;
+      v.el = video;
+      return !!(await this.snapshot(v, v.maxSide, -1));
+    } finally {
+      stream.getTracks().forEach((t) => t.stop());
+      video.pause?.();
+      video.srcObject = null;
+    }
+  }
+
+  /** Resolves true once the video shows a real picture and `settle` more have gone by; false when no picture came in time. */
+  private waitPicture(video: HTMLVideoElement, settle: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      let first = false;
+      const timer = setTimeout(() => resolve(first), FIRST_FRAME_MS);
+      const done = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const v = video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
+      if (typeof v.requestVideoFrameCallback === 'function') {
+        let seen = 0;
+        const step = () => {
+          if (video.videoWidth > 0) first = true;
+          if (first && ++seen > settle) return done();
+          v.requestVideoFrameCallback!(step);
+        };
+        v.requestVideoFrameCallback(step);
+        return;
+      }
+      const poll = () => {
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          first = true;
+          setTimeout(done, settle * 33);
+        } else setTimeout(poll, 30);
+      };
+      poll();
+    });
   }
 
   /* --------------------------------------- upload -------------------------------------------- */
