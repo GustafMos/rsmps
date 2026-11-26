@@ -43,7 +43,7 @@ export function viewNodeFor(paused: boolean, viewed: string | null): string | nu
  */
 export function pushView(
   player: Pick<import('../io/api').Player, 'setView'>,
-  view: { graph: GraphDoc; node: string | null; item: number; itemCount: number; activeOutput?: string | null },
+  view: { graph: GraphDoc; node: string | null; item: number; itemCount: number; activeOutput?: string | null; selection?: readonly string[] },
   paused: boolean,
 ): void {
   player.setView({ ...view, node: viewNodeFor(paused, view.node) });

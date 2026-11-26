@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Io } from '../../io/api';
 import type { Shot } from '../../engine/lib/stop-motion';
 import type { Editor } from './editor';
-import { StopMotionController, countdown, stopMotionForViewer, stopMotionSettings, type StopMotionEnv } from './stopMotion';
+import { StopMotionController, countdown, stopMotionForSelection, stopMotionSettings, type StopMotionEnv } from './stopMotion';
 
 function setup(opts: { grabMs?: number; nullGrab?: boolean; input?: 'camera-in' | 'media-in' | null; params?: Record<string, unknown> } = {}) {
   const toasts: string[] = [];
@@ -69,7 +69,7 @@ function setup(opts: { grabMs?: number; nullGrab?: boolean; input?: 'camera-in' 
   };
   const c = new StopMotionController(ed, io, env);
   const shots = () => params.shots as Shot[];
-  return { c, shots, toasts, grabs, added, sets, locks, rec, io };
+  return { c, shots, toasts, grabs, added, sets, locks, rec, io, ed };
 }
 
 describe('Stop Motion controller: manual shots', () => {
@@ -126,9 +126,11 @@ describe('Stop Motion controller: manual shots', () => {
     expect(stopMotionSettings({})).toEqual({ every: 2, limit: 0, maxSide: 0 });
     expect(stopMotionSettings({ interval: 0.01, stopAfter: 3.7, shotSize: '1080' })).toEqual({ every: 0.2, limit: 3, maxSide: 1080 });
     const nodes = [{ id: 'a', type: 'stop-motion', params: {} }, { id: 'b', type: 'stop-motion', params: {} }, { id: 'c', type: 'blur', params: {} }];
-    expect(stopMotionForViewer(nodes, 'b')?.id).toBe('b');
-    expect(stopMotionForViewer(nodes, 'c')?.id).toBe('a');
-    expect(stopMotionForViewer([], null)).toBeNull();
+    expect(stopMotionForSelection(nodes, ['b'])?.id).toBe('b');
+    expect(stopMotionForSelection(nodes, ['a', 'b'])?.id).toBe('b'); // the primary (last) one
+    expect(stopMotionForSelection(nodes, ['b', 'c'])).toBeNull(); // primary is not a Stop Motion
+    expect(stopMotionForSelection(nodes, [])).toBeNull(); // nothing selected: no viewer buttons
+    expect(stopMotionForSelection([], ['a'])).toBeNull();
   });
 });
 
@@ -208,6 +210,22 @@ describe('Stop Motion controller: Auto shoot', () => {
     const n = t.shots().length;
     await vi.advanceTimersByTimeAsync(5000);
     expect(t.shots().length).toBe(n);
+  });
+
+  it('keeps shooting when the node is deselected, and grabs the source (never the Stop Motion output, so no onion skin is baked in)', async () => {
+    const t = setup({ params: { interval: 1 } });
+    (t.ed.state as unknown as { selection: string[] }).selection = ['sm'];
+    t.c.toggleAuto('sm');
+    await vi.advanceTimersByTimeAsync(1500);
+    const before = t.shots().length;
+    expect(before).toBeGreaterThan(0);
+    (t.ed.state as unknown as { selection: string[] }).selection = []; // the user clicks the empty graph
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(t.c.store.get().auto.running).toBe(true);
+    expect(t.shots().length).toBeGreaterThan(before);
+    const grabbed = (t.io.player.grabNode as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => c[0]);
+    expect(new Set(grabbed)).toEqual(new Set(['cam']));
+    t.c.toggleAuto('sm');
   });
 
   it('gives up after three failed grabs in a row', async () => {

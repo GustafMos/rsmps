@@ -122,8 +122,10 @@ export interface Player {
   /**
    * `activeOutput`: id of the Output node whose frame (aspect ratio / size) non-output views should use, so previews
    * of intermediate nodes match what that output will export. Viewing an Output node always uses its own frame.
+   * `selection`: the selected node ids, last = primary. A Stop Motion node set to "Automatic" shows its live picture only while it is
+   * the primary selected node and the project is paused.
    */
-  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number; activeOutput?: string | null }): void;
+  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number; activeOutput?: string | null; selection?: readonly string[] }): void;
   play(): void;
   pause(): void;
   toggle(): void;

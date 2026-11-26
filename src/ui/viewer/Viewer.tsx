@@ -12,7 +12,7 @@ import { useApp, useEd, usePlayer } from '../store/context';
 import { safetyStore } from '../safety';
 import { getLive } from '../store/live';
 import { recordLabel, recorderForViewer, recorderSettings } from '../store/recorder';
-import { countdown, stopMotionForViewer } from '../store/stopMotion';
+import { countdown, stopMotionForSelection } from '../store/stopMotion';
 import { PaintOverlay } from './PaintOverlay';
 import { PointsOverlay } from './PointsOverlay';
 import { XformGizmo } from './XformGizmo';
@@ -441,14 +441,14 @@ function nameOf(ed: ReturnType<typeof useApp>['ed'], id: string): string {
 }
 
 /**
- * Take picture and Auto shoot at the bottom of the viewer, shown while the project has a Stop Motion node (the one being viewed, else
- * the first): the same actions as in its settings, so a shot can be taken without leaving the picture.
+ * Take picture and Auto shoot at the bottom of the viewer, shown only while a Stop Motion node is selected (the selected one is the
+ * target, whatever the viewer shows): the same actions as in its settings, so a shot can be taken without leaving the picture.
  */
 function ViewerStopMotionButtons() {
   const { io, ed } = useApp();
   const sm = getLive({ io, ed }).stopMotion;
   const ui = useSelector(sm.store, (s) => s);
-  const pick = useEd((s) => stopMotionForViewer(s.graph.nodes, s.viewedNodeId)?.id ?? '');
+  const pick = useEd((s) => stopMotionForSelection(s.graph.nodes, s.selection)?.id ?? '');
   const count = useEd((s) => {
     const n = s.graph.nodes.find((x) => x.id === pick);
     return Array.isArray(n?.params.shots) ? (n!.params.shots as unknown[]).length : 0;
@@ -461,13 +461,14 @@ function ViewerStopMotionButtons() {
   }, [ui.auto.running]);
   if (!pick) return null;
   const auto = ui.auto.running && ui.nodeId === pick;
+  const name = nameOf(ed, pick);
   return (
     <div className="rs-viewer__sm" data-nodrag onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-      <button className="rs-viewer__smbtn rs-viewer__smbtn--take" disabled={ui.busy} aria-label="Take picture" title="Take the picture that is coming in now as the next shot" onClick={() => void sm.take(pick)}>
+      <button className="rs-viewer__smbtn rs-viewer__smbtn--take" disabled={ui.busy} aria-label="Take picture" title={`Take the picture that is coming in now as the next shot of ${name}`} onClick={() => void sm.take(pick)}>
         <span className="rs-viewer__smdot" />
         {ui.busy ? 'Saving' : `Take picture${count ? ` (${count})` : ''}`}
       </button>
-      <button className={`rs-viewer__smbtn${auto ? ' is-on' : ''}`} aria-label={auto ? 'Stop auto shoot' : 'Start auto shoot'} title="Take a picture by itself every few seconds. The page must stay open and on screen." onClick={() => sm.toggleAuto(pick)}>
+      <button className={`rs-viewer__smbtn${auto ? ' is-on' : ''}`} aria-label={auto ? 'Stop auto shoot' : 'Start auto shoot'} title={`Take a picture of ${name} by itself every few seconds. The page must stay open and on screen.`} onClick={() => sm.toggleAuto(pick)}>
         {auto ? `Stop · ${countdown(ui.auto, performance.now())} s · ${ui.auto.count}` : 'Auto'}
       </button>
     </div>

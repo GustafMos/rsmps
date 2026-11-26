@@ -130,10 +130,13 @@ export function stopMotionSettings(params: Readonly<Record<string, unknown>>): {
   };
 }
 
-/** The Stop Motion the viewer's buttons work: the one being viewed, else the first one in the project. */
-export function stopMotionForViewer(nodes: readonly { id: string; type: string; params: Readonly<Record<string, unknown>> }[], viewedId: string | null): { id: string; params: Readonly<Record<string, unknown>> } | null {
-  const all = nodes.filter((n) => n.type === STOP_MOTION_ID);
-  return all.find((n) => n.id === viewedId) ?? all[0] ?? null;
+/**
+ * The Stop Motion the viewer's buttons work: the primary (last) selected node, only if it is a Stop Motion. Nothing selected there,
+ * no buttons. This is the same node that shows its live picture in "Show: Automatic".
+ */
+export function stopMotionForSelection(nodes: readonly { id: string; type: string; params: Readonly<Record<string, unknown>> }[], selection: readonly string[]): { id: string; params: Readonly<Record<string, unknown>> } | null {
+  const primary = selection[selection.length - 1];
+  return nodes.find((n) => n.id === primary && n.type === STOP_MOTION_ID) ?? null;
 }
 
 /** Hard cap so a forgotten time-lapse cannot fill the device. */

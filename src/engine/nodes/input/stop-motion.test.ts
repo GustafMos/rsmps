@@ -16,6 +16,8 @@ import {
   totalSeconds,
   type Shot,
 } from '../../lib/stop-motion';
+import { addNode, connect, createGraph, setParam } from '../../graph';
+import { defineNode } from '../../define';
 import { harness } from '../../testing';
 import type { Host, ImageValue } from '../../types';
 import def from './stop-motion.node';
@@ -143,6 +145,59 @@ describe('stop-motion node', () => {
     expect((await rgb(t, { ...p, show: 'loop' }, 0, { image: live as never })).px.slice(0, 3)).toEqual([255, 0, 0]);
     expect((await rgb(t, { ...p, show: 'auto' }, 0, { image: live as never })).px.slice(0, 3)).toEqual([255, 0, 0]);
     expect((await rgb(t, { ...p, show: 'auto', shootView: '1', onion: false }, 0, { image: live as never })).px.slice(0, 3)).toEqual([255, 255, 255]);
+  });
+
+  it('selected (stamped) shows input plus onion; unselected shows the shot at the current time with no trace of the input', async () => {
+    const t = await setup();
+    const live = t.solid(16, 16, [0, 0, 255, 255]);
+    const p = { shots: [still('red'), still('green')], fps: 10, onion: true, onionStrength: 0.5, show: 'auto' };
+    const at = async (params: Record<string, unknown>, sec: number) => (await rgb(t, params, sec, { image: live as never })).px.slice(0, 3);
+    // paused + not selected: exactly the animation at the current time
+    expect(await at(p, 0)).toEqual([255, 0, 0]);
+    expect(await at(p, 0.1)).toEqual([0, 255, 0]);
+    // paused + selected: the player stamps the node: input with the previous shot faintly over it
+    const sel = await at({ ...p, shootView: '1' }, 0.1);
+    expect(sel[0]).toBe(0);
+    expect(Math.abs(sel[1] - 128)).toBeLessThanOrEqual(2);
+    expect(Math.abs(sel[2] - 128)).toBeLessThanOrEqual(2);
+    // Onion skin off: exactly the input
+    expect(await at({ ...p, shootView: '1', onion: false }, 0.1)).toEqual([0, 0, 255]);
+  });
+
+  it('showing the animation does not evaluate the input (the camera behind it is not read)', async () => {
+    let evaluated = 0;
+    let solid: (() => ImageValue) | null = null;
+    const t = await harness(
+      [
+        defineNode({
+          id: 'fake-live',
+          title: 'f',
+          category: 'input',
+          description: 'd',
+          inputs: {},
+          outputs: { image: { type: 'image' } },
+          params: { liveTick: { type: 'string', default: '' } },
+          render: () => {
+            evaluated++;
+            return { image: solid!() };
+          },
+        }),
+      ],
+      host,
+    );
+    solid = () => t.solid(16, 16, [0, 0, 255, 255]);
+    frames.set('red', t.solid(16, 16, [255, 0, 0, 255]));
+    let g = createGraph();
+    const cam = addNode(g, t.registry, 'fake-live');
+    const sm = addNode(cam.graph, t.registry, 'stop-motion');
+    g = connect(sm.graph, t.registry, { node: cam.node.id, port: 'image' }, { node: sm.node.id, port: 'image' });
+    g = setParam(g, sm.node.id, 'shots', [still('red')]);
+    const run = (graph: typeof g) => t.engine.evaluate({ graph, node: sm.node.id, seconds: 0 });
+    await run(g);
+    expect(evaluated).toBe(0);
+    const shoot = setParam(g, sm.node.id, 'shootView', '1');
+    await run(shoot);
+    expect(evaluated).toBe(1);
   });
 
   it('no shots: the input passes through', async () => {

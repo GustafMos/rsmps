@@ -9,9 +9,11 @@ import type { ImageValue } from '../../types';
  *   Shoot view  the live input with the previous shot(s) faintly over it (onion skin), so the next one can be lined up.
  *   Animation   every shot in order at "Frames per second", looping; a still lasts `hold` frames, a recorded snippet plays at its speed.
  *
- * Which one shows is the "Show" setting. "Automatic" means Shoot view while the project is paused and the animation while it plays;
- * the player tells the node it is paused by stamping the hidden `shootView` param (src/io/live-stamp.ts), so the node stays a pure
- * function of params, inputs and time. An export never stamps it, so an export is always the animation and never needs the input.
+ * Which one shows is the "Show" setting. "Automatic" means Shoot view while this node is selected and the project is paused, and the
+ * animation in every other case (so a paused project shows the current animation frame, as an export would). The player tells the node
+ * by stamping the hidden `shootView` param (src/io/live-stamp.ts), so the node stays a pure function of params, inputs and time.
+ * An export never stamps it, so an export is always the animation. The animation never pulls the (lazy) Picture input, so a camera
+ * behind this node is not read, and can close, while the node is not in Shoot view.
  */
 export default defineNode({
   id: STOP_MOTION_ID,
@@ -37,7 +39,7 @@ export default defineNode({
         { value: 'loop', label: 'The animation' },
       ],
       label: 'Show',
-      hint: 'Automatic shows the live picture with the onion skin while the project is paused and the animation while it plays. Or force one of them.',
+      hint: 'Automatic: the live picture while this node is selected, the animation otherwise. Or force one of them.',
     },
     fps: { type: 'number', default: 12, min: MIN_FPS, max: MAX_FPS, step: 1, unit: 'hz', label: 'Frames per second', hint: 'How fast the animation plays. 6 to 12 looks like classic stop motion, 24 like film.' },
     onion: { type: 'bool', default: true, label: 'Onion skin', hint: 'Show the previous shot faintly over the live picture so you can line things up.' },

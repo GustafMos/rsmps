@@ -24,7 +24,7 @@ import { uploadExternal } from './upload';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
 import { upstream } from '../engine/graph';
-import { feedsFromLive, liveNodeIds, shootNodeIds, stampLive, stampShoot } from './live-stamp';
+import { feedsFromLive, liveNodeIds, shootingIds, shootNodeIds, stampLive, stampShoot, withoutIdleStopMotionInputs } from './live-stamp';
 import type { MemoryState } from './memory';
 import { phoneAudioWired } from './phone-audio';
 import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
@@ -54,12 +54,20 @@ interface FrameSpec {
 }
 
 interface View {
+  /** Selected nodes of the editor (last = primary): decides which Stop Motion shows its live picture while paused. */
+  selection?: readonly string[];
   activeOutput?: string | null;
   graph: GraphDoc;
   node: string | null;
   port?: string;
   item: number;
   itemCount: number;
+}
+
+function sameIds(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  const x = a ?? [];
+  const y = b ?? [];
+  return x.length === y.length && x.every((id, i) => id === y[i]);
 }
 
 interface Job {
@@ -158,7 +166,6 @@ export class PlayerImpl implements Player {
   private micNodes = 0;
   private clearPending = false;
   private liveIds = new Set<string>();
-  private shootGraph: GraphDoc | null = null;
   private liveGraph: GraphDoc | null = null;
   private hasLive = false;
   private liveTick = 0;
@@ -228,18 +235,19 @@ export class PlayerImpl implements Player {
     this.kick();
   }
 
-  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number; activeOutput?: string | null }): void {
+  setView(view: { graph: GraphDoc; node: string | null; port?: string; item: number; itemCount: number; activeOutput?: string | null; selection?: readonly string[] }): void {
     // Safe mode: open the app with ?safe in the address to load the project WITHOUT rendering anything,
     // so a setting that makes rendering hang can be fixed. Remove ?safe and reload to render again.
     if (SAFE_MODE) view = { ...view, node: null };
     const prev = this.view;
     const changed =
-      !prev || prev.graph !== view.graph || prev.node !== view.node || prev.port !== view.port || prev.item !== view.item || prev.itemCount !== view.itemCount || (prev.activeOutput ?? null) !== (view.activeOutput ?? null);
+      !prev || prev.graph !== view.graph || prev.node !== view.node || prev.port !== view.port || prev.item !== view.item || prev.itemCount !== view.itemCount || (prev.activeOutput ?? null) !== (view.activeOutput ?? null) || !sameIds(prev.selection, view.selection);
     if (!prev || prev.node !== view.node || prev.port !== view.port || (prev.activeOutput ?? null) !== (view.activeOutput ?? null)) this.fullReal = null;
-    this.view = { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, activeOutput: view.activeOutput ?? null };
+    this.view = { graph: view.graph, node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, activeOutput: view.activeOutput ?? null, selection: view.selection ?? [] };
     if (!changed) return;
     this.keyDirty = true;
     this.updateLive(view);
+    if (prev && !sameIds(prev.selection, view.selection)) this.dirty = true; // a Stop Motion may switch between its picture and its animation
     const p = view.graph.project;
     const total = totalFramesOf(p);
     const timeChanged = !prev || prev.graph.project.fps !== p.fps || prev.graph.project.duration !== p.duration || prev.graph.project.loop !== p.loop;
@@ -268,6 +276,7 @@ export class PlayerImpl implements Player {
     this.signalEvent('play');
     if (this.audioNeeded && !this.deps.audio.running) this.deps.audio.start().then(() => this.markChanged(), () => undefined);
     this.playing = true;
+    this.updateLive(this.view);
     this.fullReq = null;
     this.ctl.warmup();
     this.anchorClock();
@@ -281,6 +290,7 @@ export class PlayerImpl implements Player {
   pause(): void {
     if (!this.playing) return;
     this.playing = false;
+    if (this.view) this.updateLive(this.view);
     if (this.hasShoot) this.dirty = true;
     cancelAnimationFrame(this.raf);
     this.syncTransport();
@@ -683,11 +693,11 @@ export class PlayerImpl implements Player {
       this.liveGraph = view.graph;
       this.liveIds = liveNodeIds(view.graph, this.deps.registry);
     }
-    this.hasLive = feedsFromLive(view.graph, view.node, this.liveIds);
-    if (this.shootGraph !== view.graph) {
-      this.shootGraph = view.graph;
-      this.shootIds = shootNodeIds(view.graph);
-    }
+    // Stop Motion: only the selected one shows its live picture (while paused); the others show their animation and never read
+    // their input, so a camera behind them is not live (and can close).
+    this.shootIds = shootNodeIds(view.graph, view.selection ?? [], view.node);
+    const shooting = shootingIds(view.graph, this.shootIds, !this.playing);
+    this.hasLive = feedsFromLive(withoutIdleStopMotionInputs(view.graph, shooting), view.node, this.liveIds);
     this.hasShoot = this.shootIds.size > 0 && !!view.node && [...upstream(view.graph, view.node)].some((id) => this.shootIds.has(id));
     const fps = view.graph.project.fps;
     if (this.liveTimer && (!this.hasLive || this.liveFps !== fps)) {
@@ -960,7 +970,7 @@ export class PlayerImpl implements Player {
     this.settledKey = job.key;
     this.settledFrame = job.frame;
     this.settledProxy = job.proxy;
-    const live = this.liveSignals() || this.hasLive || this.hasShoot;
+    const live = this.liveSignals() || this.hasLive || (this.hasShoot && !this.playing);
     const cached = live || job.final ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
       const img = await this.restore(cached.image);
