@@ -143,7 +143,7 @@ export class WorldArVideoController {
       const report = files.find((f) => /^errors.*\.txt$/i.test(f.name));
       if (!video) throw new Error(report ? (await report.blob.text()).trim().split('\n')[0].replace(`${AR_VIDEO_OUTPUT_LABEL}: `, '') : 'no video was made');
       const ext = /\.([a-z0-9]+)$/i.exec(video.name)?.[1].toLowerCase() ?? 'mp4';
-      const file = new File([video.blob], takeFileName('AR', date, ext), { type: video.blob.type });
+      const file = new File([video.blob], takeFileName('AR video', date, ext), { type: video.blob.type });
       this.last = file;
       this.store.set((s) => ({ ...s, phase: 'saving', lastName: file.name }));
       const download = o.download !== false;

@@ -308,7 +308,11 @@ export class WorldArController implements WorldArApi {
         },
       });
 
-      const stopAndSave = async (): Promise<void> => {
+      // one save at a time: closing the view while a save from Stop is still running must wait for THAT save, or the view reports
+      // itself closed before the take and its clip are stored (and the finished video would never start)
+      let saving$: Promise<void> | null = null;
+      const stopAndSave = (): Promise<void> => (saving$ ??= save().finally(() => (saving$ = null)));
+      const save = async (): Promise<void> => {
         const rec = loop.stopRecording();
         if (!rec) return;
         saving = true;
@@ -337,10 +341,10 @@ export class WorldArController implements WorldArApi {
 
       let resolveClosed: (v: { error: string | null }) => void = () => undefined;
       const closed = new Promise<{ error: string | null }>((r) => (resolveClosed = r));
-      let finished = false;
-      const ended = async (error: string | null): Promise<void> => {
-        if (finished) return;
-        finished = true;
+      let endedOnce: Promise<void> | null = null;
+      // whoever asks second (Exit after the browser's own end event, say) waits for the same clean-up
+      const ended = (error: string | null): Promise<void> => (endedOnce ??= finishEnded(error));
+      const finishEnded = async (error: string | null): Promise<void> => {
         // the session is gone (Exit, the Back button, or the system took it): keep what was being recorded
         await stopAndSave().catch(() => undefined);
         source.dispose();
@@ -366,7 +370,7 @@ export class WorldArController implements WorldArApi {
           if (features.cameraAccess && made.painter.camera) {
             recorder = env.makeRecorder();
             try {
-              recorder?.start(() => null, { fps, label: 'AR', manual: true, maxSide: 1280 });
+              recorder?.start(() => null, { fps, label: 'AR camera clip', manual: true, maxSide: 1280 });
             } catch {
               recorder = null; // no video encoder here: the take is motion only
             }

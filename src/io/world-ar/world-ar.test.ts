@@ -654,7 +654,9 @@ function fakeEnv(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
       pushes.push(p);
       return pushes.length - 1;
     },
+    delay: 0,
     async stop() {
+      if (this.delay) await new Promise((r) => setTimeout(r, this.delay));
       this.state = 'idle';
       return { blob: new Blob(['x'], { type: 'video/mp4' }), name: 'AR take.mp4', frames: pushes.length, seconds: 1, width: 2, height: 2, hasAudio: false };
     },
@@ -814,9 +816,31 @@ describe('opening the AR view (fake browser)', () => {
     expect(t.takes[0].take!.clip).toBe(true);
     expect(t.takes[0].take!.frames).toBe(6);
     expect(t.takes[0].clip).toBeTruthy();
-    expect(t.added[0].name).toBe('AR take.mp4');
+    expect(t.added[0].name).toBe('AR take.mp4'); // (the fake recorder's name)
     expect(t.holds()).toBe(0);
     expect(t.c.active).toBeNull();
+  });
+
+  it('Stop and then straight away Back: the view only reports closed once the take and its clip are stored', async () => {
+    const xr = new FakeXrSystem();
+    const t = controller(xr);
+    const h = await t.open();
+    xr.session!.hit = FLOOR;
+    xr.session!.camera = { width: 1080, height: 1920 };
+    t.f.painters[0].cameraPicture = { canvas: true };
+    t.frames(2);
+    h.place();
+    t.frames(1);
+    h.toggleRecord();
+    t.frames(6);
+    t.f.recorder.delay = 20; // encoding the clip takes a while
+    h.toggleRecord(); // Stop: the clip is being saved
+    xr.session!.systemEnd(); // and the Back button right away
+    let takesWhenClosed = -1;
+    await h.closed.then(() => (takesWhenClosed = t.takes.length));
+    expect(takesWhenClosed).toBe(1);
+    expect(t.takes[0].clip).toBeTruthy();
+    expect(t.added.length).toBe(1);
   });
 
   it('Record then Stop without camera access: a motion-only take, no clip, the view stays open', async () => {

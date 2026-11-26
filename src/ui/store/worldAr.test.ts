@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { openWorldAr, takeMessage } from './worldAr';
+import { openWorldAr, saveVideoAfter, takeMessage } from './worldAr';
+import { getLive } from './live';
+
+vi.mock('./live', () => ({ getLive: vi.fn() }));
 
 /** A document with just enough in it for the overlay's buttons (the test runs without a browser). */
 function stubDocument() {
@@ -76,5 +79,40 @@ describe('Start AR and the camera', () => {
     stubDocument();
     openWorldAr(a.ctx, 'n', 'n');
     expect(open).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the finished video after the AR view closed', () => {
+  const setup = (busy: (string | null)[], saveVideo = true) => {
+    const toast = vi.fn();
+    const start = vi.fn(async () => true);
+    const queue = [...busy];
+    vi.mocked(getLive).mockReturnValue({ worldArVideo: { busy: () => (queue.length ? queue.shift()! : null), start } } as never);
+    const ctx = { io: {}, ed: { toast, state: { graph: { nodes: [{ id: 'n', x: 0, y: 0, params: { saveVideo } }] } } } } as never;
+    return { toast, start, ctx };
+  };
+  it('starts once everything is free, and says it is making the video', async () => {
+    const t = setup(['Close the AR view first.', 'An export is already running.']);
+    await saveVideoAfter(t.ctx, 'n', 'n', { tookTake: true, recorded: true }, 0);
+    expect(t.start).toHaveBeenCalledWith('n');
+    expect(t.toast).toHaveBeenCalledWith(expect.stringContaining('Making the finished video'), 'info');
+  });
+  it('a take without a camera clip says plainly that no video was made', async () => {
+    const t = setup([]);
+    await saveVideoAfter(t.ctx, 'n', 'n', { tookTake: true, recorded: false }, 0);
+    expect(t.start).not.toHaveBeenCalled();
+    expect(t.toast).toHaveBeenCalledWith(expect.stringContaining('No finished video was made'), 'info');
+  });
+  it('Save video off, or nothing recorded: nothing happens; a failure to start is shown', async () => {
+    const off = setup([], false);
+    await saveVideoAfter(off.ctx, 'n', 'n', { tookTake: true, recorded: true }, 0);
+    expect(off.start).not.toHaveBeenCalled();
+    const none = setup([]);
+    await saveVideoAfter(none.ctx, 'n', 'n', { tookTake: false, recorded: false }, 0);
+    expect(none.toast).not.toHaveBeenCalled();
+    const bad = setup([]);
+    bad.start.mockRejectedValue(new Error('boom'));
+    await saveVideoAfter(bad.ctx, 'n', 'n', { tookTake: true, recorded: true }, 0);
+    expect(bad.toast).toHaveBeenCalledWith(expect.stringContaining('could not be started: boom'), 'error');
   });
 });

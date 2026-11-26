@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.35.1] - 2026-11-26
+
+### Fixed
+- **World AR: the finished video is now made after recording.** Leaving the AR view right after pressing Stop could report the view as closed before the recording had been stored, so the automatic "Save video" never started and nothing was said about it. Closing now waits for the recording to be stored; a message "Making the finished video now…" appears when the render starts, and a plain message appears whenever it cannot start. The finished file is named "AR video take …" and the untouched camera clip "AR camera clip take …" (kept in Media only), so they cannot be mixed up. The Save as video button is shown whenever the node holds a recording.
+
 ## [0.35.0] - 2026-11-26
 
 ### Added

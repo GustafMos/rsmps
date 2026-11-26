@@ -74,7 +74,7 @@ describe('Save as video for an AR take', () => {
     expect(req.take!.at(15).seconds).toBeCloseTo(0.5, 6);
     expect(req.outputs).toHaveLength(1);
     expect(req.graph.project).toMatchObject({ width: 720, height: 1280, fps: 30 });
-    expect(t.log).toEqual(['pause', 'blocked: yes', expect.stringMatching(/^file AR take .*\.mp4$/), 'play']);
+    expect(t.log).toEqual(['pause', 'blocked: yes', expect.stringMatching(/^file AR video take .*\.mp4$/), 'play']);
     expect(t.added).toHaveLength(1);
     expect(t.toasts.at(-1)).toMatch(/Saved to your downloads and to Media.*The AR recording and its camera clip are unchanged/);
     expect(t.ctl.store.get()).toMatchObject({ phase: 'idle', nodeId: null, progress: 0 });
@@ -82,7 +82,7 @@ describe('Save as video for an AR take', () => {
     expect((t.ed as unknown as { exportBlocked: string | null }).exportBlocked).toBeNull();
     expect(JSON.stringify(t.ed.state.graph)).toBe(before); // the take and the nodes are as they were
     t.ctl.saveLast();
-    expect(t.log.at(-1)).toMatch(/^file AR take/);
+    expect(t.log.at(-1)).toMatch(/^file AR video take/);
   });
 
   it('shows progress with the time left while rendering', async () => {
