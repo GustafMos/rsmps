@@ -49,6 +49,19 @@ export default defineNode({
       label: 'Lift',
       hint: '1 stands a default 3D Object on the surface. 0 puts its middle on the surface (half of it is below).',
     },
+    cardMode: {
+      type: 'enum',
+      default: 'upright',
+      label: 'Flat pictures',
+      hint: 'How a picture that does not look through this camera (any ordinary node) stands in the room when you open the AR view on it.',
+      group: 'AR view',
+      options: [
+        { value: 'upright', label: 'Standing' },
+        { value: 'flat', label: 'Lying on the surface' },
+        { value: 'billboard', label: 'Always facing you' },
+      ],
+    },
+    cardWidth: { type: 'number', default: 0.5, min: 0.02, max: 20, step: 0.01, label: 'Picture width', hint: 'Width of a flat picture in the room, in meters.', group: 'AR view' },
     startAt: {
       type: 'number',
       default: 0,

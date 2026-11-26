@@ -670,6 +670,7 @@ function fakeEnv(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
     },
     makeTransform: fakeTransform,
     makeGpuCanvas: () => null,
+    canvasCopyWorks: () => false,
     makeRecorder: () => (o.recorder === false ? null : (recorder as unknown as LiveRecorder)),
     now: () => clock,
   };

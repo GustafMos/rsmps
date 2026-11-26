@@ -31,6 +31,8 @@ export interface FakeSessionOptions {
   lens?: Lens;
   width?: number;
   height?: number;
+  /** What the layer hands out as its framebuffer (default: a marker object; the desktop self-check passes a real WebGL one). */
+  framebuffer?: unknown;
 }
 
 export class FakeXrSession implements XrSessionLike {
@@ -67,7 +69,7 @@ export class FakeXrSession implements XrSessionLike {
     this.lens = o.lens ?? [1.9, 1.07, 0, 0];
     const width = o.width ?? 1080;
     const height = o.height ?? 1920;
-    this.layer = { framebuffer: { fake: 'xr-framebuffer' }, framebufferWidth: width, framebufferHeight: height, getViewport: () => ({ x: 0, y: 0, width, height }) };
+    this.layer = { framebuffer: 'framebuffer' in o ? o.framebuffer : { fake: 'xr-framebuffer' }, framebufferWidth: width, framebufferHeight: height, getViewport: () => ({ x: 0, y: 0, width, height }) };
     if (this.granted.includes('dom-overlay')) this.domOverlayState = { type: 'screen' };
     if (!this.granted.includes('hit-test')) this.requestHitTestSource = undefined;
   }
@@ -183,6 +185,8 @@ export class FakeXrSystem implements XrSystemLike {
   session: FakeXrSession | null = null;
   lastInit: { requiredFeatures?: string[]; optionalFeatures?: string[]; domOverlay?: { root: unknown } } | null = null;
   asked = 0;
+  /** Called with every session made (to set where the phone is before its first frame). */
+  onSession: ((s: FakeXrSession) => void) | null = null;
   constructor(private options: FakeSessionOptions = {}) {}
   isSessionSupported(mode: string): Promise<boolean> {
     this.asked++;
@@ -196,6 +200,7 @@ export class FakeXrSystem implements XrSystemLike {
     const wanted = init?.optionalFeatures ?? [];
     const has = this.options.features ?? ['hit-test', 'anchors', 'dom-overlay', 'camera-access'];
     this.session = new FakeXrSession({ ...this.options, features: has.filter((f) => wanted.includes(f) && (f !== 'dom-overlay' || !!init?.domOverlay)) });
+    this.onSession?.(this.session);
     return Promise.resolve(this.session);
   }
 }

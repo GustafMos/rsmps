@@ -61,6 +61,8 @@ export interface WorldArViewState extends ArLoopState {
   route: CopyRoute;
   renderMs: number;
   copyMs: number;
+  /** Pixel size of the newest picture of the object, or null before the first. */
+  picture: { width: number; height: number } | null;
   /** Saving a recording. */
   saving: boolean;
 }
@@ -100,10 +102,16 @@ export interface WorldArDeps {
 export interface WorldArEnv {
   xr: XrSystemLike | null;
   /** A WebGL context the session can draw with, and what paints with it. */
-  makePainter(session: XrSessionLike, features: GrantedFeatures): Promise<{ painter: ArPainter & PictureTarget; layer: XrLayerLike; dispose(): void }>;
+  makePainter(session: XrSessionLike, features: GrantedFeatures, onLost?: () => void): Promise<{ painter: ArPainter & PictureTarget; layer: XrLayerLike; dispose(): void }>;
   makeTransform?: (p: Vec3, q: Quat) => unknown;
   /** A WebGPU canvas for the 'canvas' copy route, or null where there is none. */
   makeGpuCanvas(gpu: Gpu): { el: HTMLCanvasElement | OffscreenCanvas; ctx: GPUCanvasContext } | null;
+  /**
+   * Does copying that WebGPU canvas into a WebGL texture deliver the picture on this device? Tried on a throwaway WebGL context,
+   * never on the session's own: where the two renderers do not share memory the attempt can cost the context (seen in headless
+   * desktop Chromium), and losing the session's context would end the AR view.
+   */
+  canvasCopyWorks(gpu: Gpu, canvas: { el: HTMLCanvasElement | OffscreenCanvas; ctx: GPUCanvasContext }): boolean;
   makeRecorder(): LiveRecorder | null;
   now(): number;
 }
@@ -114,11 +122,17 @@ type XrGlobals = {
   XRRigidTransform?: new (p: { x: number; y: number; z: number; w: number }, q: { x: number; y: number; z: number; w: number }) => unknown;
 };
 
+/**
+ * Set when the session's own WebGL context was lost while pictures went through the canvas route: the next AR view on this page
+ * reads pixels back instead, whatever the probe says.
+ */
+let canvasCopyBroken = false;
+
 export function browserWorldArEnv(): WorldArEnv {
   const g = (typeof window === 'undefined' ? {} : window) as unknown as XrGlobals;
   return {
     xr: browserSupportEnv().xr,
-    async makePainter(session, features) {
+    async makePainter(session, features, onLost) {
       const canvas = document.createElement('canvas');
       const gl = createXrGl(canvas);
       if (!gl || !g.XRWebGLLayer) throw new Error('This browser could not make a WebGL view for AR.');
@@ -127,6 +141,8 @@ export function browserWorldArEnv(): WorldArEnv {
       const layer = new g.XRWebGLLayer(session, gl);
       await session.updateRenderState({ baseLayer: layer });
       const painter = new GlPainter(gl);
+      // a lost context cannot be drawn into again: the view closes with the reason instead of showing a frozen or empty picture
+      canvas.addEventListener('webglcontextlost', () => onLost?.());
       if (features.cameraAccess && g.XRWebGLBinding) {
         try {
           painter.binding = new g.XRWebGLBinding(session, gl);
@@ -146,6 +162,21 @@ export function browserWorldArEnv(): WorldArEnv {
         return { el, ctx };
       } catch {
         return null;
+      }
+    },
+    canvasCopyWorks(gpu, canvas) {
+      if (canvasCopyBroken) return false;
+      let painter: GlPainter | null = null;
+      try {
+        const gl = document.createElement('canvas').getContext('webgl2', { alpha: true, premultipliedAlpha: true }) ?? null;
+        if (!gl) return false;
+        painter = new GlPainter(gl);
+        const ok = probeCanvasCopy(gpu, canvas, painter) && !gl.isContextLost();
+        painter.dispose();
+        gl.getExtension('WEBGL_lose_context')?.loseContext(); // give the throwaway context back right away
+        return ok;
+      } catch {
+        return false;
       }
     },
     makeRecorder: () => (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined' ? null : new LiveRecorder()),
@@ -169,6 +200,11 @@ export class WorldArController implements WorldArApi {
     return checkWorldAr({ ...browserSupportEnv(), xr: this.env.xr });
   }
 
+  /** Developer check for a browser without AR (see self-check.ts). Loaded only when called. */
+  async selfCheck(graph: GraphDoc, node: string): Promise<unknown> {
+    return (await import('./self-check')).runSelfCheck(this.d, graph, node);
+  }
+
   async open(o: WorldArOpen): Promise<WorldArHandle> {
     if (this.current) throw new Error('The AR view is already open.');
     const env = this.env;
@@ -185,7 +221,8 @@ export class WorldArController implements WorldArApi {
     let disposePainter: (() => void) | null = null;
     try {
       const features = featuresOf(session, asked);
-      const made = await env.makePainter(session, features);
+      let lost: () => void = () => undefined;
+      const made = await env.makePainter(session, features, () => lost());
       disposePainter = made.dispose;
       const referenceSpace = await session.requestReferenceSpace('local');
       let hitTestSource: unknown = null;
@@ -199,7 +236,7 @@ export class WorldArController implements WorldArApi {
       const graph0 = o.graph();
       const layerMode = fedByWorldAr(graph0, o.node);
       const gpuCanvas = env.makeGpuCanvas(this.d.gpu);
-      const route: CopyRoute = gpuCanvas && probeCanvasCopy(this.d.gpu, gpuCanvas, made.painter) ? 'canvas' : 'pixels';
+      const route: CopyRoute = gpuCanvas && env.canvasCopyWorks(this.d.gpu, gpuCanvas) ? 'canvas' : 'pixels';
       const fps = graph0.project.fps;
       const startedAt = env.now();
       const source = new EnginePictureSource({
@@ -229,6 +266,7 @@ export class WorldArController implements WorldArApi {
         route: source.route,
         renderMs: Math.round(source.timing.render),
         copyMs: Math.round(source.timing.copy),
+        picture: source.latest() ? { width: source.latest()!.width, height: source.latest()!.height } : null,
         saving,
       });
       const emit = () => {
@@ -340,6 +378,12 @@ export class WorldArController implements WorldArApi {
         },
         closed,
         state: () => view(lastLoop ?? loop.state()),
+      };
+      lost = () => {
+        if (source.route === 'canvas') canvasCopyBroken = true;
+        loop.stop();
+        void session.end().catch(() => undefined);
+        void ended('The AR view lost its drawing surface and had to close. Open it again: it will use a slower but safer way to show the picture.');
       };
       release = this.d.holdPlayer();
       this.current = handle;
