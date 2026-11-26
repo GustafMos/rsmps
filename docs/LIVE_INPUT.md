@@ -24,6 +24,11 @@ so, with its length). Wire it into the graph with a Media In node; the graph is 
   tab visible while recording.
 - Names look like `Webcam take 2026-11-17 18.42.05.mp4`, `Phone take ...`, `Stream take ...`.
 
+To record a live picture WITH effects, use a **Recorder** node (docs/RECIPES.md, "Record a live take"). Its "Smooth, effects
+after" quality, the default on a phone or tablet, records the raw live pictures the same way as the button above (clips named
+`Webcam raw take ...`, with the sound) and renders the effects onto them when you stop, so the clip keeps the full frame rate
+even when the preview stutters.
+
 ## Webcam
 
 Pick a camera in the node (empty = the default camera). The browser asks for permission once; camera names
@@ -292,6 +297,7 @@ The orientation it uses stays true to gravity (the horizon is level wherever you
 - **Distance** is how far in front of you the middle of the 3D scene is; **Eye height** raises the camera so the scene sits lower. **Smoothing** calms the camera; too much makes the object trail.
 - Same sources and takes as Phone Motion: *Sensors from* (this device or a linked phone), **Record motion**, *Source: Recorded take*, take smoothing. An export needs a recorded take, and the
   camera picture under it must be recorded too (the Webcam's Record button, or the Recorder node): record both in the same go if they have to match.
+  A Recorder set to "Smooth, effects after" does exactly that by itself: it records the camera and the motion together and renders the clip from both.
 - Recipe: `docs/RECIPES.md`, "A 3D object that stays put in the room".
 
 ### Other sensors that could be used

@@ -3,7 +3,7 @@ import { cameraBasis, PROJECTION_ID, simpleCamera } from '../../lib/gen-camera';
 import { RAY_WGSL } from '../../lib/gen-3d';
 import { materialKey, materialTextures, materialUniforms, materialWgsl } from '../../lib/gen-material';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformUniforms, deformWgsl, deformStepScale, deformAny, type DeformP } from '../../lib/gen-deform';
-import { rgba, rotationZYX } from '../../lib/gen-common';
+import { SPIN_AROUND_PARAM, spunRotation, rgba, rotationZYX } from '../../lib/gen-common';
 import { modelFilesSummary, renderModel } from '../../lib/model-render';
 import type { CameraValue } from '../../types';
 
@@ -74,10 +74,10 @@ export default defineNode({
     backFaces: { type: 'bool', default: false, label: 'Show back faces', group: 'Custom model', hint: 'Draw both sides of every triangle, not only the ones the file marks double-sided.', visibleIf: (p) => p.shape === 'custom' },
     wireframe: { type: 'bool', default: false, label: 'Wireframe overlay', group: 'Custom model', hint: 'Limited to 300,000 triangles.', visibleIf: (p) => p.shape === 'custom' },
     wireColor: { type: 'color', default: [0, 0, 0, 0.6], label: 'Wireframe color', group: 'Custom model', visibleIf: (p) => p.shape === 'custom' && p.wireframe === true },
-    posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
-    posY: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Y', hint: 'Up is positive.', group: 'Object' },
-    posZ: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Z', hint: 'Away from the camera is positive.', group: 'Object' },
-    objectScale: { type: 'number', default: 1, min: 0.01, max: 20, step: 0.01, label: 'Object scale', group: 'Object' },
+    posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
+    posY: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move Y', hint: 'Up is positive.', group: 'Object' },
+    posZ: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move Z', hint: 'Away from the camera is positive.', group: 'Object' },
+    objectScale: { type: 'number', default: 1, min: 0.01, max: 20, step: 0.01, scrubSpan: 4, label: 'Object scale', group: 'Object' },
     x: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Frame X', group: 'Built-in camera', hint: 'Ignored when a Camera is wired in.' },
     y: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Frame Y', hint: 'Position in the frame (built-in camera only).', group: 'Built-in camera' },
     scale: { type: 'number', default: 0.6, min: 0.02, max: 3, step: 0.005, unit: 'norm', label: 'Frame size', group: 'Built-in camera', hint: 'Fraction of the frame’s shorter side. Ignored when a Camera is wired in.' },
@@ -92,12 +92,13 @@ export default defineNode({
       ],
     },
     fov: { type: 'number', default: 30, min: 5, max: 90, step: 1, unit: 'deg', label: 'Perspective', group: 'Built-in camera', hint: 'Higher = camera closer, stronger perspective.', visibleIf: (p) => p.cameraType === 'perspective' },
-    rotX: { type: 'number', default: 25, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate X', hint: 'Tilt.', group: 'Rotation' },
-    rotY: { type: 'number', default: 35, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Y', hint: 'Turn.', group: 'Rotation' },
-    rotZ: { type: 'number', default: 0, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Z', hint: 'Roll.', group: 'Rotation' },
+    rotX: { type: 'number', default: 25, min: -360, max: 360, step: 1, scrubSpan: 360, unit: 'deg', label: 'Rotate X', hint: 'Tilt.', group: 'Rotation' },
+    rotY: { type: 'number', default: 35, min: -360, max: 360, step: 1, scrubSpan: 360, unit: 'deg', label: 'Rotate Y', hint: 'Turn.', group: 'Rotation' },
+    rotZ: { type: 'number', default: 0, min: -360, max: 360, step: 1, scrubSpan: 360, unit: 'deg', label: 'Rotate Z', hint: 'Roll.', group: 'Rotation' },
     spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
+    spinAround: SPIN_AROUND_PARAM,
     bevel: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Edge bevel', group: 'Object', hint: '0 = perfectly sharp edges and corners. About 0.07 gives the slightly soft edge older versions had; 1 rounds the shape right off. Applies to cube, cylinder, cone, pyramid and octahedron.', visibleIf: (p) => p.shape !== 'custom' },
     lightAzimuth: { type: 'number', default: -35, min: -180, max: 180, step: 1, unit: 'deg', label: 'Light azimuth', hint: 'Left to right.', group: 'Lighting' },
     lightElevation: { type: 'number', default: 40, min: -90, max: 90, step: 1, unit: 'deg', label: 'Light height', group: 'Lighting' },
@@ -124,7 +125,7 @@ export default defineNode({
     }
     const spinning = p.spinX !== 0 || p.spinY !== 0 || p.spinZ !== 0;
     const phase = spinning || deformAnimated(dp) ? ctx.time.phase : 0;
-    const R = rotationZYX(p.rotX + 360 * p.spinX * phase, p.rotY + 360 * p.spinY * phase, p.rotZ + 360 * p.spinZ * phase);
+    const R = spunRotation(p, phase);
     const az = (p.lightAzimuth * Math.PI) / 180;
     const el = (p.lightElevation * Math.PI) / 180;
     const light = [Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)];

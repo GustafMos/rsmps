@@ -67,6 +67,8 @@
 .rs-insp__pin { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; background: transparent; border: 0; color: var(--text-faint); opacity: 0.4; border-radius: var(--r); flex: none; }
 .rs-insp__row:hover .rs-insp__pin, .rs-insp__pin.is-on { opacity: 1; }
 .rs-insp__pin.is-on { color: var(--yellow); }
+.rs-insp__reset { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; background: transparent; border: 0; color: var(--text-faint); border-radius: var(--r); flex: none; cursor: pointer; }
+.rs-insp__reset:hover { color: var(--text); background: var(--bg-3); }
 .rs-insp__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sc, var(--sock-unknown)); flex: none; }
 .rs-insp__dot.rs-sock--image { --sc: var(--sock-image); } .rs-insp__dot.rs-sock--number { --sc: var(--sock-number); } .rs-insp__dot.rs-sock--color { --sc: var(--sock-color); } .rs-insp__dot.rs-sock--palette { --sc: var(--sock-palette); } .rs-insp__dot.rs-sock--vector { --sc: var(--sock-vector); }
 /* Bundled param socket: one slim row above its X / Y / Z settings. Drop a vector wire on it to drive them all. */

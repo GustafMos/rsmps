@@ -1,5 +1,5 @@
 import { defineNode } from '../../define';
-import { rgba, rotationZYX } from '../../lib/gen-common';
+import { spunRotation, rgba, rotationZYX } from '../../lib/gen-common';
 import { BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, isSpinning, LIGHT_PARAMS, lightVector, marchUniforms, QUALITY_PARAM, resolveCamera, run3d, SHADE_PARAMS, XFORM_PARAMS, type LightP, type XformP } from '../../lib/gen-3d';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformKey, deformStepScale, deformUniforms, deformWgsl, type DeformP } from '../../lib/gen-deform';
 import { gridFor, occupancy, profileMask, SDF2D_WGSL, signedField } from '../../lib/gen-sdf2d';
@@ -134,7 +134,7 @@ export default defineNode({
 
     // --- transform / camera / light ----------------------------------------------------------------
     const phase = isSpinning(p) || deformAnimated(p) ? ctx.time.phase : 0;
-    const R = rotationZYX(p.rotX + 360 * p.spinX * phase, p.rotY + 360 * p.spinY * phase, p.rotZ + 360 * p.spinZ * phase);
+    const R = spunRotation(p, phase);
     const cam = resolveCamera(p, ctx.in.camera, size.width, size.height);
     const long = Math.max(img.width, img.height);
     const hx = img.width / long;

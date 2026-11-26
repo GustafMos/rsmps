@@ -592,6 +592,17 @@ export class Editor {
     this.rememberPending(nodeId, key, value);
     this.commitLevel(setParam(this.level, nodeId, key, value), `p:${nodeId}:${key}`);
   }
+  /**
+   * Several params of one node in ONE edit: one undo step, one render (the Reset buttons, the on-picture handles for 3D objects,
+   * which move X, Y and Z together). `key` coalesces like any edit; inside beginHold / endHold a whole drag is one step.
+   */
+  setParams(nodeId: string, patch: Record<string, unknown>, key?: string): void {
+    const keys = Object.keys(patch);
+    if (!keys.length) return;
+    const g = this.level;
+    if (!g.nodes.some((n) => n.id === nodeId)) return;
+    this.commitLevel({ ...g, nodes: g.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, ...patch } } : n)) }, key ?? `ps:${nodeId}:${keys.join(',')}`);
+  }
   /** Remember the in-flight edit so a reload after a render that never finished can offer to revert it. */
   private rememberPending(nodeId: string, key: string, value: unknown): void {
     try {
@@ -1761,6 +1772,11 @@ export class Editor {
   /* -------------------------------- export --------------------------------- */
 
   private exportAbort: AbortController | null = null;
+  /**
+   * Set while something else renders through the exporter (the Recorder rendering a take): an Export started then would render at
+   * the same time on the same GPU, so it is refused with this message.
+   */
+  exportBlocked: string | null = null;
   private supportShown = new Set<string>();
 
   /** Each trigger shows its prompt at most once EVER (flag set when shown), never in safe mode or over another prompt. */
@@ -1808,6 +1824,10 @@ export class Editor {
   async runExportGraph(graph: GraphDoc, outputs: string[], items: 'current' | 'all', item: number, zip: boolean, audioFormat?: 'wav' | 'm4a' | 'webm'): Promise<boolean> {
     if (this.exportAbort) {
       this.toast('An export is already running.', 'info');
+      return false;
+    }
+    if (this.exportBlocked) {
+      this.toast(this.exportBlocked, 'info');
       return false;
     }
     const s = { graph, item };

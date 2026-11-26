@@ -406,7 +406,7 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
   } else {
     switch (p.type) {
       case 'number':
-        control = <NumberField label={label} value={value as number} min={p.min} max={p.max} softMax={p.softMax} askKey={`${node.id}:${row.key}`} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} title={p.hint} />;
+        control = <NumberField label={label} value={value as number} min={p.min} max={p.max} softMax={p.softMax} scrubSpan={p.scrubSpan} askKey={`${node.id}:${row.key}`} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} title={p.hint} />;
         break;
       case 'bool':
         control = <CheckField label={label} value={!!value} onChange={set} title={p.hint} />;
