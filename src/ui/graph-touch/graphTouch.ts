@@ -111,7 +111,7 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
     ed.connect(from, to, slot);
   };
   const dropMergeToast = () => {
-    for (const t of ed.state.toasts) if (t.text.startsWith('Click another output to merge')) ed.dismissToast(t.id);
+    for (const t of ed.state.toasts) if (t.text.startsWith('Click another output to stack')) ed.dismissToast(t.id);
   };
 
   /* ------------------------------ edge auto-pan ------------------------------ */

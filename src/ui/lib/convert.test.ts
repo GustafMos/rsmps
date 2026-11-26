@@ -76,6 +76,15 @@ describe('convertNode', () => {
     expect(back.dropped).toEqual({ layers: 0, other: 0 });
   });
 
+  it('Stack of 2 <-> Merge: bottom is the background, top is the foreground', () => {
+    const b = build('stack', ['images', 'images']);
+    const r = convertNode(b.g, registry, b.id, 'merge');
+    expect(into(r.graph, b.id, 'background')).toEqual([b.sources[0]]);
+    expect(into(r.graph, b.id, 'foreground')).toEqual([b.sources[1]]);
+    const back = convertNode(r.graph, registry, b.id, 'stack');
+    expect(into(back.graph, b.id, 'images')).toEqual(b.sources);
+  });
+
   it('Mix <-> Merge maps A/B to background/foreground', () => {
     const b = build('mix', ['a', 'b']);
     const r = convertNode(b.g, registry, b.id, 'merge');

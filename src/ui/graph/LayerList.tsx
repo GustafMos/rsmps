@@ -2,15 +2,15 @@ import { useRef } from 'react';
 import { wiresInto } from '../../engine/graph';
 import type { SocketType } from '../../engine/types';
 import { Icon } from '../components/Icon';
-import { isLayerType } from '../lib/layout';
+import { layerRows, moveUpDelta } from '../lib/layerRows';
 import { useApp, useEd } from '../store/context';
 import { shallowArrayEqual } from '../store/createStore';
 
 /**
- * Every wire into a `multi` input as its own row. Image/mask stacks list the top layer first (like a
- * layer panel); other types keep wire order. In the graph each row owns a socket so wires end at their row.
+ * Every wire into a `multi` input as its own row. An input marked `order: 'top-first'` (a layer stack) lists the top layer
+ * first, like a layer panel, labelled Top / 2 / Bottom; others keep wire order, numbered 1, 2, 3. In the graph each row owns a socket so wires end at their row.
  */
-export function LayerList({ nodeId, port, type, variant }: { nodeId: string; port: string; type: SocketType; variant: 'node' | 'inspector' }) {
+export function LayerList({ nodeId, port, type, variant, topFirst = false, firstNote }: { nodeId: string; port: string; type: SocketType; variant: 'node' | 'inspector'; topFirst?: boolean; firstNote?: string }) {
   const { ed, io } = useApp();
   const edges = useEd((s) => wiresInto(s.level, nodeId, port), shallowArrayEqual);
   const names = useEd(
@@ -26,20 +26,26 @@ export function LayerList({ nodeId, port, type, variant }: { nodeId: string; por
     shallowArrayEqual,
   );
   const dragFrom = useRef<number | null>(null);
-  const reversed = isLayerType(type);
   const n = edges.length;
-  const order = edges.map((_, k) => k);
-  if (reversed) order.reverse();
-  const up = reversed ? 1 : -1;
+  const rows = layerRows(n, topFirst, firstNote);
+  const up = moveUpDelta(topFirst);
   const move = (k: number, delta: number) => ed.edit((g) => ed.moveLayerPure(g, edges[k].id, delta));
   const big = variant === 'inspector';
 
+  const dropRow = (
+    <div className="rs-layer rs-layer--drop">
+      <span className={`rs-sock rs-sock--in rs-sock--${type}`} data-sock data-node={nodeId} data-port={port} data-dir="in" data-type={type} />
+      <span className="rs-layer__hint">{topFirst ? '+ add on top' : '+ drop wire here'}</span>
+    </div>
+  );
+
   return (
     <div className={`rs-layers${big ? ' rs-layers--big' : ''}`}>
-      {order.map((k) => {
+      {!big && topFirst && dropRow}
+      {rows.map(({ k, label }, r) => {
         const e = edges[k];
-        const first = reversed ? k === n - 1 : k === 0;
-        const last = reversed ? k === 0 : k === n - 1;
+        const first = r === 0;
+        const last = r === n - 1;
         return (
           <div
             key={e.id}
@@ -54,7 +60,7 @@ export function LayerList({ nodeId, port, type, variant }: { nodeId: string; por
             }}
           >
             {!big && <span className={`rs-sock rs-sock--in rs-sock--${type}`} data-sock data-node={nodeId} data-port={port} data-dir="in" data-type={type} data-slot={k} />}
-            <span className="rs-layer__idx rs-num">{k + 1}</span>
+            <span className="rs-layer__idx rs-num" title={label}>{label}</span>
             <button className="rs-layer__name" title={`Select ${names[k]}`} onClick={() => ed.select([e.from.node])}>
               {names[k]}
             </button>
@@ -66,12 +72,8 @@ export function LayerList({ nodeId, port, type, variant }: { nodeId: string; por
           </div>
         );
       })}
-      {!big ? (
-        <div className="rs-layer rs-layer--drop">
-          <span className={`rs-sock rs-sock--in rs-sock--${type}`} data-sock data-node={nodeId} data-port={port} data-dir="in" data-type={type} />
-          <span className="rs-layer__hint">+ drop wire here</span>
-        </div>
-      ) : n === 0 ? (
+      {!big && !topFirst && dropRow}
+      {big && n === 0 ? (
         <div className="rs-layer__hint">Nothing connected. Drag a wire from another node onto this node.</div>
       ) : null}
     </div>

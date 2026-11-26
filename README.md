@@ -169,7 +169,7 @@ fix it, then remove `?safe`.
 ### Working in the graph
 
 - **Shift+Space** or **Shift+A**: search and add a node. With a node selected, the new node is inserted into its chain.
-- Drop a wire from one output onto another output to create a Merge with the held one on top.
+- Drop a wire from one output onto another output to stack them in a Stack Layers node with the held one on top (dropping onto a Stack's output adds the held one as a new top layer).
 - Click a color to open the built-in picker; **Palettes** opens Palette Studio (harmony wheel, ramps, extract from image).
 - **L** arranges the graph, **F** frames it, **B** bypasses the selected nodes.
 - Shortcuts are listed under **?** and can be rebound; any node type can be given its own hotkey.

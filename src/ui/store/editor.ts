@@ -989,15 +989,16 @@ export class Editor {
   }
 
   /**
-   * Two outputs joined: the one you HELD goes on top (foreground), the one you dropped ONTO is the base.
-   * Images/masks make a Merge, audio makes a Mixer. One undo step. Returns false when the pair is not mergeable.
+   * Two outputs joined: the one you HELD goes on top, the one you dropped ONTO is the base (bottom).
+   * Images/masks make a Stack Layers node (base first wire, held second), audio makes a Mixer. Dropping onto the output of a
+   * Stack adds the held output as a new top layer of that Stack instead. One undo step. Returns false when the pair is not mergeable.
    */
   mergeOutputs(held: Edge['from'], base: Edge['from']): boolean {
     const g0 = this.level;
     const ta = outputType(g0, this.registry, held.node, held.port);
     const tb = outputType(g0, this.registry, base.node, base.port);
     const visual = (t: SocketType | null) => t === 'image' || t === 'mask';
-    const kind = visual(ta) && visual(tb) ? 'merge' : ta === 'audio' && tb === 'audio' ? 'mixer' : null;
+    const kind = visual(ta) && visual(tb) ? 'stack' : ta === 'audio' && tb === 'audio' ? 'mixer' : null;
     const def = kind ? this.registry.get(kind) : undefined;
     if (!kind || !def || held.node === base.node) {
       if (kind && !def) this.toast(`The "${kind}" node type is not available.`, 'error');
@@ -1005,6 +1006,19 @@ export class Editor {
     }
     const nodeA = g0.nodes.find((n) => n.id === held.node)!;
     const nodeB = g0.nodes.find((n) => n.id === base.node)!;
+    if (kind === 'stack' && nodeB.type === 'stack' && base.port === 'image') {
+      // dropped onto a Stack's output: the held output becomes a new top layer of that Stack (no second Stack nested inside it)
+      const to = { node: base.node, port: 'images' };
+      const err = connectError(g0, this.registry, held, to);
+      if (err) {
+        this.toast(err, 'error');
+        return false;
+      }
+      this.editLevel((g) => connect(g, this.registry, held, to));
+      const v = this.state.viewedNodeId;
+      this.patch({ selection: [base.node], selectedFrame: null, ...(v === held.node ? { viewedNodeId: base.node } : {}) });
+      return true;
+    }
     const wA = layoutFor(g0, nodeA, defOf(this.registry, nodeA)).width;
     const at = { x: Math.round(Math.max(nodeA.x, nodeB.x) + wA + 70), y: Math.round((nodeA.y + nodeB.y) / 2) };
     let newId = '';
@@ -1017,16 +1031,9 @@ export class Editor {
       const ins = def.inputs as Record<string, { type: string; multi?: boolean }>;
       const keys = Object.keys(ins);
       const to = (port: string) => ({ node: newId, port });
-      if (kind === 'merge') {
-        const bg = keys.includes('background') ? 'background' : keys[0];
-        const fg = keys.includes('foreground') ? 'foreground' : keys.find((k) => k !== bg)!;
-        next = connect(next, this.registry, base, to(bg));
-        next = connect(next, this.registry, held, to(fg));
-      } else {
-        const multi = keys.find((k) => ins[k].multi) ?? keys[0];
-        next = connect(next, this.registry, base, to(multi));
-        next = connect(next, this.registry, held, to(multi));
-      }
+      const multi = keys.find((k) => ins[k].multi) ?? keys[0];
+      next = connect(next, this.registry, base, to(multi));
+      next = connect(next, this.registry, held, to(multi));
       if (viewed === base.node || viewed === held.node) viewMerge = true;
       // like chain insertion: the Merge is spliced into the chain. Every wire leaving EITHER joined output that the Merge can feed
       // follows the Merge (dropping a fresh node onto a wired one, or the other way round, both mean "insert it there"). Wires that
