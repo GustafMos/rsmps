@@ -1,14 +1,15 @@
 import { defineNode } from '../../define';
+import type { VectorValue } from '../../types';
 import { angleDelta, easeSeq, gatherHistory, planHistory, slewSeq, springKernel, springSettle, unwrapSeq } from '../../lib/util-history';
 
 export default defineNode({
   id: 'smooth',
   title: 'Smooth / Interpolate',
   category: 'math',
-  description: 'Glide toward a number instead of jumping to it, so stepped values (MIDI notes, loudness, sliders) do not make things teleport. Looks at the recent past of the number, so it needs no stored state.',
+  description: 'Glide toward a number (or a vector, each of its three numbers on its own) instead of jumping to it, so stepped values (MIDI notes, loudness, sliders) do not make things teleport. Looks at the recent past of the number, so it needs no stored state.',
   keywords: ['interpolate', 'ease', 'lag', 'glide', 'portamento', 'slew', 'spring', 'average', 'filter', 'follow', 'midi', 'inertia', 'damping'],
-  inputs: { value: { type: 'number', required: true, label: 'Number' } },
-  outputs: { value: { type: 'number', label: 'Number' } },
+  inputs: { value: { type: 'number', label: 'Number' }, vector: { type: 'vector', label: 'Vector' } },
+  outputs: { value: { type: 'number', label: 'Number' }, vector: { type: 'vector', label: 'Vector' } },
   params: {
     mode: {
       type: 'enum',
@@ -47,12 +48,14 @@ export default defineNode({
   },
   async render(ctx) {
     const p = ctx.params;
-    const cur = ctx.in.value;
+    const input = ctx.in.value;
+    const inVec = ctx.in.vector;
+    if (input === null && inVec === null) return { value: null, vector: null };
     const passThrough =
       (p.mode === 'ease' && p.rise <= 0 && p.fall <= 0) ||
       (p.mode === 'linear' && Math.round(p.time * ctx.time.fps) <= 1) ||
       (p.mode === 'slew' && p.riseRate <= 0 && p.fallRate <= 0);
-    if (passThrough) return { value: cur };
+    if (passThrough) return { value: input, vector: inVec };
     const fps = ctx.time.fps;
     const clock = { frame: ctx.time.frame, fps, duration: ctx.time.duration, loop: ctx.time.loop };
 
@@ -68,29 +71,43 @@ export default defineNode({
       windowSeconds = Math.min(30, springSettle(omega, zeta));
     } else windowSeconds = p.history;
     const plan = planHistory(windowSeconds * fps, fps);
-    const newestFirst = await gatherHistory((seconds) => ctx.pull('value', { seconds }), cur, clock, plan, p.loopAware);
-    if (!newestFirst || newestFirst.every((v) => v === cur)) return { value: cur };
+    // One number through the chosen style. `pull` gives the number as it was at a time; null = nothing there.
+    const settle = async (cur: number, pull: (seconds: number) => Promise<number | null>): Promise<number> => {
+      const newestFirst = await gatherHistory(pull, cur, clock, plan, p.loopAware);
+      if (!newestFirst || newestFirst.every((v) => v === cur)) return cur;
 
-    let seq = newestFirst.slice().reverse(); // oldest first
-    let base = 0;
-    if (p.wrapAngle) {
-      seq = unwrapSeq(seq, p.period);
-      base = seq[seq.length - 1];
+      let seq = newestFirst.slice().reverse(); // oldest first
+      let base = 0;
+      if (p.wrapAngle) {
+        seq = unwrapSeq(seq, p.period);
+        base = seq[seq.length - 1];
+      }
+      let y: number;
+      if (p.mode === 'ease') y = easeSeq(seq, plan.dt, p.rise, p.fall);
+      else if (p.mode === 'linear') {
+        let sum = 0;
+        for (const v of seq) sum += v;
+        y = sum / seq.length;
+      } else if (p.mode === 'spring') {
+        const k = springKernel(seq.length, plan.dt, omega, zeta);
+        y = 0;
+        for (let i = 0; i < seq.length; i++) y += k[i] * seq[seq.length - 1 - i];
+      } else y = slewSeq(seq, plan.dt, p.riseRate, p.fallRate);
+
+      // Back to the input's own range: within half a circle of the current value.
+      if (p.wrapAngle) y = cur + angleDelta(y - base, p.period);
+      return y;
+    };
+
+    const value = input === null ? null : await settle(input, (seconds) => ctx.pull('value', { seconds }));
+    let vector: VectorValue | null = null;
+    if (inVec !== null) {
+      // The vector's past is pulled once per moment and shared by its three numbers.
+      const past = new Map<number, Promise<VectorValue | null>>();
+      const at = (seconds: number) => past.get(seconds) ?? past.set(seconds, ctx.pull('vector', { seconds })).get(seconds)!;
+      const part = (i: number) => settle(inVec[i], async (seconds) => (await at(seconds))?.[i] ?? null);
+      vector = [await part(0), await part(1), await part(2)];
     }
-    let y: number;
-    if (p.mode === 'ease') y = easeSeq(seq, plan.dt, p.rise, p.fall);
-    else if (p.mode === 'linear') {
-      let sum = 0;
-      for (const v of seq) sum += v;
-      y = sum / seq.length;
-    } else if (p.mode === 'spring') {
-      const k = springKernel(seq.length, plan.dt, omega, zeta);
-      y = 0;
-      for (let i = 0; i < seq.length; i++) y += k[i] * seq[seq.length - 1 - i];
-    } else y = slewSeq(seq, plan.dt, p.riseRate, p.fallRate);
-
-    // Back to the input's own range: within half a circle of the current value.
-    if (p.wrapAngle) y = cur + angleDelta(y - base, p.period);
-    return { value: y };
+    return { value, vector };
   },
 });

@@ -68,6 +68,7 @@ body { overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
   .rs-pal__btns .rs-btn, .rs-assets__bar .rs-btn { height: var(--touch); }
   .rs-km__add, .rs-km__key { min-height: var(--touch); min-width: var(--touch); }
   .rs-insp__pin { width: var(--touch); height: var(--touch); opacity: 1; }
+  .rs-insp__reset { width: 36px; height: var(--touch); color: var(--text-dim); }
   .rs-insp__group { height: var(--touch); }
   .rs-range__bar { height: 36px; }
   .rs-range__handle { width: 28px; }

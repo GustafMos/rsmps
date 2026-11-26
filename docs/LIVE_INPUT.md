@@ -24,6 +24,11 @@ so, with its length). Wire it into the graph with a Media In node; the graph is 
   tab visible while recording.
 - Names look like `Webcam take 2026-11-17 18.42.05.mp4`, `Phone take ...`, `Stream take ...`.
 
+To record a live picture WITH effects, use a **Recorder** node (docs/RECIPES.md, "Record a live take"). Its "Smooth, effects
+after" quality, the default on a phone or tablet, records the raw live pictures the same way as the button above (clips named
+`Webcam raw take ...`, with the sound) and renders the effects onto them when you stop, so the clip keeps the full frame rate
+even when the preview stutters.
+
 ## Webcam
 
 Pick a camera in the node (empty = the default camera). The browser asks for permission once; camera names
@@ -241,6 +246,8 @@ Outputs: yaw / pitch / roll, **Object rotate X / Y / Z**, rotation rate, acceler
 heading, position X / Y / Z, a tap pulse, a **Jolt** pulse (one per bump or flick) and **Gravity X / Y** (which way is down on the screen, -1..1: upright is (0, -1), flat on a table (0, 0); wire them
 into a position to make things fall). To steer a 3D Object wire **Object rotate X / Y / Z** into its *Rotate X / Y / Z*: they are computed in exactly the
 order 3D Object applies its rotation, so even large tilts match the phone (plain yaw / pitch / roll use the camera order and agree with it only for small tilts).
+Four bundled outputs at the bottom of the node carry three of these numbers on ONE wire (a vector): **Object rotate XYZ**, **Rotation rate XYZ**, **Acceleration XYZ** and
+**Position XYZ**. Drop one on a 3D node and pick *Rotate XYZ* or *Move XYZ* instead of dragging three wires; a number wired into a single axis still wins for that axis.
 The phone's acceleration *with* gravity is shown in the panel only (it differs between iOS and Android) and is not an output.
 
 ### Recording a move (and exporting it)
@@ -290,6 +297,7 @@ The orientation it uses stays true to gravity (the horizon is level wherever you
 - **Distance** is how far in front of you the middle of the 3D scene is; **Eye height** raises the camera so the scene sits lower. **Smoothing** calms the camera; too much makes the object trail.
 - Same sources and takes as Phone Motion: *Sensors from* (this device or a linked phone), **Record motion**, *Source: Recorded take*, take smoothing. An export needs a recorded take, and the
   camera picture under it must be recorded too (the Webcam's Record button, or the Recorder node): record both in the same go if they have to match.
+  A Recorder set to "Smooth, effects after" does exactly that by itself: it records the camera and the motion together and renders the clip from both.
 - Recipe: `docs/RECIPES.md`, "A 3D object that stays put in the room".
 - For an object that also stays put while you walk, use **Marker Camera** (below).
 

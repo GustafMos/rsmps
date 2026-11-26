@@ -99,14 +99,96 @@ export class Registry {
   }
 }
 
-/** Number/color/vec2 params double as input sockets, like Blender. Returns the socket type a param accepts, if any. */
+/**
+ * A bundled param socket: ONE `vector` input that drives two or three number params of a node (see "Vector sockets" in docs/ENGINE.md).
+ * Derived from the param names, so no node declares it: number params `<stem>X`, `<stem>Y` and optionally `<stem>Z` (or plain `x`, `y`,
+ * `z`) make the bundle `<stem>@xyz`.
+ */
+export interface ParamBundle {
+  /** Port name of the bundle socket. Contains `@`, which no param or input name does, so it cannot collide with one. */
+  port: string;
+  stem: string;
+  /** What the members share, for the UI: "Move", "Rotate", "Spin". */
+  label: string;
+  /** Param keys in x, y(, z) order. */
+  members: string[];
+}
+
+/** Suffix of every bundle port. The same for two and three members, so a node that gains a Z param later keeps its wires. */
+export const BUNDLE_SUFFIX = '@xyz';
+
+const AXES = ['X', 'Y', 'Z'] as const;
+const bundleMemo = new WeakMap<object, ParamBundle[]>();
+
+function bundleLabel(stem: string, labels: (string | undefined)[]): string {
+  // The part the member labels share once the axis letter is taken out: "Move X" / "Move Y" / "Move Z" -> "Move".
+  const stripped = labels.map((l, i) => (l ?? '').replace(new RegExp(`(^|\\s)${AXES[i]}(?=\\s|$)`), ' ').replace(/\s+/g, ' ').trim());
+  if (stripped[0] && stripped[0] !== (labels[0] ?? '') && stripped.every((l) => l === stripped[0])) return stripped[0];
+  if (!stem) return 'Vector';
+  const words = stem.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Every bundled param socket of a definition (memoised per params object). The ONE place that derives them. */
+export function paramBundles(def: AnyNodeDef): ParamBundle[] {
+  const params = def.params as Record<string, { type: string; label?: string }>;
+  const hit = bundleMemo.get(params);
+  if (hit) return hit;
+  const out: ParamBundle[] = [];
+  const isNum = (k: string) => params[k]?.type === 'number';
+  for (const key of Object.keys(params)) {
+    // `<stem>X` with a lower-case letter or digit before the axis (posX, shift2X), or a bare `x`.
+    const m = /^(?:(.*[a-z0-9])X|x)$/.exec(key);
+    if (!m || !isNum(key)) continue;
+    const stem = m[1] ?? '';
+    const name = (axis: string) => (stem ? stem + axis : axis.toLowerCase());
+    if (!isNum(name('Y'))) continue;
+    const members = [key, name('Y')];
+    if (isNum(name('Z'))) members.push(name('Z'));
+    const port = stem + BUNDLE_SUFFIX;
+    if (port in params || port in (def.inputs ?? {})) continue;
+    out.push({ port, stem, label: bundleLabel(stem, members.map((k) => params[k].label)), members });
+  }
+  bundleMemo.set(params, out);
+  return out;
+}
+
+/** The bundle behind a port name, or null. */
+export function paramBundle(def: AnyNodeDef, port: string): ParamBundle | null {
+  if (!port.endsWith(BUNDLE_SUFFIX)) return null;
+  return paramBundles(def).find((b) => b.port === port) ?? null;
+}
+
+/**
+ * Number / color / palette / vec2 params double as input sockets, like Blender, and bundles of number params get one `vector` socket.
+ * Returns the socket type a param (or bundle port) accepts, if any.
+ */
 export function paramSocketType(def: AnyNodeDef, key: string): SocketType | null {
   const p = def.params[key];
-  if (!p) return null;
+  if (!p) return paramBundle(def, key) ? 'vector' : null;
   if (p.type === 'number') return 'number';
   if (p.type === 'color') return 'color';
   if (p.type === 'palette') return 'palette';
+  if (p.type === 'vec2') return 'vector';
   return null;
+}
+
+/** Every port of a definition that is a param socket: wireable params in definition order, each bundle right before its first member. */
+export function paramSocketPorts(def: AnyNodeDef): { port: string; type: SocketType; bundle: ParamBundle | null }[] {
+  const bundles = paramBundles(def);
+  const out: { port: string; type: SocketType; bundle: ParamBundle | null }[] = [];
+  for (const key of Object.keys(def.params)) {
+    const b = bundles.find((x) => x.members[0] === key);
+    if (b) out.push({ port: b.port, type: 'vector', bundle: b });
+    const t = paramSocketType(def, key);
+    if (t) out.push({ port: key, type: t, bundle: null });
+  }
+  return out;
+}
+
+/** Is `port` something a wire can end on: an input, a wireable param or a bundle? */
+export function isInputPort(def: AnyNodeDef, port: string): boolean {
+  return port in def.inputs || port in def.params || !!paramBundle(def, port);
 }
 
 /** Can an output of type `from` feed an input of type `to`? */

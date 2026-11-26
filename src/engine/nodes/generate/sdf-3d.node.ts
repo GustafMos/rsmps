@@ -1,5 +1,5 @@
 import { defineNode } from '../../define';
-import { rotationZYX } from '../../lib/gen-common';
+import { spunRotation, rotationZYX } from '../../lib/gen-common';
 import { BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, isSpinning, LIGHT_PARAMS, lightVector, marchUniforms, QUALITY_PARAM, resolveCamera, run3d, SHADE_PARAMS, XFORM_PARAMS, type LightP, type XformP } from '../../lib/gen-3d';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformKey, deformStepScale, deformUniforms, deformWgsl, type DeformP } from '../../lib/gen-deform';
 import { gridFor, occupancy, SDF2D_WGSL, signedField } from '../../lib/gen-sdf2d';
@@ -351,7 +351,7 @@ fn surf(pw: vec3f, nw: vec3f, rd: vec3f) -> vec3f {
 
     // --- numbers ----------------------------------------------------------------------------------------
     const phase = isSpinning(p) || deformAnimated(p) ? ctx.time.phase : 0;
-    const R = rotationZYX(p.rotX + 360 * p.spinX * phase, p.rotY + 360 * p.spinY * phase, p.rotZ + 360 * p.spinZ * phase);
+    const R = spunRotation(p, phase);
     const cam = resolveCamera(p, ctx.in.camera, size.width, size.height);
     const objScale = Math.max(0.001, p.objectScale);
     const uniforms: Record<string, number | boolean | number[]> = {

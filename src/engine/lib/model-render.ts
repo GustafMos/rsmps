@@ -1,5 +1,5 @@
 import { cameraBasis, PROJECTION_ID, simpleCamera } from './gen-camera';
-import { rgba, rotationZYX } from './gen-common';
+import { spunRotation, rgba, rotationZYX } from './gen-common';
 import { ModelError, type ParsedModel } from './gen-model';
 import { parseModelBytes } from './gen-model-load';
 import { PRELUDE } from '../gpu/prelude';
@@ -629,7 +629,7 @@ export async function renderModel(
   // --- transforms -----------------------------------------------------
   const spinning = p.spinX !== 0 || p.spinY !== 0 || p.spinZ !== 0;
   const phase = spinning ? ctx.time.phase : 0;
-  const R = rotationZYX(p.rotX + 360 * p.spinX * phase, p.rotY + 360 * p.spinY * phase, p.rotZ + 360 * p.spinZ * phase);
+  const R = spunRotation(p, phase);
   const { min, max } = model.bounds;
   const bc = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
   const radius = 0.5 * Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) || 1;

@@ -6,7 +6,7 @@
 import type { CameraValue, CanvasInfo, ImageValue, NodeGpu, ParamSchema } from '../types';
 import { XFORM_PARAMS, resolveCamera, type XformP } from './gen-3d';
 import { cameraBasis, type V3 } from './gen-camera';
-import { rotationZYX } from './gen-common';
+import { spunRotation, rotationZYX } from './gen-common';
 import { decimateCloud, estimateUp, IDENTITY3, ORIENT_Y_DOWN, ORIENT_Z_UP, type Mat3, type SplatCloud } from './splat-cloud';
 import { maxSplatsFor, renderSplats, type SplatLook, type SplatXform } from './splat-render';
 import { mul3, viewSetup } from './splat-math';
@@ -129,7 +129,7 @@ export interface SplatSceneParams extends XformP {
 export function sceneXform(full: SplatCloud, p: SplatSceneParams, phase: number): SplatXform & { R: Mat3 } {
   const spinning = p.spinX !== 0 || p.spinY !== 0 || p.spinZ !== 0;
   const ph = spinning ? phase : 0;
-  const R = rotationZYX(p.rotX + 360 * p.spinX * ph, p.rotY + 360 * p.spinY * ph, p.rotZ + 360 * p.spinZ * ph) as Mat3;
+  const R = spunRotation(p, ph) as Mat3;
   const orient = !p.orientation || p.orientation === 'auto' ? estimateUp(full).matrix : ORIENT[p.orientation as keyof typeof ORIENT];
   const fitK = p.autoFit ? 0.95 / full.core.radius : 1;
   const s = fitK * Math.max(0.001, p.objectScale);

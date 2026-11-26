@@ -47,6 +47,14 @@ export const MOTION_OUTPUTS = {
   tap: { type: 'number', label: 'Tap (1 for a moment)' },
 } as const;
 
+/** The same readings bundled three to a wire (vector sockets), next to the single numbers above. */
+export const MOTION_VECTOR_OUTPUTS = {
+  rotation: { type: 'vector', label: 'Object rotate XYZ', hint: 'Object rotate X, Y and Z on one wire: into the Rotate vector socket of a 3D node.' },
+  rate: { type: 'vector', label: 'Rotation rate XYZ' },
+  acceleration: { type: 'vector', label: 'Acceleration XYZ' },
+  position: { type: 'vector', label: 'Position XYZ (m)', hint: 'Position X, Y and Z on one wire: into the Move vector socket of a 3D node.' },
+} as const;
+
 export interface ShapeParams {
   mode: 'relative' | 'absolute';
   gainX: number;
@@ -118,7 +126,7 @@ export default defineNode({
     'Turns a phone into a controller: tilt and turn (gyro), shake, gravity, touch pad, pinch and twist, compass and position become numbers for any setting. Use a phone linked by QR code, or the sensors of the phone or tablet the app runs on (Sensors from: This device). Wire yaw / pitch / roll into a 3D object\'s rotation or into a Phone Camera Rig. Record a move and replay it exactly, even in exports.',
   keywords: ['gyro', 'gyroscope', 'accelerometer', 'tilt', 'sensor', 'orientation', 'motion control', 'wii', 'remote', 'phone', 'shake', 'touch', 'compass', 'imu', 'controller', 'joystick', 'gravity', 'device', 'this device', 'jolt'],
   inputs: {},
-  outputs: MOTION_OUTPUTS,
+  outputs: { ...MOTION_OUTPUTS, ...MOTION_VECTOR_OUTPUTS },
   params: {
     session: { type: 'string', default: '', label: 'Session', visibleIf: () => false },
     liveTick: { type: 'string', default: '', label: 'Live tick', visibleIf: () => false },
@@ -176,6 +184,7 @@ export default defineNode({
   render(ctx) {
     const p = ctx.params;
     // the reader takes the clock, so the node renders again every frame while live
-    return shapeOutputs(motionReader(p, ctx.host, ctx.time.seconds, 'Phone Motion', NO_SMOOTH), p);
+    const o = shapeOutputs(motionReader(p, ctx.host, ctx.time.seconds, 'Phone Motion', NO_SMOOTH), p);
+    return { ...o, rotation: [o.objX, o.objY, o.objZ], rate: [o.rateX, o.rateY, o.rateZ], acceleration: [o.accX, o.accY, o.accZ], position: [o.posX, o.posY, o.posZ] };
   },
 });

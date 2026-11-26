@@ -11,6 +11,7 @@
  *  - Dragging a node, a wire or a frame toward the edge of the panel pans the view (the drag follows).
  */
 import { connectError } from '../../engine/graph';
+import { showBundleSockets } from '../store/nodeView';
 import { GROUP_TYPE } from '../../engine/group';
 import type { SocketType } from '../../engine/types';
 import { LongPress } from '../responsive/longPress';
@@ -77,8 +78,15 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
   };
   const setPending = (p: PendingWire | null) => {
     wireStore.set({ pending: p });
-    if (p) mark(p);
-    else clearMarks();
+    // a vector wire looking for an input: the nodes show their bundle sockets (one socket for an X / Y / Z group) so one can be tapped
+    showBundleSockets(!!p && p.side === 'out' && p.type === 'vector');
+    if (p) {
+      mark(p);
+      // sockets that only just appeared (the bundle sockets) are marked once they are in the page
+      requestAnimationFrame(() => {
+        if (wireStore.get().pending === p) mark(p);
+      });
+    } else clearMarks();
   };
   const describe = (el: HTMLElement): PendingWire => {
     const n = ed.state.level.nodes.find((x) => x.id === el.dataset.node);

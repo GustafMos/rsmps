@@ -1,11 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORIES, type AnyNodeDef, type InputSchema, type NodeInstance, type ParamDef } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
 import { parseHex, toHex } from '../lib/colorMath';
 import { LayerList } from '../graph/LayerList';
-import { paramSocketType } from '../../engine/define';
+import { paramBundles, paramSocketType, type ParamBundle } from '../../engine/define';
+import { bundleAxes } from '../lib/compat';
 import { useSelector } from '../store/createStore';
 import { nodeViewStore, setPin } from '../store/nodeView';
 import { effectivePins } from '../lib/layout';
@@ -47,6 +48,7 @@ import { DepthAiPanel } from './DepthAiPanel';
 import { StyleAiPanel } from './StyleAiPanel';
 import { GroupPanel } from './GroupPanel';
 import { defOf, GROUP_TYPE } from '../../engine/group';
+import { drivenParams, patchIsNoop, resetPatch, transformOf, type ResetKind, type Transform3d } from '../lib/xform3d';
 import './inspector.css';
 
 /** Messages that only say what to set up first (nothing is broken): shown as a note, not as an error. */
@@ -249,6 +251,7 @@ function NodePanel({ id }: { id: string }) {
           <LayerList nodeId={id} port={port} type={d.type} variant="inspector" />
         </div>
       ))}
+      <TransformReset node={node} def={def} wired={wired} />
       <ParamGroups
         node={node}
         def={def}
@@ -267,6 +270,46 @@ function NodePanel({ id }: { id: string }) {
       />
     </div>
   );
+}
+
+const RESETS: { kind: ResetKind; label: string; title: (t: Transform3d) => string }[] = [
+  { kind: 'position', label: 'Reset position', title: () => 'Put it back in the middle of the picture' },
+  { kind: 'rotation', label: 'Reset rotation', title: () => 'No rotation at all: every angle to 0 (new nodes start slightly turned so they look 3D; this removes that too)' },
+  { kind: 'all', label: 'Reset all', title: () => 'Position to the middle, rotation to 0 and the size back to normal' },
+];
+
+/**
+ * One-tap "zero it out" for nodes that place something in 3D (which nodes: lib/xform3d.ts). Rotation goes to a true 0, 0, 0, not to
+ * the slightly turned pose new nodes start with. Each button is one undo step; settings driven by a wire are left alone.
+ */
+function TransformReset({ node, def, wired }: { node: NodeInstance; def: AnyNodeDef; wired: ReadonlyMap<string, unknown> }) {
+  const { ed } = useApp();
+  const t = useMemo(() => transformOf(def), [def]);
+  if (!t) return null;
+  const skip = drivenParams(def, wired.keys());
+  const params: Record<string, unknown> = {};
+  for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.default;
+  return (
+    <div className="rs-insp__sec" data-xform-reset>
+      <div className="rs-caps">Place in 3D</div>
+      <div className="rs-insp__actions">
+        {RESETS.map((r) => {
+          const patch = resetPatch(t, r.kind, skip);
+          return (
+            <button key={r.kind} className="rs-btn" title={r.title(t)} disabled={patchIsNoop(params, patch)} onClick={() => ed.setParams(node.id, patch, `xreset:${node.id}:${r.kind}`)}>
+              {r.label}
+            </button>
+          );
+        })}
+      </div>
+      {t.kind === 'object' && <p className="rs-insp__hint">You can also drag the object on the picture: select this node and use Move, Turn and Size in the viewer.</p>}
+    </div>
+  );
+}
+
+/** Params whose default is a plain setting, so "back to the default" is safe to offer in one tap (files, drawn data and code are left out: they are work, not a setting). */
+function canResetParam(p: ParamDef): boolean {
+  return p.type !== 'assets' && p.type !== 'json' && !(p.type === 'string' && (p.kind === 'code' || p.multiline));
 }
 
 function ParamGroups({
@@ -309,6 +352,7 @@ function ParamGroups({
     return out;
   }, [def, node.params]);
 
+  const bundles = useMemo(() => paramBundles(def), [def]);
   if (!groups.length) return <div className="rs-insp__sec"><p className="rs-insp__hint">This node has no parameters.</p></div>;
   // A node with a very long inspector (SDF 3D has about a hundred settings) starts with its groups closed, except the shape slots that are switched on.
   const big = groups.reduce((n, g) => n + g.items.length, 0) > 60;
@@ -330,26 +374,69 @@ function ParamGroups({
             </button>
           )}
           {!isClosed(g.name) &&
-            g.items.map(([key, p]) => (
-              <ParamControl key={key} node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} wiredFrom={label(key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(key)} onDisconnect={() => onDisconnect(key)} />
-            ))}
+            g.items.map(([key, p]) => {
+              // a bundle socket sits right above its first setting; a vector wire on it also drives the settings without a wire of their own
+              const starts = bundles.find((b) => b.members[0] === key);
+              const via = wired.has(key) ? undefined : bundles.find((b) => wired.has(b.port) && b.members.includes(key));
+              return (
+                <Fragment key={key}>
+                  {starts && <BundleRow node={node} bundle={starts} isWired={wired.has(starts.port)} wiredFrom={label(starts.port)} onSelectSource={() => onSelectSource(starts.port)} onDisconnect={() => onDisconnect(starts.port)} />}
+                  <ParamControl node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} via={via} wiredFrom={label(via ? via.port : key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(via ? via.port : key)} onDisconnect={() => onDisconnect(key)} />
+                </Fragment>
+              );
+            })}
         </div>
       ))}
     </>
   );
 }
 
-function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin, onSelectSource, onDisconnect }: { node: NodeInstance; def: AnyNodeDef; keyName: string; p: ParamDef; isWired: boolean; wiredFrom: string; pinned: boolean; onPin: (on: boolean) => void; onSelectSource: () => void; onDisconnect: () => void }) {
+/** The socket of a bundle (one vector wire for an X / Y / Z group of settings): a slim row, a drop target like every wireable setting. */
+function BundleRow({ node, bundle, isWired, wiredFrom, onSelectSource, onDisconnect }: { node: NodeInstance; bundle: ParamBundle; isWired: boolean; wiredFrom: string; onSelectSource: () => void; onDisconnect: () => void }) {
+  const axes = bundleAxes(bundle);
+  const what = `${bundle.label} ${axes.split('').join(', ')}`;
+  return (
+    <div className="rs-insp__row rs-insp__bundle" title={`One vector wire sets ${what} together. A number wired into one of them still wins for that one.`} data-bundle-port={bundle.port} data-insp-sock="" data-node={node.id} data-port={bundle.port} data-dir="in" data-type="vector">
+      <label className="rs-insp__label">
+        <span className="rs-insp__dot rs-sock--vector" />
+        <span className="rs-insp__lt">{bundle.label} <span className="rs-insp__axes">{axes}</span></span>
+      </label>
+      <div className="rs-insp__ctl">
+        {isWired ? (
+          <div className="rs-insp__wired">
+            <Icon name="plug" size={13} />
+            <button className="rs-insp__chip2" onClick={onSelectSource} title="Select the driving node">driven by {wiredFrom || 'a node'}</button>
+            <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onDisconnect} title="Disconnect and use the values below" aria-label="Disconnect"><Icon name="close" size={12} /></button>
+          </div>
+        ) : (
+          <div className="rs-insp__bundlehint">one vector wire for all {axes.length}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ParamControl({ node, def, keyName, p, isWired, via, wiredFrom, pinned, onPin, onSelectSource, onDisconnect }: { node: NodeInstance; def: AnyNodeDef; keyName: string; p: ParamDef; isWired: boolean; via?: ParamBundle; wiredFrom: string; pinned: boolean; onPin: (on: boolean) => void; onSelectSource: () => void; onDisconnect: () => void }) {
   const sockType = paramSocketType(def, keyName);
   const { ed, io } = useApp();
   const label = p.label ?? keyName;
   const value = node.params[keyName] ?? p.absent ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, keyName, v);
   const isCode = p.type === 'string' && p.kind === 'code';
+  // one way to put ANY setting back, the same on every node: a small button beside the name once the value differs (and a double-click on the name)
+  const changed = !isWired && canResetParam(p) && JSON.stringify(value) !== JSON.stringify(p.default);
+  const resetParam = () => { if (changed) set(p.default); };
   const stacked = (p.type === 'vec2' && p.range) || p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && (p.multiline || p.kind === 'code'));
 
   let control: React.ReactNode;
-  if (isWired) {
+  if (via && !isWired) {
+    control = (
+      <div className="rs-insp__wired" title="Driven by the vector wire of this group. Wire a number onto this row to set this one yourself.">
+        <Icon name="plug" size={13} />
+        <button className="rs-insp__chip2" onClick={onSelectSource} title="Select the driving node">from {wiredFrom || 'a node'} <span className="rs-insp__via">{'XYZ'[via.members.indexOf(keyName)]}</span></button>
+      </div>
+    );
+  } else if (isWired) {
     control = (
       <div className="rs-insp__wired">
         <Icon name="plug" size={13} />
@@ -360,7 +447,7 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
   } else {
     switch (p.type) {
       case 'number':
-        control = <NumberField large name={label} askKey={`${node.id}:${keyName}`} softMax={p.softMax} value={value as number} min={p.min} max={p.max} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} />;
+        control = <NumberField large name={label} askKey={`${node.id}:${keyName}`} softMax={p.softMax} scrubSpan={p.scrubSpan} value={value as number} min={p.min} max={p.max} step={p.step} unit={p.unit} integer={p.integer} defaultValue={p.default} onChange={set} />;
         if (p.unit === 's') {
           control = (
             <div className="rs-insp__nowrap">
@@ -407,7 +494,8 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
       <label className="rs-insp__label">
         <button className={`rs-insp__pin${pinned ? ' is-on' : ''}`} aria-pressed={pinned} title={pinned ? 'Shown on the node: click to hide' : 'Show on the node'} onClick={() => onPin(!pinned)}><Icon name="pin" size={12} /></button>
         {sockType && <span className={`rs-insp__dot rs-sock--${sockType}`} title="Drag a wire from a node's output onto this row to drive it" />}
-        <span className="rs-insp__lt">{label}</span>
+        <span className="rs-insp__lt" onDoubleClick={resetParam}>{label}</span>
+        {changed && <button type="button" className="rs-insp__reset" title="Back to the default value" aria-label={`Reset ${label} to its default`} onClick={(e) => { e.preventDefault(); resetParam(); }}><Icon name="undo" size={12} /></button>}
       </label>
       <div className="rs-insp__ctl">{control}</div>
       {p.hint && !isCode && <div className="rs-insp__phint">{p.hint}</div>}
