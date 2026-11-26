@@ -21,7 +21,7 @@ import { FEED_MAX_SIDE } from './camera-feed';
 import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
 import { cardCorners, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, viewMatrix, viewRay, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
 import { rotate } from '../../engine/lib/motion-math';
-import { hintFor, initialPlaceState, placeStep, type Gesture, type PlaceState } from './placement';
+import { hintFor, initialPlaceState, liftedPlacement, placeStep, type Gesture, type PlaceState } from './placement';
 import type { GrantedFeatures, XrAnchorLike, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrRigidTransform, XrSessionLike, XrViewLike, XrViewportLike } from './xr-api';
 
 /** What draws into the AR view (WebGL in the app, a recorder of calls in the tests). */
@@ -77,6 +77,8 @@ export interface ArLoopState {
   /** Camera frames per second, and finished pictures of the object per second. */
   fps: number;
   pictureFps: number;
+  /** How far the object is raised above its surface, metres (0 = on it). */
+  height: number;
   /** The object is held by a browser anchor (false = a fixed pose in the room). */
   anchored: boolean;
   /** The recording has the camera picture with it. */
@@ -301,7 +303,8 @@ export class ArLoop {
     // 4. draw
     const viewProjection = mat4Mul(view.projectionMatrix, viewMatrix(pose));
     d.painter.begin(d.layer.framebuffer, viewport);
-    const pl = this.place.placement;
+    const base = this.place.placement;
+    const pl = base ? liftedPlacement(base) : null; // where the object really stands: the surface point plus its height
     if (this.place.phase !== 'placed' && this.place.reticle) d.painter.ring(reticleCorners(this.place.reticle, RING_RADIUS), viewProjection);
     const moment: WorldMoment = { view: pose, lens, object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale } : null };
     const pic = d.source.latest();
@@ -356,12 +359,24 @@ export class ArLoop {
     }
     if (a.type === 'place') return this.placeNow(frame, pose);
     const g = a.g;
-    const pl = this.place.placement;
+    const base = this.place.placement;
+    const pl = base ? liftedPlacement(base) : null;
     if (g.type === 'tap') {
       if (this.place.phase !== 'placed') this.placeNow(frame, pose);
       return;
     }
-    if (!pl) return;
+    if (!pl || !base) return;
+    if (g.type === 'lift') {
+      // finger travel up the screen maps to metres at the object's distance, so the object follows the fingers 1 to 1 on screen
+      const scr = this.d.screen();
+      const dist = Math.max(0.2, depthOf(pose, pl.p));
+      this.place = placeStep(this.place, { type: 'lift', dh: (g.dy * 2 * dist) / (Math.max(1e-6, lens[1]) * Math.max(1, scr.height)) });
+      return;
+    }
+    if (g.type === 'lift-reset') {
+      this.place = placeStep(this.place, { type: 'height', to: 0 });
+      return;
+    }
     if (g.type === 'twist' || g.type === 'pinch') {
       this.place = placeStep(this.place, g.type === 'twist' ? { type: 'twist', deg: g.deg } : { type: 'pinch', factor: g.factor });
       return;
@@ -377,7 +392,7 @@ export class ArLoop {
     const h = rayPlane(ray.origin, ray.dir, pl.p, rotate(pl.q, [0, 1, 0]));
     if (!h) return; // the finger points above the horizon of the surface: the object stays
     if (g.type === 'drag-start' || !this.drag) {
-      this.drag = { h0: h, p0: pl.p };
+      this.drag = { h0: h, p0: base.p }; // the surface point moves; the height above it stays
       return;
     }
     const to: Vec3 = [this.drag.p0[0] + h[0] - this.drag.h0[0], this.drag.p0[1] + h[1] - this.drag.h0[1], this.drag.p0[2] + h[2] - this.drag.h0[2]];
@@ -489,6 +504,7 @@ export class ArLoop {
       recSeconds: r && r.t0 >= 0 ? (this.d.now() - r.t0) / 1000 : 0,
       fps: this.rate(this.frameTimes),
       pictureFps: this.rate(this.pictureTimes),
+      height: this.place.placement?.h ?? 0,
       anchored: !!this.anchor,
       clip: r?.withClip === true,
       error: this.error,

@@ -5,9 +5,10 @@
  *   searching --(a surface is found)--> aiming --(tap / Place)--> placed --(Reset)--> aiming
  *
  * While aiming, a ring (the reticle) shows where the object would land. Once placed: one finger drags it along its surface, two
- * fingers turn it (twist) and resize it (pinch).
+ * fingers turn it (twist), resize it (pinch) or raise it (both fingers up or down).
  */
 import type { Vec3 } from '../../engine/lib/motion-math';
+import { rotate } from '../../engine/lib/motion-math';
 import { yawFacing, type Placement, type XrPose } from '../../engine/lib/xr-math';
 
 export type Phase = 'searching' | 'aiming' | 'placed';
@@ -30,6 +31,10 @@ export type PlaceEvent =
   | { type: 'move'; to: Vec3 }
   | { type: 'twist'; deg: number }
   | { type: 'pinch'; factor: number }
+  /** Raise (positive) or lower the object by `dh` metres above its surface. */
+  | { type: 'lift'; dh: number }
+  /** Put the object at height `to` metres above its surface (0 = on it). */
+  | { type: 'height'; to: number }
   /** The browser refined where the anchored surface point is. */
   | { type: 'anchor'; pose: XrPose }
   /** Pick the object up again. */
@@ -37,6 +42,18 @@ export type PlaceEvent =
 
 export const MIN_SCALE = 0.05;
 export const MAX_SCALE = 40;
+/** How far the object can be lowered into / raised off its surface, metres. */
+export const MIN_HEIGHT = -2;
+export const MAX_HEIGHT = 5;
+const clampH = (h: number): number => Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, h));
+
+/** The placement as the scene sees it: the surface point moved up along the surface normal by the height. */
+export function liftedPlacement(pl: Placement): Placement {
+  const h = pl.h ?? 0;
+  if (!h) return pl;
+  const up = rotate(pl.q, [0, 1, 0]);
+  return { ...pl, p: [pl.p[0] + up[0] * h, pl.p[1] + up[1] * h, pl.p[2] + up[2] * h] };
+}
 
 export const initialPlaceState = (): PlaceState => ({ phase: 'searching', reticle: null, placement: null, tracking: true });
 
@@ -52,7 +69,7 @@ export function placeStep(s: PlaceState, e: PlaceEvent): PlaceState {
     case 'place': {
       if (!s.reticle) return s;
       const keep = s.placement?.scale ?? 1; // moving a placed object to the ring keeps the size the user pinched
-      return { ...s, phase: 'placed', placement: { p: s.reticle.p, q: s.reticle.q, yaw: yawFacing(s.reticle, e.viewer), scale: keep } };
+      return { ...s, phase: 'placed', placement: { p: s.reticle.p, q: s.reticle.q, yaw: yawFacing(s.reticle, e.viewer), scale: keep, h: s.placement?.h ?? 0 } };
     }
     case 'move':
       return s.placement ? { ...s, placement: { ...s.placement, p: e.to } } : s;
@@ -60,6 +77,10 @@ export function placeStep(s: PlaceState, e: PlaceEvent): PlaceState {
       return s.placement ? { ...s, placement: { ...s.placement, yaw: wrap(s.placement.yaw + e.deg) } } : s;
     case 'pinch':
       return s.placement && e.factor > 0 ? { ...s, placement: { ...s.placement, scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, s.placement.scale * e.factor)) } } : s;
+    case 'lift':
+      return s.placement && Number.isFinite(e.dh) ? { ...s, placement: { ...s.placement, h: clampH((s.placement.h ?? 0) + e.dh) } } : s;
+    case 'height':
+      return s.placement && Number.isFinite(e.to) ? { ...s, placement: { ...s.placement, h: clampH(e.to) } } : s;
     case 'anchor':
       return s.placement ? { ...s, placement: { ...s.placement, p: e.pose.p, q: e.pose.q } } : s;
     case 'reset':
@@ -76,7 +97,7 @@ export function hintFor(s: PlaceState, o: { gestures: boolean; recording: boolea
   if (s.phase === 'searching') return 'Move the phone slowly to find a surface. Point it at the floor or a table.';
   if (s.phase === 'aiming') return o.gestures ? 'Tap the screen or press Place to put it on the ring.' : 'Tap the screen to put it on the ring.';
   if (o.recording) return 'Recording. Walk around it. Press Stop when you are done.';
-  return o.gestures ? 'Walk around it. Drag to move, two fingers to turn and resize.' : 'Walk around it. Tap to put it somewhere else.';
+  return o.gestures ? 'Walk around it. Drag to move, two fingers to turn, resize or lift. Height: slide the side strip.' : 'Walk around it. Tap to put it somewhere else.';
 }
 
 /* ------------------------------------------------------------------ fingers */
@@ -87,7 +108,14 @@ export type Gesture =
   | { type: 'drag'; x: number; y: number }
   | { type: 'drag-end' }
   | { type: 'twist'; deg: number }
-  | { type: 'pinch'; factor: number };
+  | { type: 'pinch'; factor: number }
+  /** Two fingers (or the Height strip) moved up the screen by `dy` CSS pixels (negative = down). */
+  | { type: 'lift'; dy: number }
+  /** Double tap on the Height strip: back onto the surface. */
+  | { type: 'lift-reset' };
+
+/** A two-finger gesture is a lift or a turn/resize once the fingers have travelled this far (CSS pixels); until then nothing happens. */
+export const MULTI_DEAD = 8;
 
 /** A finger must travel this far (CSS pixels) before it is a drag and no longer a tap. */
 export const TAP_SLOP = 12;
@@ -111,7 +139,10 @@ export class GestureReader {
   private fingers = new Map<number, Finger>();
   private dragging = false;
   private multi = false;
-  private last: { angle: number; dist: number } | null = null;
+  private last: { angle: number; dist: number; my: number } | null = null;
+  /** Net travel since the two fingers came down, in pixels of finger travel; and what the gesture was decided to be. */
+  private acc = { twist: 0, pinch: 0, lift: 0, deg: 0, factor: 1 };
+  private mode: 'lift' | 'turn' | null = null;
 
   down(id: number, x: number, y: number, t: number): Gesture[] {
     const out: Gesture[] = [];
@@ -121,6 +152,8 @@ export class GestureReader {
       if (this.dragging) out.push({ type: 'drag-end' });
       this.dragging = false;
       this.multi = true;
+      this.acc = { twist: 0, pinch: 0, lift: 0, deg: 0, factor: 1 };
+      this.mode = null;
       this.last = this.pair();
     }
     return out;
@@ -139,6 +172,27 @@ export class GestureReader {
       const out: Gesture[] = [];
       let d = now.angle - was.angle;
       d -= 360 * Math.round(d / 360);
+      // What is this two-finger gesture? The net travel of the fingers decides, once, after a small dead zone: both fingers going
+      // the same way up or down is a lift, anything else a turn and resize. Jitter cancels out in a net sum.
+      if (!this.mode) {
+        this.acc.twist += ((d * Math.PI) / 180) * (now.dist / 2);
+        this.acc.pinch += (now.dist - was.dist) / 2;
+        this.acc.lift += was.my - now.my; // the screen's y runs down
+        this.acc.deg += -d;
+        this.acc.factor *= now.dist / was.dist;
+        const t = Math.abs(this.acc.twist);
+        const p = Math.abs(this.acc.pinch);
+        const l = Math.abs(this.acc.lift);
+        if (Math.max(t, p, l) < MULTI_DEAD) return [];
+        this.mode = l > 1.25 * Math.max(t, p) ? 'lift' : 'turn';
+        // what the fingers did while deciding is handed over as the first move of the chosen gesture
+        if (this.mode === 'lift') return [{ type: 'lift', dy: this.acc.lift }];
+        const first: Gesture[] = [];
+        if (Math.abs(this.acc.deg) > 1e-4) first.push({ type: 'twist', deg: this.acc.deg });
+        if (Math.abs(this.acc.factor - 1) > 1e-5) first.push({ type: 'pinch', factor: this.acc.factor });
+        return first;
+      }
+      if (this.mode === 'lift') return Math.abs(was.my - now.my) > 1e-6 ? [{ type: 'lift', dy: was.my - now.my }] : [];
       // the screen's y runs down, so a clockwise turn of the fingers is a positive angle here; seen from above the object turns the same way
       if (Math.abs(d) > 1e-4) out.push({ type: 'twist', deg: -d });
       const k = now.dist / was.dist;
@@ -178,9 +232,9 @@ export class GestureReader {
     return out;
   }
 
-  private pair(): { angle: number; dist: number } | null {
+  private pair(): { angle: number; dist: number; my: number } | null {
     const [a, b] = [...this.fingers.values()];
     if (!a || !b) return null;
-    return { angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI, dist: Math.hypot(b.x - a.x, b.y - a.y) };
+    return { angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI, dist: Math.hypot(b.x - a.x, b.y - a.y), my: (a.y + b.y) / 2 };
   }
 }
