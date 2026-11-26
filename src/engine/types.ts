@@ -508,6 +508,12 @@ export interface Host {
    */
   liveBlocked?(source: LiveSource): boolean;
   /**
+   * The AR view's camera picture (World AR Camera's Picture output). Calling it also tells the host the picture is in use, so the
+   * AR view only copies camera frames while something asks. `session` false = no AR view is open (use the ordinary camera);
+   * `session` true with `access` false = the phone does not hand the camera picture over; `frame` null = none arrived yet.
+   */
+  arCameraFrame?(): { session: boolean; access: boolean; frame: { texture: GPUTexture; width: number; height: number } | null };
+  /**
    * Value of a named signal that a stream-domain (audio/MIDI) node publishes, at `seconds`:
    * loudness, pitch, note, gate… This is the bridge that lets sound drive picture parameters.
    * Live it returns the latest measured value; during export, the value analysed from the rendered audio.

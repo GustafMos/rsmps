@@ -1,4 +1,6 @@
 import { defineNode } from '../../define';
+import type { CameraValue, ImageValue } from '../../types';
+import { cameraSource } from '../../lib/live-source';
 import { defaultRigCamera } from '../../lib/motion-rig';
 import { isWorldTake, sampleWorldTake, worldTakeDuration, type WorldMoment } from '../../lib/world-take';
 import { awayCamera, worldCamera } from '../../lib/xr-math';
@@ -8,7 +10,12 @@ import { awayCamera, worldCamera } from '../../lib/xr-math';
  * from the object the user placed on a real surface. The object is the scene: it stays at the origin, where every 3D node puts it,
  * and this camera moves around it.
  *
- * It has three sources and picks by itself:
+ * Its Picture output is the live camera picture, so it can go into a material or any effect while the Webcam node is cut off by the AR
+ * view: in the AR view it is the AR camera frame (the host copies it once per camera frame, and only while this output is wired); with
+ * no AR view it is the device's back camera through the ordinary live path; with neither it is transparent. `liveTick` is stamped by
+ * the player (only while Picture is wired) so the picture is never served from the evaluation cache.
+ *
+ * The camera has three sources and picks by itself:
  *  - the AR view is open: the view hands the pose of each camera frame in through the hidden `live` param (it evaluates a copy of the
  *    graph with that param filled in, the way live picture nodes get their tick), so the picture is rendered for exactly that pose;
  *  - a recorded take: plays it by the clock, in step with the camera clip recorded with it, so effects and exports work;
@@ -24,12 +31,17 @@ export default defineNode({
   title: 'World AR Camera',
   category: 'input',
   description:
-    'Experimental. A 3D camera that follows the phone through the room (walking included) using the browser\'s built-in AR, so a 3D object stands on a real floor or table. Wire it into a 3D Object\'s Camera input, view the object and press "Start AR" in the inspector (Android Chrome). A recorded take plays back in the normal viewer, in step with the camera clip recorded with it.',
+    'Experimental. A 3D camera that follows the phone through the room (walking included) using the browser\'s built-in AR, so a 3D object stands on a real floor or table. Wire it into a 3D Object\'s Camera input, view the object and press "Start AR" in the inspector (Android Chrome). A recorded take plays back in the normal viewer, in step with the camera clip recorded with it. The Picture output is what the camera sees right now (in AR, the AR camera picture; outside AR, the back camera), so you can use the room as a texture.',
   keywords: ['ar', 'augmented reality', 'webxr', 'arcore', 'world', 'room', 'floor', 'table', 'place', 'anchor', 'surface', 'tracking', '6dof', 'walk', 'phone', 'camera', '3d', 'markerless'],
   inputs: {},
-  outputs: { camera: { type: 'camera', label: 'Camera' } },
+  outputs: {
+    camera: { type: 'camera', label: 'Camera' },
+    picture: { type: 'image', label: 'Picture' },
+  },
+  optionalOutputs: ['picture'],
   params: {
     live: { type: 'json', default: null, label: 'Live pose', visibleIf: () => false },
+    liveTick: { type: 'string', default: '', label: 'Live tick', visibleIf: () => false },
     take: { type: 'json', default: null, label: 'Recorded take', visibleIf: () => false },
     size: {
       type: 'number',
@@ -77,16 +89,42 @@ export default defineNode({
     loopTake: { type: 'bool', default: false, label: 'Repeat the take', hint: 'Play the take again from the start when it ends (otherwise it holds its last pose).', group: 'Recording', visibleIf: (p) => !!p.take },
   },
   summary: (p) => (isWorldTake(p.take) ? `recorded take · ${worldTakeDuration(p.take).toFixed(1)} s` : 'no take yet'),
-  render(ctx) {
+  async render(ctx) {
     const p = ctx.params;
     let m: WorldMoment | null = null;
     if (isMoment(p.live)) m = p.live;
     else if (isWorldTake(p.take)) m = sampleWorldTake(p.take, ctx.time.seconds - p.startAt, p.loopTake);
-    // nothing to follow: an ordinary camera, a little above the object and looking at it
-    if (!m) return { camera: { ...defaultRigCamera(), position: [0, 1, -4.5] } };
-    // tracked, but nothing is placed (yet): the object must not show
-    if (!m.object) return { camera: awayCamera() };
-    const placement = { p: m.object.p, q: m.object.q, yaw: 0, scale: m.object.scale };
-    return { camera: worldCamera(m.view, m.lens, placement, { unit: p.size / 2, lift: p.lift }, ctx.canvas) };
+    let camera: CameraValue;
+    if (!m) camera = { ...defaultRigCamera(), position: [0, 1, -4.5] }; // nothing to follow: an ordinary camera above the object, looking at it
+    else if (!m.object) camera = awayCamera(); // tracked, but nothing is placed (yet): the object must not show
+    else camera = worldCamera(m.view, m.lens, { p: m.object.p, q: m.object.q, yaw: 0, scale: m.object.scale }, { unit: p.size / 2, lift: p.lift }, ctx.canvas);
+    // the Picture costs a camera copy every frame: only made when something is wired to it (asking the host also tells it the picture is in use)
+    if (!ctx.wants('picture')) return { camera };
+    void ctx.time.seconds; // live: re-render every frame
+    const clear = (): ImageValue => {
+      const width = Math.max(1, Math.round(ctx.canvas.width));
+      const height = Math.max(1, Math.round(ctx.canvas.height));
+      return ctx.gpu.pass({ label: 'world-ar-clear', size: { width, height, unit: ctx.unitFor(width, height) }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return vec4f(0.0); }' });
+    };
+    const host = ctx.host;
+    const ar = host.arCameraFrame?.();
+    if (ar?.session) {
+      // the AR view owns the camera: its own frame, or nothing where the phone does not hand it over (or none came yet)
+      if (!ar.frame) return { camera, picture: clear() };
+      return { camera, picture: { kind: 'image', texture: ar.frame.texture, width: ar.frame.width, height: ar.frame.height, unit: ctx.unitFor(ar.frame.width, ar.frame.height) } };
+    }
+    // no AR view: the back camera of this device, through the same path as a Webcam node set to the back camera
+    if (!host.liveFrame) return { camera, picture: clear() };
+    const source = cameraSource({ device: '', facing: 'back', resolution: 'auto' });
+    if (host.liveBlocked?.(source)) return { camera, picture: clear() };
+    const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
+    let frame: Awaited<ReturnType<NonNullable<typeof host.liveFrame>>> = null;
+    try {
+      frame = await host.liveFrame(source, maxSide, ctx.time.seconds);
+    } catch {
+      frame = null; // no camera, refused, in use: a transparent picture, not an error (the graph can still be built)
+    }
+    if (!frame) return { camera, picture: clear() };
+    return { camera, picture: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit: ctx.unitFor(frame.width, frame.height) } };
   },
 });

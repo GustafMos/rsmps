@@ -74,7 +74,7 @@ export class GlPainter implements ArPainter {
   private loc: { pos: number; uv: number; vp: WebGLUniformLocation | null; tex: WebGLUniformLocation | null; opacity: WebGLUniformLocation | null; mode: WebGLUniformLocation | null };
   private data = new Float32Array(20);
   private hasPicture = false;
-  private cameraSize: { width: number; height: number } | null = null;
+  private cameraSize: { width: number; height: number; maxSide: number } | null = null;
   /** Set once camera access is known to work in this session. */
   binding: CameraBinding | null = null;
 
@@ -210,16 +210,16 @@ export class GlPainter implements ArPainter {
    * access. ASSUMPTION (could not be checked without a device): the camera texture is in OpenGL's orientation, its row 0 at the
    * bottom of the picture. If recorded clips come out upside down, `CAMERA_TOP_V` below is the one thing to change.
    */
-  camera(view: XrViewLike): unknown | null {
+  camera(view: XrViewLike, maxSide: number = CAMERA_MAX_SIDE): unknown | null {
     const gl = this.gl;
     const cam = view.camera;
     if (!this.binding || !cam || !cam.width || !cam.height) return null;
     const texture = this.binding.getCameraImage(cam);
     if (!texture) return null;
     const canvas = gl.canvas as HTMLCanvasElement | OffscreenCanvas;
-    if (!this.cameraSize || this.cameraSize.width !== cam.width || this.cameraSize.height !== cam.height) {
-      this.cameraSize = { width: cam.width, height: cam.height };
-      const k = Math.min(1, CAMERA_MAX_SIDE / Math.max(cam.width, cam.height));
+    if (!this.cameraSize || this.cameraSize.width !== cam.width || this.cameraSize.height !== cam.height || this.cameraSize.maxSide !== maxSide) {
+      this.cameraSize = { width: cam.width, height: cam.height, maxSide };
+      const k = Math.min(1, maxSide / Math.max(cam.width, cam.height));
       canvas.width = Math.max(2, Math.floor((cam.width * k) / 2) * 2);
       canvas.height = Math.max(2, Math.floor((cam.height * k) / 2) * 2);
     }
