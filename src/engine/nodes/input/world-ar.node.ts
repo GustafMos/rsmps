@@ -74,6 +74,13 @@ export default defineNode({
       ],
     },
     cardWidth: { type: 'number', default: 0.5, min: 0.02, max: 20, step: 0.01, label: 'Picture width', hint: 'Width of a flat picture in the room, in meters.', group: 'AR view' },
+    saveVideo: {
+      type: 'bool',
+      default: true,
+      label: 'Save video',
+      hint: 'After you close the AR view, make a video file of the recording: the camera picture with the object over it. It is added to Media and downloaded.',
+      group: 'AR view',
+    },
     startAt: {
       type: 'number',
       default: 0,

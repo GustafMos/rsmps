@@ -6,6 +6,7 @@ import type { CardMode } from '../../engine/lib/xr-math';
 import type { WorldArTake } from '../../io/world-ar/controller';
 import { createArOverlay } from '../worldAr/overlay';
 import type { AppCtx } from './context';
+import { getLive } from './live';
 
 type Ctx = Pick<AppCtx, 'io' | 'ed'>;
 
@@ -13,7 +14,7 @@ type Ctx = Pick<AppCtx, 'io' | 'ed'>;
 export function takeMessage(t: WorldArTake): { text: string; kind: 'ok' | 'error' | 'info' } {
   if (!t.take) return { text: t.error ?? 'Nothing was recorded.', kind: 'error' };
   const secs = `${t.seconds.toFixed(1)} s`;
-  if (t.clip) return { text: `AR take saved (${secs}). The camera clip was added as a Media In node: merge the object over it.`, kind: 'ok' };
+  if (t.clip) return { text: `AR take saved (${secs}). The camera clip was added as a Media In node. "Save as video" on the AR node makes a finished file with the object over it.`, kind: 'ok' };
   if (t.error) return { text: `AR take saved (${secs}), movement only. ${t.error}`, kind: 'info' };
   return { text: `AR take saved (${secs}), movement only: this browser did not hand the camera picture to the page.`, kind: 'info' };
 }
@@ -34,12 +35,15 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
   if (!shown) return ed.toast('View the node you want to see in the room first (the eye on a node, for example your 3D Object), then press Start AR.', 'info');
   const overlay = createArOverlay();
   const params = node?.params ?? {};
+  let recorded = false;
   const saveTake = (t: WorldArTake) => {
     const m = takeMessage(t);
     ed.toast(m.text, m.kind);
     if (!t.take) return;
+    recorded = !!t.clip;
     ed.beginHold(); // the take and its clip node: one undo step
-    ed.setParam(nodeId, 'take', t.take);
+    // the take remembers its camera clip and what was shown, so the video can be made later, also after a reload
+    ed.setParam(nodeId, 'take', { ...t.take, ...(t.clip ? { clipAsset: t.clip.id } : {}), shown });
     ed.setParam(nodeId, 'startAt', 0);
     if (t.clip) ed.addNodeAt('media-in', { x: (node?.x ?? 0) - 40, y: (node?.y ?? 0) + 220 }, undefined, { assets: [t.clip.id] });
     ed.endHold();
@@ -58,6 +62,9 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
       void handle.closed.then((end) => {
         overlay.remove();
         if (end.error) ed.toast(end.error, 'error');
+        // the AR session is over, so the camera and the GPU are free: render the video now (plain function, nothing awaited in the session)
+        const now = ed.state.graph.nodes.find((n) => n.id === nodeId);
+        if (recorded && now?.params.saveVideo !== false) void getLive(app).worldArVideo.start(fullId);
       });
     },
     (err) => {

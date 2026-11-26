@@ -40,6 +40,11 @@ export interface WorldTake {
   tracks: Record<string, number[]>;
   /** True when the frames match a camera clip recorded in the same session. */
   clip: boolean;
+  /** The clip frame take frame 0 belongs to, when the clip's first pictures had no pose (absent = 0: frame n of the take is frame n of the clip). */
+  clipFirst?: number;
+  /** Media id of the camera clip recorded with the take, and the node the AR view showed (set by the app when it stores the take). */
+  clipAsset?: string;
+  shown?: string;
 }
 
 interface Spec {
@@ -122,8 +127,10 @@ export function buildWorldTake(samples: WorldSample[], opts: { fps: number }): W
   }
   let frames: number;
   const dense: Row[] = [];
+  let first = 0;
   if (byFrame) {
     const f0 = sorted[0].frame!;
+    first = f0;
     frames = Math.max(2, sorted[sorted.length - 1].frame! - f0 + 1);
     let j = 0;
     for (let i = 0; i < frames; i++) {
@@ -168,7 +175,7 @@ export function buildWorldTake(samples: WorldSample[], opts: { fps: number }): W
     for (const i of rdp(q, spec.tol)) flat.push(i, q[i]);
     tracks[n] = flat;
   }
-  return { v: 1, kind: 'world-ar', fps, frames, tracks, clip: byFrame };
+  return { v: 1, kind: 'world-ar', fps, frames, tracks, clip: byFrame, ...(byFrame && first > 0 ? { clipFirst: first } : {}) };
 }
 
 const NEUTRAL: Row = { cx: 0, cy: 0, cz: 0, cqx: 0, cqy: 0, cqz: 0, cqw: 1, ox: 0, oy: 0, oz: 0, oqx: 0, oqy: 0, oqz: 0, oqw: 1, os: 1, on: 0, l0: 1, l5: 1, l8: 0, l9: 0 };

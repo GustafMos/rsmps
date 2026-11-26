@@ -8,6 +8,7 @@ import { MidiController } from './midi';
 import { OutputController } from './output';
 import { StreamController } from './stream';
 import { RecorderController } from './recorder';
+import { WorldArVideoController } from './worldArVideo';
 import { REACT_FEATURES, reactPatch, reactionOf, soundSources, stopReacting, type ReactFeature, type SoundSource } from './react';
 
 export interface LiveUi {
@@ -26,6 +27,8 @@ export class Live {
   readonly stream: StreamController;
   /** The Recorder node's Record button. */
   readonly recorder: RecorderController;
+  /** World AR Camera: Save as video. */
+  readonly worldArVideo: WorldArVideoController;
   readonly ui: Store<LiveUi> = createStore<LiveUi>({ outputMenu: null, paramMenu: null, soundChooser: null });
 
   constructor(
@@ -36,6 +39,7 @@ export class Live {
     this.output = new OutputController((m, k) => ed.toast(m, k));
     this.stream = new StreamController(io.stream, (m, k) => ed.toast(m, k));
     this.recorder = new RecorderController(ed, io);
+    this.worldArVideo = new WorldArVideoController(ed, io, () => (this.recorder.store.get().phase === 'idle' ? null : 'A recording is in progress. Try again when it has finished.'));
   }
 
   /** "React to sound" on a number setting: one undo step. Asks which sound when the project has several. */

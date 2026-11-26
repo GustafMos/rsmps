@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Registry } from '../../engine/define';
 import { addNode, connect, createGraph } from '../../engine/graph';
 import { qAxisAngle, rotate, type Vec3 } from '../../engine/lib/motion-math';
+import { buildWorldArVideoGraph } from '../../engine/lib/ar-video-graph';
 import { buildWorldTake, sampleWorldTake, type WorldMoment } from '../../engine/lib/world-take';
 import { depthOf, placementQuat, project, rayPlane, viewRay, type Corners, type XrPose } from '../../engine/lib/xr-math';
 import { registerBuiltins } from '../../engine/nodes';
@@ -843,4 +844,90 @@ describe('opening the AR view (fake browser)', () => {
     expect(t.takes[1].error).toMatch(/too short/);
     await h.close();
   });
+});
+
+/* ------------------------------------------------------------------ the AR video keeps the object on its spot */
+
+describe('the AR video: clip time to take time', () => {
+  const FPS = 30;
+  /**
+   * Record through the real loop with a phone that walks along x at 1 m/s, frames arriving at an uneven pace, the clip recorder
+   * ready late, dropping some pictures and taking its first picture as clip frame `lead` (as when the encoder started early).
+   */
+  function record(lead: number) {
+    const t = setup();
+    t.session.camera = { width: 1080, height: 1920 };
+    t.painter.cameraPicture = { canvas: true };
+    t.session.hit = FLOOR;
+    t.step();
+    t.loop.placeHere();
+    t.step();
+    let ct = 0; // the phone's own clock in ms
+    let calls = 0;
+    let t0 = -1;
+    let last = -1;
+    const captured = new Map<number, number>(); // clip frame -> the x of the phone when that picture was taken
+    t.loop.startRecording({
+      push: () => {
+        calls++;
+        if (calls <= 2 || calls % 7 === 0) return -1; // encoder not ready yet / a picture dropped
+        if (t0 < 0) t0 = ct - (lead * 1000) / FPS;
+        const n = Math.floor(((ct - t0) * FPS) / 1000);
+        if (n <= last) return -1; // this clip frame has its picture already
+        last = n;
+        captured.set(n, ct / 1000);
+        return n;
+      },
+    });
+    for (let i = 0; i < 60; i++) {
+      ct += 25 + (i % 4) * 6; // 25..43 ms: a variable frame rate
+      t.session.viewer = { p: [ct / 1000, 1.4, 0], q: EYE.q };
+      t.step();
+    }
+    const rec = t.loop.stopRecording()!;
+    return { rec, captured, last, t0: () => t0 };
+  }
+
+  const arProject = (): GraphDoc =>
+    ({
+      schema: 'rsmps/graph',
+      version: 2,
+      name: 'ar',
+      project: { width: 1080, height: 1920, fps: 24, duration: 4, loop: false, lengthMode: 'relative', referenceSide: 1080 },
+      nodes: [
+        { id: 'ar', type: 'world-ar', x: 0, y: 0, params: {} },
+        { id: 'obj', type: 'object-3d', x: 0, y: 0, params: {} },
+      ],
+      edges: [{ id: 'c', from: { node: 'ar', port: 'camera' }, to: { node: 'obj', port: 'camera' } }],
+    }) as unknown as GraphDoc;
+
+  for (const lead of [0, 2]) {
+    it(`frame N of the video uses the pose of clip frame N (the clip's first picture is frame ${lead}): within a frame, dropped pictures hold the pose before`, () => {
+      const { rec, captured, last, t0 } = record(lead);
+      const take = buildWorldTake(rec.samples, { fps: FPS })!;
+      expect(take.clip).toBe(true);
+      expect(take.clipFirst ?? 0).toBe(lead);
+      const built = buildWorldArVideoGraph(arProject(), { arId: 'ar', viewedId: 'obj', viewedPort: 'image', take, clipAsset: 'clip', width: 540, height: 960, output: {} })!;
+      const ar = built.graph.nodes.find((n) => n.id === 'ar')!.params as { take: typeof take; startAt: number };
+      const clip = built.graph.nodes.find((n) => n.id === 'ar-clip')!.params as { offset: number };
+      expect(built.graph.project.fps).toBe(FPS); // the video runs at the clip's rate, not the project's 24
+      const firstFrame = [...captured.keys()].sort((a, b) => a - b)[0];
+      let checked = 0;
+      for (let n = 0; n <= last; n++) {
+        const seconds = n / FPS; // the project time the exporter renders frame n at
+        expect(Math.floor((seconds + clip.offset) * FPS + 1e-6)).toBe(n); // the clip frame the Media In shows then
+        const x = sampleWorldTake(ar.take, seconds - ar.startAt).view.p[0];
+        // what the phone saw in that picture: the pose of the newest clip frame taken at or before n (a dropped picture is held)
+        let from = n;
+        while (!captured.has(from) && from > firstFrame) from--;
+        expect(x).toBeCloseTo(captured.get(Math.max(from, firstFrame))!, 3);
+        // and that is where the phone was when the frame was taken, to within a frame of walking (1 m/s, 1/30 s)
+        if (captured.has(n)) {
+          expect(Math.abs(x - (t0() + (n * 1000) / FPS) / 1000)).toBeLessThan(1 / FPS);
+          checked++;
+        }
+      }
+      expect(checked).toBeGreaterThan(10);
+    });
+  }
 });

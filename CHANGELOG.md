@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.35.0] - 2026-11-26
+
+### Added
+- **World AR recordings can be saved as a video file.** After recording in the AR view, the recorded camera clip is rendered with the viewed graph's picture on top, following the recorded camera movement, and downloaded as a file and added to Media, the same way the Recorder's "effects after" mode works. With the new "Save video" switch on (the default) this starts by itself when the AR view is closed; the World AR panel also has a **Save as video** button with progress, time left and Cancel. The recording and its camera clip are kept, so the graph can be changed and the video saved again. A recording without a camera picture can be saved as the object alone. Recordings made before this version do not remember their camera clip and need recording again. Experimental: tested against a simulated AR session only.
+
 ## [0.34.0] - 2026-11-26
 
 ### Added

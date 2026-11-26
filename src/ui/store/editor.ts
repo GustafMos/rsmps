@@ -1777,6 +1777,10 @@ export class Editor {
    * the same time on the same GPU, so it is refused with this message.
    */
   exportBlocked: string | null = null;
+  /** Why nothing else may render through the exporter right now (an export or a take is running), or null. */
+  get exportBusy(): string | null {
+    return this.exportAbort ? 'An export is already running.' : this.exportBlocked;
+  }
   private supportShown = new Set<string>();
 
   /** Each trigger shows its prompt at most once EVER (flag set when shown), never in safe mode or over another prompt. */
