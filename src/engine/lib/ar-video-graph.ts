@@ -52,10 +52,19 @@ export interface ArVideoGraph {
 export function buildWorldArVideoGraph(graph: GraphDoc, o: ArVideoOptions): ArVideoGraph | null {
   const view = flattenGraph(graph);
   const ar = view.alias.get(o.arId) ?? o.arId;
-  const shown = view.alias.get(o.viewedId) ?? o.viewedId;
+  let shown = view.alias.get(o.viewedId) ?? o.viewedId;
+  let shownPort = o.viewedPort;
   const flat = view.graph;
   const arNode = flat.nodes.find((n) => n.id === ar);
   if (!arNode || !flat.nodes.some((n) => n.id === shown)) return null;
+  // An Image Out has no picture of its own: what the AR view showed on it is what is wired into it. Without this the video
+  // would merge a node that gives nothing, and only the camera clip would be in it.
+  for (let guard = 0; flat.nodes.find((n) => n.id === shown)?.type === 'image-out' && guard < 16; guard++) {
+    const feed = flat.edges.find((e) => e.to.node === shown && e.to.port === 'image');
+    if (!feed) return null;
+    shown = feed.from.node;
+    shownPort = feed.from.port;
+  }
   const used = new Set(flat.nodes.map((n) => n.id));
   const fresh = (base: string): string => {
     let id = base;
@@ -91,7 +100,7 @@ export function buildWorldArVideoGraph(graph: GraphDoc, o: ArVideoOptions): ArVi
   }
   const extra: NodeInstance[] = [];
   if (pictureUsed || o.clipAsset) extra.push(clip(pictureId, arNode.x, arNode.y + 160, 'AR camera clip'));
-  let last = { node: shown, port: o.viewedPort };
+  let last = { node: shown, port: shownPort };
   if (o.clipAsset) {
     const mergeId = fresh('ar-video-merge');
     extra.push({ id: mergeId, type: 'merge', x: arNode.x + 200, y: arNode.y + 120, label: 'Object over camera', params: { mode: 'normal', opacity: 1, fit: 'stretch', center: [0.5, 0.5], scale: 1 } });

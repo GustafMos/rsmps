@@ -34,6 +34,15 @@ const project = () =>
   );
 
 describe('the render graph of a World AR video', () => {
+  it('viewing an Image Out merges what is wired into it (an Image Out gives no picture itself)', () => {
+    const g = project();
+    const r = buildWorldArVideoGraph(g, opts({ viewedId: 'out' }))!;
+    const fg = r.graph.edges.find((e) => e.to.port === 'foreground')!;
+    expect(fg.from).toEqual({ node: 'fx', port: 'image' });
+    const bare = doc([node('ar', 'world-ar'), node('out', 'image-out')], []);
+    expect(buildWorldArVideoGraph(bare, opts({ viewedId: 'out' }))).toBeNull();
+  });
+
   it('the camera plays the take, Picture and the Webcam become the camera clip, and the object is merged over the clip into an Output', () => {
     const g = project();
     const r = buildWorldArVideoGraph(g, opts({ viewedId: 'fx' }))!;

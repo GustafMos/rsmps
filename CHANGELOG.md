@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.35.2] - 2026-11-26
+
+### Fixed
+- **World AR "Save as video" now includes the node tree when an Output node was being viewed.** If the AR view was started while an Output node had the eye, the saved video contained only the camera clip: the video was built from the Output node's own picture, and an Output node has none. It now follows the wire into the Output node and renders what feeds it, as the live AR view does. Existing recordings work: press Save as video again.
+
 ## [0.35.1] - 2026-11-26
 
 ### Fixed
