@@ -18,7 +18,7 @@ export default defineNode({
   title: 'Stop Motion',
   category: 'input',
   description:
-    'Make stop motion or a time-lapse: wire in a Webcam, press Take picture for each frame (or Auto shoot for a time-lapse), and the shots play back as a looping animation. Shows the previous shot faintly over the live picture so you can line up the next one..',
+    'Make stop motion or a time-lapse: wire in a Webcam, press Take picture for each frame (or Auto shoot for a time-lapse), and the shots play back as a looping animation. Shows the previous shot faintly over the live picture so you can line up the next one. For a smooth hyperlapse put a Stabilize node after it.',
   keywords: ['stop motion', 'stopmotion', 'animation', 'frame by frame', 'onion skin', 'time lapse', 'timelapse', 'hyperlapse', 'interval', 'shoot', 'capture', 'photo', 'camera'],
   inputs: { image: { type: 'image', lazy: true, label: 'Picture' } },
   outputs: {
@@ -55,7 +55,7 @@ export default defineNode({
       group: 'Shooting',
       hint: 'How large new shots are stored. Smaller shots use much less memory and storage: good for a long time-lapse with hundreds of shots.',
     },
-    interval: { type: 'number', default: 2, min: 0.2, max: 600, softMax: 60, step: 0.1, unit: 's', label: 'Auto shoot every', group: 'Shooting', hint: 'Seconds between pictures when Auto shoot is running (time-lapse, hyperlapse).' },
+    interval: { type: 'number', default: 2, min: 0.2, max: 600, softMax: 60, step: 0.1, unit: 's', label: 'Auto shoot every', group: 'Shooting', hint: 'Seconds between pictures when Auto shoot is running (time-lapse, hyperlapse). Handheld shots this far apart jump around: put a Stabilize node after this one and press Analyse to smooth them.' },
     stopAfter: { type: 'number', default: 0, min: 0, max: 9999, step: 1, label: 'Stop after shots', group: 'Shooting', hint: 'Auto shoot stops by itself after this many pictures. 0 = keep going until you stop it.' },
     setsLength: { type: 'bool', default: true, label: 'Set project length', hint: 'The project (playback and export) becomes exactly as long as the animation, so it loops on it. If other nodes also set the length the longest one wins.' },
     shootView: { type: 'string', default: '', label: 'Shoot view', visibleIf: () => false },
