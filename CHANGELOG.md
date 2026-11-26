@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.26.0] - 2026-11-26
+
+### Added
+- **Phone Motion: the sensors of this device.** A new "Sensors from" setting: Linked phone (as before, through the QR link) or **This device**, the phone or tablet the app is running on. A node added on a phone starts on This device. Orientation (yaw, pitch, roll), rotation rate, acceleration, shake, tilt and compass heading come from the device's own sensors, turned so "left" is left however the phone is held. The sensors are listened to only while something uses them. An **Allow motion sensors** button in the node's settings asks for permission where the browser needs it (iPhone, iPad) and shows whether values are arriving.
+- **Phone Motion: Jolt and Gravity outputs.** Jolt gives a short pulse per bump; Gravity X / Y say which way is down on the screen (-1..1), for making things fall or slide. They work for a linked phone too.
+- **AR Camera node** (Input): a 3D camera that follows the phone's orientation, so a 3D object stays put in the room while you turn the phone (turning only: it does not follow you walking). Wire it into a 3D object's Camera input and merge the result over the Webcam's back camera. Recenter sets straight ahead; Field of view (across the shorter side, 45 by default) is adjusted until the object stops sliding against the camera picture. Recording a take works as on Phone Motion, so an export is repeatable.
+- Not included: touch on the viewer as an input (one finger already pans the view and two zoom it, so it needs its own mode), and battery, light and location.
+
 ## [0.25.0] - 2026-11-25
 
 ### Added
