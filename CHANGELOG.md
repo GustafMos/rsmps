@@ -4,6 +4,13 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.29.0] - 2026-11-26
+
+### Added
+- **Vector wires: one cable for X, Y and Z.** A new wire type carries three numbers together. Wherever a node has X / Y / Z settings (Move, Rotate, Spin on the 3D nodes and many others) it also has one bundled socket, such as "Rotate XYZ", that drives all of them; two-value settings such as a centre point accept a vector wire too. The bundled sockets are an option: they stay hidden until wired, until you expand the node, or while you are placing a vector wire. A wire on a single setting still wins for that setting, and the single sockets work as before.
+- **New nodes: Combine XYZ, Separate XYZ, Vector and Vector Math** (add, subtract, multiply, scale, mix, length, normalize, cross, dot). Smooth and Delay Value take vectors as well as numbers.
+- **Vector outputs on Phone Motion, Motion Path and Region Info**, so for example the phone's tilt can drive an object's rotation with one wire.
+
 ## [0.28.0] - 2026-11-26
 
 ### Added
