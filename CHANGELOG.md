@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.43.0] - 2026-11-26
+
+### Added
+- **3D Scan with a linked phone (experimental).** With RSMPS on the computer (desktop app or LAN mode) and a phone linked over the local network, the 3D Scan panel has **Scan with a linked phone**. The phone runs the same scan as before (tap, fit the dome, walk round, watch the coverage) and the photos and camera positions arrive in the computer's project while you shoot, with the coverage, map and guidance mirrored on the computer. Photos are sent one at a time, checked, and resent after a dropped connection; if the link stays down, what arrived is kept. The result is the same kind of scan as a local one, so Save scan for a computer and Splat from Video work with it. Tested with simulated links and a simulated AR session only.
+
 ## [0.42.0] - 2026-11-26
 
 ### Added
