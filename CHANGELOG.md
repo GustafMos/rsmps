@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.46.2] - 2026-11-26
+
+### Changed
+- **Stop Motion shows the live picture only while it is selected.** With Show on Automatic, the node gives the camera picture (with the onion skin, or plain when Onion skin is off) only while the Stop Motion node is selected and the project is paused. Otherwise, paused or playing, it gives the animation at the current time, so a paused project shows the current stop-motion frame instead of a camera feed. The viewer's Take picture and Auto buttons appear only while a Stop Motion node is selected. Auto shoot keeps running when you select something else, and the camera is no longer kept in use while the node shows the animation.
+
 ## [0.46.1] - 2026-11-26
 
 ### Fixed
