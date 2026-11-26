@@ -11,6 +11,11 @@ import type { Gpu } from '../engine/gpu/gpu';
 import { uploadExternal } from './upload';
 import type { CameraControls, LiveSource } from '../engine/types';
 import { CANNOT_MESSAGE, buildConstraints, digitalZoomFor, type Caps } from './camera-controls';
+import { facingOfId, facingOfLabel, loadCatalogue, nameCameras, noteCamera, onCatalogueChanged, recordFromTrack } from './camera-catalogue';
+import {
+  CHEAP_FIX_MS, CLASH_MESSAGE, GAVE_UP_MESSAGE, MUTE_GRACE_MS, PAIR_FAIL_MS, RESTART_BACKOFF_MS, SIZE_HD, SIZE_SD, STUCK_MS, TEST_SIZES,
+  describePairTests, isClashError, ladderRungs, pairKey, reducedNote, type PairOutcome, type PairTest, type Selector, type Size,
+} from './camera-ladder';
 
 type UrlMode = 'auto' | 'image' | 'mjpeg' | 'video';
 export type LiveRequest = LiveSource & { freeze?: boolean };
@@ -40,6 +45,11 @@ export interface CameraInfo {
   digitalZoom: number;
   /** The last thing the camera refused, in plain words ('' = nothing). */
   error: string;
+  /** Set when the camera runs at a smaller picture so that two cameras can work together: the size and a one-line explanation. */
+  reducedTo: Size | null;
+  note: string;
+  /** The id the browser gives this camera ('' when unknown). */
+  deviceId: string;
 }
 
 /** Applying camera constraints is slow: at most one in flight, and the next one waits at least this long, keeping only the latest wish. */
@@ -177,6 +187,24 @@ interface Entry {
   refreshTimer: ReturnType<typeof setInterval> | null;
   rvfc: number;
   closed: boolean;
+  /** Order of opening: a camera waits for the ones opened before it (so two cameras never ask at the same instant). */
+  seq: number;
+  /** Device cameras: the first picture arrived (health checks start here). */
+  opened: boolean;
+  deviceId: string;
+  /** When the track went mute (0 = not mute), when the last new picture was seen, when the video said it stalled. */
+  mutedAt: number;
+  lastFrameAt: number;
+  lastSeenTime: number;
+  stalledAt: number;
+  trackEnded: boolean;
+  /** Recovery of a stuck camera: stage (0 play, 1 fresh video element, 2+ full restarts), when the next step may run, a restart is running. */
+  recStage: number;
+  recAt: number;
+  restarting: boolean;
+  /** Running smaller than asked so that another camera fits; and the size to go back to. */
+  reduced: Size | null;
+  original: Size | null;
 }
 
 export class LiveSources {
@@ -195,6 +223,15 @@ export class LiveSources {
   private ctl = new Map<string, CameraCtl>();
   /** While true the device cameras are closed and never opened (the AR view owns the camera). Remote sources are not touched. */
   private camerasSuspended = false;
+  /** True while the page opens cameras itself (a test or a measurement): nodes get nothing meanwhile and the cameras come back afterwards. */
+  private parked = false;
+  private seqCounter = 0;
+  /** What worked (or did not) for each pair of cameras this session, so the ladder is not run again for every frame. */
+  private pairs = new Map<string, PairOutcome>();
+  /** Cameras the page stopped restarting by itself: they stay closed until the Restart button. */
+  private gaveUp = new Map<string, string>();
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private pageOff: (() => void) | null = null;
 
   get camerasBlocked(): boolean {
     return this.camerasSuspended;
@@ -208,6 +245,7 @@ export class LiveSources {
       for (const e of [...this.entries.values()]) if (e.req.kind === 'camera') this.close(e);
     }
     this.cameraFailed.clear(); // a camera that failed meanwhile is tried afresh
+    this.gaveUp.clear();
   }
 
   constructor(private gpu: Gpu) {}
@@ -234,8 +272,9 @@ export class LiveSources {
 
   private async frameOf(req: LiveRequest, maxSide: number, hold?: { at: number; held: boolean }): Promise<LiveFrame | null> {
     const key = sourceKey(req);
-    if (req.kind === 'camera' && this.camerasSuspended) return null;
+    if (req.kind === 'camera' && (this.camerasSuspended || this.parked)) return null;
     let e = this.entries.get(key);
+    if (req.kind === 'camera' && this.gaveUp.has(key)) throw new Error(this.gaveUp.get(key));
     if (!e && req.kind === 'camera') {
       if (this.cameraRefused) throw new Error(CAMERA_BLOCKED);
       const failed = this.cameraFailed.get(key);
@@ -276,7 +315,7 @@ export class LiveSources {
    */
   drawable(req: LiveRequest): CanvasImageSource | null {
     const key = sourceKey(req);
-    if (req.kind === 'camera' && this.camerasSuspended) return null;
+    if (req.kind === 'camera' && (this.camerasSuspended || this.parked || this.gaveUp.has(key))) return null;
     let e = this.entries.get(key);
     if (!e && req.kind === 'camera' && this.cameraRefused) return null;
     if (!e) {
@@ -330,6 +369,7 @@ export class LiveSources {
     for (const e of [...this.entries.values()]) this.close(e);
     for (const c of this.ctl.values()) if (c.timer) clearTimeout(c.timer);
     this.ctl.clear();
+    this.pageOff?.();
   }
 
   /* --------------------------------------- camera controls ----------------------------------- */
@@ -365,7 +405,22 @@ export class LiveSources {
     } catch {
       /* a track that ended */
     }
-    return { open: !!track && !e?.closed, capabilities: e?.caps ?? {}, settings, digitalZoom: digitalZoomFor(c?.wanted.zoom, e?.caps ?? null), error: c?.error ?? '' };
+    const peers = e ? this.deviceCameras(e) : [];
+    const reducedTo = e?.reduced && peers.length ? e.reduced : null;
+    let together = 'the two cameras';
+    const mine = e ? facingOfId(e.deviceId) : 'unknown';
+    const theirs = peers[0] ? facingOfId(peers[0].deviceId) : 'unknown';
+    if (mine !== 'unknown' && theirs !== 'unknown' && mine !== theirs) together = 'the front and back cameras';
+    return {
+      open: !!track && !e?.closed,
+      capabilities: e?.caps ?? {},
+      settings,
+      digitalZoom: digitalZoomFor(c?.wanted.zoom, e?.caps ?? null),
+      error: this.gaveUp.get(key) ?? c?.error ?? '',
+      reducedTo,
+      note: reducedTo ? reducedNote(reducedTo, together) : '',
+      deviceId: e?.deviceId || String(settings.deviceId ?? ''),
+    };
   }
 
   /**
@@ -450,7 +505,7 @@ export class LiveSources {
   /* --------------------------------------- opening ------------------------------------------- */
 
   private open(key: string, req: LiveRequest): Entry {
-    const base = { key, req, phoneVersion: -1, stream: null, track: null, caps: null, initial: {}, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false } as const;
+    const base = { key, req, phoneVersion: -1, stream: null, track: null, caps: null, initial: {}, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false, seq: ++this.seqCounter, opened: false, deviceId: '', mutedAt: 0, lastFrameAt: performance.now(), lastSeenTime: -1, stalledAt: 0, trackEnded: false, recStage: 0, recAt: 0, restarting: false, reduced: null, original: null } as const;
     if (req.kind === 'phone') {
       const e: Entry = { ...base, el: document.createElement('video'), isVideo: false, ready: Promise.resolve() };
       return e;
@@ -519,56 +574,414 @@ export class LiveSources {
     return e;
   }
 
+  private newVideo(): HTMLVideoElement {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    return video;
+  }
+
+  private gum(video: MediaTrackConstraints | boolean): Promise<MediaStream> {
+    return navigator.mediaDevices.getUserMedia({ video, audio: false });
+  }
+
+  private primaryConstraints(e: Entry, req: Extract<LiveRequest, { kind: 'camera' }>): MediaTrackConstraints {
+    const constraints: MediaTrackConstraints = {};
+    if (req.deviceId) constraints.deviceId = { exact: req.deviceId };
+    if (req.width) constraints.width = { ideal: req.width };
+    if (req.height) constraints.height = { ideal: req.height };
+    if (req.facing) constraints.facingMode = req.facing;
+    const wantRate = this.ctl.get(e.key)?.wanted.frameRate ?? req.controls?.frameRate;
+    if (wantRate && wantRate > 0) constraints.frameRate = { ideal: wantRate };
+    return constraints;
+  }
+
   private async openCamera(e: Entry, video: HTMLVideoElement, req: Extract<LiveRequest, { kind: 'camera' }>): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia) {
       e.error = new Error('This browser has no camera access (it needs a secure page: https or localhost).');
       return;
     }
     try {
-      const constraints: MediaTrackConstraints = {};
-      if (req.deviceId) constraints.deviceId = { exact: req.deviceId };
-      if (req.width) constraints.width = { ideal: req.width };
-      if (req.height) constraints.height = { ideal: req.height };
-      if (req.facing) constraints.facingMode = req.facing;
-      const wantRate = this.ctl.get(e.key)?.wanted.frameRate ?? req.controls?.frameRate;
-      if (wantRate && wantRate > 0) constraints.frameRate = { ideal: wantRate };
-      const stream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
+      const stream = await this.acquire(e, req);
       if (e.closed) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
-      e.stream = stream;
-      this.readTrack(e, stream);
-      video.srcObject = stream;
-      await video.play().catch(() => undefined);
-      if (video.readyState < 2) await new Promise<void>((r) => (video.onloadeddata = () => r()));
+      await this.attachStream(e, video, stream);
+    } catch (err) {
+      this.failOpen(e, err);
+    }
+  }
+
+  private failOpen(e: Entry, err: unknown): void {
+    const name = (err as { name?: string })?.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      this.cameraRefused = true;
+      e.error = new Error(CAMERA_BLOCKED);
+    } else {
+      e.error = new Error(name === 'ClashError' ? (err as Error).message : cameraErrorMessage(err));
+      this.cameraFailed.set(e.key, { until: performance.now() + CAMERA_RETRY_MS, message: e.error.message });
+    }
+  }
+
+  /** Other device cameras of this page that have a picture. */
+  private deviceCameras(except?: Entry): Entry[] {
+    return [...this.entries.values()].filter((x) => x !== except && x.req.kind === 'camera' && !x.closed && x.opened && !!x.stream);
+  }
+
+  private identity(e: Entry): string {
+    const r = e.req;
+    return r.kind === 'camera' ? e.deviceId || r.deviceId || r.facing || 'default' : '';
+  }
+
+  /** The stream for a camera. When another device camera of this page is open and the first request is refused, it climbs down the ladder. */
+  private async acquire(e: Entry, req: Extract<LiveRequest, { kind: 'camera' }>): Promise<MediaStream> {
+    const primary = this.primaryConstraints(e, req);
+    // a camera that is still opening goes first: two cameras never ask at the same instant
+    const earlier = [...this.entries.values()].filter((x) => x !== e && x.req.kind === 'camera' && !x.closed && !x.opened && x.seq < e.seq);
+    if (earlier.length) await Promise.all(earlier.map((x) => x.ready.catch(() => undefined)));
+    const others = this.deviceCameras(e);
+    if (!others.length) return this.gum(primary);
+    const other = others[0];
+    const pk = pairKey(e.deviceId || req.deviceId || req.facing || 'default', this.identity(other));
+    const known = this.pairs.get(pk);
+    if (known && !known.ok) {
+      if (performance.now() - known.at < PAIR_FAIL_MS) throw Object.assign(new Error(CLASH_MESSAGE), { name: 'ClashError' });
+    } else if (known?.ok) {
+      const rung = ladderRungs(this.sameSelector(req), this.altSelector(req, other)).find((r) => r.id === known.rung);
+      if (rung) {
+        try {
+          if (known.otherSize && !other.reduced) await this.lower(other, known.otherSize);
+          const s = await this.gum(rung.constraints);
+          e.reduced = rung.size;
+          e.original = this.sizeAsked(req);
+          return s;
+        } catch (err) {
+          if (!isClashError(err)) throw err;
+        }
+      }
+    }
+    try {
+      return await this.gum(primary);
+    } catch (err) {
+      if (!isClashError(err)) throw err;
+      return this.ladder(e, req, other, pk);
+    }
+  }
+
+  private sizeAsked(req: Extract<LiveRequest, { kind: 'camera' }>): Size {
+    return { width: req.width ?? 1920, height: req.height ?? 1080 };
+  }
+
+  private sameSelector(req: Extract<LiveRequest, { kind: 'camera' }>): Selector {
+    return req.deviceId ? { deviceId: req.deviceId } : req.facing ? { facing: req.facing } : null;
+  }
+
+  /** The other way of choosing the same camera: by side when it was chosen by id, and by the first camera known to face that way when it was chosen by side. */
+  private altSelector(req: Extract<LiveRequest, { kind: 'camera' }>, other: Entry): Selector {
+    if (req.deviceId) {
+      const f = facingOfId(req.deviceId);
+      return f === 'unknown' ? null : { facing: f === 'back' ? 'environment' : 'user' };
+    }
+    if (req.facing) {
+      const want = req.facing === 'environment' ? 'back' : 'front';
+      const cat = loadCatalogue();
+      const id = Object.keys(cat).find((k) => k !== other.deviceId && facingOfId(k, cat) === want);
+      return id ? { deviceId: id } : null;
+    }
+    return null;
+  }
+
+  private async lower(other: Entry, size: Size): Promise<void> {
+    try {
+      await other.track?.applyConstraints({ width: { ideal: size.width }, height: { ideal: size.height }, frameRate: { ideal: 30 } });
+    } catch {
+      /* the camera keeps what it had */
+    }
+    other.reduced = size;
+  }
+
+  /**
+   * The ladder (each step tried once, stopping at the first that works):
+   *  1. the new camera at 1280x720, then 640x480, then the same two sizes chosen the other way (by side or by id);
+   *  2. the camera that is already open lowered to 1280x720 without a restart, and step 1 again;
+   *  3. the open camera restarted at 1280x720 (a brief interruption), and step 1 again;
+   *  4. both at 640x480.
+   * When nothing works the open camera is put back as it was and the failure is remembered for a minute.
+   */
+  private async ladder(e: Entry, req: Extract<LiveRequest, { kind: 'camera' }>, other: Entry, pk: string): Promise<MediaStream> {
+    const rungs = ladderRungs(this.sameSelector(req), this.altSelector(req, other));
+    const run = async () => {
+      for (const r of rungs) {
+        if (e.closed) return null;
+        try {
+          return { stream: await this.gum(r.constraints), rung: r };
+        } catch (err) {
+          if (!isClashError(err)) throw err;
+        }
+      }
+      return null;
+    };
+    const done = (got: NonNullable<Awaited<ReturnType<typeof run>>>): MediaStream => {
+      this.pairs.set(pk, { ok: true, rung: got.rung.id, size: got.rung.size, otherSize: other.reduced });
+      e.reduced = got.rung.size;
+      e.original = this.sizeAsked(req);
+      return got.stream;
+    };
+    let got = await run();
+    if (got) return done(got);
+    const restoreTo = other.original;
+    let restarted = false;
+    await this.lower(other, SIZE_HD);
+    if ((got = await run())) return done(got);
+    const otherReq = other.req as Extract<LiveRequest, { kind: 'camera' }>;
+    const otherAsk = (s: Size): MediaTrackConstraints => ({
+      ...(other.deviceId ? { deviceId: { exact: other.deviceId } } : otherReq.deviceId ? { deviceId: { exact: otherReq.deviceId } } : otherReq.facing ? { facingMode: otherReq.facing } : {}),
+      width: { ideal: s.width },
+      height: { ideal: s.height },
+      frameRate: { ideal: 30 },
+    });
+    for (const s of [SIZE_HD, SIZE_SD]) {
+      restarted = true;
+      other.reduced = s;
+      await this.restartStream(other, otherAsk(s));
+      if ((got = await run())) return done(got);
+    }
+    // nothing worked: put the open camera back as it was
+    other.reduced = null;
+    if (restarted) await this.restartStream(other, this.primaryConstraints(other, otherReq));
+    else if (restoreTo) await other.track?.applyConstraints({ width: { ideal: restoreTo.width }, height: { ideal: restoreTo.height } }).catch(() => undefined);
+    this.pairs.set(pk, { ok: false, at: performance.now() });
+    throw Object.assign(new Error(CLASH_MESSAGE), { name: 'ClashError' });
+  }
+
+  /** Stop the stream of an open camera and open it again with other constraints (same entry, so the nodes keep their wiring). */
+  private async restartStream(e: Entry, constraints: MediaTrackConstraints): Promise<boolean> {
+    const video = this.newVideo();
+    this.releaseStream(e);
+    e.held = null;
+    e.heldAt = null;
+    try {
+      const stream = await this.gum(constraints);
+      if (e.closed) {
+        stream.getTracks().forEach((t) => t.stop());
+        return false;
+      }
+      await this.attachStream(e, video, stream);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private releaseStream(e: Entry): void {
+    e.stream?.getTracks().forEach((t) => {
+      t.onended = null;
+      t.onmute = null;
+      t.onunmute = null;
+      t.stop();
+    });
+    e.stream = null;
+    e.track = null;
+    const el = e.el as HTMLVideoElement & { cancelVideoFrameCallback?: (n: number) => void };
+    if (el.cancelVideoFrameCallback && e.rvfc) el.cancelVideoFrameCallback(e.rvfc);
+    el.pause?.();
+    el.srcObject = null;
+    e.fresh = true;
+    e.lastTime = -1;
+    e.uploadedBucket = '';
+  }
+
+  /** Show a stream in a video element, read what the camera reports, and start watching it. */
+  private async attachStream(e: Entry, video: HTMLVideoElement, stream: MediaStream): Promise<void> {
+    e.el = video;
+    e.stream = stream;
+    this.readTrack(e, stream);
+    video.srcObject = stream;
+    await video.play().catch(() => undefined);
+    if (video.readyState < 2) await Promise.race([new Promise<void>((r) => (video.onloadeddata = () => r())), new Promise<void>((r) => setTimeout(r, 4000))]);
+    const now = performance.now();
+    e.opened = true;
+    e.mutedAt = 0;
+    e.trackEnded = false;
+    e.lastFrameAt = now;
+    e.stalledAt = 0;
+    const settings = (e.track?.getSettings?.() ?? {}) as Record<string, unknown>;
+    e.deviceId = String(settings.deviceId ?? (e.req.kind === 'camera' ? e.req.deviceId : '') ?? '');
+    if (!e.original && typeof settings.width === 'number' && typeof settings.height === 'number') e.original = { width: settings.width, height: settings.height };
+    this.watchFrames(e, video);
+    this.watchTrack(e, video);
+    this.watchPage();
+    if (e.deviceId) noteCamera(e.deviceId, { ...recordFromTrack(e.caps, settings), ...(e.track?.label ? { label: e.track.label } : {}) });
+    this.devicesListeners.forEach((l) => l()); // labels become available after permission
+  }
+
+  /** Android takes the camera away when the page goes to the background: the track ends or goes mute, or the picture just stops. */
+  private watchTrack(e: Entry, video: HTMLVideoElement): void {
+    const track = e.track;
+    if (track) {
+      track.onended = () => {
+        e.trackEnded = true;
+      };
+      track.onmute = () => {
+        if (!e.mutedAt) e.mutedAt = performance.now();
+      };
+      track.onunmute = () => {
+        e.mutedAt = 0;
+      };
+    }
+    const mark = () => {
+      if (e.el === video) e.stalledAt = performance.now();
+    };
+    video.onstalled = mark;
+    video.onsuspend = mark;
+    video.onemptied = mark;
+    video.onpause = () => {
+      if (e.el === video && !e.closed && !pageHidden()) void video.play().catch(() => undefined);
+    };
+  }
+
+  private watchPage(): void {
+    if (this.pageOff || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    const back = () => {
+      if (!pageHidden()) this.checkCameras(performance.now(), true);
+    };
+    document.addEventListener('visibilitychange', back);
+    const w = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null;
+    w?.addEventListener('pageshow', back);
+    this.watchdog = setInterval(() => this.checkCameras(performance.now(), false), 1000);
+    this.pageOff = () => {
+      document.removeEventListener('visibilitychange', back);
+      w?.removeEventListener('pageshow', back);
+      if (this.watchdog) clearInterval(this.watchdog);
+      this.watchdog = null;
+      this.pageOff = null;
+    };
+  }
+
+  /**
+   * Look at every open device camera: ended, mute for longer than a moment, or showing no new picture for a couple of seconds while a node
+   * wants it. Does nothing while the page is hidden or the AR view owns the camera. `resume`: the page just came back, so the
+   * time spent hidden does not count, and a camera that ended meanwhile is restarted at once.
+   */
+  checkCameras(now: number, resume: boolean): void {
+    if (this.camerasSuspended || this.parked || pageHidden()) return;
+    for (const e of [...this.entries.values()]) {
+      if (e.req.kind !== 'camera' || e.closed || e.error || !e.opened || e.restarting) continue;
+      if (resume) {
+        e.lastFrameAt = now;
+        e.recAt = 0;
+        if (e.mutedAt) e.mutedAt = now;
+      }
+      if (!resume && now - e.lastUsed > STUCK_MS + 1000) continue; // nobody wants this picture
+      const v = e.el as HTMLVideoElement;
+      if (v.currentTime !== e.lastSeenTime) {
+        e.lastSeenTime = v.currentTime;
+        e.lastFrameAt = now;
+      }
+      const ended = !e.stream || e.trackEnded || e.track?.readyState === 'ended';
+      const muted = e.mutedAt > 0 && now - e.mutedAt > MUTE_GRACE_MS;
+      const frozen = now - e.lastFrameAt > (e.stalledAt > e.lastFrameAt ? STUCK_MS / 2 : STUCK_MS);
+      if (!ended && !muted && !frozen) {
+        e.recStage = 0; // healthy again: the next trouble starts from the cheap fixes
+        continue;
+      }
+      if (now < e.recAt) continue;
+      this.recover(e, now, ended || muted);
+    }
+  }
+
+  private recover(e: Entry, now: number, hard: boolean): void {
+    const stage = hard ? Math.max(e.recStage, 2) : e.recStage;
+    if (stage === 0) {
+      void (e.el as HTMLVideoElement).play?.()?.catch?.(() => undefined);
+      e.recStage = 1;
+      e.recAt = now + CHEAP_FIX_MS;
+      return;
+    }
+    if (stage === 1) {
+      // a fresh video element on the same stream
+      const old = e.el as HTMLVideoElement;
+      const video = this.newVideo();
+      video.srcObject = e.stream;
+      old.pause?.();
+      old.srcObject = null;
+      e.el = video;
+      e.fresh = true;
+      e.lastTime = -1;
+      void video.play?.()?.catch?.(() => undefined);
       this.watchFrames(e, video);
-      this.devicesListeners.forEach((l) => l()); // labels become available after permission
+      this.watchTrack(e, video);
+      e.recStage = 2;
+      e.recAt = now + CHEAP_FIX_MS;
+      return;
+    }
+    const run = stage - 2;
+    if (run > RESTART_BACKOFF_MS.length) {
+      this.gaveUp.set(e.key, GAVE_UP_MESSAGE);
+      this.close(e);
+      return;
+    }
+    e.recStage = stage + 1;
+    void this.fullRestart(e, run);
+  }
+
+  /** The real restart: stop the stream, drop the picture sources, ask the browser for the camera again (through the ladder when another camera is open). The entry and its key stay. */
+  private async fullRestart(e: Entry, run: number): Promise<void> {
+    if (e.restarting || e.closed || e.req.kind !== 'camera') return;
+    e.restarting = true;
+    const video = this.newVideo();
+    try {
+      this.releaseStream(e);
+      e.held = null;
+      e.heldAt = null;
+      const stream = await this.acquire(e, e.req);
+      if (e.closed) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      await this.attachStream(e, video, stream);
     } catch (err) {
       const name = (err as { name?: string })?.name;
       if (name === 'NotAllowedError' || name === 'SecurityError') {
         this.cameraRefused = true;
-        e.error = new Error(CAMERA_BLOCKED);
-      } else {
-        e.error = new Error(cameraErrorMessage(err));
-        this.cameraFailed.set(e.key, { until: performance.now() + CAMERA_RETRY_MS, message: e.error.message });
+        this.gaveUp.set(e.key, CAMERA_BLOCKED);
+        this.close(e);
       }
+    } finally {
+      e.restarting = false;
+      e.recAt = performance.now() + (RESTART_BACKOFF_MS[run] ?? RESTART_BACKOFF_MS[RESTART_BACKOFF_MS.length - 1]);
     }
   }
 
+  /** When the camera that was keeping another one small closes, the other goes back up to the size it was asked for. */
+  private raiseReduced(): void {
+    const cams = this.deviceCameras();
+    if (cams.length !== 1) return;
+    const o = cams[0];
+    const size = o.original;
+    if (!o.reduced || !size) return;
+    o.reduced = null;
+    void o.track?.applyConstraints({ width: { ideal: size.width }, height: { ideal: size.height } }).catch(() => undefined);
+  }
+
   /**
-   * Ask for camera permission now. Call it from a button press: browsers show the question reliably only then. Cameras that
-   * failed are closed, so the nodes open them again on the next frame. Returns the outcome with a readable message on failure.
+   * Ask for camera permission now, and restart every device camera. Call it from a button press: browsers show the question reliably
+   * only then. Every device camera stream is stopped, whether it looks fine or not (a stream that Android took away can still look
+   * "open"), every memory of failures is cleared, and the nodes open the cameras again on their next frame under the same source keys.
    */
   async askCamera(): Promise<{ ok: boolean; message?: string }> {
     if (this.camerasSuspended) return { ok: false, message: 'The camera is in use by the AR view. Leave the AR view first.' };
     if (!navigator.mediaDevices?.getUserMedia) return { ok: false, message: 'This browser has no camera access (it needs a secure page: https or localhost).' };
+    this.cameraRefused = false;
+    this.cameraFailed.clear();
+    this.gaveUp.clear();
+    this.pairs.clear();
+    for (const e of [...this.entries.values()]) if (e.req.kind === 'camera') this.close(e);
+    await new Promise((r) => setTimeout(r, 150)); // let the system let go of the camera
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const stream = await this.gum(true);
       stream.getTracks().forEach((t) => t.stop());
-      this.cameraRefused = false;
-      this.cameraFailed.clear();
-      for (const e of [...this.entries.values()]) if (e.req.kind === 'camera' && e.error) this.close(e);
       this.devicesListeners.forEach((l) => l());
       return { ok: true };
     } catch (err) {
@@ -582,13 +995,111 @@ export class LiveSources {
     }
   }
 
+  /* ------------------------------- test and measure cameras ----------------------------------- */
+
+  /** Close the device cameras for a moment (nodes get nothing meanwhile). The returned function opens them again, under the same keys. */
+  private async parkCameras(): Promise<() => void> {
+    const before = [...this.entries.values()].filter((x) => x.req.kind === 'camera' && !x.closed).map((x) => ({ key: x.key, req: x.req }));
+    this.parked = true;
+    for (const x of [...this.entries.values()]) if (x.req.kind === 'camera') this.close(x);
+    await new Promise((r) => setTimeout(r, 150));
+    return () => {
+      this.parked = false;
+      for (const b of before) {
+        if (this.entries.has(b.key)) continue;
+        this.entries.set(b.key, this.open(b.key, b.req));
+      }
+      if (before.length) this.ensureSweeper();
+    };
+  }
+
+  /**
+   * Try every back camera with every front camera (at most 6 pairs; when the sides are not known, pairs of the cameras in order) at
+   * 1080p, 720p and 480p, and say which pairs work at which size. Whatever was open is opened again afterwards.
+   */
+  async testCamerasTogether(): Promise<{ ok: boolean; message?: string; rows: PairTest[]; lines: string[] }> {
+    const fail = (message: string) => ({ ok: false, message, rows: [] as PairTest[], lines: [] as string[] });
+    if (this.camerasSuspended) return fail('The camera is in use by the AR view. Leave the AR view first.');
+    if (!navigator.mediaDevices?.getUserMedia) return fail('This browser has no camera access (it needs a secure page: https or localhost).');
+    const raw = await rawVideoInputs();
+    if (raw.length < 2) return fail('This device has fewer than two cameras, so there is nothing to test.');
+    const names = nameCameras(raw);
+    const nameOf = (id: string) => names.find((n) => n.id === id)?.label ?? 'Camera';
+    const facing = (d: { id: string; label: string }) => (facingOfLabel(d.label) !== 'unknown' ? facingOfLabel(d.label) : facingOfId(d.id));
+    const backs = raw.filter((d) => facing(d) === 'back');
+    const fronts = raw.filter((d) => facing(d) === 'front');
+    const pairs: [string, string][] = [];
+    for (const b of backs) for (const f of fronts) pairs.push([b.id, f.id]);
+    if (!pairs.length) for (let i = 0; i < raw.length; i++) for (let j = i + 1; j < raw.length; j++) pairs.push([raw[i].id, raw[j].id]);
+    const restore = await this.parkCameras();
+    const rows: PairTest[] = [];
+    try {
+      for (const [a, b] of pairs.slice(0, 6)) {
+        const works: string[] = [];
+        for (const t of TEST_SIZES) {
+          const opened: MediaStream[] = [];
+          try {
+            for (const id of [a, b]) opened.push(await this.gum({ deviceId: { exact: id }, width: { ideal: t.size.width }, height: { ideal: t.size.height }, frameRate: { ideal: 30 } }));
+            works.push(t.label);
+          } catch (err) {
+            const name = (err as { name?: string })?.name;
+            if (name === 'NotAllowedError' || name === 'SecurityError') {
+              this.cameraRefused = true;
+              return fail(CAMERA_BLOCKED);
+            }
+          } finally {
+            opened.forEach((s) => s.getTracks().forEach((x) => x.stop()));
+          }
+          await new Promise((r) => setTimeout(r, 60));
+        }
+        rows.push({ a: nameOf(a), b: nameOf(b), works });
+      }
+    } finally {
+      restore();
+    }
+    return { ok: true, rows, lines: describePairTests(rows) };
+  }
+
+  /** Open every camera briefly, one after the other, to learn what each reports (zoom range, largest picture, torch). Whatever was open is opened again afterwards. */
+  async measureCameras(): Promise<{ ok: boolean; measured: number; message?: string }> {
+    if (this.camerasSuspended) return { ok: false, measured: 0, message: 'The camera is in use by the AR view. Leave the AR view first.' };
+    if (!navigator.mediaDevices?.getUserMedia) return { ok: false, measured: 0, message: 'This browser has no camera access (it needs a secure page: https or localhost).' };
+    const raw = await rawVideoInputs();
+    const restore = await this.parkCameras();
+    let measured = 0;
+    try {
+      for (const d of raw) {
+        if (!d.id) continue;
+        try {
+          const s = await this.gum({ deviceId: { exact: d.id } });
+          const t = s.getVideoTracks()[0];
+          noteCamera(d.id, { ...recordFromTrack((t?.getCapabilities?.() as unknown as Record<string, unknown>) ?? {}, (t?.getSettings?.() as unknown as Record<string, unknown>) ?? {}), label: d.label });
+          measured++;
+          s.getTracks().forEach((x) => x.stop());
+        } catch (err) {
+          const name = (err as { name?: string })?.name;
+          if (name === 'NotAllowedError' || name === 'SecurityError') {
+            this.cameraRefused = true;
+            return { ok: false, measured, message: CAMERA_BLOCKED };
+          }
+        }
+        await new Promise((r) => setTimeout(r, 60));
+      }
+    } finally {
+      restore();
+    }
+    this.devicesListeners.forEach((l) => l());
+    return { ok: true, measured };
+  }
+
   /** Mark `fresh` whenever the video presents a new frame (cheap; falls back to currentTime polling). */
   private watchFrames(e: Entry, video: HTMLVideoElement): void {
     const v = video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
     if (typeof v.requestVideoFrameCallback !== 'function') return;
     const tick = () => {
-      if (e.closed) return;
+      if (e.closed || e.el !== video) return;
       e.fresh = true;
+      e.lastFrameAt = performance.now();
       e.rvfc = v.requestVideoFrameCallback!(tick);
     };
     e.rvfc = v.requestVideoFrameCallback(tick);
@@ -720,7 +1231,16 @@ export class LiveSources {
       clearInterval(this.sweeper);
       this.sweeper = null;
     }
+    if (e.req.kind === 'camera') {
+      this.raiseReduced();
+      if (![...this.entries.values()].some((x) => x.req.kind === 'camera')) this.pageOff?.();
+    }
   }
+}
+
+/** True while the page is in the background: no camera is checked or restarted then. */
+function pageHidden(): boolean {
+  return typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden === true);
 }
 
 /* ----------------------------------------- devices ---------------------------------------------- */
@@ -730,20 +1250,31 @@ export interface Device {
   label: string;
 }
 
-/** Cameras (labels only after the user granted permission: before that "Camera 1", …). */
-export async function listVideoInputs(): Promise<Device[]> {
+/** The cameras as the browser lists them (labels only after the user granted permission). */
+export async function rawVideoInputs(): Promise<Device[]> {
   try {
     if (!navigator.mediaDevices?.enumerateDevices) return [];
     const all = await navigator.mediaDevices.enumerateDevices();
-    return all.filter((d) => d.kind === 'videoinput').map((d, i) => ({ id: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+    return all.filter((d) => d.kind === 'videoinput').map((d) => ({ id: d.deviceId, label: d.label }));
   } catch {
     return [];
   }
+}
+
+/** Cameras with short plain names (see camera-catalogue.ts): the owner's own name, else the side and what the camera reported, else the browser's label. */
+export async function listVideoInputs(): Promise<Device[]> {
+  const raw = await rawVideoInputs();
+  for (const d of raw) if (d.id && d.label) noteCamera(d.id, { label: d.label, ...(facingOfLabel(d.label) !== 'unknown' ? { facing: facingOfLabel(d.label) } : {}) });
+  return nameCameras(raw);
 }
 
 export function onVideoDevicesChanged(listener: () => void): () => void {
   const md = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
   if (!md?.addEventListener) return () => undefined;
   md.addEventListener('devicechange', listener);
-  return () => md.removeEventListener('devicechange', listener);
+  const offNames = onCatalogueChanged(listener);
+  return () => {
+    md.removeEventListener('devicechange', listener);
+    offNames();
+  };
 }

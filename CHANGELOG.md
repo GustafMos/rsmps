@@ -4,6 +4,16 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.45.0] - 2026-11-26
+
+### Fixed
+- **The camera comes back after leaving the browser.** When the phone takes the camera away while the page is in the background, the picture used to stay frozen until the whole site was reloaded, and restarting the camera did nothing. Each camera is now checked when you return and whenever it stops delivering new pictures: it is restarted properly, with zoom and the other camera controls re-applied, and the nodes stay wired. A new **Restart camera** button forces a full restart whatever state the camera is in.
+- **Front and back cameras together.** When a second camera is refused while another is running, the app now retries at smaller picture sizes (1280 x 720, then 640 x 480) and, if needed, lowers the camera that is already on; phones that can run two cameras only allow it at reduced sizes. The inspector says when a camera runs smaller for that reason, and says plainly when the browser cannot run the two together at any size. **Test cameras together** lists which front and back pairs work at which size.
+
+### Changed
+- **Camera names say what the phone reports**, for example "Back 1 · zoom 0.6x-10x · 12 MP", instead of "Camera 1". **Measure cameras** fills these in, and **Name this camera** lets you give each camera your own name (browsers do not tell a page which lens a camera is). The first entry of the Camera list is now "Automatic", and the Webcam node's summary shows the side and current zoom, such as "back · 1x".
+Not yet tried on a real phone.
+
 ## [0.44.0] - 2026-11-26
 
 ### Changed
