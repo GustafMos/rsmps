@@ -1,4 +1,5 @@
 import { defineNode } from '../../define';
+import { SPIN_AROUND_PARAM } from '../../lib/gen-common';
 import { modelFilesSummary, renderModel } from '../../lib/model-render';
 
 /**
@@ -32,6 +33,7 @@ export default defineNode({
     spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
+    spinAround: SPIN_AROUND_PARAM,
     shading: {
       type: 'enum',
       default: 'smooth',
