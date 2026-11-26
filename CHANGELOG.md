@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.26.1] - 2026-11-26
+
+### Added
+- **3D objects can spin around their own axes.** Object 3D, Model 3D, Shape 3D, Image to 3D and the splat viewer have a new "Spin around" setting next to Spin X / Y / Z: **The object's own axes** (the default for new nodes) or The scene's axes. On its own axes an object spins about itself however it is tilted: tilt a disc with Rotate X and Z, set Spin Y to 1, and it turns on its own tilted spindle like a record. Before, the spin was added to the rotation angles, so a tilted object wobbled round the scene's upright axis. Nodes in existing projects keep spinning the way they did until you change the setting.
+
 ## [0.26.0] - 2026-11-26
 
 ### Added
