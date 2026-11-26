@@ -14,9 +14,10 @@ type Ctx = Pick<AppCtx, 'io' | 'ed'>;
 export function takeMessage(t: WorldArTake): { text: string; kind: 'ok' | 'error' | 'info' } {
   if (!t.take) return { text: t.error ?? 'Nothing was recorded.', kind: 'error' };
   const secs = `${t.seconds.toFixed(1)} s`;
-  if (t.clip) return { text: `AR take saved (${secs}). The camera clip was added as a Media In node. "Save as video" on the AR node makes a finished file with the object over it.`, kind: 'ok' };
-  if (t.error) return { text: `AR take saved (${secs}), movement only. ${t.error}`, kind: 'info' };
-  return { text: `AR take saved (${secs}), movement only: this browser did not hand the camera picture to the page.`, kind: 'info' };
+  const rate = t.rate?.clamped ? ` Recorded at ${t.rate.fps} frames per second: the phone's AR camera does not deliver ${t.rate.asked}.` : '';
+  if (t.clip) return { text: `AR take saved (${secs}). The camera clip was added as a Media In node. "Save as video" on the AR node makes a finished file with the object over it.${rate}`, kind: 'ok' };
+  if (t.error) return { text: `AR take saved (${secs}), movement only. ${t.error}${rate}`, kind: 'info' };
+  return { text: `AR take saved (${secs}), movement only: this browser did not hand the camera picture to the page.${rate}`, kind: 'info' };
 }
 
 /**
@@ -53,6 +54,7 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
   ar.open({
     graph: () => ed.state.graph,
     node: shown,
+    recordRate: params.recordRate && params.recordRate !== 'project' ? Number(params.recordRate) || null : null,
     card: { mode: (params.cardMode as CardMode) ?? 'upright', width: Number(params.cardWidth ?? 0.5) || 0.5 },
     overlay: overlay.root,
     onState: (s) => overlay.update(s),

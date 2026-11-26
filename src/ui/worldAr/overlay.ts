@@ -54,24 +54,79 @@ export function createArOverlay(doc: Document = document): ArOverlay {
   const reset = button('Reset', 'Pick it up and choose another spot');
   const record = button('Record', 'Record the movement (and the camera picture where the browser hands it over)');
   const exit = button('Exit', 'Leave the AR view');
-  // The Height strip: a slim, full-reach strip on the right edge (at least 44 px wide, clear of the notch and the gesture bar). Dragging
-  // it moves the object up and down; the same finger travel as two fingers on the picture. Shown once something is placed.
-  const strip = doc.createElement('div');
-  strip.style.cssText = 'position:absolute;right:max(8px,env(safe-area-inset-right));top:28%;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 120px);width:52px;display:none;flex-direction:column;align-items:center;justify-content:space-between;border-radius:26px;background:rgba(20,24,32,.55);border:1px solid rgba(255,255,255,.35);touch-action:none;font:600 12px system-ui,sans-serif;';
-  strip.setAttribute('role', 'slider');
-  strip.setAttribute('aria-label', 'Height');
-  strip.title = 'Drag up or down to raise or lower it. Double tap to put it back on the surface.';
-  const arrowUp = doc.createElement('div');
-  arrowUp.textContent = '\u25B2';
-  arrowUp.style.cssText = 'padding-top:10px;pointer-events:none;';
-  const heightLabel = doc.createElement('div');
-  heightLabel.style.cssText = 'pointer-events:none;writing-mode:vertical-rl;transform:rotate(180deg);letter-spacing:.05em;white-space:nowrap;';
-  heightLabel.textContent = 'Height';
-  const arrowDown = doc.createElement('div');
-  arrowDown.textContent = '\u25BC';
-  arrowDown.style.cssText = 'padding-bottom:10px;pointer-events:none;';
-  strip.append(arrowUp, heightLabel, arrowDown);
-  root.append(touch, hint, badge, stats, strip, bar);
+  // Two slim, full-reach strips (at least 44 px wide, clear of the notch and the gesture bar): Height on the right edge, Zoom on the left.
+  // Each has its own finger, never a tap or drag on the room. Travel up the screen raises / zooms in; a quick double tap resets.
+  const makeStrip = (side: 'left' | 'right', name: string, title: string, move: (dy: number) => void, reset: () => void) => {
+    const el = doc.createElement('div');
+    el.style.cssText = `position:absolute;${side}:max(8px,env(safe-area-inset-${side}));top:28%;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 120px);width:52px;display:none;flex-direction:column;align-items:center;justify-content:space-between;border-radius:26px;background:rgba(20,24,32,.55);border:1px solid rgba(255,255,255,.35);touch-action:none;font:600 12px system-ui,sans-serif;`;
+    el.setAttribute('role', 'slider');
+    el.setAttribute('aria-label', name);
+    el.title = title;
+    const up = doc.createElement('div');
+    up.textContent = '▲';
+    up.style.cssText = 'padding-top:10px;pointer-events:none;';
+    const label = doc.createElement('div');
+    label.style.cssText = 'pointer-events:none;writing-mode:vertical-rl;transform:rotate(180deg);letter-spacing:.05em;white-space:nowrap;';
+    label.textContent = name;
+    const down = doc.createElement('div');
+    down.textContent = '▼';
+    down.style.cssText = 'padding-bottom:10px;pointer-events:none;';
+    el.append(up, label, down);
+    let y: number | null = null;
+    let id = -1;
+    let lastTap = -1e9;
+    let moved = 0;
+    el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (y !== null) return;
+      y = e.clientY;
+      id = e.pointerId;
+      moved = 0;
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        /* the moves still arrive while the finger stays on the strip */
+      }
+    });
+    el.addEventListener('pointermove', (e) => {
+      e.stopPropagation();
+      if (y === null || e.pointerId !== id) return;
+      const dy = y - e.clientY;
+      y = e.clientY;
+      moved += Math.abs(dy);
+      if (dy) move(dy);
+    });
+    const end = (e: PointerEvent, cancelled: boolean) => {
+      e.stopPropagation();
+      if (y === null || e.pointerId !== id) return;
+      y = null;
+      if (cancelled || moved >= 8) return;
+      if (e.timeStamp - lastTap <= 400) {
+        reset();
+        lastTap = -1e9;
+      } else lastTap = e.timeStamp;
+    };
+    el.addEventListener('pointerup', (e) => end(e, false));
+    el.addEventListener('pointercancel', (e) => end(e, true));
+    // the number shows briefly while it changes, then the word again
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const show = (text: string) => {
+      label.textContent = text;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        label.textContent = name;
+        timer = null;
+      }, 1500);
+    };
+    const stop = () => {
+      if (timer) clearTimeout(timer);
+    };
+    return { el, show, stop };
+  };
+  const heightStrip = makeStrip('right', 'Height', 'Drag up or down to raise or lower it. Double tap to put it back on the surface.', (dy) => handle?.gesture({ type: 'lift', dy }), () => handle?.gesture({ type: 'lift-reset' }));
+  const zoomStrip = makeStrip('left', 'Zoom', 'Drag up to zoom in, down to zoom out (1x to 4x). Double tap to go back to 1x. The recording keeps the full picture.', (dy) => handle?.gesture({ type: 'zoom', dy }), () => handle?.gesture({ type: 'zoom-reset' }));
+  const strip = heightStrip.el;
+  root.append(touch, hint, badge, stats, strip, zoomStrip.el, bar);
   doc.body.appendChild(root);
 
   let handle: WorldArHandle | null = null;
@@ -93,53 +148,9 @@ export function createArOverlay(doc: Document = document): ArOverlay {
   // The session would also report every tap as its own "select". The page handles the fingers itself, so that one is switched off
   // for the whole overlay (the DOM Overlays module's `beforexrselect`).
   root.addEventListener('beforexrselect', (e) => e.preventDefault());
-  // Height strip: its own finger, never a tap or drag on the room. Travel up the screen raises; a quick double tap lowers back to the surface.
-  let stripY: number | null = null;
-  let stripId = -1;
-  let lastStripTap = -1e9;
-  let stripMoved = 0;
-  strip.addEventListener('pointerdown', (e) => {
-    e.stopPropagation();
-    if (stripY !== null) return;
-    stripY = e.clientY;
-    stripId = e.pointerId;
-    stripMoved = 0;
-    try {
-      strip.setPointerCapture(e.pointerId);
-    } catch {
-      /* the moves still arrive while the finger stays on the strip */
-    }
-  });
-  strip.addEventListener('pointermove', (e) => {
-    e.stopPropagation();
-    if (stripY === null || e.pointerId !== stripId) return;
-    const dy = stripY - e.clientY;
-    stripY = e.clientY;
-    stripMoved += Math.abs(dy);
-    if (dy) handle?.gesture({ type: 'lift', dy });
-  });
-  const stripEnd = (e: PointerEvent, cancelled: boolean) => {
-    e.stopPropagation();
-    if (stripY === null || e.pointerId !== stripId) return;
-    stripY = null;
-    if (cancelled || stripMoved >= 8) return;
-    if (e.timeStamp - lastStripTap <= 400) {
-      handle?.gesture({ type: 'lift-reset' });
-      lastStripTap = -1e9;
-    } else lastStripTap = e.timeStamp;
-  };
-  strip.addEventListener('pointerup', (e) => stripEnd(e, false));
-  strip.addEventListener('pointercancel', (e) => stripEnd(e, true));
   let shownHeight = 0;
-  let heightTimer: ReturnType<typeof setTimeout> | null = null;
-  const showHeight = (metres: number) => {
-    heightLabel.textContent = `${metres >= 0 ? '+' : '-'}${Math.round(Math.abs(metres) * 100)} cm`;
-    if (heightTimer) clearTimeout(heightTimer);
-    heightTimer = setTimeout(() => {
-      heightLabel.textContent = 'Height';
-      heightTimer = null;
-    }, 1500);
-  };
+  let shownZoom = 1;
+  const showHeight = (metres: number) => heightStrip.show(`${metres >= 0 ? '+' : '-'}${Math.round(Math.abs(metres) * 100)} cm`);
   place.addEventListener('click', () => handle?.place());
   reset.addEventListener('click', () => handle?.reset());
   record.addEventListener('click', () => handle?.toggleRecord());
@@ -152,6 +163,7 @@ export function createArOverlay(doc: Document = document): ArOverlay {
       root.style.display = 'block';
     },
     update(s) {
+      const zoom = s.zoom ?? 1;
       hint.textContent = s.error ?? s.hint;
       place.disabled = s.phase !== 'aiming';
       place.style.opacity = place.disabled ? '0.4' : '1';
@@ -159,6 +171,13 @@ export function createArOverlay(doc: Document = document): ArOverlay {
       reset.style.opacity = reset.disabled ? '0.4' : '1';
       strip.style.display = s.phase === 'placed' ? 'flex' : 'none';
       strip.setAttribute('aria-valuenow', String(Math.round(s.height * 100)));
+      // Zoom needs the camera picture (the page draws it larger itself); without it the strip is not shown and the readout says why
+      zoomStrip.el.style.display = s.zoomAvailable === true ? 'flex' : 'none';
+      zoomStrip.el.setAttribute('aria-valuenow', zoom.toFixed(1));
+      if (Math.abs(zoom - shownZoom) > 1e-3) {
+        shownZoom = zoom;
+        zoomStrip.show(`${zoom.toFixed(1)}x`);
+      }
       if (Math.abs(s.height - shownHeight) > 1e-4) {
         shownHeight = s.height;
         showHeight(s.height); // the number shows briefly while it changes, then the word again
@@ -169,14 +188,18 @@ export function createArOverlay(doc: Document = document): ArOverlay {
       // numbers worth reading out when something is wrong: camera frames per second, pictures of the object per second and what one
       // costs, how the picture gets into the view, and which extras this phone granted
       const f = s.features;
+      const rate = s.recordFps !== s.askedFps ? `${s.recording ? 'recording' : 'will record'} at ${s.recordFps} per second: the phone's AR camera gives ${s.cameraFps}, ${s.askedFps} was asked` : s.recording ? `recording at ${s.recordFps} per second` : '';
       stats.textContent = [
-        `${s.fps} fps · object ${s.pictureFps}/s`,
+        `${s.fps} fps${zoom !== 1 ? ` · zoom ${zoom.toFixed(1)}x` : ''} · object ${s.pictureFps}/s`,
+        ...(rate ? [rate] : []),
+        ...(f.cameraAccess ? [] : ['no zoom: this phone does not hand over the camera picture']),
         `render ${s.renderMs} ms · copy ${s.copyMs} ms (${s.route})`,
         `${f.hitTest ? 'surfaces' : 'NO surfaces'} · ${s.anchored ? 'anchored' : f.anchors ? 'anchor pending' : 'no anchors'} · ${f.cameraAccess ? 'camera clip' : 'motion only'}`,
       ].join('\n');
     },
     remove() {
-      if (heightTimer) clearTimeout(heightTimer);
+      heightStrip.stop();
+      zoomStrip.stop();
       handle = null;
       root.remove();
     },

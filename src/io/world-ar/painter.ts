@@ -124,10 +124,11 @@ export class GlPainter implements ArPainter {
    * One rectangle. Corners: bottom-left, bottom-right, top-left, top-right. `topV` is the texture row that is the TOP of the picture:
    * 0 for pictures uploaded here (their first row is the top), 1 for textures in OpenGL's own orientation.
    */
-  private quad(corners: Corners, viewProjection: Float32Array, mode: number, opacity: number, texture: WebGLTexture | null, topV: number): void {
+  private quad(corners: Corners, viewProjection: Float32Array, mode: number, opacity: number, texture: WebGLTexture | null, topV: number, uvScale = 1): void {
     const gl = this.gl;
     const d = this.data;
     const uv = [0, 1 - topV, 1, 1 - topV, 0, topV, 1, topV];
+    if (uvScale !== 1) for (let i = 0; i < 8; i++) uv[i] = 0.5 + (uv[i] - 0.5) * uvScale; // the middle part of the picture only
     for (let i = 0; i < 4; i++) {
       d[i * 5] = corners[i][0];
       d[i * 5 + 1] = corners[i][1];
@@ -229,6 +230,24 @@ export class GlPainter implements ArPainter {
     this.quad([[-1, -1, 0], [1, -1, 0], [-1, 1, 0], [1, 1, 0]], IDENTITY, 0, 1, texture, CAMERA_TOP_V);
     gl.enable(gl.BLEND);
     return canvas;
+  }
+
+  /**
+   * Digital zoom: the camera picture of this frame drawn over the whole of the XR layer (the framebuffer and viewport `begin` set),
+   * its middle 1/zoom of each side stretched to fill it. The same camera texture as `camera`, so it lines up the way the clip does.
+   * ASSUMPTION (needs a device): the camera image has the shape of the screen and shows the same view as the system passthrough, so
+   * the zoomed picture and the object (projected with the same factor) agree. False when the camera picture is not there.
+   */
+  backdrop(view: XrViewLike, zoom: number): boolean {
+    const gl = this.gl;
+    const cam = view.camera;
+    if (!this.binding || !cam || !cam.width || !cam.height) return false;
+    const texture = this.binding.getCameraImage(cam);
+    if (!texture) return false;
+    gl.disable(gl.BLEND);
+    this.quad([[-1, -1, 0], [1, -1, 0], [-1, 1, 0], [1, 1, 0]], IDENTITY, 0, 1, texture, CAMERA_TOP_V, 1 / Math.max(1, zoom));
+    gl.enable(gl.BLEND);
+    return true;
   }
 
   dispose(): void {

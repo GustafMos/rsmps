@@ -37,6 +37,7 @@ export default defineNode({
   outputs: {
     camera: { type: 'camera', label: 'Camera' },
     picture: { type: 'image', label: 'Picture' },
+    zoom: { type: 'number', label: 'Zoom', hint: 'The AR view\'s zoom at this moment of the take (1 = none). The saved video uses it to zoom the camera clip the same way.' },
   },
   optionalOutputs: ['picture'],
   params: {
@@ -74,6 +75,20 @@ export default defineNode({
       ],
     },
     cardWidth: { type: 'number', default: 0.5, min: 0.02, max: 20, step: 0.01, label: 'Picture width', hint: 'Width of a flat picture in the room, in meters.', group: 'AR view' },
+    recordRate: {
+      type: 'enum',
+      default: 'project',
+      label: 'Recording rate',
+      hint: 'How many times a second the AR view notes the phone and takes a camera picture while recording, and the frame rate of the saved video. The phone\'s AR camera often runs at 30: asking for more records at what it gives, and the AR view says so.',
+      group: 'AR view',
+      options: [
+        { value: 'project', label: 'Match project' },
+        { value: '24', label: '24 per second' },
+        { value: '25', label: '25 per second' },
+        { value: '30', label: '30 per second' },
+        { value: '60', label: '60 per second' },
+      ],
+    },
     saveVideo: {
       type: 'bool',
       default: true,
@@ -101,12 +116,13 @@ export default defineNode({
     let m: WorldMoment | null = null;
     if (isMoment(p.live)) m = p.live;
     else if (isWorldTake(p.take)) m = sampleWorldTake(p.take, ctx.time.seconds - p.startAt, p.loopTake);
+    const zoom = m?.zoom && m.zoom > 0 ? m.zoom : 1;
     let camera: CameraValue;
     if (!m) camera = { ...defaultRigCamera(), position: [0, 1, -4.5] }; // nothing to follow: an ordinary camera above the object, looking at it
     else if (!m.object) camera = awayCamera(); // tracked, but nothing is placed (yet): the object must not show
     else camera = worldCamera(m.view, m.lens, { p: m.object.p, q: m.object.q, yaw: 0, scale: m.object.scale }, { unit: p.size / 2, lift: p.lift }, ctx.canvas);
     // the Picture costs a camera copy every frame: only made when something is wired to it (asking the host also tells it the picture is in use)
-    if (!ctx.wants('picture')) return { camera };
+    if (!ctx.wants('picture')) return { camera, zoom };
     void ctx.time.seconds; // live: re-render every frame
     const clear = (): ImageValue => {
       const width = Math.max(1, Math.round(ctx.canvas.width));
@@ -117,13 +133,13 @@ export default defineNode({
     const ar = host.arCameraFrame?.();
     if (ar?.session) {
       // the AR view owns the camera: its own frame, or nothing where the phone does not hand it over (or none came yet)
-      if (!ar.frame) return { camera, picture: clear() };
-      return { camera, picture: { kind: 'image', texture: ar.frame.texture, width: ar.frame.width, height: ar.frame.height, unit: ctx.unitFor(ar.frame.width, ar.frame.height) } };
+      if (!ar.frame) return { camera, zoom, picture: clear() };
+      return { camera, zoom, picture: { kind: 'image', texture: ar.frame.texture, width: ar.frame.width, height: ar.frame.height, unit: ctx.unitFor(ar.frame.width, ar.frame.height) } };
     }
     // no AR view: the back camera of this device, through the same path as a Webcam node set to the back camera
-    if (!host.liveFrame) return { camera, picture: clear() };
+    if (!host.liveFrame) return { camera, zoom, picture: clear() };
     const source = cameraSource({ device: '', facing: 'back', resolution: 'auto' });
-    if (host.liveBlocked?.(source)) return { camera, picture: clear() };
+    if (host.liveBlocked?.(source)) return { camera, zoom, picture: clear() };
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
     let frame: Awaited<ReturnType<NonNullable<typeof host.liveFrame>>> = null;
     try {
@@ -131,7 +147,7 @@ export default defineNode({
     } catch {
       frame = null; // no camera, refused, in use: a transparent picture, not an error (the graph can still be built)
     }
-    if (!frame) return { camera, picture: clear() };
-    return { camera, picture: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit: ctx.unitFor(frame.width, frame.height) } };
+    if (!frame) return { camera, zoom, picture: clear() };
+    return { camera, zoom, picture: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit: ctx.unitFor(frame.width, frame.height) } };
   },
 });

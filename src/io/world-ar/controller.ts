@@ -41,6 +41,8 @@ export interface WorldArOpen {
   card: { mode: CardMode; width: number };
   /** The element shown over the camera picture (buttons, hint). It must be in the document. */
   overlay: HTMLElement | null;
+  /** Recording rate of the World AR Camera node: frames per second, or null / absent = the project's. */
+  recordRate?: number | null;
   onState(state: WorldArViewState): void;
   /** A recording was saved: the take, and the camera clip when the session handed the camera picture over. */
   onTake(take: WorldArTake): void;
@@ -50,6 +52,8 @@ export interface WorldArTake {
   take: WorldTake | null;
   clip: AssetInfo | null;
   seconds: number;
+  /** The rate the take was recorded at, what was asked for, and whether the AR camera was too slow for it. */
+  rate?: { fps: number; asked: number; clamped: boolean };
   /** A sentence when something went wrong (the take or the clip may still be there). */
   error: string | null;
 }
@@ -266,6 +270,7 @@ export class WorldArController implements WorldArApi {
         minInterval: layerMode ? 0 : 1000 / Math.max(1, fps),
       });
       let saving = false;
+      let recRate = { fps, asked: fps, clamped: false };
       let recorder: LiveRecorder | null = null;
       let lastLoop: ArLoopState | null = null;
       const view = (s: ArLoopState): WorldArViewState => ({
@@ -319,7 +324,8 @@ export class WorldArController implements WorldArApi {
         emit();
         const out: WorldArTake = { take: null, clip: null, seconds: 0, error: null };
         try {
-          out.take = buildWorldTake(rec.samples, { fps });
+          out.take = buildWorldTake(rec.samples, { fps: recRate.fps });
+          out.rate = recRate;
           if (!out.take) out.error = 'Nothing was recorded: the recording was too short.';
           else out.seconds = out.take.frames / out.take.fps;
           if (recorder && recorder.state === 'recording') {
@@ -367,10 +373,12 @@ export class WorldArController implements WorldArApi {
             return;
           }
           let clip: ArClipRecorder | null = null;
+          // the rate for this recording: asked for, but never more than the AR camera delivers (frames would repeat unevenly)
+          recRate = loop.recordRateFor(fps);
           if (features.cameraAccess && made.painter.camera) {
             recorder = env.makeRecorder();
             try {
-              recorder?.start(() => null, { fps, label: 'AR camera clip', manual: true, maxSide: 1280 });
+              recorder?.start(() => null, { fps: recRate.fps, label: 'AR camera clip', manual: true, maxSide: 1280 });
             } catch {
               recorder = null; // no video encoder here: the take is motion only
             }
@@ -381,7 +389,7 @@ export class WorldArController implements WorldArApi {
               clip = { push: (picture) => r.push(picture as CanvasImageSource) };
             }
           }
-          loop.startRecording(clip);
+          loop.startRecording(clip, recRate);
         },
         close: async () => {
           await stopAndSave().catch(() => undefined);
@@ -404,6 +412,8 @@ export class WorldArController implements WorldArApi {
       };
       release = this.d.holdPlayer();
       this.current = handle;
+      loop.projectFps = fps;
+      loop.setRecordRate(o.recordRate && o.recordRate > 0 ? o.recordRate : null);
       loop.start();
       return handle;
     } catch (err) {

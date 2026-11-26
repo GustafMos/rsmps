@@ -22,6 +22,11 @@ export interface WorldMoment {
   lens: Lens;
   /** The placed object: its point on the surface, its full orientation (surface frame and twist together) and its size multiplier. */
   object: { p: Vec3; q: Quat; scale: number } | null;
+  /**
+   * The AR view's digital zoom for this frame (absent = 1). `lens` is the lens of the ZOOMED picture (what the engine camera uses);
+   * the take stores the un-zoomed lens and this factor apart, because the recorded camera clip is the un-zoomed picture.
+   */
+  zoom?: number;
 }
 
 export interface WorldSample extends WorldMoment {
@@ -57,6 +62,7 @@ const ROT: Spec = { step: 2e-5, tol: 1e-4 };
 const LENS: Spec = { step: 1e-5, tol: 5e-5 };
 const SCALE: Spec = { step: 1e-4, tol: 5e-4 };
 const FLAG: Spec = { step: 1, tol: 0.25 };
+const ZOOM: Spec = { step: 1e-3, tol: 2e-3 };
 
 const CHANNELS: Record<string, Spec> = {
   cx: POS, cy: POS, cz: POS,
@@ -66,6 +72,7 @@ const CHANNELS: Record<string, Spec> = {
   os: SCALE,
   on: FLAG,
   l0: LENS, l5: LENS, l8: LENS, l9: LENS,
+  zm: ZOOM,
 };
 export const WORLD_CHANNELS = Object.keys(CHANNELS);
 const QUATS: [string, string, string, string][] = [
@@ -87,6 +94,7 @@ function rowOf(m: WorldMoment, last: Row | null): Row {
   const o = m.object;
   const vq = qNorm(m.view.q);
   const oq = o ? qNorm(o.q) : null;
+  const z = m.zoom && m.zoom > 0 ? m.zoom : 1;
   return {
     cx: m.view.p[0], cy: m.view.p[1], cz: m.view.p[2],
     cqx: vq[0], cqy: vq[1], cqz: vq[2], cqw: vq[3],
@@ -94,7 +102,8 @@ function rowOf(m: WorldMoment, last: Row | null): Row {
     oqx: oq ? oq[0] : (last?.oqx ?? 0), oqy: oq ? oq[1] : (last?.oqy ?? 0), oqz: oq ? oq[2] : (last?.oqz ?? 0), oqw: oq ? oq[3] : (last?.oqw ?? 1),
     os: o ? o.scale : (last?.os ?? 1),
     on: o ? 1 : 0,
-    l0: m.lens[0], l5: m.lens[1], l8: m.lens[2], l9: m.lens[3],
+    l0: m.lens[0] / z, l5: m.lens[1] / z, l8: m.lens[2] / z, l9: m.lens[3] / z,
+    zm: z,
   };
 }
 
@@ -173,12 +182,14 @@ export function buildWorldTake(samples: WorldSample[], opts: { fps: number }): W
     for (let i = 0; i < frames; i++) q[i] = quantise(ch[n][i], spec.step);
     const flat: number[] = [];
     for (const i of rdp(q, spec.tol)) flat.push(i, q[i]);
+    // a take that never zoomed has no zoom track, exactly like a take recorded before zoom existed
+    if (n === 'zm' && ch.zm.every((v) => Math.abs(v - 1) < 1e-9)) continue;
     tracks[n] = flat;
   }
   return { v: 1, kind: 'world-ar', fps, frames, tracks, clip: byFrame, ...(byFrame && first > 0 ? { clipFirst: first } : {}) };
 }
 
-const NEUTRAL: Row = { cx: 0, cy: 0, cz: 0, cqx: 0, cqy: 0, cqz: 0, cqw: 1, ox: 0, oy: 0, oz: 0, oqx: 0, oqy: 0, oqz: 0, oqw: 1, os: 1, on: 0, l0: 1, l5: 1, l8: 0, l9: 0 };
+const NEUTRAL: Row = { cx: 0, cy: 0, cz: 0, cqx: 0, cqy: 0, cqz: 0, cqw: 1, ox: 0, oy: 0, oz: 0, oqx: 0, oqy: 0, oqz: 0, oqw: 1, os: 1, on: 0, l0: 1, l5: 1, l8: 0, l9: 0, zm: 1 };
 
 function expand(take: WorldTake): Record<string, Float64Array> {
   const ch: Record<string, Float64Array> = {};
@@ -221,9 +232,11 @@ export function sampleWorldTake(take: WorldTake, seconds: number, loop = false):
   const num = (name: string): number => c[name][i0] + (c[name][i1] - c[name][i0]) * u;
   const quat = (g: [string, string, string, string]): Quat => qNorm(qSlerp([c[g[0]][i0], c[g[1]][i0], c[g[2]][i0], c[g[3]][i0]], [c[g[0]][i1], c[g[1]][i1], c[g[2]][i1], c[g[3]][i1]], u));
   const on = (u < 0.5 ? c.on[i0] : c.on[i1]) >= 0.5;
+  const zoom = num('zm');
   return {
     view: { p: [num('cx'), num('cy'), num('cz')], q: quat(QUATS[0]) },
-    lens: [num('l0'), num('l5'), num('l8'), num('l9')],
+    lens: [num('l0') * zoom, num('l5') * zoom, num('l8') * zoom, num('l9') * zoom],
+    ...(zoom !== 1 ? { zoom } : {}),
     object: on ? { p: [num('ox'), num('oy'), num('oz')], q: quat(QUATS[1]), scale: num('os') } : null,
   };
 }

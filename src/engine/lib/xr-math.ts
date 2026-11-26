@@ -70,6 +70,23 @@ export function lensOf(projection: ArrayLike<number>): Lens {
   return [projection[0], projection[5], projection[8], projection[9]];
 }
 
+/** Digital zoom limits of the AR view: the centre of the picture, scaled up. Never below 1x. */
+export const ZOOM_MIN = 1;
+export const ZOOM_MAX = 4;
+export const clampZoom = (z: number): number => (Number.isFinite(z) ? Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) : 1);
+
+/** The lens of a picture zoomed in by `zoom` about its centre: every focal and offset term grows by the same factor. */
+export function zoomLens(lens: Lens, zoom: number): Lens {
+  return zoom === 1 ? lens : [lens[0] * zoom, lens[1] * zoom, lens[2] * zoom, lens[3] * zoom];
+}
+
+/** A projection matrix zoomed in by `zoom` about the middle of the screen (its x and y rows scaled): what shows the zoomed picture. */
+export function zoomProjection(projection: ArrayLike<number>, zoom: number): Float32Array {
+  const m = Float32Array.from(projection as ArrayLike<number>);
+  if (zoom !== 1) for (const i of [0, 4, 8, 12, 1, 5, 9, 13]) m[i] *= zoom;
+  return m;
+}
+
 /** Width / height of the picture the lens was made for. */
 export const lensAspect = (lens: Lens): number => (lens[0] > 1e-9 ? lens[1] / lens[0] : 1);
 

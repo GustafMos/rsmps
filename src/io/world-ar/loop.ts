@@ -19,7 +19,7 @@
 import type { Quat, Vec3 } from '../../engine/lib/motion-math';
 import { FEED_MAX_SIDE } from './camera-feed';
 import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
-import { cardCorners, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, viewMatrix, viewRay, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
+import { cardCorners, clampZoom, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, viewMatrix, viewRay, zoomLens, zoomProjection, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
 import { rotate } from '../../engine/lib/motion-math';
 import { hintFor, initialPlaceState, liftedPlacement, placeStep, type Gesture, type PlaceState } from './placement';
 import type { GrantedFeatures, XrAnchorLike, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrRigidTransform, XrSessionLike, XrViewLike, XrViewportLike } from './xr-api';
@@ -34,6 +34,11 @@ export interface ArPainter {
   ring(corners: Corners, viewProjection: Float32Array): void;
   /** The camera picture of this frame as something a recorder can read right now, or null (no camera access, or no picture yet). */
   camera?(view: XrViewLike, maxSide?: number): unknown | null;
+  /**
+   * Digital zoom: draw the camera picture of this frame into the XR layer (right after `begin`), its centre scaled up by `zoom`, so it
+   * covers the system's own passthrough. Returns false when the camera picture is not there (then nothing zoomed may be drawn).
+   */
+  backdrop?(view: XrViewLike, zoom: number): boolean;
 }
 
 /** A finished picture of the object, already in the painter's texture. */
@@ -83,6 +88,13 @@ export interface ArLoopState {
   anchored: boolean;
   /** The recording has the camera picture with it. */
   clip: boolean;
+  /** The zoom the user asked for (1 = none), and whether this phone can zoom (it needs the camera picture). */
+  zoom: number;
+  zoomAvailable: boolean;
+  /** The recording rate the take is using (frames per second), what was asked for, and the measured rate of the AR camera. */
+  recordFps: number;
+  askedFps: number;
+  cameraFps: number;
   error: string | null;
   ended: boolean;
 }
@@ -133,6 +145,26 @@ export const MAX_FRAME_ERRORS = 30;
 const RING_RADIUS = 0.09;
 const STATE_EVERY_MS = 200;
 
+/** How far one pixel of finger travel on the Zoom strip changes the zoom (exponential, so it feels even from 1x to 4x). */
+export const ZOOM_PER_PIXEL = 0.006;
+
+/** The recording rates the settings offer. */
+export const RECORD_RATES = [60, 30, 25, 24] as const;
+
+/**
+ * The rate a take is recorded at. `asked` null = the project's rate (kept as it is: the take follows the project, the old behaviour).
+ * An asked rate the AR camera cannot deliver is lowered to the nearest usual rate it can (a 60 on a 30 per second session records 30),
+ * because a take with more frames than pictures would repeat pictures unevenly. `measured` 0 = not known yet: nothing is lowered.
+ */
+export function effectiveRecordRate(asked: number | null, project: number, measured: number): { fps: number; asked: number; clamped: boolean } {
+  const want = asked ?? project;
+  if (asked === null || !(measured > 0)) return { fps: want, asked: want, clamped: false };
+  const can = measured * 1.08; // a 30 Hz session measures 29..31
+  if (want <= can) return { fps: want, asked: want, clamped: false };
+  const fit = RECORD_RATES.find((r) => r <= can);
+  return { fps: fit ?? Math.max(1, Math.round(measured)), asked: want, clamped: true };
+}
+
 type Action = { type: 'place' } | { type: 'reset' } | { type: 'gesture'; g: Gesture };
 
 export class ArLoop {
@@ -153,6 +185,12 @@ export class ArLoop {
   private reanchor = false;
   private drag: { h0: Vec3; p0: Vec3 } | null = null;
   private lastView: { pose: XrPose; lens: Lens } | null = null;
+  /** The zoom the user chose; and the zoom actually on the screen in the last frame (1 when the camera picture was not there to zoom). */
+  private zoom = 1;
+  private zoomShown = 1;
+  /** The recording rate asked for (null = the project's) and what the recording uses. */
+  private rateAsked: number | null = null;
+  private rateUsed: { fps: number; asked: number; clamped: boolean } | null = null;
   private recording: { t0: number; samples: WorldSample[]; clip: ArClipRecorder | null; withClip: boolean | null } | null = null;
   private frameTimes: number[] = [];
   private pictureTimes: number[] = [];
@@ -170,6 +208,9 @@ export class ArLoop {
   };
 
   constructor(private d: ArLoopDeps) {}
+
+  /** The project's frame rate, for 'Match project' (set by whoever opens the loop; 30 until then). */
+  projectFps = 30;
 
   start(): void {
     if (this.running || this.ended) return;
@@ -195,6 +236,27 @@ export class ArLoop {
     this.actions.push({ type: 'gesture', g });
   }
 
+  /** The recording rate to use from the next recording on: frames per second, or null for the project's. */
+  setRecordRate(fps: number | null): void {
+    this.rateAsked = fps;
+  }
+  /** The camera's own rate right now, frames per second (0 = not known yet). */
+  get cameraFps(): number {
+    return this.frameTimes.length < 10 ? 0 : this.rate(this.frameTimes); // too few frames to know
+  }
+  /** The rate a recording started now would use. */
+  recordRateFor(project: number): { fps: number; asked: number; clamped: boolean } {
+    return effectiveRecordRate(this.rateAsked, project, this.cameraFps);
+  }
+  /** The zoom the user chose (1 to 4). */
+  get zoomFactor(): number {
+    return this.zoom;
+  }
+  /** Whether this session can zoom: the page needs the camera picture to draw it larger. */
+  get canZoom(): boolean {
+    return this.d.features.cameraAccess && !!this.d.painter.backdrop;
+  }
+
   get isRecording(): boolean {
     return !!this.recording;
   }
@@ -203,9 +265,10 @@ export class ArLoop {
   }
 
   /** Start noting poses. `clip` records the camera picture alongside when the session hands it over; null = motion only. */
-  startRecording(clip: ArClipRecorder | null): void {
+  startRecording(clip: ArClipRecorder | null, rate?: { fps: number; asked: number; clamped: boolean }): void {
     if (this.recording || this.ended) return;
     this.recording = { t0: -1, samples: [], clip, withClip: null };
+    this.rateUsed = rate ?? this.recordRateFor(this.projectFps);
     this.emit(true);
   }
 
@@ -301,12 +364,18 @@ export class ArLoop {
     if (this.reanchor && !this.drag) this.makeAnchor(frame, null);
 
     // 4. draw
-    const viewProjection = mat4Mul(view.projectionMatrix, viewMatrix(pose));
     d.painter.begin(d.layer.framebuffer, viewport);
+    // digital zoom: the camera picture is drawn into the layer by the page, its centre scaled up, and everything else (the object, the
+    // ring) is projected with the same factor. Where the camera picture is not there this frame, nothing is zoomed this frame.
+    const zoom = this.zoom > 1 && this.canZoom && d.painter.backdrop?.(view, this.zoom) ? this.zoom : 1;
+    this.zoomShown = zoom;
+    const viewProjection = mat4Mul(zoomProjection(view.projectionMatrix, zoom), viewMatrix(pose));
     const base = this.place.placement;
     const pl = base ? liftedPlacement(base) : null; // where the object really stands: the surface point plus its height
     if (this.place.phase !== 'placed' && this.place.reticle) d.painter.ring(reticleCorners(this.place.reticle, RING_RADIUS), viewProjection);
-    const moment: WorldMoment = { view: pose, lens, object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale } : null };
+    // the lens of the zoomed picture: the engine renders the object through it, so it stays locked to the room while the camera is zoomed
+    const zlens = zoomLens(lens, zoom);
+    const moment: WorldMoment = { view: pose, lens: zlens, ...(zoom !== 1 ? { zoom } : {}), object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale } : null };
     const pic = d.source.latest();
     if (pic && pic.seq !== this.lastSeq) {
       this.lastSeq = pic.seq;
@@ -332,7 +401,7 @@ export class ArLoop {
     // 5. the next picture, for this pose
     if (!this.paused && (pl || d.show.kind === 'card')) {
       const depth = pl ? Math.max(0.05, depthOf(pose, pl.p)) : 1;
-      d.source.request({ moment, depth, size: pictureSize(lens, d.maxSide), seconds: d.seconds() });
+      d.source.request({ moment, depth, size: pictureSize(zlens, d.maxSide), seconds: d.seconds() });
     }
 
     // 6. the take
@@ -361,6 +430,14 @@ export class ArLoop {
     const g = a.g;
     const base = this.place.placement;
     const pl = base ? liftedPlacement(base) : null;
+    if (g.type === 'zoom') {
+      if (this.canZoom) this.zoom = clampZoom(this.zoom * Math.exp(g.dy * ZOOM_PER_PIXEL));
+      return;
+    }
+    if (g.type === 'zoom-reset') {
+      this.zoom = 1;
+      return;
+    }
     if (g.type === 'tap') {
       if (this.place.phase !== 'placed') this.placeNow(frame, pose);
       return;
@@ -370,7 +447,7 @@ export class ArLoop {
       // finger travel up the screen maps to metres at the object's distance, so the object follows the fingers 1 to 1 on screen
       const scr = this.d.screen();
       const dist = Math.max(0.2, depthOf(pose, pl.p));
-      this.place = placeStep(this.place, { type: 'lift', dh: (g.dy * 2 * dist) / (Math.max(1e-6, lens[1]) * Math.max(1, scr.height)) });
+      this.place = placeStep(this.place, { type: 'lift', dh: (g.dy * 2 * dist) / (Math.max(1e-6, lens[1] * this.zoomShown) * Math.max(1, scr.height)) });
       return;
     }
     if (g.type === 'lift-reset') {
@@ -388,7 +465,10 @@ export class ArLoop {
     }
     // drag-start / drag: where the finger's ray meets the object's own surface
     const scr = this.d.screen();
-    const ray = viewRay(pose, lens, (g.x / Math.max(1, scr.width)) * 2 - 1, 1 - (g.y / Math.max(1, scr.height)) * 2);
+    // the screen shows the middle of the camera picture scaled up by the zoom: a finger at screen point n is on the point n / zoom of the
+    // real view, so un-zoom about the centre before casting the ray
+    const zs = this.zoomShown;
+    const ray = viewRay(pose, lens, ((g.x / Math.max(1, scr.width)) * 2 - 1) / zs, (1 - (g.y / Math.max(1, scr.height)) * 2) / zs);
     const h = rayPlane(ray.origin, ray.dir, pl.p, rotate(pl.q, [0, 1, 0]));
     if (!h) return; // the finger points above the horizon of the surface: the object stays
     if (g.type === 'drag-start' || !this.drag) {
@@ -507,6 +587,11 @@ export class ArLoop {
       height: this.place.placement?.h ?? 0,
       anchored: !!this.anchor,
       clip: r?.withClip === true,
+      zoom: this.canZoom ? this.zoom : 1,
+      zoomAvailable: this.canZoom,
+      recordFps: r && this.rateUsed ? this.rateUsed.fps : this.recordRateFor(this.projectFps).fps,
+      askedFps: r && this.rateUsed ? this.rateUsed.asked : this.recordRateFor(this.projectFps).asked,
+      cameraFps: this.cameraFps,
       error: this.error,
       ended: this.ended,
     };
