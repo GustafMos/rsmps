@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { COVERAGE_MEANING, coverageOf, qualitySummary } from '../../engine/lib/scan-coverage';
 import { isScanData, normalizeScan } from '../../engine/lib/scan-data';
 import type { NodeInstance } from '../../engine/types';
 import { scanBlockedReason, type WorldArSupport } from '../../io/world-ar/support';
 import { useApp } from '../store/context';
+import { loadScanFiles, saveScanZip, type SaveProgress } from '../store/scanFiles';
 import { openScan } from '../store/worldArScan';
 import { WORLD_AR_BETA } from './WorldArPanel';
 
@@ -45,6 +46,23 @@ export function ScanPanel({ node }: { node: NodeInstance }) {
   const quality = useMemo(() => qualitySummary(scan), [scan]);
   const blocked = scanBlockedReason(support);
   const depthShots = scan.shots.filter((s) => s.depth).length;
+  const [saving, setSaving] = useState<SaveProgress | null>(null);
+  const abort = useRef<AbortController | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  useEffect(() => () => abort.current?.abort(), []);
+  const save = async () => {
+    const ac = new AbortController();
+    abort.current = ac;
+    setSaving({ fraction: 0, note: 'Starting' });
+    await saveScanZip(app, scan, node.label || '3d-scan', setSaving, ac.signal);
+    abort.current = null;
+    setSaving(null);
+  };
+  const load = async (files: File[]) => {
+    if (!files.length) return;
+    if (has && !(await ed.ask({ title: 'Replace this scan?', text: `This node holds a scan of ${scan.shots.length} photos. Loading a file replaces it (Undo brings it back). The photos stay in Media.`, ok: 'Load scan file', cancel: 'Keep it' }))) return;
+    await loadScanFiles(app, node.id, files);
+  };
   const start = async () => {
     // asked first, then the AR view opens from the OK press (which counts as the press the browser wants)
     if (has && !(await ed.ask({ title: 'Start a new scan?', text: `This node holds a scan of ${scan.shots.length} photos. A new scan replaces it (Undo brings it back). The photos stay in Media. The phone cannot find again where an earlier scan stood, so a scan cannot be continued.`, ok: 'Start new scan', cancel: 'Keep it' }))) return;
@@ -67,6 +85,34 @@ export function ScanPanel({ node }: { node: NodeInstance }) {
           Clear
         </button>
       </div>
+      <div className="rs-insp__actions">
+        <button className="rs-btn" disabled={!has || !!saving} title={has ? 'Downloads one zip file with the photos and where the phone was for each, ready for COLMAP, nerfstudio, Brush and similar tools on a computer. Nothing leaves this device.' : 'There is no scan to save'} onClick={() => void save()}>
+          Save scan for a computer
+        </button>
+        {saving && (
+          <button className="rs-btn" onClick={() => abort.current?.abort()}>
+            Cancel
+          </button>
+        )}
+        <button className="rs-btn" disabled={!!saving} title="Open a scan zip saved on another device (or its scan.json with the numbered photos). The photos are added to Media." onClick={() => picker.current?.click()}>
+          Load scan file
+        </button>
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          accept=".zip,.json,.jpg,.jpeg,.png,application/zip,application/json,image/jpeg,image/png"
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = '';
+            void load(files);
+          }}
+        />
+      </div>
+      {saving && <progress max={1} value={saving.fraction} aria-label="Saving the scan" style={{ width: '100%' }} />}
+      {saving && <p className="rs-insp__hint" role="status">{saving.note} ({Math.round(saving.fraction * 100)}%)</p>}
+      <p className="rs-insp__hint">Save scan for a computer: one zip with the photos and the phone's positions, to open with COLMAP, a splat trainer, or the desktop app's Splat from Video. Load scan file does the opposite: pick that zip on any device.</p>
       {blocked && <p className="rs-insp__hint" role="status">Start scan is off here: {blocked}</p>}
       <p className="rs-insp__hint">In the AR view: aim at the surface next to the object and tap, make the dome fit the object (pinch, or the Size strip), lift its middle (Height strip), press Start, then walk slowly round it. Photos are taken by themselves; the picture, the map and one line of advice show what is still missing.</p>
       {has ? (
