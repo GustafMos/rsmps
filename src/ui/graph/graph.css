@@ -24,6 +24,7 @@
 .rs-wire--mask { stroke: var(--sock-mask); }
 .rs-wire--palette { stroke: var(--sock-palette); }
 .rs-wire--number { stroke: var(--sock-number); }
+.rs-wire--vector { stroke: var(--sock-vector); }
 .rs-wire--color { stroke: var(--sock-color); }
 .rs-wire--audio { stroke: var(--sock-audio); }
 .rs-wire--midi { stroke: var(--sock-midi); }

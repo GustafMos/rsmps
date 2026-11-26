@@ -113,8 +113,9 @@ Exemplars to copy from (read the one closest to your node first):
 9. **No state.** No module-level variables that change, no caches of your own: the kernel caches
    results by params + inputs. Same inputs must give the same output (use `seed` params + hashes,
    never `Math.random()`).
-10. **Every number/color/palette param is also an input socket** automatically. Do not add separate
-    inputs for values that are params.
+10. **Every number/color/palette/vec2 param is also an input socket** automatically (number, color, palette; a `vec2` takes a
+    `vector` wire). Do not add separate inputs for values that are params. Number params named `<stem>X` / `<stem>Y` (/ `<stem>Z`)
+    also get ONE bundled `vector` socket for the group: see "Vector sockets" under Pending rules.
 11. Nodes never import from `src/ui`, `src/io` or `src/cli`.
 12. Share code through `src/engine/lib/` or by exporting a helper from the node that owns it
     (e.g. `gaussianBlur` in `blur.node.ts`). Do not copy shaders between files.
@@ -182,7 +183,7 @@ indistinguishable from a built-in node. See `docs/PLUGINS.md`.
 19. **WGSL reserved words as uniform or texture names fail silently** (e.g. `target`, `size` is reserved by the kernel).
     Use descriptive names and assert pixels in the test.
 20. **Wire order of a `multi` input is meaningful** (first = bottom layer); never sort inputs.
-21. New socket types beyond the originals: `regions` (tracked boxes), `camera`; param type `device`; node flags
+21. New socket types beyond the originals: `regions` (tracked boxes), `camera`, `material`, `vector` (three numbers, `[x, y, z]`); param type `device`; node flags
     `playable`, `maskable`. Stream nodes can publish numbers to the picture side with `io.signal` (see audio/README.md).
 
 ## GPU memory (rules added by the memory pass)
@@ -535,3 +536,22 @@ where cache nodes go to bake a whole group.
 - **Process panels work on full path ids** (`ui/store/processes.ts`): `runProcess / cancelProcess / clearProcess` take the id the scheduler and the engine use (`group/inner`); a component holding a node of the SHOWN level converts it with
   `ed.fullId(levelId)`. `processSelection` maps the shown level's selection to paths and orders them on the flattened document; results are written with `withProcessResult` (one undo step), auto processes and the
   stash for other projects look nodes up by path, and job labels read "Group name › Node" (`processLabel`).
+- **Vector sockets: three numbers on one wire.** Socket type `vector`, value a plain `[x, y, z]` triple (`VectorValue`; always three, 2D uses read x and y; no unit of its
+  own: the socket it arrives at gives it meaning). A plain array of three is a vector and of four a colour (`checkOutputs`). It connects only to `vector` (no implicit
+  number <-> vector conversion: Combine XYZ / Separate XYZ are the visible converters). Nodes in `nodes/math`: Vector, Combine XYZ, Separate XYZ, Vector Math; Smooth and
+  Delay Number take a vector next to their number.
+  **Bundled param sockets are derived, never declared.** `paramBundles(def)` in `define.ts` is the ONE place: number params `<stem>X` and `<stem>Y`, optionally `<stem>Z`
+  (capital axis letter after a lower-case letter or digit: `posX`, `rotY`, `cropSizeZ`), or bare `x` / `y` (/ `z`), make one input port `<stem>@xyz` (`@xyz` for the bare
+  names; the same suffix for two and three members, so a node that gains a Z later keeps its wires). `@` never appears in a param or input name (a registry-wide test
+  checks it), so the port cannot collide. Its label is what the member labels share without the axis letter ("Move X/Y/Z" -> "Move"), else the stem in words. So naming
+  a new node's params `fooX` / `fooY` / `fooZ` is all it takes; `paramSocketType`, `paramSocketPorts`, `paramBundle` and `isInputPort` are what the engine, `inputType` /
+  `validateGraph`, the group code and every socket list of the UI use. A `vec2` param takes a vector wire on its own port (x, y).
+  Rules: the engine splits a bundle wire into its members BEFORE params are resolved, so each member is then an ordinary wired number (min / max, `integer`, `px` conversion
+  exactly as a number wire) and `render` sees plain numbers in `ctx.params`, nodes are untouched; a member that has a wire of its own keeps it (that wire wins for that
+  component, even while it carries nothing); a two-member bundle ignores z; `ctx.inputVaries(member)` is true when the bundle varies; cache keys need nothing new (they are
+  built from the resolved params). A wired vec2 is held to the param's min / max. Not done: bundles are not exposed on a group node as one socket (expose the members, or
+  give the group a `vector` input port and wire it to the inner bundle).
+  UI: an unused bundle takes no room on a node. Its row (one socket, "Move XYZ") appears right above its first member while it is wired, when the node shows all its rows,
+  and on every node while a vector wire is being placed by tapping (touch). Dropping a vector wire on a node body offers the bundles in the socket picker. The inspector
+  shows one slim row per bundle above its members (a drop target like every wireable row); members driven by the bundle read "from <node>". Test: `__tests__/vector-sockets.test.ts`,
+  `ui/lib/bundle-sockets.test.ts`.

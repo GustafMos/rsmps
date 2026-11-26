@@ -11,7 +11,7 @@
  *
  * Contract: docs/ENGINE.md, Pending rules ("Group nodes", "Repeat groups", "Bake a group").
  */
-import type { Registry } from './define';
+import { isInputPort, type Registry } from './define';
 import { stableStringify } from './lib/stable-json';
 import {
   CATEGORIES,
@@ -111,7 +111,7 @@ export const REPEAT_BLENDS = [
   { value: 'difference', label: 'Difference' },
 ] as const;
 
-const SOCKETS: readonly SocketType[] = ['image', 'mask', 'palette', 'number', 'color', 'regions', 'camera', 'material', 'audio', 'midi'];
+const SOCKETS: readonly SocketType[] = ['image', 'mask', 'palette', 'number', 'color', 'vector', 'regions', 'camera', 'material', 'audio', 'midi'];
 
 export const isGroupNode = (n: { type: string } | undefined | null): boolean => !!n && n.type === GROUP_TYPE;
 export const isBoundaryNode = (n: { type: string } | undefined | null): boolean => !!n && (n.type === GROUP_INPUT_TYPE || n.type === GROUP_OUTPUT_TYPE);
@@ -759,7 +759,7 @@ export function withLevel(root: GraphDoc, path: readonly string[], level: GraphD
   const next: NodeInstance = { ...g, params };
   // Wires outside that used a port (or an exposed param) that no longer exists go too.
   const def = groupDefOf(next);
-  const okIn = (port: string) => port in def.inputs || port in def.params;
+  const okIn = (port: string) => isInputPort(def, port);
   const edges = parent.edges.filter((e) => !(e.to.node === gid && !okIn(e.to.port)) && !(e.from.node === gid && !(e.from.port in def.outputs)));
   const nextParent: GraphDoc = { ...parent, nodes: parent.nodes.map((n) => (n.id === gid ? next : n)), edges: edges.length === parent.edges.length ? parent.edges : edges };
   return withLevel(root, parentPath, nextParent);

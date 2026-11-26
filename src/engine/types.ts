@@ -13,7 +13,7 @@ import type { AudioKernel } from './audio/types';
 /* Sockets and values                                                       */
 /* ----------------------------------------------------------------------- */
 
-export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'regions' | 'camera' | 'material' | 'audio' | 'midi';
+export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'vector' | 'regions' | 'camera' | 'material' | 'audio' | 'midi';
 
 /**
  * A GPU image. RGBA8, sRGB-encoded, PREMULTIPLIED alpha, row 0 = top.
@@ -113,6 +113,12 @@ export interface MaterialValue {
 /** Straight (non-premultiplied) sRGB colour, 0..1. */
 export type ColorValue = [number, number, number, number];
 
+/**
+ * Three numbers on one wire: [x, y, z]. A plain bundle of numbers with no unit of its own (a position, a rotation in degrees, a
+ * scale...): the socket it arrives at gives it meaning. 2D uses read x and y. See "Vector sockets" in docs/ENGINE.md.
+ */
+export type VectorValue = [number, number, number];
+
 /** Audio and MIDI values live in the stream domain; see src/engine/audio/types.ts. */
 export interface AudioValue {
   kind: 'audio';
@@ -129,6 +135,7 @@ export interface SocketValueMap {
   palette: PaletteValue;
   number: number;
   color: ColorValue;
+  vector: VectorValue;
   audio: AudioValue;
   regions: RegionsValue;
   camera: CameraValue;

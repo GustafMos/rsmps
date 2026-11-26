@@ -25,6 +25,8 @@ import { inputsAccepting } from '../lib/sockets';
 import { compatibleSockets } from '../lib/compat';
 import { wireError } from '../lib/wireConvert';
 import type { SocketType } from '../../engine/types';
+import { wireStore } from '../graph-touch/graphTouch';
+import { showBundleSockets } from '../store/nodeView';
 
 const THRESHOLD = 3;
 export const ASSET_MIME = 'application/x-rsmps-asset';
@@ -67,6 +69,7 @@ export function createGestures(app: AppCtx) {
     if (ctl.hint) ctl.hint.style.display = 'none';
     ctl.pending?.removeAttribute('d');
     ctl.pendingOut = null;
+    if (!wireStore.get().pending) showBundleSockets(false);
     ctl.root?.querySelectorAll('.is-insert').forEach((x) => x.classList.remove('is-insert'));
     ctl.edgeEls.forEach((els) => els.forEach((p) => (p.style.display = '')));
   }
@@ -288,6 +291,8 @@ export function createGestures(app: AppCtx) {
     };
     for (const s of sockets) if (errorFor(s) && !mergeTarget(s)) s.dataset.dim = '1';
     cls('is-wiring', true);
+    // a vector wire being dragged: the nodes show their bundle sockets (one socket for an X / Y / Z group) so one can be hit
+    showBundleSockets(fixed.side === 'out' && fixed.type === 'vector');
     const path = ctl.pending;
     path?.setAttribute('class', `rs-wire rs-wire--${fixed.type} is-pending`);
     let target: HTMLElement | null = null;

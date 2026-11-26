@@ -44,6 +44,7 @@ export default defineNode({
     y: { type: 'number', label: 'Y' },
     angle: { type: 'number', label: 'Direction (degrees)' },
     speed: { type: 'number', label: 'Speed' },
+    position: { type: 'vector', label: 'Position XY' },
   },
   params: {
     mode: {
@@ -102,6 +103,6 @@ export default defineNode({
     const dx = span > 0 ? (b[0] - a[0]) / span : 0;
     const dy = span > 0 ? (b[1] - a[1]) / span : 0;
     const len = Math.hypot(dx, dy);
-    return { x: here[0], y: here[1], angle: len > 1e-9 ? (Math.atan2(dy, dx) * 180) / Math.PI : 0, speed: len * perSecond };
+    return { x: here[0], y: here[1], angle: len > 1e-9 ? (Math.atan2(dy, dx) * 180) / Math.PI : 0, speed: len * perSecond, position: [here[0], here[1], 0] };
   },
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { AnyNodeDef, CameraValue } from '../../engine/types';
 import { trackPointer } from '../lib/drag';
-import { cameraOf, OBJECT_KEYS, OBJECT_RADIUS, patchIsNoop, resetPatch, transformOf, type ResetKind } from '../lib/xform3d';
+import { cameraOf, drivenParams, OBJECT_KEYS, OBJECT_RADIUS, patchIsNoop, resetPatch, transformOf, type ResetKind } from '../lib/xform3d';
 import { useApp, useEd, usePlayer } from '../store/context';
 import {
   angleStep,
@@ -90,7 +90,7 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
     for (const [k, p] of Object.entries(def.params as Record<string, { default: unknown }>)) out[k] = node?.params[k] ?? p.default;
     return out;
   }, [def, node?.params]);
-  const wired = useMemo(() => new Set(edges.filter((e) => e.to.node === nodeId).map((e) => e.to.port)), [edges, nodeId]);
+  const wired = useMemo(() => drivenParams(def, edges.filter((e) => e.to.node === nodeId).map((e) => e.to.port)), [edges, nodeId, def]);
   const camEdge = edges.find((e) => e.to.node === nodeId && e.to.port === 'camera');
 
   // Where the picture is on screen right now. Read every frame: the viewer pans and zooms without telling anyone.

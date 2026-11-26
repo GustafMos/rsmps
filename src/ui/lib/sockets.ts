@@ -1,4 +1,4 @@
-import { canConnect, paramSocketType } from '../../engine/define';
+import { canConnect, paramSocketPorts } from '../../engine/define';
 import type { AnyNodeDef, AssetInfo, InputSchema, OutputSchema, ParamSchema, SocketType } from '../../engine/types';
 
 type AssetKind = AssetInfo['kind'];
@@ -12,11 +12,7 @@ export function inputsAccepting(def: AnyNodeDef, src: SocketType): string[] {
     if (d.type === src) exact.push(port);
     else if (canConnect(src, d.type)) loose.push(port);
   }
-  for (const key of Object.keys(def.params)) {
-    const t = paramSocketType(def, key);
-    if (!t) continue;
-    if (t === src) loose.push(key);
-  }
+  for (const s of paramSocketPorts(def)) if (s.type === src) loose.push(s.port);
   return [...exact, ...loose];
 }
 

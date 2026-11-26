@@ -246,6 +246,8 @@ Outputs: yaw / pitch / roll, **Object rotate X / Y / Z**, rotation rate, acceler
 heading, position X / Y / Z, a tap pulse, a **Jolt** pulse (one per bump or flick) and **Gravity X / Y** (which way is down on the screen, -1..1: upright is (0, -1), flat on a table (0, 0); wire them
 into a position to make things fall). To steer a 3D Object wire **Object rotate X / Y / Z** into its *Rotate X / Y / Z*: they are computed in exactly the
 order 3D Object applies its rotation, so even large tilts match the phone (plain yaw / pitch / roll use the camera order and agree with it only for small tilts).
+Four bundled outputs at the bottom of the node carry three of these numbers on ONE wire (a vector): **Object rotate XYZ**, **Rotation rate XYZ**, **Acceleration XYZ** and
+**Position XYZ**. Drop one on a 3D node and pick *Rotate XYZ* or *Move XYZ* instead of dragging three wires; a number wired into a single axis still wins for that axis.
 The phone's acceleration *with* gravity is shown in the panel only (it differs between iOS and Android) and is not an output.
 
 ### Recording a move (and exporting it)
