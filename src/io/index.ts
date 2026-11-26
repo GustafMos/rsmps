@@ -23,6 +23,7 @@ import { EvalGate } from './gate';
 import { Library } from './library';
 import { cameraPermission, listVideoInputs, onVideoDevicesChanged } from './live';
 import { LiveRecordController } from './live-record';
+import { WorldArController } from './world-ar/controller';
 import { PlayerImpl } from './player';
 import { PluginManagerImpl } from './plugins';
 import { NodePresetStore } from './node-presets';
@@ -262,6 +263,8 @@ export const createIo: CreateIo = async () => {
     phone,
     sensors,
     liveRecorder,
+    // nothing is asked of the browser until its `open()` is called from a button press
+    worldAr: new WorldArController({ gpu, gate, registry, add: (files) => library.add(files), holdPlayer: () => player.hold() }),
     addons: new AddonsImpl(desktop),
     capabilities: () => new Set([...(phone.available ? (['local-server'] as const) : []), ...(desktop ? (['desktop'] as const) : [])]),
     stream: {

@@ -777,6 +777,8 @@ export interface Io {
   sensors?: DeviceSensorsApi;
   /** Record a live picture input into a clip in the Media library (the Record button on Webcam, Phone Camera and URL / Stream). */
   liveRecorder: LiveRecordApi;
+  /** The World AR view (WebXR on an Android phone; experimental). Absent on implementations without a browser. See world-ar/controller.ts. */
+  worldAr?: import('./world-ar/controller').WorldArApi;
   /** Official add-ons (desktop app only; `supported` is false in the web version). */
   addons: AddonsApi;
   /**
