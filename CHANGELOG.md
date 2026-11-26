@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.30.0] - 2026-11-26
+
+### Added
+- **Marker AR: objects that stay put on a printed marker.** The new **Marker Camera** node finds a printed square marker in the camera picture and works out where the camera is, so a 3D Object or Model 3D wired to its Camera output stands on the marker as you move around it. Print the marker from the node's inspector (PDF or picture, A4 or Letter, at 100% size) or show the new **AR Marker** node on a second screen. Settings: Field of view (45 degrees by default; change it if the object leans or slides), what to do when the marker is lost (keep, hide or fade), smoothing, and "Show what is found" to draw the outline and axes. Outputs include the camera, found, distance, and position / turn as vector wires. The template "An object standing on a marker" sets the wiring up. Tested on synthetic pictures only, not yet with a real camera.
+
 ## [0.29.0] - 2026-11-26
 
 ### Added
