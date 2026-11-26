@@ -13,12 +13,14 @@ export type PhoneMode =
   | 'camera'
   | 'scan'
   | 'controller'
-  | 'stopmotion';
+  | 'stopmotion'
+  | 'scan3d';
 export const PHONE_MODES: readonly PhoneMode[] = [
   'camera',
   'scan',
   'controller',
   'stopmotion',
+  'scan3d',
 ];
 export type PhoneMedia = 'video' | 'none' | 'refused';
 
@@ -74,6 +76,7 @@ export function thirdStepLabel(mode: PhoneMode, media: PhoneMedia | null): strin
   if (media === 'video' || (media === null && mode === 'camera')) return 'Video connected';
   if (mode === 'scan') return 'Scan mode ready';
   if (mode === 'controller') return 'Controller linked';
+  if (mode === 'scan3d') return '3D scan ready';
   if (mode === 'stopmotion') return 'Stop motion ready';
   return 'Phone linked (no picture)';
 }

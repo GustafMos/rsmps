@@ -118,7 +118,8 @@ export interface ScanFrame {
 
 interface Kept {
   shot: ScanShot;
-  blob: Blob;
+  /** Null when the session was told not to keep the photos (the phone page sends each one on and lets it go). */
+  blob: Blob | null;
 }
 
 export class ScanSession {
@@ -148,8 +149,27 @@ export class ScanSession {
   private pendingDone = new Set<Promise<void>>();
   private finished = false;
   private nowMs = 0;
+  private holding = false;
 
-  constructor(private o: { env: ScanEnv; depth: boolean; grid?: { az: number; el: number }; auto?: boolean }) {
+  constructor(
+    private o: {
+      env: ScanEnv;
+      depth: boolean;
+      grid?: { az: number; el: number };
+      auto?: boolean;
+      /**
+       * Phone page (3D scan with a linked phone): called for every photo kept, in order, with its 0-based number. With `keepBlobs: false`
+       * the session does not hold on to the photo afterwards, so only a few photos are in memory at any time.
+       */
+      onKeep?: (shot: ScanShot, blob: Blob, index: number) => void;
+      keepBlobs?: boolean;
+      /**
+       * True = take no new photo now (the photos already kept are still being sent). Receives the number of photos being encoded.
+       * Automatic capture waits; the guidance line says "Sending photos...".
+       */
+      hold?: (encoding: number) => boolean;
+    },
+  ) {
     if (o.auto === false) this.auto = false;
   }
 
@@ -186,6 +206,11 @@ export class ScanSession {
     return true;
   }
 
+  /** The dome as locked at Start (null before). The phone page sends it to the computer as the scan's header. */
+  header(): Pick<ScanData, 'v' | 'units' | 'target' | 'grid'> | null {
+    return this.target ? { v: 1, units: 'm', target: this.target, grid: this.grid } : null;
+  }
+
   /** The words under the buttons for the current step. */
   hint(place: PlaceState, o: { gestures: boolean; paused: boolean }): string {
     if (o.paused || !place.tracking || place.phase === 'searching') return hintFor(place, { gestures: o.gestures, recording: false, paused: o.paused });
@@ -198,6 +223,7 @@ export class ScanSession {
   private guidanceLine(): string {
     if (!this.target || !this.report) return '';
     if (this.kept.length + this.inflight.length >= SCAN_MAX_SHOTS) return 'The photo limit is reached. Press Done.';
+    if (this.holding) return 'Sending photos…';
     return guidanceFor({ steady: this.last.steady, aimed: this.last.aimed, distance: this.last.distance, radius: this.target.radius, report: this.report, dir: this.last.dir, up: this.target.up }).text;
   }
 
@@ -221,12 +247,14 @@ export class ScanSession {
     // the picture should fill the view; remember how far off it is, for the readout
     if (f.paused || !f.tracking || this.finished) return;
 
-    const free = this.inflight.length < MAX_PENDING && this.kept.length + this.inflight.length < SCAN_MAX_SHOTS;
+    const held = !!this.o.hold?.(this.inflight.length);
+    this.holding = held;
+    const free = this.inflight.length < MAX_PENDING && this.kept.length + this.inflight.length < SCAN_MAX_SHOTS && !held;
     let take = false;
     if (this.wantShutter) {
       this.wantShutter = false;
       if (free) take = true;
-      else this.notice = { text: this.inflight.length >= MAX_PENDING ? 'One moment: the last photos are still being saved.' : 'The photo limit is reached. Press Done.', until: f.now + 1500 };
+      else this.notice = { text: held ? 'Sending photos to the computer. One moment.' : this.inflight.length >= MAX_PENDING ? 'One moment: the last photos are still being saved.' : 'The photo limit is reached. Press Done.', until: f.now + 1500 };
     } else if (this.auto && free && aimed && steady && distanceOk(v.dist, target.radius) && here && f.now - this.lastShotAt >= MIN_SHOT_GAP_MS) {
       const positions = [...this.kept.map((k) => k.shot), ...this.inflight.map((pos) => ({ pos }))];
       take = isNewViewpoint(pose.p, positions, target, this.grid, this.report.counts);
@@ -268,8 +296,9 @@ export class ScanSession {
             this.notice = { text: 'Too blurry, hold steadier', until: this.nowMs + BLUR_HINT_MS };
             return;
           }
-          this.kept.push({ shot, blob });
+          this.kept.push({ shot, blob: this.o.keepBlobs === false ? null : blob });
           this.keptSharp.push(shot.sharp);
+          this.o.onKeep?.(shot, blob, this.kept.length - 1);
           if (shot.depth) this.depthShots++;
           this.flash++;
           this.report = this.recompute();
@@ -343,6 +372,6 @@ export class ScanSession {
     while (this.pendingDone.size) await Promise.all([...this.pendingDone]);
     const target = this.target;
     const scan: ScanData = target ? { ...emptyScan(), target, grid: this.grid, shots: this.kept.map((k) => k.shot), ...(this.rejected ? { rejected: this.rejected } : {}) } : emptyScan();
-    return { scan, blobs: this.kept.map((k) => k.blob), summary: qualitySummary(scan, this.rejected), rejected: this.rejected, depth: this.o.depth };
+    return { scan, blobs: this.kept.flatMap((k) => (k.blob ? [k.blob] : [])), summary: qualitySummary(scan, this.rejected), rejected: this.rejected, depth: this.o.depth };
   }
 }

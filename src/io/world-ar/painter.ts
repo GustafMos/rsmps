@@ -16,7 +16,7 @@ import type { Corners } from '../../engine/lib/xr-math';
 import type { ArPainter } from './loop';
 import { copyToGrab } from './scan-grab';
 import type { ScanGrab } from './scan-session';
-import type { XrViewLike, XrViewportLike } from './xr-api';
+import type { GrantedFeatures, XrLayerLike, XrSessionLike, XrViewLike, XrViewportLike } from './xr-api';
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
 
@@ -330,4 +330,35 @@ export const CAMERA_TOP_V = 1;
 export function createXrGl(canvas: HTMLCanvasElement): GL | null {
   const attrs = { xrCompatible: true, alpha: true, antialias: false, depth: false, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: false };
   return (canvas.getContext('webgl2', attrs) as WebGL2RenderingContext | null) ?? (canvas.getContext('webgl', attrs) as WebGLRenderingContext | null);
+}
+
+type XrGlobals = {
+  XRWebGLLayer?: new (session: unknown, gl: unknown) => XrLayerLike;
+  XRWebGLBinding?: new (session: unknown, gl: unknown) => CameraBinding;
+};
+
+/**
+ * The browser's painter for an open AR session: a WebGL context of its own, the session's base layer and, when the camera picture was
+ * granted, the binding that hands it over. Shared by the World AR view and the phone page's 3D scan (neither needs anything else).
+ */
+export async function makeBrowserXrPainter(session: XrSessionLike, features: GrantedFeatures, onLost?: () => void): Promise<{ painter: GlPainter; layer: XrLayerLike; dispose(): void }> {
+  const g = (typeof window === 'undefined' ? {} : window) as unknown as XrGlobals;
+  const canvas = document.createElement('canvas');
+  const gl = createXrGl(canvas);
+  if (!gl || !g.XRWebGLLayer) throw new Error('This browser could not make a WebGL view for AR.');
+  // already asked for at creation; older browsers want it said again, and it is harmless where it is not needed
+  await (gl as unknown as { makeXRCompatible?: () => Promise<void> }).makeXRCompatible?.();
+  const layer = new g.XRWebGLLayer(session, gl);
+  await session.updateRenderState({ baseLayer: layer });
+  const painter = new GlPainter(gl);
+  // a lost context cannot be drawn into again: the view closes with the reason instead of showing a frozen or empty picture
+  canvas.addEventListener('webglcontextlost', () => onLost?.());
+  if (features.cameraAccess && g.XRWebGLBinding) {
+    try {
+      painter.binding = new g.XRWebGLBinding(session, gl);
+    } catch {
+      painter.binding = null; // granted on paper only: the take is motion only
+    }
+  }
+  return { painter, layer, dispose: () => painter.dispose() };
 }

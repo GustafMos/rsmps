@@ -515,6 +515,8 @@ export interface PhoneApi {
   setMode?(token: string, mode: import('../phone/link-modes').PhoneMode): void;
   /** Scan with phone: photos in, statuses and preview out (see phone-scan.ts). */
   scan?: import('./phone-scan').PhoneScanStore;
+  /** 3D scan with a linked phone: shots, coverage and the finished scan from a phone in scan3d mode (see phone-scan3d.ts). */
+  scan3d?: import('./phone-scan3d').PhoneScan3dStore;
   /** Stop motion with the phone as the capture rig (see phone-stopmotion.ts). */
   stopmotion?: import('./phone-stopmotion').PhoneStopMotionStore;
 }

@@ -11,8 +11,7 @@
  * socket (`transport.buffered()`); it is called again from `pump()` when the socket drains.
  */
 import {
-  FRAME_PHOTO,
-  FRAME_PREVIEW,
+  frameKindOf,
   base64ToBytes,
   crc32,
   crcHex,
@@ -107,7 +106,7 @@ export class ChunkSender {
     while (this.nextSend < this.total && this.nextSend - this.acked < this.o.window && this.o.transport.buffered() < max) {
       const seq = this.nextSend++;
       const from = seq * this.o.chunkBytes;
-      const frame = encodeChunkFrame(this.o.prefix === 'scan' ? FRAME_PHOTO : FRAME_PREVIEW, this.o.id, seq, this.o.bytes.subarray(from, Math.min(this.o.bytes.length, from + this.o.chunkBytes)));
+      const frame = encodeChunkFrame(frameKindOf(this.o.prefix), this.o.id, seq, this.o.bytes.subarray(from, Math.min(this.o.bytes.length, from + this.o.chunkBytes)));
       this.o.transport.sendChunk(frame);
       this.sentFrames++;
       this.highest = Math.max(this.highest, this.nextSend);
@@ -276,7 +275,7 @@ export class TransferReceiver {
       const bytes = typeof m.data === 'string' ? base64ToBytes(m.data) : null;
       if (!isId(m.id)) return;
       if (!bytes || typeof m.seq !== 'number') return this.reject(m.id, 'bad-chunk', 'The chunk is not valid.');
-      this.chunk({ kind: p === 'scan' ? FRAME_PHOTO : FRAME_PREVIEW, id: m.id, seq: m.seq, payload: bytes }, now);
+      this.chunk({ kind: frameKindOf(p), id: m.id, seq: m.seq, payload: bytes }, now);
     }
   }
 
