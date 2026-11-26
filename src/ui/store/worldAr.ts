@@ -1,5 +1,5 @@
 /**
- * The "Open AR view" button of the World AR Camera node: opens `io.worldAr` on what the viewer shows, and puts a finished recording
+ * The "Start AR" button of the World AR Camera node: opens `io.worldAr` on what the viewer shows, and puts a finished recording
  * into the graph (the take into the node, the camera clip into a new Media In node next to it).
  */
 import type { CardMode } from '../../engine/lib/xr-math';
@@ -31,7 +31,7 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
   const node = ed.state.graph.nodes.find((n) => n.id === nodeId) ?? null;
   // what stands in the room is what the viewer shows; with nothing viewed, this camera's own first user cannot be guessed
   const shown = ed.state.viewedNodeId && ed.state.viewedNodeId !== fullId ? ed.state.viewedNodeId : null;
-  if (!shown) return ed.toast('View the node you want to see in the room first (the eye on a node, for example your 3D Object), then press Open AR view.', 'info');
+  if (!shown) return ed.toast('View the node you want to see in the room first (the eye on a node, for example your 3D Object), then press Start AR.', 'info');
   const overlay = createArOverlay();
   const params = node?.params ?? {};
   const saveTake = (t: WorldArTake) => {

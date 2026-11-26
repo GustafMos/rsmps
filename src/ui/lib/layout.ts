@@ -2,7 +2,7 @@
  * Deterministic node geometry. Node boxes have fixed row heights, so socket positions are
  * computed (not measured): wires can be drawn and updated without touching the DOM.
  */
-import { paramSocketType } from '../../engine/define';
+import { paramBundle, paramBundles, paramSocketPorts, paramSocketType, type ParamBundle } from '../../engine/define';
 import { paletteInputPort } from './sockets';
 import { defOf } from '../../engine/group';
 import { nodeViewStore } from '../store/nodeView';
@@ -27,6 +27,14 @@ export interface ParamRow {
   key: string;
   def: ParamDef;
   socket: SocketType | null;
+  /** The wired bundle socket that drives this param (a vector wire on its X / Y / Z group), when there is one. */
+  via?: string;
+}
+/** A bundled param socket: one `vector` input for an X / Y / Z group of params. Only on the node while wired or with all rows shown. */
+export interface BundleRow {
+  kind: 'bundle';
+  y: number;
+  bundle: ParamBundle;
 }
 export interface LayersRow {
   kind: 'layers';
@@ -55,6 +63,8 @@ export interface BodyView {
   pinned?: string[];
   expanded: boolean;
   wired: string[];
+  /** Show the bundle sockets even when they are not wired (a vector wire is being placed). */
+  bundles?: boolean;
 }
 export interface KindRow {
   kind: 'kind';
@@ -65,7 +75,7 @@ export interface FamilyRow {
   kind: 'family';
   y: number;
 }
-export type Row = IoRow | ParamRow | MoreRow | HintRow | LayersRow | KindRow | FamilyRow;
+export type Row = IoRow | ParamRow | BundleRow | MoreRow | HintRow | LayersRow | KindRow | FamilyRow;
 export const HINT_H = 56;
 
 export interface NodeLayout {
@@ -125,7 +135,7 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
     const cy = HEAD_H / 2;
     for (const i of inputs) sockets[`in:${i.port}`] = { x: 0, y: cy };
     for (const o of outputs) sockets[`out:${o.port}`] = { x: NODE_W, y: cy };
-    if (def) for (const key of Object.keys(def.params)) if (paramSocketType(def, key)) sockets[`in:${key}`] = { x: 0, y: cy };
+    if (def) for (const s of paramSocketPorts(def)) sockets[`in:${s.port}`] = { x: 0, y: cy };
     const layout = { width: NODE_W, height: HEAD_H, rows: [], summaryY: null, sockets };
     cache.set(node, { def, missing: missKey, collapsed: true, hint, counts: countsKey, layout });
     return layout;
@@ -167,14 +177,34 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
     const wiredSet = new Set(view.wired);
     const shown = params.filter(([k]) => view.expanded || pinnedSet.has(k) || wiredSet.has(k));
     const hidden = params.filter(([k]) => !shown.some(([s]) => s === k));
+    // Bundle sockets (one vector wire for an X / Y / Z group) take a row of their own right above their members, but only
+    // while they are wired or every row is shown: an unused bundle costs the node nothing.
+    const bundles = paramBundles(def);
+    const bundleShown = (b: ParamBundle) => wiredSet.has(b.port) || view.expanded || !!view.bundles;
+    const bundleRow = (b: ParamBundle) => {
+      rows.push({ kind: 'bundle', y, bundle: b });
+      sockets[`in:${b.port}`] = { x: 0, y: y + ROW_H / 2 };
+      y += ROW_H;
+    };
+    const placed = new Set<string>();
     for (const [key, p] of shown) {
+      // above the first of its members that is on the node
+      const starts = bundles.find((b) => !placed.has(b.port) && b.members.includes(key));
+      if (starts && bundleShown(starts)) {
+        bundleRow(starts);
+        placed.add(starts.port);
+      }
       const socket = paramSocketType(def, key);
-      rows.push({ kind: 'param', y, key, def: p, socket });
+      const via = wiredSet.has(key) ? undefined : bundles.find((b) => wiredSet.has(b.port) && b.members.includes(key))?.port;
+      rows.push({ kind: 'param', y, key, def: p, socket, ...(via ? { via } : {}) });
       if (socket) sockets[`in:${key}`] = { x: 0, y: y + ROW_H / 2 };
       y += ROW_H;
     }
+    // a bundle whose first member is not on the node still shows while it is wired (or while a vector wire is being placed)
+    for (const b of bundles) if ((wiredSet.has(b.port) || view.bundles) && !placed.has(b.port)) bundleRow(b);
     // hidden params that can be wired get a socket at the expander row (wired ones are never hidden)
     for (const [key] of hidden) if (paramSocketType(def, key)) sockets[`in:${key}`] = { x: 0, y: y + ROW_H / 2 };
+    for (const b of bundles) if (!sockets[`in:${b.port}`]) sockets[`in:${b.port}`] = { x: 0, y: y + ROW_H / 2 };
     const extras = params.filter(([k]) => !pinnedSet.has(k) && !wiredSet.has(k)).length;
     if (hidden.length > 0 || (view.expanded && extras > 0)) {
       rows.push({ kind: 'more', y, count: view.expanded ? extras : hidden.length, expanded: view.expanded });
@@ -269,11 +299,14 @@ export function parsePortSignature(sig: string): MissingPorts {
   return { inputs: a ? a.split(',') : [], outputs: b ? b.split(',') : [] };
 }
 
+/** Is `port` a param socket of the definition (a wireable param or a bundle), as opposed to an input? */
+export const isParamPort = (def: AnyNodeDef, port: string): boolean => port in def.params || !!paramBundle(def, port);
+
 /** Pins / expansion / wired params of a node, from the shared view store and the wires. */
 export function bodyViewFor(def: AnyNodeDef, nodeId: string, edges: Edge[]): BodyView {
   const st = nodeViewStore.get();
-  const wired = [...new Set(edges.filter((e) => e.to.node === nodeId && e.to.port in def.params).map((e) => e.to.port))];
-  return { pinned: st.pins[nodeId], expanded: !!st.expanded[nodeId], wired };
+  const wired = [...new Set(edges.filter((e) => e.to.node === nodeId && isParamPort(def, e.to.port)).map((e) => e.to.port))];
+  return { pinned: st.pins[nodeId], expanded: !!st.expanded[nodeId], wired, bundles: st.bundles };
 }
 
 /** Params currently pinned on the node body (explicit pins, else the default first rows). */

@@ -4,6 +4,34 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.30.0] - 2026-11-26
+
+### Added
+- **Marker AR: objects that stay put on a printed marker.** The new **Marker Camera** node finds a printed square marker in the camera picture and works out where the camera is, so a 3D Object or Model 3D wired to its Camera output stands on the marker as you move around it. Print the marker from the node's inspector (PDF or picture, A4 or Letter, at 100% size) or show the new **AR Marker** node on a second screen. Settings: Field of view (45 degrees by default; change it if the object leans or slides), what to do when the marker is lost (keep, hide or fade), smoothing, and "Show what is found" to draw the outline and axes. Outputs include the camera, found, distance, and position / turn as vector wires. The template "An object standing on a marker" sets the wiring up. Tested on synthetic pictures only, not yet with a real camera.
+
+## [0.29.0] - 2026-11-26
+
+### Added
+- **Vector wires: one cable for X, Y and Z.** A new wire type carries three numbers together. Wherever a node has X / Y / Z settings (Move, Rotate, Spin on the 3D nodes and many others) it also has one bundled socket, such as "Rotate XYZ", that drives all of them; two-value settings such as a centre point accept a vector wire too. The bundled sockets are an option: they stay hidden until wired, until you expand the node, or while you are placing a vector wire. A wire on a single setting still wins for that setting, and the single sockets work as before.
+- **New nodes: Combine XYZ, Separate XYZ, Vector and Vector Math** (add, subtract, multiply, scale, mix, length, normalize, cross, dot). Smooth and Delay Value take vectors as well as numbers.
+- **Vector outputs on Phone Motion, Motion Path and Region Info**, so for example the phone's tilt can drive an object's rotation with one wire.
+
+## [0.28.0] - 2026-11-26
+
+### Added
+- **Move and turn 3D objects by dragging in the viewer.** Select an Object 3D, Model 3D, Shape 3D, Image to 3D or splat node and the viewer shows a small bar with **Move**, **Turn** and **Size**. Move: drag the circle; the knob beside it pushes the object away or pulls it closer. Turn: drag on the object to turn it freely, drag the outer ring to roll it. Size: drag the corner knob. Works with a finger or a mouse; one drag is one undo step; press the lit button again to put the handles away. Settings driven by a wire are left alone.
+- **Reset buttons for 3D placement.** The inspector has a "Place in 3D" section with Reset position, Reset rotation (every angle to exactly 0) and Reset all, and the viewer bar has a Reset for the current mode. Glass and Hypercube get the reset buttons too.
+
+## [0.27.0] - 2026-11-26
+
+### Added
+- **Smooth recording: effects are applied after you stop.** The Recorder has a new "Quality" setting. **Smooth, effects after** records the live pictures themselves (Webcam, Phone Camera, URL / Stream) at the camera's full frame rate, together with the sound, the live sound values and the phone's motion sensors, and renders the effects onto them frame by frame when you stop. The clip is smooth even when the preview stutters on a slow device. **As seen, instant** is the recording as before. **Automatic** (the default) uses smooth on phones and tablets. While the effects are rendered the Recorder shows progress, the time left and Cancel; the page must stay open. The untouched camera clips stay in Media ("Keep raw clips"), so the same take can be tried with other effects, and "Render again" appears if rendering was cancelled or failed. Not yet tried on a real phone.
+
+## [0.26.1] - 2026-11-26
+
+### Added
+- **3D objects can spin around their own axes.** Object 3D, Model 3D, Shape 3D, Image to 3D and the splat viewer have a new "Spin around" setting next to Spin X / Y / Z: **The object's own axes** (the default for new nodes) or The scene's axes. On its own axes an object spins about itself however it is tilted: tilt a disc with Rotate X and Z, set Spin Y to 1, and it turns on its own tilted spindle like a record. Before, the spin was added to the rotation angles, so a tilted object wobbled round the scene's upright axis. Nodes in existing projects keep spinning the way they did until you change the setting.
+
 ## [0.26.0] - 2026-11-26
 
 ### Added

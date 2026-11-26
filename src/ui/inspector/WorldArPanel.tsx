@@ -41,7 +41,7 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
           title={ok ? 'Opens the camera full-screen. The browser asks for the camera first. Nothing leaves this device.' : support.message}
           onClick={() => openWorldAr(app, node.id, fullId)}
         >
-          Open AR view
+          Start AR
         </button>
       </div>
       <p className="rs-insp__hint">

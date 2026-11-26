@@ -153,14 +153,56 @@ To keep what you do live (a camera through effects, a performance with a MIDI co
 
 1. Add a **Recorder** (category Time) where the picture you want passes: before the Output for the finished look, right after the
    Webcam for the raw camera. It passes the picture on unchanged.
-2. Select it and press **Record**. The viewer switches to that node, playback starts, and what the viewer shows is recorded with
-   the sound that is playing (press Enable audio first for sound).
+2. Select it and press **Record** (or the Record button in the corner of the viewer). The viewer switches to that node, playback
+   starts, and the take is recorded with the sound that is playing (press Enable audio first for sound).
 3. Press **Stop**: the clip is saved to Media. Use it with a Media In, or export it.
+
+**Quality** decides how the clip is made:
+
+- **As seen, instant** records exactly what the viewer shows. The clip is there the moment you stop, and everything you do while
+  recording (sliders, a MIDI controller) is in it. It is only as smooth as the preview: when the device cannot keep up with the
+  effects, the clip stutters the same way. Raise the preview scale for a sharp clip, and keep the window visible.
+- **Smooth, effects after** records the camera itself (every Webcam, Phone Camera or URL / Stream that feeds the Recorder, inside
+  groups too) at its own frame rate, which costs almost nothing, together with the sound as you hear it. The preview may stutter
+  while you record; that does not matter. When you stop, the effects are rendered onto the recording frame by frame, each frame at
+  the moment it was seen at, so the clip is smooth however slow the device is. The rendering takes a while (on a phone often longer
+  than the take itself): the Recorder shows "Rendering 42%" with the time left and a **Cancel**. Keep the page open and on screen.
+- **Automatic** (the default) is the smooth way on a phone or tablet and the instant way on a computer.
+
+A smooth recording, in detail:
+
+- The clip has the project frame rate and the frame of the Output (the long side at most **Clip size**), like an export. If the
+  camera runs at another rate than the project, the Recorder says so while recording: set the project frame rate to the camera's
+  (25 or 30) and every camera picture becomes one frame of the clip.
+- The sound is the recording of what was heard (the sound wired into the Recorder, else what the Audio Output plays). It is not
+  rendered again, so a microphone, a live synth or a hand on a fader sound exactly as they did.
+- The raw camera clips go to Media as "Webcam raw take ..." (the first one carries the sound) and stay there with **Keep raw
+  clips** on: put one in a Media In to try other effects on the same take. If the rendering fails or you cancel it, they are
+  always kept, the message says where they are, and **Render again** on the Recorder makes the clip from them, with the effects
+  as they are at that moment.
+- The clip is rendered with the settings as they are when you stop. Changes made by hand DURING the take are not replayed as a
+  performance: for that, use "As seen".
+- Recorded along with the picture: motion sensors (Phone Motion and AR Camera nodes that feed the Recorder record a take for the
+  clip; a project that loops gets the motion of its first pass only) and the values pictures take from live sound (Sound to
+  Numbers on a microphone, for example, needs Enable audio). Not recorded: a Webcam's **Freeze** (the raw clip keeps running),
+  and a live picture that is not upstream of the Recorder.
+- Pausing ends the take, as does the end of a project that neither loops nor runs on. Do not move the playhead while recording.
+- Up to 4 live pictures are recorded side by side; a phone is comfortable with one or two. With nothing live upstream (a video clip
+  with effects) there is nothing to record separately, so the Recorder records as seen and says so: use **Export** for a smooth
+  file of a clip with effects.
+- Storage: a raw clip takes about 25 MB a minute at 1280 x 720 and 55 MB a minute at 1920 x 1080 (30 pictures a second), the
+  rendered clip about as much again, and both are held in memory until they are saved. A take ends by itself after 30 minutes
+  or 1.5 GB. On a phone, takes of a few minutes are a sensible size.
+- Nothing in the project is changed: the rendering works on a copy, and the viewer goes back to what it showed.
 
 **While recording** decides what the clock does. **Time runs on** (the default): time keeps going until you stop, so effects keep
 changing instead of repeating every loop; the project plays with Loop off for the take. Movements that are a cycle by nature (a
-spin, a wobble) still come round. **Loop the project**: plays as usual, repeating at the project length. The clip is what the
-viewer shows, so raise the preview scale for a sharp one, and keep the window visible.
+spin, a wobble) still come round. **Loop the project**: plays as usual, repeating at the project length. A smooth recording is
+rendered with the same clock, frame by frame.
+
+**Export is always smooth.** Exporting an Output does not record the preview: it renders every frame of the project in full, one
+after the other, and writes each at its exact place in time. On a slow device only the waiting is longer (the bar shows the frame
+it is on and the time left); the file plays at the right speed with no frame missing.
 
 ## Go live on Twitch or YouTube (desktop app)
 
@@ -351,6 +393,8 @@ Needs the phone link (see `docs/LIVE_INPUT.md`): the desktop app, or `npm run de
 1. Add a **Phone Motion** node and press **Link a phone** in its inspector; scan the QR code. On the phone press **Start motion**. The panel shows a small cube that follows the phone.
    Hold the phone upright the way you will use it and press **Recenter**.
 2. Add a **3D Object**. Wire Phone Motion's **Object rotate X / Y / Z** into the object's **Rotate X / Y / Z** (the sockets next to each slider). The object now copies the phone's orientation.
+   One wire instead of three: drag Phone Motion's **Object rotate XYZ** output (at the bottom of the node) onto the 3D Object and pick **Rotate XYZ**. The same works for **Position XYZ** into **Move XYZ**.
+   A number wired into one of the three (say Rotate Y) still wins for that one.
    If an axis feels mirrored tick **Invert X / Y / Z** on Phone Motion.
 3. To look around a scene instead: add a **Phone 3D Camera Rig**, wire **Yaw / Pitch / Roll** from Phone Motion into it and its **Camera** output into the 3D Object's **Camera** input. Turn on **Orbit mode** to swing
    the camera round the object with the phone, **Lock roll** to keep the horizon level.
@@ -374,6 +418,30 @@ Open the app on the phone itself (Android Chrome, or Safari on iPhone / iPad). N
 
 It follows turning only: if you walk, the object walks with you. More of the phone's sensors as numbers (tilt, shake, jolt, gravity, compass): add a **Phone Motion** node; on a phone it reads
 this device too. Wire **Gravity X / Y** into an object's position to make it fall towards the low side of the screen.
+
+## An object standing on a marker (walk round it)
+
+The AR Camera above follows turning only. For an object that is really anchored, so you can walk round it, come close and step back, use a printed marker. The start screen has this graph
+ready: **An object standing on a marker** (3D).
+
+1. Add a **Marker Camera** (Detect & Track). In its panel choose a size and press **Print marker**. Print the PDF at 100% (actual size, not "fit to page") and lay the sheet flat on a table
+   or the floor. No printer: on a tablet or a second phone add an **AR Marker** node, view it full screen and lay that device down.
+2. Add a **Webcam** (on a phone it opens the back camera) and wire it into the Marker Camera's **Picture in**.
+3. Add a **3D Object**. Wire **Marker Camera > Camera** into its **Camera** input and **Marker Camera > Picture** into its **Size from**.
+4. Add a **Merge**: **Marker Camera > Picture** is the background, the 3D Object goes on top. View the Merge.
+5. Point the camera at the marker: the object stands on it. Walk round it. The paper is the ground of the scene: x is the marker's right, z is where its top edge points, y is up, so the
+   object's **Move X / Y / Z** place it on and above the paper. **Object size** scales the scene against the marker (at 1 the black square is 2 scene units wide). **Floor height** is the
+   height of the paper in the scene: the default suits the standard cube; a ball needs -0.95.
+6. If the object leans or slides as you move round, change **Field of view** (about 40 for wide video, about 52 for 4:3) until a tall object stands straight from every side.
+7. Turn on **Show what is found** to see what the node sees: a green outline with a yellow dot on the marker's top-left corner, the three axes, and a red rim when the marker is not found.
+8. When the marker is covered or leaves the picture the object holds for a moment and then fades or hides (**When lost**). For a soft fade wire **Found** into the Merge's **Opacity**.
+9. Hide the marker under the object with **Cover the marker**, or lay a picture flat on it: wire any picture into **Flat picture** and merge the **Flat picture on marker** output over the
+   camera picture.
+10. To export: record the camera picture first (the Webcam's Record button), put the recorded clip in place of the Webcam and press **Analyze clip** on the Marker Camera. The export is then
+    exactly what the viewer shows. The same works for any clip filmed with the marker in view.
+
+Tips: a larger marker and good, even light give a calmer object; the marker should be at least a tenth of the picture wide. Glossy paper and screens at full brightness can reflect or bloom:
+matte paper is best. Several markers in view: pick one by number with **Marker**.
 
 ## Gaussian splats (Gaussian Splat, Picture to Splats)
 

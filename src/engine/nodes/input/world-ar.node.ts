@@ -24,7 +24,7 @@ export default defineNode({
   title: 'World AR Camera',
   category: 'input',
   description:
-    'Experimental. A 3D camera that follows the phone through the room (walking included) using the browser\'s built-in AR, so a 3D object stands on a real floor or table. Wire it into a 3D Object\'s Camera input, view the object and press "Open AR view" in the inspector (Android Chrome). A recorded take plays back in the normal viewer, in step with the camera clip recorded with it.',
+    'Experimental. A 3D camera that follows the phone through the room (walking included) using the browser\'s built-in AR, so a 3D object stands on a real floor or table. Wire it into a 3D Object\'s Camera input, view the object and press "Start AR" in the inspector (Android Chrome). A recorded take plays back in the normal viewer, in step with the camera clip recorded with it.',
   keywords: ['ar', 'augmented reality', 'webxr', 'arcore', 'world', 'room', 'floor', 'table', 'place', 'anchor', 'surface', 'tracking', '6dof', 'walk', 'phone', 'camera', '3d', 'markerless'],
   inputs: {},
   outputs: { camera: { type: 'camera', label: 'Camera' } },

@@ -66,6 +66,16 @@ export function sourceSize(src: unknown): { width: number; height: number } {
   return pick('width', 'height');
 }
 
+/**
+ * Frames per second a live picture really delivers, when the browser says: a camera or phone stream shown in a <video> knows its
+ * rate. Null for anything else (a still that refreshes, a stream that does not tell).
+ */
+export function streamFrameRate(src: unknown): number | null {
+  const stream = (src as { srcObject?: { getVideoTracks?: () => { getSettings?: () => { frameRate?: number } }[] } } | null)?.srcObject;
+  const rate = stream?.getVideoTracks?.()[0]?.getSettings?.().frameRate;
+  return typeof rate === 'number' && Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
 /** "Phone take 2026-11-17 18.42.05.mp4" (local time; no characters a file system refuses). */
 export function takeFileName(label: string, at: Date, ext: string): string {
   const p = (n: number) => String(n).padStart(2, '0');
@@ -174,6 +184,10 @@ export class LiveRecorder {
   }
   get frames(): number {
     return this.s?.frames ?? 0;
+  }
+  /** `performance.now()` at which frame 0 of the clip was taken; 0 until there is one. Lets several recordings be lined up in time. */
+  get startedAt(): number {
+    return this.s?.t0 ?? 0;
   }
 
   /** Called on every state change and about once a second while recording. */
