@@ -46,6 +46,7 @@ import { missingCapabilities } from '../lib/requirements';
 import { ProjectSettingsPanel } from './ProjectSettings';
 import { BakePanel } from './BakePanel';
 import { DatamoshPanel } from './DatamoshPanel';
+import { StabilizePanel } from './StabilizePanel';
 import { ProcessPanel } from './ProcessPanel';
 import { SplatTrainPanel } from './SplatTrainPanel';
 import { DepthAiPanel } from './DepthAiPanel';
@@ -234,7 +235,7 @@ function NodePanel({ id }: { id: string }) {
           {(!wired.has('recordAudio') || !wired.has('recordMidi')) && <p className="rs-insp__hint">Nothing is wired into the record inputs yet: these buttons add the source node and connect it. Then arm a track (the ● button) and press Record.</p>}
         </div>
       )}
-      {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : node.type === 'datamosh-real' ? <DatamoshPanel node={node} /> : node.type === 'style-transfer-ai' ? <StyleAiPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
+      {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : node.type === 'datamosh-real' ? <DatamoshPanel node={node} /> : node.type === 'stabilize' ? <StabilizePanel node={node} /> : node.type === 'style-transfer-ai' ? <StyleAiPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && node.params.device !== 'this' && <PhonePanel node={node} />}
       {(node.type === 'phone-motion' || node.type === 'ar-camera') && !missing.length && <PhoneMotionPanel node={node} />}
       {node.type === 'world-ar' && <WorldArPanel node={node} fullId={fullId} />}
