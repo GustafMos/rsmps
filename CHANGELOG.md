@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.32.0] - 2026-11-26
+
+### Added
+- **Fake 360.** A new node that builds a full 360 panorama from one or two ordinary pictures, for example a phone's front and back cameras. The pictures are placed exactly where the cameras look (set each camera's view angle), and the rest of the sphere is filled: Mirror, Stretch edges, Blur out or Blend both. With only a front picture wired, it is reused for the back. Output as a 2:1 panorama, a **Tiny planet**, or **Look around** (an ordinary view into the panorama whose Look turn and Look tilt can be wired to Phone Motion). It is a fake: only the parts the cameras see are real.
+
 ## [0.31.0] - 2026-11-26
 
 ### Added
