@@ -30,7 +30,7 @@ export function createArOverlay(doc: Document = document): ArOverlay {
   const touch = doc.createElement('div');
   touch.style.cssText = 'position:absolute;inset:0;touch-action:none;';
   const hint = doc.createElement('div');
-  hint.style.cssText = 'position:absolute;left:12px;right:12px;top:max(12px,env(safe-area-inset-top));padding:10px 12px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;pointer-events:none;';
+  hint.style.cssText = 'position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 40px);padding:10px 12px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;pointer-events:none;';
   hint.setAttribute('role', 'status');
   const badge = doc.createElement('div');
   badge.textContent = 'Experimental';

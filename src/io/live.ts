@@ -156,6 +156,22 @@ export class LiveSources {
   private cameraRefused = false;
   /** Cameras that failed to open for another reason (in use, not found): not tried again before `until`, so a failing camera is not opened on every frame. */
   private cameraFailed = new Map<string, { until: number; message: string }>();
+  /** While true the device cameras are closed and never opened (the AR view owns the camera). Remote sources are not touched. */
+  private camerasSuspended = false;
+
+  get camerasBlocked(): boolean {
+    return this.camerasSuspended;
+  }
+
+  /** Close every open device camera and keep them closed (on), or let the nodes open them again on their next frame (off). */
+  suspendCameras(on: boolean): void {
+    if (on === this.camerasSuspended) return;
+    this.camerasSuspended = on;
+    if (on) {
+      for (const e of [...this.entries.values()]) if (e.req.kind === 'camera') this.close(e);
+    }
+    this.cameraFailed.clear(); // a camera that failed meanwhile is tried afresh
+  }
 
   constructor(private gpu: Gpu) {}
 
@@ -172,6 +188,7 @@ export class LiveSources {
    */
   async frame(req: LiveRequest, maxSide: number, hold?: { at: number; held: boolean }): Promise<LiveFrame | null> {
     const key = sourceKey(req);
+    if (req.kind === 'camera' && this.camerasSuspended) return null;
     let e = this.entries.get(key);
     if (!e && req.kind === 'camera') {
       if (this.cameraRefused) throw new Error(CAMERA_BLOCKED);
@@ -213,6 +230,7 @@ export class LiveSources {
    */
   drawable(req: LiveRequest): CanvasImageSource | null {
     const key = sourceKey(req);
+    if (req.kind === 'camera' && this.camerasSuspended) return null;
     let e = this.entries.get(key);
     if (!e && req.kind === 'camera' && this.cameraRefused) return null;
     if (!e) {
@@ -377,6 +395,7 @@ export class LiveSources {
    * failed are closed, so the nodes open them again on the next frame. Returns the outcome with a readable message on failure.
    */
   async askCamera(): Promise<{ ok: boolean; message?: string }> {
+    if (this.camerasSuspended) return { ok: false, message: 'The camera is in use by the AR view. Leave the AR view first.' };
     if (!navigator.mediaDevices?.getUserMedia) return { ok: false, message: 'This browser has no camera access (it needs a secure page: https or localhost).' };
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });

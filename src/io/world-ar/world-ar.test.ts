@@ -10,7 +10,7 @@ import type { LiveRecorder } from '../live-record';
 import { WorldArController, type WorldArEnv, type WorldArTake, type WorldArViewState } from './controller';
 import { fedByWorldAr, stampWorldAr, worldArNodeIds, type PictureTarget } from './engine-source';
 import { FakeXrSession, FakeXrSystem, fakeTransform } from './fake-xr';
-import { ArLoop, MAX_FRAME_ERRORS, pictureSize, type ArLoopState, type ArPainter, type ArPicture, type ArPictureSource } from './loop';
+import { ArLoop, MAX_FRAME_ERRORS, pictureSize, renderFailHint, type ArLoopState, type ArPainter, type ArPicture, type ArPictureSource } from './loop';
 import { GestureReader, MAX_SCALE, MIN_SCALE, TAP_MS, hintFor, initialPlaceState, placeStep, type Gesture, type PlaceState } from './placement';
 import { checkWorldAr, startErrorMessage, unsupportedMessage } from './support';
 import { OPTIONAL_FEATURES, featuresOf } from './xr-api';
@@ -681,6 +681,7 @@ function controller(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
   const f = fakeEnv(xr, o);
   const evals: unknown[] = [];
   let holds = 0;
+  const camCalls: boolean[] = [];
   const added: File[] = [];
   const c = new WorldArController(
     {
@@ -701,6 +702,7 @@ function controller(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
         holds++;
         return () => holds--;
       },
+      suspendCameras: (on) => void camCalls.push(on),
     },
     f.env,
   );
@@ -714,7 +716,7 @@ function controller(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
       xr.session!.step(33);
     }
   };
-  return { c, f, evals, added, states, takes, open, frames, holds: () => holds, flush: () => new Promise((r) => setTimeout(r, 0)) };
+  return { c, f, evals, added, states, takes, open, frames, camCalls, holds: () => holds, flush: () => new Promise((r) => setTimeout(r, 0)) };
 }
 
 describe('opening the AR view (fake browser)', () => {
@@ -758,6 +760,34 @@ describe('opening the AR view (fake browser)', () => {
     expect(t.c.active).toBeNull();
     const none = new WorldArController({} as never, { ...fakeEnv(xr).env, xr: null });
     await expect(none.open({} as never)).rejects.toThrow(/did not start/);
+  });
+
+  it('the camera is let go before the session is asked for and comes back on every way out', async () => {
+    // normal Exit
+    let xr = new FakeXrSystem();
+    let t = controller(xr);
+    let h = await t.open();
+    expect(t.camCalls).toEqual([true]);
+    await h.close();
+    expect(t.camCalls).toEqual([true, false]);
+    // the system ends the session
+    xr = new FakeXrSystem();
+    t = controller(xr);
+    h = await t.open();
+    xr.session!.systemEnd();
+    await h.closed;
+    expect(t.camCalls).toEqual([true, false]);
+    // a refused start
+    xr = new FakeXrSystem();
+    xr.failWith = { name: 'NotSupportedError' };
+    t = controller(xr);
+    await expect(t.open()).rejects.toThrow();
+    expect(t.camCalls).toEqual([true, false]);
+  });
+
+  it('a failing hint says what to do', () => {
+    expect(renderFailHint('Waiting for the camera…')).toMatch(/Waiting for the camera\. .*View the 3D Object itself, or remove the node that needs the camera/);
+    expect(renderFailHint('Media In: no media')).toMatch(/remove the node that fails/);
   });
 
   it('the picture is rendered through the engine and uploaded; the system ending the session closes the view and saves the recording', async () => {

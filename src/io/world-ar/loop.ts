@@ -109,6 +109,13 @@ export interface ArLoopDeps {
 const pt = (v: { x: number; y: number; z: number }): Vec3 => [v.x, v.y, v.z];
 export const poseOf = (t: XrRigidTransform): XrPose => ({ p: pt(t.position), q: [t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w] });
 
+/** The hint for a picture that cannot be made: the reason in plain words, and what to do about it. */
+export function renderFailHint(reason: string): string {
+  const r = reason.replace(/[.…\s]+$/, '');
+  if (/camera|webcam/i.test(r)) return `The picture could not be rendered: ${r}. The phone's camera is in use by the AR view, so a node that needs it cannot work. View the 3D Object itself, or remove the node that needs the camera.`;
+  return `The picture could not be rendered: ${r}. View the 3D Object itself, or remove the node that fails.`;
+}
+
 /** Pixel size of the object's picture for a lens: the lens's shape, long side `maxSide`, both even. */
 export function pictureSize(lens: Lens, maxSide: number): { width: number; height: number } {
   const a = lensAspect(lens);
@@ -464,7 +471,7 @@ export class ArLoop {
     return {
       phase: this.place.phase,
       tracking: this.place.tracking,
-      hint: sourceError ? `The picture could not be rendered: ${sourceError}` : hintFor(this.place, { gestures: this.d.features.domOverlay, recording: !!r, paused: this.paused }),
+      hint: sourceError ? renderFailHint(sourceError) : hintFor(this.place, { gestures: this.d.features.domOverlay, recording: !!r, paused: this.paused }),
       recording: !!r,
       recSeconds: r && r.t0 >= 0 ? (this.d.now() - r.t0) / 1000 : 0,
       fps: this.rate(this.frameTimes),
