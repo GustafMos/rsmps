@@ -223,8 +223,8 @@ function NodePanel({ id }: { id: string }) {
         </div>
       )}
       {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : node.type === 'datamosh-real' ? <DatamoshPanel node={node} /> : node.type === 'style-transfer-ai' ? <StyleAiPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
-      {hasSessionParam(def) && !missing.length && <PhonePanel node={node} />}
-      {node.type === 'phone-motion' && !missing.length && <PhoneMotionPanel node={node} />}
+      {hasSessionParam(def) && !missing.length && node.params.device !== 'this' && <PhonePanel node={node} />}
+      {(node.type === 'phone-motion' || node.type === 'ar-camera') && !missing.length && <PhoneMotionPanel node={node} />}
       {node.type === 'camera-in' && <CameraPermissionPanel />}
       {node.type === 'media-in' && <FastCopyPanel node={node} />}
       {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}

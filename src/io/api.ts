@@ -773,6 +773,8 @@ export interface Io {
   stream: StreamApi;
   /** Phone as a camera through a QR code (LAN mode only). */
   phone: PhoneApi;
+  /** Motion sensors of the device the app runs on (see device-sensors.ts). Absent on implementations without them. */
+  sensors?: DeviceSensorsApi;
   /** Record a live picture input into a clip in the Media library (the Record button on Webcam, Phone Camera and URL / Stream). */
   liveRecorder: LiveRecordApi;
   /** Official add-ons (desktop app only; `supported` is false in the web version). */
@@ -1162,4 +1164,13 @@ export interface TexturePreview {
   /** Object URL of the result; revoke with `dispose`. */
   url: string;
   dispose(): void;
+}
+
+/** The motion sensors of the device the app itself runs on (a phone or tablet), feeding the motion session `this-device`. */
+export interface DeviceSensorsApi {
+  /** Say that the values are wanted now (keeps the sensors on a few more seconds). Never asks for a permission. */
+  demand(): void;
+  /** The "Allow motion sensors" button: asks the browser where it needs asking (iOS), then starts. Call it from the click itself. */
+  allow(): Promise<import('./device-sensors').DeviceSensorStatus>;
+  status(): import('./device-sensors').DeviceSensorStatus;
 }

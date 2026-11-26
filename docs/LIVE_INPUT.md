@@ -238,7 +238,8 @@ Wire any output into any number setting. Angles are degrees and continuous (they
 roll tilts clockwise. **Angles**: *Relative to Recenter* (default; the first pose is neutral until you press Recenter) or *Absolute*, which falls back to relative on a phone without a compass.
 Per-axis sensitivity, invert, dead zone, limit and a "tilt for full stick" range shape the response; **Smoothing** removes shake with little lag (one-euro filter).
 Outputs: yaw / pitch / roll, **Object rotate X / Y / Z**, rotation rate, acceleration, shake (0..1), tilt X / Y (-1..1, a joystick), touch X / Y, touch count, pinch, twist, pan, compass
-heading, position X / Y / Z and a tap pulse. To steer a 3D Object wire **Object rotate X / Y / Z** into its *Rotate X / Y / Z*: they are computed in exactly the
+heading, position X / Y / Z, a tap pulse, a **Jolt** pulse (one per bump or flick) and **Gravity X / Y** (which way is down on the screen, -1..1: upright is (0, -1), flat on a table (0, 0); wire them
+into a position to make things fall). To steer a 3D Object wire **Object rotate X / Y / Z** into its *Rotate X / Y / Z*: they are computed in exactly the
 order 3D Object applies its rotation, so even large tilts match the phone (plain yaw / pitch / roll use the camera order and agree with it only for small tilts).
 The phone's acceleration *with* gravity is shown in the panel only (it differs between iOS and Android) and is not an output.
 
@@ -261,6 +262,36 @@ Wire Phone Motion's yaw, pitch and roll (and, optionally, position X / Y / Z, sc
 3D node. Without a wired camera it uses the 3D Camera node's defaults. *Look around* turns the camera where it stands (the phone is a window); *Orbit mode* swings the camera
 round the target instead, always looking at it; *Lock roll* keeps the horizon level; *Height offset* raises it.
 
+### This device's own sensors (the app running on a phone or tablet)
+
+When the app itself runs on a phone or tablet, no second phone and no LAN mode are needed: set **Sensors from** to **This device** on Phone Motion (or AR Camera). A node added on a
+phone or tablet starts that way, the same way the Webcam starts on the phone's own back camera. The device's `deviceorientation` / `devicemotion` events are fed into the same motion
+session a linked phone feeds (`src/io/device-sensors.ts`, session name `this-device`), so smoothing, Recenter, recording a take and exporting from a take are the same code.
+
+- **When the sensors run.** Only while something reads them: a node that feeds the viewer, or the node's inspector being open. A few seconds after the last read the listeners are removed.
+- **Permission.** Android Chrome asks nothing: the values simply arrive (the page must be https, which the hosted app is). iPhone and iPad deliver nothing until you press
+  **Allow motion sensors** in the inspector and answer the browser's question. The app never asks by itself. The panel says what it sees: receiving, waiting, blocked, not a secure page,
+  or "no motion sensors" (a computer).
+- **Screen rotation.** Orientation, rotation rate, acceleration and gravity are given along the screen as it is shown now, so "tilt left" is left in portrait and in landscape.
+- **Compass.** The orientation comes from the steady gyro-only sensor; where the browser also has a north-referenced one (Android Chrome's `deviceorientationabsolute`, the iPhone's compass
+  heading) it is used only to know where north is, for *Angles: Absolute* and the heading output.
+- **What is there.** Orientation, rotation rate, acceleration, shake, jolt, gravity, compass. Not there on this device: the touch pad, position and location outputs (they stay at their
+  neutral values). Touches on the viewer already zoom and pan the picture and move the on-picture handles, so they are not also turned into numbers.
+- **Privacy.** The values never leave the page.
+
+### AR Camera (a 3D camera that follows the phone)
+
+**AR Camera** (`ar-camera`) outputs a normal camera whose direction is the phone's, so a 3D Object stays where it is in the room while you look around. It follows turning only: walking is
+not tracked, so the scene moves with you. It reads the orientation as a rotation (a quaternion), not as three angles, so pointing the phone straight up or down works like any other direction.
+The orientation it uses stays true to gravity (the horizon is level wherever you press Recenter); **Recenter** only decides which direction is straight ahead.
+
+- **Field of view** must match the real camera for the object to stick to the camera picture: it is measured across the picture's shorter side (like 3D Camera), about 40 for a phone's main
+  camera in wide (16:9) video and about 52 in 4:3. Turn slowly and adjust until the object stops sliding.
+- **Distance** is how far in front of you the middle of the 3D scene is; **Eye height** raises the camera so the scene sits lower. **Smoothing** calms the camera; too much makes the object trail.
+- Same sources and takes as Phone Motion: *Sensors from* (this device or a linked phone), **Record motion**, *Source: Recorded take*, take smoothing. An export needs a recorded take, and the
+  camera picture under it must be recorded too (the Webcam's Record button, or the Recorder node): record both in the same go if they have to match.
+- Recipe: `docs/RECIPES.md`, "A 3D object that stays put in the room".
+
 ### Other sensors that could be used
 
 Already in: touch (multi-touch pad), compass, location, AR pose. Possible next: the **microphone** (already available through Sound to Numbers), the **ambient light sensor**
@@ -273,6 +304,9 @@ Sensor data goes only over the existing authenticated link to your own computer.
 and is never stored unless you record it into a take. Nothing is sent to any other server.
 
 ### What can only be confirmed on a real phone
+
+For this device's own sensors: that tilting the top of the phone away from you raises Pitch and turning to the right raises Yaw, that Gravity X is above 0 with the right edge lower, that
+landscape reads like portrait (it assumes `screen.orientation.angle` is 90 with the top edge to the left), that the iPhone's question appears from the button, and the AR Camera's field of view and lag against the camera picture.
 
 The iOS permission prompt, the actual sensor values and signs on a given phone (iOS and Android report acceleration with gravity with opposite signs), compass-corrected yaw on iPhone, landscape
 rotation, the touch pad feel and multi-touch limits, location, the AR toggle, and how the 3D Object follows the phone visually (the math is tested; a mirrored axis is fixed with *Invert*).

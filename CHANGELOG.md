@@ -4,6 +4,16 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.26.0] - 2026-11-26
+
+### Added
+- **Hypercube node** (Generate): a cube of 3, 4, 5 or 6 dimensions (4D, the tesseract, by default) turning in its higher dimensions, drawn as glowing lines with faint glass faces. Motion looks (Slow tumble, Inside out, Through itself, Chaos, Custom), all in whole turns per loop; colours by dimension or by depth; corner dots; a transparent background to sit over a picture. A wired picture is shown on the faces of the inner or outer cube, or behind the lines.
+- **Frame Array node** (Time): many frames of a clip shown at once as panes standing in 3D space, so time becomes depth. Layouts Stack, Row, Ring, Helix, Grid 3D and Tunnel; the frames can flow past a fixed "now", every pane can play, or the panes can hold still frames with a moving highlight; a swinging or orbiting camera; pane opacity, borders, fade with distance. Every pane is one more evaluation of what is wired in (10 by default, 32 at most).
+- **Phone Motion: the sensors of this device.** A new "Sensors from" setting: Linked phone (as before, through the QR link) or **This device**, the phone or tablet the app is running on. A node added on a phone starts on This device. Orientation (yaw, pitch, roll), rotation rate, acceleration, shake, tilt and compass heading come from the device's own sensors, turned so "left" is left however the phone is held. The sensors are listened to only while something uses them. An **Allow motion sensors** button in the node's settings asks for permission where the browser needs it (iPhone, iPad) and shows whether values are arriving.
+- **Phone Motion: Jolt and Gravity outputs.** Jolt gives a short pulse per bump; Gravity X / Y say which way is down on the screen (-1..1), for making things fall or slide. They work for a linked phone too.
+- **AR Camera node** (Input): a 3D camera that follows the phone's orientation, so a 3D object stays put in the room while you turn the phone (turning only: it does not follow you walking). Wire it into a 3D object's Camera input and merge the result over the Webcam's back camera. Recenter sets straight ahead; Field of view (across the shorter side, 45 by default) is adjusted until the object stops sliding against the camera picture. Recording a take works as on Phone Motion, so an export is repeatable.
+- Not included: touch on the viewer as an input (one finger already pans the view and two zoom it, so it needs its own mode), and battery, light and location.
+
 ## [0.25.0] - 2026-11-25
 
 ### Added

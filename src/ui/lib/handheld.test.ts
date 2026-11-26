@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cameraSource, liveOrientOfNode } from '../../engine/lib/live-source';
-import { cameraNodeFor, isHandheld } from './handheld';
+import { cameraNodeFor, isHandheld, motionNodeParams } from './handheld';
 
 describe('phones and tablets use their own camera', () => {
   it('recognises a phone or tablet', () => {
@@ -30,5 +30,12 @@ describe('phones and tablets use their own camera', () => {
     expect(liveOrientOfNode('camera-in', { mirror: true, facing: 'front', device: '' }).mirror).toBe(true);
     expect(liveOrientOfNode('camera-in', { mirror: true, facing: 'auto', device: '' }).mirror).toBe(true);
     expect(liveOrientOfNode('camera-in', { mirror: true, facing: 'back', device: 'abc' }).mirror).toBe(true);
+  });
+  it('motion nodes read this device\'s own sensors on a phone, and stay on the linked phone on a computer', () => {
+    expect(motionNodeParams('phone-motion', true)).toEqual({ device: 'this' });
+    expect(motionNodeParams('ar-camera', true, { fov: 60 })).toEqual({ device: 'this', fov: 60 });
+    expect(motionNodeParams('phone-motion', true, { device: 'linked' })).toEqual({ device: 'linked' }); // an explicit choice wins
+    expect(motionNodeParams('phone-motion', false)).toBeUndefined();
+    expect(motionNodeParams('blur', true, { radius: 3 })).toEqual({ radius: 3 });
   });
 });

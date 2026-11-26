@@ -28,10 +28,15 @@ const UNIT: ChannelSpec = { step: 0.001, tol: 0.004, big: 1 };
 export const STORED: Record<string, ChannelSpec> = {
   qx: Q, qy: Q, qz: Q, qw: Q,
   aqx: Q, aqy: Q, aqz: Q, aqw: Q,
+  // "level" orientation: true to gravity (the horizon stays level), only the heading is recentered. What an AR camera needs.
+  lqx: Q, lqy: Q, lqz: Q, lqw: Q,
   heading: A,
   rx: RATE, ry: RATE, rz: RATE,
   ax: ACC, ay: ACC, az: ACC,
   shake: UNIT,
+  jolt: { ...UNIT, tol: 0.25, noSmooth: true },
+  // which way is down on the screen (x right, y up), -1..1
+  gx: UNIT, gy: UNIT,
   tx: UNIT, ty: UNIT, tc: { ...UNIT, noSmooth: true },
   pinch: UNIT, twist: A, panx: UNIT, pany: UNIT,
   px: { step: 0.002, tol: 0.01, big: 2 }, py: { step: 0.002, tol: 0.01, big: 2 }, pz: { step: 0.002, tol: 0.01, big: 2 },
@@ -46,7 +51,10 @@ export const ALL_CHANNELS: string[] = [...STORED_NAMES, ...DERIVED_NAMES];
 const QUAT_GROUPS: [string, string, string, string][] = [
   ['qx', 'qy', 'qz', 'qw'],
   ['aqx', 'aqy', 'aqz', 'aqw'],
+  ['lqx', 'lqy', 'lqz', 'lqw'],
 ];
+/** Channels that are steps or pulses: never blended between two samples. */
+const STEPPED = new Set(['tc', 'tap', 'jolt']);
 
 /** Neutral values of every channel (identity pose, nothing touched). */
 export function neutralFrame(): MotionFrame {
@@ -54,6 +62,7 @@ export function neutralFrame(): MotionFrame {
   for (const n of ALL_CHANNELS) f[n] = 0;
   f.qw = 1;
   f.aqw = 1;
+  f.lqw = 1;
   f.pinch = 1;
   return f;
 }
@@ -105,8 +114,10 @@ export function isTake(v: unknown): v is MotionTake {
 function expand(tracks: Record<string, number[]>, frames: number): Record<string, Float64Array> {
   const ch: Record<string, Float64Array> = {};
   const neutral = neutralFrame();
+  // a take recorded before the level orientation existed has no such track: its recentered orientation is the closest thing
+  const old = !tracks.lqw || tracks.lqw.length < 2;
   for (const name of STORED_NAMES) {
-    const k = tracks[name];
+    const k = old && name.startsWith('lq') ? tracks[`q${name.slice(2)}`] : tracks[name];
     const out = new Float64Array(frames);
     if (!k || k.length < 2) out.fill(neutral[name]);
     else {
@@ -178,7 +189,7 @@ function sampleSeries(samples: RawSample[], t: number): MotionFrame {
   for (const n of STORED_NAMES) {
     const x = a.v[n] ?? 0;
     const y = b.v[n] ?? 0;
-    out[n] = n === 'tc' || n === 'tap' ? (u < 0.5 ? x : y) : x + (y - x) * u;
+    out[n] = STEPPED.has(n) ? (u < 0.5 ? x : y) : x + (y - x) * u;
   }
   for (const g of QUAT_GROUPS) {
     const q = qSlerp([a.v[g[0]] ?? 0, a.v[g[1]] ?? 0, a.v[g[2]] ?? 0, a.v[g[3]] ?? 1], [b.v[g[0]] ?? 0, b.v[g[1]] ?? 0, b.v[g[2]] ?? 0, b.v[g[3]] ?? 1], u);
@@ -248,7 +259,7 @@ export function blendLoop(d: Dense, n: number): Dense {
   for (let i = 0; i < N; i++) {
     const w = i / N; // 0 = the tail continuing the move, 1 = the head itself
     for (const name of STORED_NAMES) {
-      if (name === 'tc' || name === 'tap') continue;
+      if (STEPPED.has(name)) continue;
       ch[name][i] = d.ch[name][L + i] * (1 - w) + d.ch[name][i] * w;
     }
     for (const g of QUAT_GROUPS) {
