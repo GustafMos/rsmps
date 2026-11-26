@@ -114,7 +114,7 @@
 
 .rs-sock[data-merge] { transform: scale(1.5); box-shadow: 0 0 0 2px var(--accent-hi); opacity: 1; filter: none; }
 .rs-sock[data-merge]::before {
-  content: 'merge'; position: absolute; right: 18px; top: -7px; padding: 1px 5px; background: var(--accent); color: #fff;
+  content: 'stack'; position: absolute; right: 18px; top: -7px; padding: 1px 5px; background: var(--accent); color: #fff;
   font: 600 11px var(--font-ui); border: 1px solid #000; white-space: nowrap; pointer-events: none;
 }
 .rs-sock[data-merge='mix']::before { content: 'mix'; }

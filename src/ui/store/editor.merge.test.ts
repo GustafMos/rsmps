@@ -43,11 +43,12 @@ function setup() {
 }
 
 const out = (id: string) => ({ node: id, port: 'image' });
-const mergeOf = (ed: InstanceType<typeof Editor>) => ed.state.graph.nodes.find((n) => n.type === 'merge')!;
+/** The Stack Layers node a join created (any stack that was not in the test's own node set). */
+const joinOf = (s: { ed: InstanceType<typeof Editor>; ids: Record<string, string> }) => s.ed.state.graph.nodes.find((n) => n.type === 'stack' && !Object.values(s.ids).includes(n.id))!;
 const feeds = (g: GraphDoc, from: string, to: string, port?: string) => g.edges.filter((e) => e.from.node === from && e.to.node === to && (!port || e.to.port === port));
 
-describe('mergeOutputs inserts the Merge into the chain', () => {
-  it('base has downstream: consumers follow the Merge; held ends up on foreground, base on background', () => {
+describe('mergeOutputs inserts a Stack Layers node into the chain', () => {
+  it('base has downstream: consumers follow the Merge; base is the first wire (bottom), held the second (top)', () => {
     const s = setup();
     s.add('a', 'noise');
     s.add('b', 'noise');
@@ -58,9 +59,8 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
     s.load();
     expect(s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b))).toBe(true);
     const g = s.graph();
-    const m = mergeOf(s.ed);
-    expect(feeds(g, s.ids.b, m.id, 'background')).toHaveLength(1);
-    expect(feeds(g, s.ids.a, m.id, 'foreground')).toHaveLength(1);
+    const m = joinOf(s);
+    expect(wiresInto(g, m.id, 'images').map((e) => e.from.node)).toEqual([s.ids.b, s.ids.a]);
     expect(feeds(g, m.id, s.ids.blur)).toHaveLength(1);
     expect(g.edges.some((e) => e.from.node === s.ids.b && e.to.node === s.ids.blur)).toBe(false);
   });
@@ -74,7 +74,7 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
     s.load();
     expect(s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b))).toBe(true);
     const g = s.graph();
-    const m = mergeOf(s.ed);
+    const m = joinOf(s);
     expect(feeds(g, m.id, s.ids.o)).toHaveLength(1);
     expect(feeds(g, s.ids.a, s.ids.o)).toHaveLength(0);
   });
@@ -92,7 +92,7 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
     s.load();
     expect(s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b))).toBe(true);
     const g = s.graph();
-    const m = mergeOf(s.ed);
+    const m = joinOf(s);
     for (const t of ['o1', 'o2', 'blur']) expect(feeds(g, m.id, s.ids[t])).toHaveLength(1);
     expect(g.edges.filter((e) => e.to.node === s.ids.o1 || e.to.node === s.ids.o2 || e.to.node === s.ids.blur).every((e) => e.from.node === m.id)).toBe(true);
   });
@@ -107,7 +107,7 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
     s.load();
     s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b));
     const g = s.graph();
-    const m = mergeOf(s.ed);
+    const m = joinOf(s);
     expect(wiresInto(g, s.ids.st, 'images').map((e) => e.from.node)).toEqual([m.id]);
   });
 
@@ -135,7 +135,7 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
     s.load();
     s.ed.mergeOutputs(out(s.ids.b), out(s.ids.a));
     const g = s.graph();
-    const m = mergeOf(s.ed);
+    const m = joinOf(s);
     expect(wiresInto(g, s.ids.st, 'images').map((e) => e.from.node)).toEqual([s.ids.l0, m.id, s.ids.l2]);
   });
 
@@ -149,7 +149,7 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
     s.load();
     expect(s.ed.mergeOutputs(out(s.ids.a), out(s.ids.blur))).toBe(true);
     const g = s.graph();
-    const m = mergeOf(s.ed);
+    const m = joinOf(s);
     expect(feeds(g, s.ids.a, s.ids.blur)).toHaveLength(1); // would loop if moved
     expect(feeds(g, m.id, s.ids.o)).toHaveLength(1);
     expect(feeds(g, m.id, s.ids.blur)).toHaveLength(0);
@@ -178,7 +178,7 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
       s.load();
       (s.ed as unknown as { patch(p: object): void }).patch({ viewedNodeId: s.ids[viewed] });
       s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b));
-      expect(s.ed.state.viewedNodeId).toBe(mergeOf(s.ed).id);
+      expect(s.ed.state.viewedNodeId).toBe(joinOf(s).id);
     }
   });
 
@@ -196,5 +196,67 @@ describe('mergeOutputs inserts the Merge into the chain', () => {
     expect(wiresInto(g, mx.id, 'audio').map((e) => e.from.node)).toEqual([s.ids.b, s.ids.a]);
     expect(feeds(g, mx.id, s.ids.o)).toHaveLength(1);
     expect(feeds(g, s.ids.b, s.ids.o)).toHaveLength(0);
+  });
+
+  it('pictures make a Stack Layers node, not a Merge', () => {
+    const s = setup();
+    s.add('a', 'noise');
+    s.add('b', 'noise');
+    s.load();
+    s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b));
+    expect(s.graph().nodes.some((n) => n.type === 'merge')).toBe(false);
+    expect(wiresInto(s.graph(), joinOf(s).id, 'images').map((e) => e.from.node)).toEqual([s.ids.b, s.ids.a]);
+    expect(s.ed.state.selection).toEqual([joinOf(s).id]);
+  });
+
+  it('dropping onto a Stack output adds the held output as a new top layer (no nesting)', () => {
+    const s = setup();
+    s.add('a', 'noise');
+    s.add('b', 'noise');
+    s.add('c', 'noise');
+    s.add('o', 'image-out');
+    s.wire('b', 'o');
+    s.load();
+    s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b));
+    const st = joinOf(s);
+    const nodesBefore = s.graph().nodes.length;
+    (s.ed as unknown as { patch(p: object): void }).patch({ viewedNodeId: s.ids.c });
+    expect(s.ed.mergeOutputs(out(s.ids.c), out(st.id))).toBe(true);
+    const g = s.graph();
+    expect(g.nodes).toHaveLength(nodesBefore);
+    expect(g.nodes.filter((n) => n.type === 'stack')).toHaveLength(1);
+    expect(wiresInto(g, st.id, 'images').map((e) => e.from.node)).toEqual([s.ids.b, s.ids.a, s.ids.c]);
+    expect(feeds(g, st.id, s.ids.o)).toHaveLength(1);
+    expect(s.ed.state.selection).toEqual([st.id]);
+    expect(s.ed.state.viewedNodeId).toBe(st.id);
+    s.ed.undo();
+    expect(wiresInto(s.graph(), st.id, 'images')).toHaveLength(2);
+  });
+
+  it('dropping onto a Stack with a loop-making held output is refused', () => {
+    const s = setup();
+    s.add('a', 'noise');
+    s.add('st', 'stack');
+    s.add('b', 'blur');
+    s.wire('a', 'st');
+    s.wire('st', 'b');
+    s.load();
+    expect(s.ed.mergeOutputs(out(s.ids.b), out(s.ids.st))).toBe(false);
+    expect(wiresInto(s.graph(), s.ids.st, 'images')).toHaveLength(1);
+  });
+
+  it('an old project with a Merge is untouched by joining other outputs', () => {
+    const s = setup();
+    s.add('a', 'noise');
+    s.add('b', 'noise');
+    s.add('m', 'merge');
+    s.add('c', 'noise');
+    s.wire('a', 'm', 'background');
+    s.wire('b', 'm', 'foreground');
+    s.load();
+    const before = s.graph().edges.filter((e) => e.to.node === s.ids.m);
+    s.ed.mergeOutputs(out(s.ids.c), out(s.ids.m));
+    expect(s.graph().edges.filter((e) => e.to.node === s.ids.m)).toEqual(before);
+    expect(s.graph().nodes.filter((n) => n.type === 'merge')).toHaveLength(1);
   });
 });

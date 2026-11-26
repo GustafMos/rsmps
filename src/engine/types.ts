@@ -156,6 +156,13 @@ export interface InputDef {
   /** Accept several wires; the value is an array in wire order. */
   multi?: boolean;
   /**
+   * For a `multi` picture input that is a layer stack: show the wires like a layer panel, the LAST wire (drawn on top) first
+   * and the first wire (the bottom) last, with "Top" / "Bottom" labels. Presentation only: the wire order stays as it is.
+   */
+  order?: 'top-first';
+  /** With `order: 'top-first'`: what the bottom (first) wire does, shown after "Bottom", e.g. "sets size". */
+  firstNote?: string;
+  /**
    * Do not evaluate this input automatically: `ctx.in` holds null and the node fetches it with `ctx.pull`.
    * Use it for analysis that should run ONCE on a fixed frame (e.g. extracting a palette from the first frame of a
    * video): the node is then not re-rendered when the input changes from frame to frame, only when the upstream

@@ -5,9 +5,9 @@ export default defineNode({
   family: 'combine',
   title: 'Stack Layers',
   category: 'composite',
-  description: 'Layer many images on top of each other. The first wire is the bottom layer and sets the output size; each upper layer is fitted onto it.',
+  description: 'Layer many images on top of each other. The list reads like a layer panel: the top row is drawn on top, the bottom row sits underneath and sets the output size. Each upper layer is fitted onto it.',
   keywords: ['layers', 'overlay', 'over', 'composite', 'combine', 'sandwich'],
-  inputs: { images: { type: 'image', multi: true, label: 'Layers (bottom to top)' } },
+  inputs: { images: { type: 'image', multi: true, label: 'Layers', order: 'top-first', firstNote: 'sets size' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     fit: {
