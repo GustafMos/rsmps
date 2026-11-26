@@ -125,3 +125,8 @@
 .rs-insp__err.is-info { background: var(--bg-2); border-color: var(--line-strong); color: var(--text-dim); }
 .rs-json__empty { font-style: italic; }
 .rs-json__details > summary { cursor: pointer; color: var(--text-dim); font-size: var(--fs-xs); }
+
+/* Webcam camera controls: a touch-sized slider with its value beside it */
+.rs-camrange { display: flex; align-items: center; gap: var(--s-2); width: 100%; }
+.rs-camrange input[type="range"] { flex: 1; min-width: 0; min-height: 36px; }
+.rs-camrange__val { min-width: 4.5em; text-align: right; font-variant-numeric: tabular-nums; }

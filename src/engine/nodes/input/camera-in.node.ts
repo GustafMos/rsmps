@@ -1,6 +1,6 @@
 import { defineNode } from '../../define';
 import { liveInputKernel } from '../../audio/live-input';
-import { cameraSource, liveOrientOfNode } from '../../lib/live-source';
+import { cameraRequest, liveOrientOfNode } from '../../lib/live-source';
 
 /**
  * Live webcam. The host opens the camera lazily, shares one stream between nodes using the same device and
@@ -45,8 +45,28 @@ export default defineNode({
         { value: '1920x1080', label: '1920 × 1080' },
       ],
     },
+    frameRate: {
+      type: 'enum',
+      default: 'auto',
+      label: 'Frame rate',
+      options: [
+        { value: 'auto', label: 'Auto' },
+        { value: 'project', label: 'Match project' },
+        { value: '24', label: '24 fps' },
+        { value: '25', label: '25 fps' },
+        { value: '30', label: '30 fps' },
+        { value: '50', label: '50 fps' },
+        { value: '60', label: '60 fps' },
+      ],
+      hint: 'How many pictures per second to ask the camera for. Match project asks for the project frame rate. A rate the camera cannot do is replaced by the nearest one it can; the inspector shows what it really delivers. The picture is shown at the project frame rate at most.',
+    },
     mirror: { type: 'bool', default: true, label: 'Mirror', hint: 'Flip horizontally, like a mirror (natural for a front camera).' },
     freeze: { type: 'bool', default: false, label: 'Freeze', hint: 'Hold the current frame.' },
+    zoom: { type: 'number', default: 1, min: 0.5, max: 30, step: 0.01, label: 'Zoom', group: 'Camera controls', hint: 'Uses the zoom of the camera itself when it has one (see Camera controls below for its range), otherwise the picture is cropped and enlarged about the centre. Never below 1x on a camera without zoom.' },
+    exposureComp: { type: 'number', default: 0, min: -8, max: 8, step: 0.1, label: 'Exposure comp.', group: 'Camera controls', hint: 'Make the picture brighter or darker, in stops. Only for cameras that offer it; limited to the range of the camera.' },
+    focusDistance: { type: 'number', default: 0.5, min: 0, max: 1, step: 0.01, label: 'Focus distance', group: 'Camera controls', hint: '0 is nearest, 1 is farthest. Used only while Focus is set to Manual in Camera controls below.' },
+    colorTemp: { type: 'number', default: 5000, min: 2000, max: 10000, step: 50, label: 'Colour temperature', group: 'Camera controls', hint: 'In kelvin: low is warm, high is cool. Used only while White balance is set to Manual in Camera controls below.' },
+    cameraExtra: { type: 'string', default: '', label: 'Camera extras', visibleIf: () => false },
     micDevice: { type: 'device', device: 'audio-input', default: '', label: 'Microphone', group: 'Sound', hint: 'The microphone for this camera\'s sound. It is opened (and asked permission for) only once one of the sound outputs is wired.' },
     gain: { type: 'number', default: 0, min: -40, max: 40, step: 0.1, unit: 'db', label: 'Input gain', group: 'Sound' },
     monitor: { type: 'bool', default: false, label: 'Hear myself', group: 'Sound', hint: 'Off by default: with speakers, hearing yourself causes feedback. Off, the Sound output is silent and the Silent tap still carries the microphone: wire the tap into a Recorder or an effect.' },
@@ -59,7 +79,7 @@ export default defineNode({
     void ctx.time.seconds; // live: re-render every frame
     const host = ctx.host;
     if (!host.liveFrame) throw new Error('A live camera is not available here (exports and headless runs cannot use one). Record it first.');
-    const source = cameraSource(ctx.params);
+    const source = cameraRequest(ctx.params, ctx.time.fps);
     if (host.liveBlocked?.(source)) {
       // the AR view owns the camera: nothing here, so what is merged over it shows over the phone's own camera picture
       const width = Math.max(1, Math.round(ctx.canvas.width));
@@ -71,12 +91,18 @@ export default defineNode({
     const frame = await host.liveFrame(source, maxSide, ctx.time.seconds);
     if (!frame) throw new Error('Waiting for the camera…');
     const unit = ctx.unitFor(frame.width, frame.height);
-    if (!liveOrientOfNode('camera-in', ctx.params).mirror) return { image: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit } };
+    const mirror = liveOrientOfNode('camera-in', ctx.params).mirror;
+    // a camera without a zoom of its own: crop and enlarge about the centre (never below 1x)
+    const zoom = frame.nativeZoom ? 1 : Math.max(1, Number(ctx.params.zoom ?? 1) || 1);
+    if (!mirror && zoom <= 1) return { image: { kind: 'image', texture: frame.texture, width: frame.width, height: frame.height, unit } };
     const image = ctx.gpu.pass({
       label: 'camera-mirror',
       size: { width: frame.width, height: frame.height, unit },
       textures: { src: { texture: frame.texture } },
-      wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smpNearest, vec2f(1.0 - uv.x, uv.y), 0.0); }',
+      uniforms: { zoom },
+      wgsl: zoom > 1
+        ? 'fn fx(uv: vec2f, px: vec2f) -> vec4f { var o = (uv - vec2f(0.5)) / u.zoom + vec2f(0.5); ' + (mirror ? 'o.x = 1.0 - o.x; ' : '') + 'return textureSampleLevel(src, smp, o, 0.0); }'
+        : 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return textureSampleLevel(src, smpNearest, vec2f(1.0 - uv.x, uv.y), 0.0); }',
     });
     return { image };
   },

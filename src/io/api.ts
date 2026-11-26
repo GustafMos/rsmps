@@ -6,7 +6,8 @@
 import type { Engine } from '../engine/engine';
 import type { AudioDevice, PcmAudio, RecordedTake, RecordingState } from '../engine/audio/api';
 import type { Registry } from '../engine/define';
-import type { AssetInfo, GraphDoc, Host, ProcessLive, ProcessResult, Value } from '../engine/types';
+import type { CameraInfo } from './live';
+import type { AssetInfo, CameraControls, GraphDoc, Host, LiveSource, ProcessLive, ProcessResult, Value } from '../engine/types';
 import type { PendingProcess, ProcessStatus } from '../engine/process';
 import type { BlankSheetOptions } from './print/blank';
 
@@ -433,6 +434,10 @@ export interface DeviceApi {
   cameraPermission(): Promise<'granted' | 'denied' | 'prompt' | 'unknown'>;
   /** Ask for camera permission now (call from a button press). After a refusal, cameras stay closed until this succeeds. */
   askCamera(): Promise<{ ok: boolean; message?: string }>;
+  /** What an open camera can do (zoom range, torch, focus, ...) and how it is set now. Never opens the camera: `open` is false until a node has. */
+  cameraInfo(source: LiveSource): CameraInfo;
+  /** Set some of a camera's own controls now. Kept and applied again whenever the camera is reopened. Says plainly when the camera cannot do it. */
+  applyCamera(source: LiveSource, controls: CameraControls): { ok: boolean; message?: string };
 }
 
 /** State of a phone link session (QR code). */

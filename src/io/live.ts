@@ -9,7 +9,8 @@
  */
 import type { Gpu } from '../engine/gpu/gpu';
 import { uploadExternal } from './upload';
-import type { LiveSource } from '../engine/types';
+import type { CameraControls, LiveSource } from '../engine/types';
+import { CANNOT_MESSAGE, buildConstraints, digitalZoomFor, type Caps } from './camera-controls';
 
 type UrlMode = 'auto' | 'image' | 'mjpeg' | 'video';
 export type LiveRequest = LiveSource & { freeze?: boolean };
@@ -25,6 +26,37 @@ export interface LiveFrame {
   texture: GPUTexture;
   width: number;
   height: number;
+  /** Camera pictures: true when the camera does the zoom itself, so the node must not zoom the picture again. */
+  nativeZoom?: boolean;
+}
+
+/** What a camera source reports about itself, for the inspector. */
+export interface CameraInfo {
+  /** The camera is open and has a live track. */
+  open: boolean;
+  capabilities: Caps;
+  settings: Record<string, unknown>;
+  /** Zoom to do in the picture (1 = none): the whole zoom when the camera has no zoom of its own. */
+  digitalZoom: number;
+  /** The last thing the camera refused, in plain words ('' = nothing). */
+  error: string;
+}
+
+/** Applying camera constraints is slow: at most one in flight, and the next one waits at least this long, keeping only the latest wish. */
+export const CAMERA_APPLY_MS = 80;
+
+/** What is remembered about the controls of one camera source (it outlives the stream, so a reopened camera gets them again). */
+interface CameraCtl {
+  wanted: CameraControls;
+  /** Signature of the last snapshot the node handed in: the node's values only replace `wanted` when they changed. */
+  snap: string;
+  /** Constraint names sent to the current track. */
+  sent: Set<string>;
+  lastSig: string;
+  busy: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+  lastFlush: number;
+  error: string;
 }
 
 export const IDLE_CLOSE_MS = 5000;
@@ -125,6 +157,10 @@ interface Entry {
   phoneVersion: number;
   isVideo: boolean;
   stream: MediaStream | null;
+  track: MediaStreamTrack | null;
+  caps: Caps | null;
+  /** What the camera reported when it was opened. */
+  initial: Record<string, unknown>;
   texture: GPUTexture | null;
   frame: LiveFrame | null;
   ready: Promise<void>;
@@ -156,6 +192,7 @@ export class LiveSources {
   private cameraRefused = false;
   /** Cameras that failed to open for another reason (in use, not found): not tried again before `until`, so a failing camera is not opened on every frame. */
   private cameraFailed = new Map<string, { until: number; message: string }>();
+  private ctl = new Map<string, CameraCtl>();
   /** While true the device cameras are closed and never opened (the AR view owns the camera). Remote sources are not touched. */
   private camerasSuspended = false;
 
@@ -187,6 +224,15 @@ export class LiveSources {
    * same for a few frames, and so does the picture.
    */
   async frame(req: LiveRequest, maxSide: number, hold?: { at: number; held: boolean }): Promise<LiveFrame | null> {
+    if (req.kind !== 'camera') return this.frameOf(req, maxSide, hold);
+    if (req.controls) this.noteControls(sourceKey(req), req.controls);
+    const f = await this.frameOf(req, maxSide, hold);
+    if (!f || !req.controls) return f;
+    const e = this.entries.get(sourceKey(req));
+    return e?.caps && digitalZoomFor(req.controls.zoom, e.caps) === 1 ? { ...f, nativeZoom: true } : f;
+  }
+
+  private async frameOf(req: LiveRequest, maxSide: number, hold?: { at: number; held: boolean }): Promise<LiveFrame | null> {
     const key = sourceKey(req);
     if (req.kind === 'camera' && this.camerasSuspended) return null;
     let e = this.entries.get(key);
@@ -282,12 +328,129 @@ export class LiveSources {
 
   closeAll(): void {
     for (const e of [...this.entries.values()]) this.close(e);
+    for (const c of this.ctl.values()) if (c.timer) clearTimeout(c.timer);
+    this.ctl.clear();
+  }
+
+  /* --------------------------------------- camera controls ----------------------------------- */
+
+  private ctlOf(key: string): CameraCtl {
+    let c = this.ctl.get(key);
+    if (!c) {
+      c = { wanted: {}, snap: '', sent: new Set(), lastSig: '', busy: false, timer: null, lastFlush: 0, error: '' };
+      this.ctl.set(key, c);
+    }
+    return c;
+  }
+
+  /** The node's values for a camera, handed in with every frame request: they replace what is wanted only when they changed. */
+  private noteControls(key: string, controls: CameraControls): void {
+    const c = this.ctlOf(key);
+    const snap = JSON.stringify(controls);
+    if (snap === c.snap) return;
+    c.snap = snap;
+    c.wanted = { ...controls };
+    this.scheduleApply(key);
+  }
+
+  /** What a camera source can do and how it is set now. Never opens the camera. */
+  cameraInfo(req: LiveRequest): CameraInfo {
+    const key = sourceKey(req);
+    const e = this.entries.get(key);
+    const c = this.ctl.get(key);
+    const track = e?.track;
+    let settings: Record<string, unknown> = {};
+    try {
+      settings = (track?.getSettings?.() as Record<string, unknown>) ?? {};
+    } catch {
+      /* a track that ended */
+    }
+    return { open: !!track && !e?.closed, capabilities: e?.caps ?? {}, settings, digitalZoom: digitalZoomFor(c?.wanted.zoom, e?.caps ?? null), error: c?.error ?? '' };
+  }
+
+  /**
+   * Ask a camera source for some settings now (merged into what is wanted; the node's own values replace them the next time they change).
+   * Applied to the live track when there is one, otherwise as soon as the camera is open, and again whenever it is reopened.
+   * Says plainly when the camera cannot do it; the stream is never touched in that case.
+   */
+  applyCamera(req: LiveRequest, partial: CameraControls): { ok: boolean; message?: string } {
+    const key = sourceKey(req);
+    const c = this.ctlOf(key);
+    const e = this.entries.get(key);
+    const names = Object.keys(partial).filter((k) => k !== 'zoom' && k !== 'frameRate'); // those two always work (zoom falls back to the picture)
+    if (e?.caps && names.length) {
+      const probe = buildConstraints({ ...c.wanted, ...partial }, e.caps, c.sent, e.initial);
+      if (probe.unsupported.filter((u) => names.includes(u)).length === names.length) {
+        c.error = CANNOT_MESSAGE;
+        return { ok: false, message: CANNOT_MESSAGE };
+      }
+    }
+    c.error = '';
+    c.wanted = { ...c.wanted, ...partial };
+    this.scheduleApply(key);
+    return { ok: true };
+  }
+
+  private readTrack(e: Entry, stream: MediaStream): void {
+    const track = stream.getVideoTracks?.()[0] ?? null;
+    e.track = track;
+    e.caps = null;
+    if (!track) return;
+    try {
+      e.caps = typeof track.getCapabilities === 'function' ? ((track.getCapabilities() as unknown as Caps) ?? {}) : {};
+      e.initial = (track.getSettings?.() as unknown as Record<string, unknown>) ?? {};
+    } catch {
+      e.caps = {};
+    }
+    const c = this.ctlOf(e.key);
+    c.sent = new Set();
+    c.lastSig = '';
+    c.busy = false;
+    this.scheduleApply(e.key);
+  }
+
+  private scheduleApply(key: string): void {
+    const c = this.ctlOf(key);
+    if (c.busy || c.timer) return; // the pending / running one picks up the latest wish
+    const wait = Math.max(0, c.lastFlush + CAMERA_APPLY_MS - performance.now());
+    c.timer = setTimeout(() => {
+      c.timer = null;
+      void this.flushApply(key);
+    }, wait);
+  }
+
+  private async flushApply(key: string): Promise<void> {
+    const c = this.ctlOf(key);
+    const e = this.entries.get(key);
+    if (!e?.track || !e.caps || e.closed || c.busy) return;
+    const built = buildConstraints(c.wanted, e.caps, c.sent, e.initial);
+    if (built.unsupported.length && !c.error) c.error = CANNOT_MESSAGE;
+    if (!built.unsupported.length && c.error === CANNOT_MESSAGE) c.error = '';
+    if (built.signature === c.lastSig || !built.keys.length) {
+      c.lastSig = built.signature;
+      return;
+    }
+    c.busy = true;
+    c.lastFlush = performance.now();
+    const track = e.track;
+    const sigBefore = JSON.stringify(c.wanted);
+    try {
+      await track.applyConstraints(built.constraints);
+      c.lastSig = built.signature;
+      c.sent = new Set(built.active);
+    } catch {
+      // the stream goes on as it was: only the setting is refused
+      c.error = CANNOT_MESSAGE;
+      c.lastSig = built.signature; // do not retry the same refused set on every frame
+    }
+    c.busy = false;
+    if (JSON.stringify(c.wanted) !== sigBefore) this.scheduleApply(key); // the wish changed meanwhile: only the latest is sent
   }
 
   /* --------------------------------------- opening ------------------------------------------- */
 
   private open(key: string, req: LiveRequest): Entry {
-    const base = { key, req, phoneVersion: -1, stream: null, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false } as const;
+    const base = { key, req, phoneVersion: -1, stream: null, track: null, caps: null, initial: {}, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false } as const;
     if (req.kind === 'phone') {
       const e: Entry = { ...base, el: document.createElement('video'), isVideo: false, ready: Promise.resolve() };
       return e;
@@ -367,12 +530,15 @@ export class LiveSources {
       if (req.width) constraints.width = { ideal: req.width };
       if (req.height) constraints.height = { ideal: req.height };
       if (req.facing) constraints.facingMode = req.facing;
+      const wantRate = this.ctl.get(e.key)?.wanted.frameRate ?? req.controls?.frameRate;
+      if (wantRate && wantRate > 0) constraints.frameRate = { ideal: wantRate };
       const stream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
       if (e.closed) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
       e.stream = stream;
+      this.readTrack(e, stream);
       video.srcObject = stream;
       await video.play().catch(() => undefined);
       if (video.readyState < 2) await new Promise<void>((r) => (video.onloadeddata = () => r()));
