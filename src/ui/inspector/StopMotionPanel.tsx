@@ -6,6 +6,7 @@ import { useApp } from '../store/context';
 import { useSelector } from '../store/createStore';
 import { getLive } from '../store/live';
 import { countdown } from '../store/stopMotion';
+import { StopMotionPhone } from './StopMotionPhone';
 
 const CELL = 76; // width of one thumbnail plus its gap
 const OVERSCAN = 4;
@@ -78,7 +79,11 @@ export function StopMotionPanel({ id, params }: { id: string; params: Readonly<R
     if (sel >= shots.length) setSel(shots.length - 1);
   }, [shots.length, sel]);
 
+  // the node's settings go to a linked phone (it shows the same Shot size, onion skin and auto shoot values)
+  useEffect(() => sm.syncPhoneSettings(), [sm, params.shotSize, params.interval, params.stopAfter, params.fps, params.onion, params.onionStrength, params.onionFrames]);
+
   const mine = ui.nodeId === id;
+  const viaPhone = mine && ui.phone.state === 'connected';
   const auto = mine && ui.auto.running;
   const recording = mine && ui.snippet === 'recording';
   const rec = app.io.liveRecorder;
@@ -99,7 +104,7 @@ export function StopMotionPanel({ id, params }: { id: string; params: Readonly<R
       <div className="rs-caps">Shoot</div>
       <div className="rs-insp__actions">
         <button className="rs-btn rs-btn--primary rs-sm__take" disabled={busy || recording} title="Takes the picture that is coming in right now as the next shot" onClick={take}>
-          {busy ? 'Saving' : 'Take picture'}
+          {busy ? 'Saving' : viaPhone ? (ui.phone.asked ? 'Waiting for the phone' : 'Take picture on phone') : 'Take picture'}
         </button>
         <button className="rs-btn" disabled={shots.length === 0} title="Remove the last shot" onClick={() => sm.undoLast(id)}>
           Undo last shot
@@ -113,6 +118,7 @@ export function StopMotionPanel({ id, params }: { id: string; params: Readonly<R
           {auto ? `Stop auto shoot · next in ${countdown(ui.auto, performance.now())} s · ${ui.auto.count}${ui.auto.limit ? ` of ${ui.auto.limit}` : ''}` : 'Start auto shoot'}
         </button>
       </div>
+      <StopMotionPhone id={id} />
       <p className="rs-insp__hint">
         Auto shoot takes a picture every {Number(params.interval) || 2} s (change it under Shooting below). The page must stay open and on screen while it runs: the phone must not lock or switch to another app. The screen is kept awake for you where the browser allows it.
       </p>

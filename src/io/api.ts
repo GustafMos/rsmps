@@ -517,6 +517,8 @@ export interface PhoneApi {
   scan?: import('./phone-scan').PhoneScanStore;
   /** 3D scan with a linked phone: shots, coverage and the finished scan from a phone in scan3d mode (see phone-scan3d.ts). */
   scan3d?: import('./phone-scan3d').PhoneScan3dStore;
+  /** Stop motion with the phone as the capture rig (see phone-stopmotion.ts). */
+  stopmotion?: import('./phone-stopmotion').PhoneStopMotionStore;
 }
 
 export type { AddonInfo, AddonState } from './desktop';

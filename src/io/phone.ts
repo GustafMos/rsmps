@@ -12,6 +12,7 @@ import { LINK_TYPES, parseHello, sendsVideo, type PhoneMedia, type PhoneMode } f
 import { PhoneMotionStore } from './phone-motion';
 import { PhoneScanStore } from './phone-scan';
 import { PhoneScan3dStore } from './phone-scan3d';
+import { PhoneStopMotionStore } from './phone-stopmotion';
 import { DesktopClient, isDesktop, phoneSocketUrl, type LanInfo } from './desktop';
 
 export const LAN_MESSAGE =
@@ -121,6 +122,8 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
   });
   /** 3D scan with a linked phone: photos, positions and live coverage from a phone in scan3d mode. See phone-scan3d.ts. */
   readonly scan3d = new PhoneScan3dStore({ sendJson: (token, msg) => this.sendTo(token, msg) });
+  /** Stop motion with the phone as the capture rig: stills in, settings and commands out. See phone-stopmotion.ts. */
+  readonly stopmotion = new PhoneStopMotionStore({ sendJson: (token, msg) => this.sendTo(token, msg) });
   private desktopInfo: LanInfo | null = null;
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
   private origins: string[] = [];
@@ -270,7 +273,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     const s = this.sessions.get(token);
     if (!s) return;
     s.mode = mode;
-    if (mode !== 'camera') this.dropPeer(s);
+    if (mode !== 'camera' && mode !== 'stopmotion') this.dropPeer(s); // stop motion keeps the live picture
     this.send(s, { type: 'mode', mode });
     if (mode === 'scan') this.scan.phoneIsScanning(token);
   }
@@ -288,6 +291,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     this.motion.drop(token);
     this.scan.drop(token);
     this.scan3d.drop(token);
+    this.stopmotion.drop(token);
     this.setState(s, 'disconnected');
     this.stopIfIdle();
   }
@@ -416,6 +420,10 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
       this.scan3d.ingestJson(s.token, msg); // 3D scan: shots, live numbers, the final message
       return;
     }
+    if (PhoneStopMotionStore.handles(msg.type)) {
+      this.stopmotion.ingest(s.token, msg); // stop motion: stills, settings, status
+      return;
+    }
     if (PhoneScanStore.handles(msg.type)) {
       this.scan.ingestJson(s.token, msg); // photo transfer, status and preview messages (scan mode)
       return;
@@ -437,7 +445,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
       case 'phone-joined':
         s.reached = true;
         s.progress = advanceProgress(s.progress, 'accepted');
-        if (s.mode === 'camera') {
+        if (s.mode === 'camera' || s.mode === 'stopmotion') {
           this.setDetail(s, 'Code accepted. Connecting the video...');
           await this.startPeer(s);
         } else this.setDetail(s, 'Code accepted. Waiting for the phone to say what it does...');
@@ -445,6 +453,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
       case 'phone-left':
         if (this.scan.has(s.token)) this.scan.session(s.token).active = false;
         this.scan3d.linkLost(s.token, true);
+        this.stopmotion.phoneLeft(s.token);
         s.pc?.close();
         s.pc = null;
         this.emitStream(s, null);
@@ -473,6 +482,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     s.progress = advanceProgress(s.progress, 'accepted');
     s.mode = h.mode;
     s.media = h.media;
+    if (this.stopmotion.has(s.token) || h.mode === 'stopmotion') this.stopmotion.phoneMode(s.token, h.mode === 'stopmotion');
     if (sendsVideo(h)) {
       if (!s.pc && !s.jpeg) {
         if (s.state === 'connected') {

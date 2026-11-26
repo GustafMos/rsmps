@@ -7,6 +7,7 @@ describe('phone modes', () => {
     expect(modeFromSearch('?token=x&mode=scan')).toBe('scan');
     expect(modeFromSearch('?mode=controller&token=x')).toBe('controller');
     expect(modeFromSearch('?mode=scan3d&token=x')).toBe('scan3d');
+    expect(modeFromSearch('?mode=stopmotion&token=x')).toBe('stopmotion');
     expect(modeFromSearch('?mode=explode')).toBe('camera');
     expect(parseMode(undefined)).toBe('camera');
   });
@@ -14,6 +15,7 @@ describe('phone modes', () => {
     expect(parseHello({ type: 'hello', v: 1, mode: 'scan', media: 'none' })).toEqual({ type: 'hello', v: 1, mode: 'scan', media: 'none' });
     expect(parseHello({ type: 'hello', mode: 'camera', media: 'refused' })!.media).toBe('refused');
     expect(parseHello({ type: 'hello', mode: 'camera', media: 'weird' })!.media).toBe('none');
+    expect(parseHello({ type: 'hello', v: 1, mode: 'stopmotion', media: 'video' })).toEqual({ type: 'hello', v: 1, mode: 'stopmotion', media: 'video' });
     expect(parseHello({ type: 'hello', mode: 'fly' })).toBeNull();
     expect(parseHello({ type: 'ice' })).toBeNull();
     expect(parseModeMsg({ type: 'mode', mode: 'scan' })).toEqual({ type: 'mode', mode: 'scan' });
@@ -26,6 +28,10 @@ describe('phone modes', () => {
     expect(sendsVideo({ mode: 'camera', media: 'refused' })).toBe(false);
     expect(sendsVideo({ mode: 'camera', media: 'none' })).toBe(false);
     expect(sendsVideo({ mode: 'scan', media: 'video' })).toBe(false);
+    // stop motion shows the camera too (the live picture next to the stills): complete on the first frame, like camera mode
+    expect(sendsVideo({ mode: 'stopmotion', media: 'video' })).toBe(true);
+    // ... and when the camera is refused the hello alone completes the link
+    expect(sendsVideo({ mode: 'stopmotion', media: 'refused' })).toBe(false);
     expect(sendsVideo({ mode: 'controller', media: 'none' })).toBe(false);
     // 3D scan mode: the hello alone completes the link, the camera picture is the phone's own AR view and never flows
     expect(sendsVideo({ mode: 'scan3d', media: 'none' })).toBe(false);
@@ -39,5 +45,7 @@ describe('phone modes', () => {
     expect(thirdStepLabel('camera', 'refused')).toBe('Phone linked (no picture)');
     expect(thirdStepLabel('scan3d', 'none')).toBe('3D scan ready');
     expect(thirdStepLabel('scan3d', null)).toBe('3D scan ready');
+    expect(thirdStepLabel('stopmotion', 'video')).toBe('Video connected');
+    expect(thirdStepLabel('stopmotion', 'refused')).toBe('Stop motion ready');
   });
 });
