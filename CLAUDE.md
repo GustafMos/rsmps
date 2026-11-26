@@ -11,8 +11,11 @@ Rules that follow from it:
 - The top-tier session model plans, designs, reviews and talks to the owner. It does not do the bulk coding itself.
 - Coding is delegated to a cheaper model: pass `model: "sonnet"` (or `"haiku"` for trivial work) on every Agent call.
   Never spawn an agent that inherits the top-tier model, and never use `subagent_type: "fork"` for coding.
-- At most ONE background agent at a time. No parallel fan-out and no workflows unless the owner asks for them in that
-  message and has been told the rough cost first.
+- Parallel background agents are allowed again, but ONLY on cheaper models (owner, later on 2026-11-26: "start as many
+  agents as u want as long as fable is doing research and delegation and actual coding etc happens via cheaper models
+  best fit for each task"). Pick the cheapest model that fits each task. Run in parallel only work that is really
+  independent (different files), keep the number modest, and never run a parallel agent on the top-tier model. No
+  workflows unless the owner asks for them.
 - Before starting anything large (a multi-hour feature, several features at once), say so and give a rough size, then
   wait for the owner's go-ahead.
 - Keep agent briefs narrow, and tell agents to run targeted tests only (never the whole vitest suite).
