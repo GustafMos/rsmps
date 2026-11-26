@@ -18,7 +18,7 @@ export default defineNode({
   title: 'Stop Motion',
   category: 'input',
   description:
-    'Make stop motion or a time-lapse: wire in a Webcam, press Take picture for each frame (or Auto shoot for a time-lapse), and the shots play back as a looping animation. Shows the previous shot faintly over the live picture so you can line up the next one. Put a Stabilize node after it for a smooth hyperlapse if your camera moved.',
+    'Make stop motion or a time-lapse: wire in a Webcam, press Take picture for each frame (or Auto shoot for a time-lapse), and the shots play back as a looping animation. Shows the previous shot faintly over the live picture so you can line up the next one..',
   keywords: ['stop motion', 'stopmotion', 'animation', 'frame by frame', 'onion skin', 'time lapse', 'timelapse', 'hyperlapse', 'interval', 'shoot', 'capture', 'photo', 'camera'],
   inputs: { image: { type: 'image', lazy: true, label: 'Picture' } },
   outputs: {

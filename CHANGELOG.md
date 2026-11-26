@@ -4,6 +4,13 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.39.0] - 2026-11-26
+
+### Added
+- **Stop Motion.** A new node for real stop motion, time-lapse and hyperlapse. Wire a Webcam (or any picture) into it and press **Take picture**, in the inspector or on the button in the viewer corner; each press adds one shot. **Onion skin** shows the previous shot (up to three) faintly over the live picture so the next one can be lined up. The shots play back as a looping animation that grows as you shoot, at the Frames per second you choose, and each shot can be held for 1 to 4 frames. **Record snippet** adds a short live clip as one shot. **Auto shoot** takes a picture every N seconds until stopped or after a set number of shots, keeping the screen awake where the device allows it. The strip in the inspector lets you undo the last shot, delete, move, duplicate or retake any shot, and clear all. Shots are stored in Media (Shot size: Full, 1080 or 720), so they survive a reload and export without the camera. While paused the node shows the live picture with the onion skin, and while playing it shows the animation; the Show setting can force either. It can set the project length.
+- **Stop Motion in a Media Timeline.** Wired into a Media Timeline, every shot becomes its own cut, in order; new shots are added as cuts automatically, and the timeline has an "Update cuts from Stop Motion" button.
+Not yet tried with a real camera.
+
 ## [0.38.0] - 2026-11-26
 
 ### Added
