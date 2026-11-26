@@ -15,6 +15,7 @@ import { Piano } from './Piano';
 import { RecordButton } from '../timeline/RecordButton';
 import { isTimelineDef } from '../timeline/TimelineEditor';
 import { MEDIA_TIMELINE_ID } from '../../engine/lib/media-edit';
+import { updateStopMotionCuts } from '../../engine/lib/media-edit-graph';
 import { RangeField } from '../components/RangeField';
 import { DrumGrid, looksLikeDrumPattern } from './DrumGrid';
 import { KindPicker } from '../components/KindPicker';
@@ -38,6 +39,7 @@ import { CameraPermissionPanel } from './CameraPermissionPanel';
 import { CameraControlsPanel } from './CameraControlsPanel';
 import { FastCopyPanel } from './FastCopyPanel';
 import { RecorderPanel } from './RecorderPanel';
+import { StopMotionPanel } from './StopMotionPanel';
 import { isLivePictureType } from '../../engine/lib/live-source';
 import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
@@ -211,6 +213,11 @@ function NodePanel({ id }: { id: string }) {
           <div className="rs-caps">Edit</div>
           <div className="rs-insp__actions">
             <button className="rs-btn rs-btn--primary" onClick={() => ed.openTimeline(id)}>Open editor</button>
+            {edges.some((e) => e.to.node === id && e.to.port === 'clips' && nodes.find((n) => n.id === e.from.node)?.type === 'stop-motion') && (
+              <button className="rs-btn" title="Add a cut for every Stop Motion shot that has none yet and remove the cuts of deleted shots. Cuts you trimmed or moved stay as they are." onClick={() => ed.editLevel((g) => updateStopMotionCuts(g, id))}>
+                Update cuts from Stop Motion
+              </button>
+            )}
           </div>
           <p className="rs-insp__hint">Wire pictures into Clips and sounds into Sounds: each new wire is added at the end. Arrange, trim, fade and layer them in the strip under the graph.</p>
         </div>
@@ -237,6 +244,7 @@ function NodePanel({ id }: { id: string }) {
       {node.type === 'media-in' && <FastCopyPanel node={node} />}
       {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}
       {node.type === 'recorder' && <RecorderPanel fullId={fullId} params={node.params} />}
+      {node.type === 'stop-motion' && <StopMotionPanel id={id} params={node.params} />}
       {def.playable && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Keyboard</div>

@@ -116,3 +116,12 @@
   .rs-giz__bar { height: calc(var(--touch, 44px) + 4px); }
   .rs-giz__bar .rs-btn { height: var(--touch, 44px); min-width: var(--touch, 44px); padding: 0 var(--s-3); }
 }
+
+/* Stop Motion: Take picture and Auto shoot at the bottom of the viewer */
+.rs-viewer__sm { position: absolute; left: var(--s-2); bottom: var(--s-2); z-index: 7; display: flex; gap: var(--s-2); }
+.rs-viewer__smbtn { display: flex; align-items: center; gap: var(--s-2); min-height: 32px; padding: 0 var(--s-3); background: color-mix(in srgb, var(--bg-2) 88%, transparent); border: 1px solid var(--line-strong); border-radius: var(--r); color: var(--text); font-weight: 600; cursor: pointer; box-shadow: var(--shadow-hard-sm); white-space: nowrap; }
+.rs-viewer__smbtn:hover { background: var(--bg-3); }
+.rs-viewer__smbtn:disabled { opacity: 0.6; cursor: default; }
+.rs-viewer__smbtn.is-on { border-color: #e5484d; }
+.rs-viewer__smdot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--text); }
+@media (pointer: coarse) { .rs-viewer__smbtn { min-height: var(--touch, 44px); } }

@@ -23,7 +23,8 @@ import { isLossy, packFrame, unpackBytes, unpackToBitmap, type CacheQuality, typ
 import { uploadExternal } from './upload';
 import type { EvalGate } from './gate';
 import type { Library } from './library';
-import { feedsFromLive, liveNodeIds, stampLive } from './live-stamp';
+import { upstream } from '../engine/graph';
+import { feedsFromLive, liveNodeIds, shootNodeIds, stampLive, stampShoot } from './live-stamp';
 import type { MemoryState } from './memory';
 import { phoneAudioWired } from './phone-audio';
 import { needsInvalidate, type FrameEvent, type SignalRouter } from './signals';
@@ -157,9 +158,13 @@ export class PlayerImpl implements Player {
   private micNodes = 0;
   private clearPending = false;
   private liveIds = new Set<string>();
+  private shootGraph: GraphDoc | null = null;
   private liveGraph: GraphDoc | null = null;
   private hasLive = false;
   private liveTick = 0;
+  /** Stop Motion nodes that show the live picture while paused (see live-stamp.ts), and whether one feeds the viewed node. */
+  private shootIds = new Set<string>();
+  private hasShoot = false;
   private liveTimer: ReturnType<typeof setInterval> | null = null;
   private liveFps = 0;
   private curPixel = 1;
@@ -276,6 +281,7 @@ export class PlayerImpl implements Player {
   pause(): void {
     if (!this.playing) return;
     this.playing = false;
+    if (this.hasShoot) this.dirty = true;
     cancelAnimationFrame(this.raf);
     this.syncTransport();
     // Refine the frame on screen to full resolution.
@@ -403,6 +409,56 @@ export class PlayerImpl implements Player {
       return null;
     } finally {
       this.gpu.release(img.texture);
+    }
+  }
+
+  async grabNode(nodeId: string, port: string | undefined, maxSide = 0, mime: 'image/png' | 'image/jpeg' = 'image/png'): Promise<Blob | null> {
+    const view = this.view;
+    if (!view) return null;
+    const graph = this.graphOf(view);
+    const ids = liveNodeIds(graph, this.deps.registry);
+    const spec = this.frameSpecFor(view);
+    let res: EvalResult | null = null;
+    try {
+      res = await this.deps.gate.evaluateHeld({
+        graph: ids.size ? stampLive(graph, ids, ++this.liveTick) : graph,
+        node: nodeId,
+        port,
+        seconds: this.frame / graph.project.fps,
+        item: view.item,
+        itemCount: view.itemCount,
+        proxy: 1,
+        canvas: spec.canvas,
+        quality: 'final',
+      });
+      const v = res.value;
+      if (!isTextured(v)) return null;
+      const presenter = new OffscreenPresenter(this.gpu, mime === 'image/jpeg');
+      try {
+        const long = Math.max(v.width, v.height);
+        if (maxSide > 0 && long > maxSide) {
+          const k = maxSide / long;
+          const size = { width: Math.max(2, Math.round(v.width * k)), height: Math.max(2, Math.round(v.height * k)) };
+          const small = this.gpu.scoped(() => {
+            const out = conformImage(this.gpu, v, size, 'stretch', 'center') as ImageValue;
+            this.gpu.retain(out.texture);
+            return out;
+          });
+          try {
+            return await presentToBlob(presenter, small, mime, mime === 'image/jpeg' ? 0.92 : undefined);
+          } finally {
+            this.gpu.release(small.texture);
+          }
+        }
+        return await presentToBlob(presenter, v, mime, mime === 'image/jpeg' ? 0.92 : undefined);
+      } finally {
+        presenter.dispose();
+      }
+    } catch (err) {
+      console.warn('Grab failed:', err);
+      return null;
+    } finally {
+      if (res) this.deps.gate.drop(res);
     }
   }
 
@@ -628,6 +684,11 @@ export class PlayerImpl implements Player {
       this.liveIds = liveNodeIds(view.graph, this.deps.registry);
     }
     this.hasLive = feedsFromLive(view.graph, view.node, this.liveIds);
+    if (this.shootGraph !== view.graph) {
+      this.shootGraph = view.graph;
+      this.shootIds = shootNodeIds(view.graph);
+    }
+    this.hasShoot = this.shootIds.size > 0 && !!view.node && [...upstream(view.graph, view.node)].some((id) => this.shootIds.has(id));
     const fps = view.graph.project.fps;
     if (this.liveTimer && (!this.hasLive || this.liveFps !== fps)) {
       clearInterval(this.liveTimer);
@@ -888,13 +949,18 @@ export class PlayerImpl implements Player {
     return { graph: this.graphOf(view), node: view.node, port: view.port, item: view.item, itemCount: view.itemCount, frame: this.frame, proxy, key: this.key, frameSpec: spec };
   }
 
+  /** While paused, Stop Motion nodes that may show their live picture are stamped to (see live-stamp.ts). */
+  private stampShoot(graph: GraphDoc): GraphDoc {
+    return this.hasShoot && !this.playing ? stampShoot(graph, this.shootIds) : graph;
+  }
+
   private async execute(job: Job): Promise<void> {
     this.dirty = false;
     // Assume this job settles; a successful show() makes `shown` authoritative instead.
     this.settledKey = job.key;
     this.settledFrame = job.frame;
     this.settledProxy = job.proxy;
-    const live = this.liveSignals() || this.hasLive;
+    const live = this.liveSignals() || this.hasLive || this.hasShoot;
     const cached = live || job.final ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
       const img = await this.restore(cached.image);
@@ -912,7 +978,7 @@ export class PlayerImpl implements Player {
     let res: EvalResult;
     try {
       res = await this.deps.gate.evaluateHeld({
-        graph: this.hasLive ? stampLive(job.graph, this.liveIds, ++this.liveTick) : job.graph,
+        graph: this.stampShoot(this.hasLive ? stampLive(job.graph, this.liveIds, ++this.liveTick) : job.graph),
         node: job.node,
         port: job.port,
         seconds: job.frame / job.graph.project.fps,
