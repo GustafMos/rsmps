@@ -70,3 +70,17 @@ export function startErrorMessage(err: unknown): string {
   if (name === 'NotAllowedError') return 'AR was not allowed. Allow the camera for this site in the browser\'s site settings and press the button again.';
   return `The AR view did not start: ${text || 'unknown reason'}`;
 }
+
+/**
+ * Why the 3D Scan panel cannot start a scan, or null when it can: the same wording as World AR (the scan view is the same AR
+ * session). `ok` says nothing about the camera picture: whether the phone hands it over is only known once the session is open, and
+ * `noCameraPictureMessage` is then what the view says.
+ */
+export function scanBlockedReason(s: WorldArSupport): string | null {
+  return s.state === 'ok' ? null : s.message;
+}
+
+export const noCameraPictureMessage = 'This phone does not hand the camera picture to the page in AR, so a scan cannot take photos here. A scan needs the AR camera picture (the "camera-access" feature of Chrome on Android).';
+
+/** What the scan view's readout says about depth sensing, so the owner can report it. */
+export const depthReadout = (granted: boolean): string => (granted ? 'depth: yes' : 'depth: no');

@@ -9,7 +9,7 @@
  */
 import type { Quat, Vec3 } from '../../engine/lib/motion-math';
 import { projectionMatrix, type Lens, type XrPose } from '../../engine/lib/xr-math';
-import type { XrAnchorLike, XrFrameCallback, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrRigidTransform, XrSessionLike, XrSystemLike, XrViewLike } from './xr-api';
+import type { XrAnchorLike, XrCpuDepthLike, XrFrameCallback, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrRigidTransform, XrSessionInit, XrSessionLike, XrSystemLike, XrViewLike } from './xr-api';
 
 const transformOf = (pose: XrPose): XrRigidTransform => ({
   position: { x: pose.p[0], y: pose.p[1], z: pose.p[2], w: 1 },
@@ -31,6 +31,8 @@ export interface FakeSessionOptions {
   lens?: Lens;
   width?: number;
   height?: number;
+  /** The depth picture the "device" gives when `depth-sensing` is granted (default 8 x 6, a flat 1.2 m, 16-bit values in millimetres). */
+  depth?: { width: number; height: number; metres: number };
   /** What the layer hands out as its framebuffer (default: a marker object; the desktop self-check passes a real WebGL one). */
   framebuffer?: unknown;
 }
@@ -39,6 +41,8 @@ export class FakeXrSession implements XrSessionLike {
   enabledFeatures?: string[];
   domOverlayState: { type: string } | null = null;
   visibilityState = 'visible';
+  depthUsage?: string;
+  depthDataFormat?: string;
   /** Where the phone is. null = the room is lost (no viewer pose). */
   viewer: XrPose | null = { p: [0, 1.4, 0], q: [0, 0, 0, 1] };
   /** The device only knows how it is turned. */
@@ -48,6 +52,8 @@ export class FakeXrSession implements XrSessionLike {
   hit: XrPose | null = null;
   /** Size of the camera picture offered through camera access, or null. */
   camera: { width: number; height: number } | null = null;
+  /** The depth picture handed out with `depth-sensing`, or null for none this frame. */
+  depth: { width: number; height: number; metres: number } | null = { width: 8, height: 6, metres: 1.2 };
   readonly anchors: FakeAnchor[] = [];
   /** Make the next anchor requests fail (a device that grants anchors and then cannot make one). */
   failAnchors = false;
@@ -70,6 +76,11 @@ export class FakeXrSession implements XrSessionLike {
     const width = o.width ?? 1080;
     const height = o.height ?? 1920;
     this.layer = { framebuffer: 'framebuffer' in o ? o.framebuffer : { fake: 'xr-framebuffer' }, framebufferWidth: width, framebufferHeight: height, getViewport: () => ({ x: 0, y: 0, width, height }) };
+    if (o.depth) this.depth = o.depth;
+    if (this.granted.includes('depth-sensing')) {
+      this.depthUsage = 'cpu-optimized';
+      this.depthDataFormat = 'luminance-alpha';
+    }
     if (this.granted.includes('dom-overlay')) this.domOverlayState = { type: 'screen' };
     if (!this.granted.includes('hit-test')) this.requestHitTestSource = undefined;
   }
@@ -151,6 +162,16 @@ export class FakeXrSession implements XrSessionLike {
         return { transform: transformOf(a.pose) };
       },
       getHitTestResults: () => (hitResult ? [hitResult] : []),
+      ...(this.granted.includes('depth-sensing')
+        ? {
+            getDepthInformation: (): XrCpuDepthLike | null => {
+              const d = this.depth;
+              if (!d) return null;
+              const data = new Uint16Array(d.width * d.height).fill(Math.round(d.metres * 1000));
+              return { width: d.width, height: d.height, data: data.buffer, rawValueToMeters: 0.001, normDepthBufferFromNormView: { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] } };
+            },
+          }
+        : {}),
       ...(anchorsOn
         ? {
             trackedAnchors: { has: (x: XrAnchorLike) => this.anchors.includes(x as FakeAnchor) && (x as FakeAnchor).tracked && !(x as FakeAnchor).deleted },
@@ -183,7 +204,7 @@ export class FakeXrSystem implements XrSystemLike {
   /** Make `isSessionSupported` throw. */
   throwOnAsk = false;
   session: FakeXrSession | null = null;
-  lastInit: { requiredFeatures?: string[]; optionalFeatures?: string[]; domOverlay?: { root: unknown } } | null = null;
+  lastInit: XrSessionInit | null = null;
   asked = 0;
   /** Called with every session made (to set where the phone is before its first frame). */
   onSession: ((s: FakeXrSession) => void) | null = null;
@@ -193,7 +214,7 @@ export class FakeXrSystem implements XrSystemLike {
     if (this.throwOnAsk) return Promise.reject(new Error('blocked'));
     return Promise.resolve(this.supported && mode === 'immersive-ar');
   }
-  requestSession(_mode: string, init?: { requiredFeatures?: string[]; optionalFeatures?: string[]; domOverlay?: { root: unknown } }): Promise<XrSessionLike> {
+  requestSession(_mode: string, init?: XrSessionInit): Promise<XrSessionLike> {
     this.lastInit = init ?? null;
     if (this.failWith) return Promise.reject(this.failWith);
     // the browser grants what was asked for AND what it has

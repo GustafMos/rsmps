@@ -20,7 +20,7 @@ export interface ArOverlay {
 
 const BTN = 'font:600 15px system-ui,sans-serif;color:#fff;background:rgba(20,24,32,.72);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:12px 16px;min-width:64px;touch-action:manipulation;';
 
-export function createArOverlay(doc: Document = document): ArOverlay {
+export function createArOverlay(doc: Document = document, opts: { scan?: boolean } = {}): ArOverlay {
   const root = doc.createElement('div');
   // hidden in the page; the browser shows it by itself as the overlay of the session
   root.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:none;user-select:none;-webkit-user-select:none;touch-action:none;color:#fff;font:14px/1.4 system-ui,sans-serif;';
@@ -52,8 +52,12 @@ export function createArOverlay(doc: Document = document): ArOverlay {
   };
   const place = button('Place', 'Put it on the ring');
   const reset = button('Reset', 'Pick it up and choose another spot');
-  const record = button('Record', 'Record the movement (and the camera picture where the browser hands it over)');
-  const exit = button('Exit', 'Leave the AR view');
+  // the scan view has no Record button (a detached one keeps the rest of this file the same); its own buttons come in this order
+  const record = opts.scan ? doc.createElement('button') : button('Record', 'Record the movement (and the camera picture where the browser hands it over)');
+  const start = opts.scan ? button('Start', 'Start the walk: the dome stays where it is and photos are taken as you move round it') : null;
+  const shutter = opts.scan ? button('Photo', 'Take one photo now') : null;
+  const autoBtn = opts.scan ? button('Auto: on', 'Automatic photos: one whenever you are steady, aiming at the object, and at a new angle') : null;
+  const exit = button('Exit', opts.scan ? 'Done: saves the photos and leaves the AR view' : 'Leave the AR view');
   // Two slim, full-reach strips (at least 44 px wide, clear of the notch and the gesture bar): Height on the right edge, Zoom on the left.
   // Each has its own finger, never a tap or drag on the room. Travel up the screen raises / zooms in; a quick double tap resets.
   const makeStrip = (side: 'left' | 'right', name: string, title: string, move: (dy: number) => void, reset: () => void) => {
@@ -124,9 +128,28 @@ export function createArOverlay(doc: Document = document): ArOverlay {
     return { el, show, stop };
   };
   const heightStrip = makeStrip('right', 'Height', 'Drag up or down to raise or lower it. Double tap to put it back on the surface.', (dy) => handle?.gesture({ type: 'lift', dy }), () => handle?.gesture({ type: 'lift-reset' }));
-  const zoomStrip = makeStrip('left', 'Zoom', 'Drag up to zoom in, down to zoom out (1x to 4x). Double tap to go back to 1x. The recording keeps the full picture.', (dy) => handle?.gesture({ type: 'zoom', dy }), () => handle?.gesture({ type: 'zoom-reset' }));
+  const zoomStrip = makeStrip('left', opts.scan ? 'Size' : 'Zoom', opts.scan ? 'Drag up to make the dome wider, down to make it smaller (0.1 to 5 metres). Double tap for 0.5 m. Pinching does the same.' : 'Drag up to zoom in, down to zoom out (1x to 4x). Double tap to go back to 1x. The recording keeps the full picture.', (dy) => handle?.gesture({ type: 'zoom', dy }), () => handle?.gesture({ type: 'zoom-reset' }));
   const strip = heightStrip.el;
   root.append(touch, hint, badge, stats, strip, zoomStrip.el, bar);
+  // the scan view's coverage box: one plain line and a small map (azimuth across, elevation up) of which directions have photos
+  const box = opts.scan ? doc.createElement('div') : null;
+  const map = opts.scan ? doc.createElement('canvas') : null;
+  const covLine = opts.scan ? doc.createElement('div') : null;
+  const covNote = opts.scan ? doc.createElement('div') : null;
+  const flashEl = opts.scan ? doc.createElement('div') : null;
+  if (box && map && covLine && covNote && flashEl) {
+    box.style.cssText = 'position:absolute;left:12px;top:calc(env(safe-area-inset-top,0px) + 116px);display:none;padding:8px 10px;border-radius:12px;background:rgba(20,24,32,.72);pointer-events:none;max-width:210px;';
+    box.title = 'Coverage is the share of viewing directions around the object that have a sharp photo. Straight underneath, and any low angle that would put the phone below the floor, are not counted.';
+    covLine.style.cssText = 'font:600 14px system-ui,sans-serif;margin-bottom:6px;';
+    covNote.style.cssText = 'font:11px system-ui,sans-serif;opacity:.75;margin-top:4px;';
+    covNote.textContent = 'Counts the sides you can reach. Not straight underneath.';
+    map.width = 168;
+    map.height = 60;
+    map.style.cssText = 'display:block;width:168px;height:60px;border-radius:4px;';
+    box.append(covLine, map, covNote);
+    flashEl.style.cssText = 'position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s ease-out;';
+    root.append(box, flashEl);
+  }
   doc.body.appendChild(root);
 
   let handle: WorldArHandle | null = null;
@@ -155,6 +178,83 @@ export function createArOverlay(doc: Document = document): ArOverlay {
   reset.addEventListener('click', () => handle?.reset());
   record.addEventListener('click', () => handle?.toggleRecord());
   exit.addEventListener('click', () => void handle?.close());
+  start?.addEventListener('click', () => handle?.scan?.begin());
+  shutter?.addEventListener('click', () => handle?.scan?.shutter());
+  let autoOn = true;
+  autoBtn?.addEventListener('click', () => {
+    autoOn = !autoOn;
+    handle?.scan?.setAuto(autoOn);
+  });
+  let shownFlash = 0;
+  let shownRadius = -1;
+  const drawMap = (sc: NonNullable<WorldArViewState['scan']>) => {
+    const ctx = (map as unknown as HTMLCanvasElement | null)?.getContext?.('2d');
+    if (!ctx || !map) return;
+    const { az, el } = sc.grid;
+    const cw = map.width / az;
+    const ch = map.height / el;
+    ctx.clearRect(0, 0, map.width, map.height);
+    const colors = ['#555a63', '#d33b3b', '#e0a43a', '#35c25a'];
+    for (let row = 0; row < el; row++)
+      for (let col = 0; col < az; col++) {
+        ctx.fillStyle = colors[sc.cells[row * az + col] ?? 1];
+        ctx.fillRect(col * cw + 0.5, (el - 1 - row) * ch + 0.5, cw - 1, ch - 1);
+      }
+    if (sc.here) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sc.here.col * cw + 1, (el - 1 - sc.here.row) * ch + 1, cw - 2, ch - 2);
+    }
+  };
+  const scanUpdate = (s: WorldArViewState, sc: NonNullable<WorldArViewState['scan']>) => {
+    const capture = sc.phase === 'capture';
+    place.disabled = capture || s.phase !== 'aiming';
+    place.style.opacity = place.disabled ? '0.4' : '1';
+    reset.disabled = capture || s.phase !== 'placed';
+    reset.style.opacity = reset.disabled ? '0.4' : '1';
+    record.style.display = 'none';
+    if (start) {
+      start.style.display = capture ? 'none' : '';
+      start.disabled = sc.phase !== 'setup';
+      start.style.opacity = start.disabled ? '0.4' : '1';
+    }
+    if (shutter) {
+      shutter.style.display = capture ? '' : 'none';
+      shutter.disabled = s.saving;
+    }
+    if (autoBtn) {
+      autoBtn.style.display = capture ? '' : 'none';
+      autoBtn.textContent = sc.auto ? 'Auto: on' : 'Auto: off';
+      autoOn = sc.auto;
+    }
+    exit.textContent = s.saving ? 'Saving' : capture ? 'Done' : 'Exit';
+    exit.disabled = s.saving;
+    // the Size strip and the Height strip are for sizing the dome, before the walk
+    const sizing = !capture && s.phase === 'placed';
+    zoomStrip.el.style.display = sizing ? 'flex' : 'none';
+    strip.style.display = sizing ? 'flex' : 'none';
+    if (Math.abs(sc.radius - shownRadius) > 1e-4) {
+      shownRadius = sc.radius;
+      zoomStrip.show(`${sc.radius.toFixed(2)} m`);
+    }
+    if (box && covLine && flashEl) {
+      box.style.display = capture ? 'block' : 'none';
+      covLine.textContent = sc.line;
+      if (capture) drawMap(sc);
+      if (sc.flash !== shownFlash) {
+        shownFlash = sc.flash;
+        flashEl.style.opacity = '0.35';
+        setTimeout(() => (flashEl.style.opacity = '0'), 60);
+      }
+    }
+    const f = s.features;
+    stats.textContent = [
+      `${s.fps} fps · ${sc.pending} saving · ${sc.rejected} blurry`,
+      sc.depth ? 'depth: yes' : 'depth: no',
+      sc.picture ? `photo ${sc.picture.width}x${sc.picture.height}${sc.aspectOff > 0.03 ? ` · shape off by ${Math.round(sc.aspectOff * 100)}%` : ''}` : 'no photo yet',
+      `${f.hitTest ? 'surfaces' : 'NO surfaces'} · ${s.anchored ? 'anchored' : f.anchors ? 'anchor pending' : 'no anchors'}`,
+    ].join('\n');
+  };
 
   return {
     root,
@@ -196,6 +296,7 @@ export function createArOverlay(doc: Document = document): ArOverlay {
         `render ${s.renderMs} ms · copy ${s.copyMs} ms (${s.route})`,
         `${f.hitTest ? 'surfaces' : 'NO surfaces'} · ${s.anchored ? 'anchored' : f.anchors ? 'anchor pending' : 'no anchors'} · ${f.cameraAccess ? 'camera clip' : 'motion only'}`,
       ].join('\n');
+      if (s.scan) scanUpdate(s, s.scan);
     },
     remove() {
       heightStrip.stop();
