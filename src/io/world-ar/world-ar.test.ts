@@ -4,14 +4,14 @@ import { addNode, connect, createGraph } from '../../engine/graph';
 import { qAxisAngle, rotate, type Vec3 } from '../../engine/lib/motion-math';
 import { buildWorldArVideoGraph } from '../../engine/lib/ar-video-graph';
 import { buildWorldTake, sampleWorldTake, type WorldMoment } from '../../engine/lib/world-take';
-import { depthOf, placementQuat, project, rayPlane, viewRay, type Corners, type XrPose } from '../../engine/lib/xr-math';
+import { depthOf, placementQuat, project, rayPlane, viewRay, zoomLens, zoomProjection, type Corners, type XrPose } from '../../engine/lib/xr-math';
 import { registerBuiltins } from '../../engine/nodes';
 import type { AssetInfo, GraphDoc } from '../../engine/types';
 import type { LiveRecorder } from '../live-record';
 import { WorldArController, type WorldArEnv, type WorldArTake, type WorldArViewState } from './controller';
 import { fedByWorldAr, stampWorldAr, worldArNodeIds, type PictureTarget } from './engine-source';
 import { FakeXrSession, FakeXrSystem, fakeTransform } from './fake-xr';
-import { ArLoop, MAX_FRAME_ERRORS, pictureSize, renderFailHint, type ArLoopState, type ArPainter, type ArPicture, type ArPictureSource } from './loop';
+import { ArLoop, MAX_FRAME_ERRORS, effectiveRecordRate, pictureSize, renderFailHint, type ArLoopState, type ArPainter, type ArPicture, type ArPictureSource } from './loop';
 import { GestureReader, MAX_SCALE, MIN_SCALE, TAP_MS, hintFor, initialPlaceState, placeStep, type Gesture, type PlaceState } from './placement';
 import { checkWorldAr, startErrorMessage, unsupportedMessage } from './support';
 import { OPTIONAL_FEATURES, featuresOf } from './xr-api';
@@ -184,6 +184,9 @@ describe('fingers', () => {
 class FakePainter implements ArPainter, PictureTarget {
   calls: { op: string; corners?: Corners; fb?: unknown }[] = [];
   cameraPicture: unknown | null = null;
+  /** The zoom of every backdrop drawn, and whether the camera picture is there for it. */
+  backdrops: number[] = [];
+  backdropOk = true;
   uploads = 0;
   begin(fb: unknown) {
     this.calls = [{ op: 'begin', fb }];
@@ -196,6 +199,10 @@ class FakePainter implements ArPainter, PictureTarget {
   }
   camera() {
     return this.cameraPicture;
+  }
+  backdrop(_view: unknown, zoom: number) {
+    if (this.backdropOk) this.backdrops.push(zoom);
+    return this.backdropOk;
   }
   uploadPixels() {
     this.uploads++;
@@ -647,8 +654,10 @@ function fakeEnv(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
   const recorder = {
     state: 'idle',
     onAutoStop: null as null | (() => void),
-    start() {
+    startOpts: null as null | { fps: number },
+    start(_a?: unknown, opts?: { fps: number }) {
       this.state = 'recording';
+      this.startOpts = opts ?? null;
     },
     push(p: unknown) {
       pushes.push(p);
@@ -712,14 +721,24 @@ function controller(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
   const states: WorldArViewState[] = [];
   const takes: WorldArTake[] = [];
   const graph = createGraph('p');
-  const open = () => c.open({ graph: () => graph, node: 'n1', card: { mode: 'upright', width: 0.5 }, overlay: { clientWidth: 360, clientHeight: 640 } as HTMLElement, onState: (s) => states.push(s), onTake: (t) => takes.push(t) });
+  const openWith = (extra: { recordRate?: number | null; fps?: number } = {}) =>
+    c.open({
+      graph: () => (extra.fps ? { ...graph, project: { ...graph.project, fps: extra.fps } } : graph),
+      node: 'n1',
+      card: { mode: 'upright', width: 0.5 },
+      recordRate: extra.recordRate,
+      overlay: { clientWidth: 360, clientHeight: 640 } as HTMLElement,
+      onState: (s) => states.push(s),
+      onTake: (t) => takes.push(t),
+    });
+  const open = () => openWith();
   const frames = (n: number) => {
     for (let i = 0; i < n; i++) {
       f.advance(33);
       xr.session!.step(33);
     }
   };
-  return { c, f, evals, added, states, takes, open, frames, camCalls, holds: () => holds, flush: () => new Promise((r) => setTimeout(r, 0)) };
+  return { c, f, evals, added, states, takes, open, openWith, frames, camCalls, holds: () => holds, flush: () => new Promise((r) => setTimeout(r, 0)) };
 }
 
 describe('opening the AR view (fake browser)', () => {
@@ -872,8 +891,14 @@ describe('opening the AR view (fake browser)', () => {
 
 /* ------------------------------------------------------------------ the AR video keeps the object on its spot */
 
-describe('the AR video: clip time to take time', () => {
-  const FPS = 30;
+/** Phones differ: a 30 per second AR camera with an uneven pace, and a 60 per second one; the clip is recorded at 30 or at 60. */
+const SYNC_CASES = [
+  { name: '30 per second clip, 30 per second phone', fps: 30, ms: (i: number) => 25 + (i % 4) * 6, frames: 60 },
+  { name: '60 per second clip, 60 per second phone', fps: 60, ms: (i: number) => 12 + (i % 4) * 3, frames: 120 },
+  { name: '30 per second clip, 60 per second phone', fps: 30, ms: (i: number) => 12 + (i % 4) * 3, frames: 120 },
+];
+for (const rate of SYNC_CASES) describe(`the AR video: clip time to take time, ${rate.name}`, () => {
+  const FPS = rate.fps;
   /**
    * Record through the real loop with a phone that walks along x at 1 m/s, frames arriving at an uneven pace, the clip recorder
    * ready late, dropping some pictures and taking its first picture as clip frame `lead` (as when the encoder started early).
@@ -903,8 +928,8 @@ describe('the AR video: clip time to take time', () => {
         return n;
       },
     });
-    for (let i = 0; i < 60; i++) {
-      ct += 25 + (i % 4) * 6; // 25..43 ms: a variable frame rate
+    for (let i = 0; i < rate.frames; i++) {
+      ct += rate.ms(i); // a variable frame rate
       t.session.viewer = { p: [ct / 1000, 1.4, 0], q: EYE.q };
       t.step();
     }
@@ -952,6 +977,310 @@ describe('the AR video: clip time to take time', () => {
         }
       }
       expect(checked).toBeGreaterThan(10);
+      // no clip frame is used twice, and the frames the take keeps run forward
+      const frames = rec.samples.map((x) => x.frame!);
+      expect(new Set(frames).size).toBe(frames.length);
+      expect([...frames].sort((a, b) => a - b)).toEqual(frames);
     });
   }
+});
+
+
+/* ------------------------------------------------------------------ digital zoom */
+
+describe('zoom in the AR view (fake session)', () => {
+  const zoomOf = (t: ReturnType<typeof setup>) => {
+    t.step();
+    return t.loop.state().zoom;
+  };
+  /** A placed object, with the camera picture available. */
+  const placed = (features?: string[]) => {
+    const t = setup({ features });
+    t.session.camera = { width: 1080, height: 1920 };
+    t.painter.cameraPicture = { canvas: true };
+    t.session.hit = FLOOR;
+    t.step();
+    t.loop.placeHere();
+    t.step();
+    return t;
+  };
+
+  it('the zoom strip changes the zoom, it stays between 1x and 4x, a double tap (zoom-reset) goes back to 1x', () => {
+    const t = setup();
+    t.session.camera = { width: 1080, height: 1920 };
+    t.step();
+    expect(t.loop.state().zoomAvailable).toBe(true);
+    expect(t.loop.state().zoom).toBe(1);
+    t.loop.gesture({ type: 'zoom', dy: 60 });
+    expect(zoomOf(t)).toBeCloseTo(Math.exp(60 * 0.006), 5);
+    t.loop.gesture({ type: 'zoom', dy: 5000 });
+    expect(zoomOf(t)).toBe(4);
+    t.loop.gesture({ type: 'zoom', dy: -5000 });
+    expect(zoomOf(t)).toBe(1); // never below 1x
+    t.loop.gesture({ type: 'zoom', dy: 100 });
+    t.step();
+    t.loop.gesture({ type: 'zoom-reset' });
+    expect(zoomOf(t)).toBe(1);
+  });
+
+  it('zoomed: the camera picture is drawn into the layer by the page; at 1x it is not (the system passthrough shows)', () => {
+    const t = setup();
+    t.session.camera = { width: 1080, height: 1920 };
+    t.step(2);
+    expect(t.painter.backdrops).toEqual([]);
+    t.loop.gesture({ type: 'zoom', dy: 100 });
+    t.step(2);
+    expect(t.painter.backdrops.length).toBe(2);
+    expect(t.painter.backdrops[0]).toBeCloseTo(Math.exp(0.6), 5);
+  });
+
+  it('without camera access zoom is not available: the control stays at 1x and nothing is drawn zoomed', () => {
+    const t = setup({ features: ['hit-test', 'anchors', 'dom-overlay'] });
+    t.loop.gesture({ type: 'zoom', dy: 200 });
+    t.step(2);
+    const s = t.loop.state();
+    expect(s.zoomAvailable).toBe(false);
+    expect(s.zoom).toBe(1);
+    expect(t.painter.backdrops).toEqual([]);
+  });
+
+  it('a frame without a camera picture is not zoomed (the object and the picture must agree)', () => {
+    const t = placed();
+    t.loop.gesture({ type: 'zoom', dy: 100 });
+    t.source.finish();
+    t.painter.backdropOk = false;
+    t.step();
+    expect(t.source.requests[t.source.requests.length - 1].moment.zoom).toBeUndefined();
+    t.source.finish();
+    t.painter.backdropOk = true;
+    t.step();
+    expect(t.source.requests[t.source.requests.length - 1].moment.zoom).toBeCloseTo(Math.exp(0.6), 5);
+  });
+
+  it('the object is rendered through the zoomed lens, so it stays locked to the room', () => {
+    const t = placed();
+    t.loop.gesture({ type: 'zoom', dy: 115 });
+    t.source.finish();
+    t.step(2);
+    const z = t.loop.state().zoom;
+    const m = t.source.requests[t.source.requests.length - 1].moment;
+    close(m.lens, zoomLens(t.session.lens, z));
+    const spot = project(EYE, m.lens, FLOOR.p)!;
+    const plain = project(EYE, t.session.lens, FLOOR.p)!;
+    expect(spot[0]).toBeCloseTo(plain[0] * z, 5);
+    expect(spot[1]).toBeCloseTo(plain[1] * z, 5);
+    const pm = zoomProjection(Float32Array.from([1.9, 0, 0, 0, 0, 1.07, 0, 0, 0.1, 0.2, -1, -1, 0, 0, -0.1, 0]), 2);
+    expect(pm[0]).toBeCloseTo(3.8, 5);
+    expect(pm[5]).toBeCloseTo(2.14, 5);
+    expect(pm[8]).toBeCloseTo(0.2, 5);
+    expect(pm[9]).toBeCloseTo(0.4, 5);
+    expect(pm[2]).toBe(0);
+    expect(pm[11]).toBe(-1);
+  });
+
+  it('gestures land under the finger on the zoomed picture: a drag puts the object where the finger is', () => {
+    const t = placed();
+    t.loop.gesture({ type: 'zoom', dy: 115 });
+    t.step(2);
+    const z = t.loop.state().zoom;
+    const zl = zoomLens(t.session.lens, z);
+    const px = (ndc: [number, number]): [number, number] => [((ndc[0] + 1) / 2) * 360, ((1 - ndc[1]) / 2) * 640];
+    const unpx = (x: number, y: number): [number, number] => [(x / 360) * 2 - 1, 1 - (y / 640) * 2];
+    // the finger goes down where the zoomed picture shows the object and slides to another point of the zoomed picture
+    const [sx, sy] = px(project(EYE, zl, t.loop.placement!.p)!);
+    t.loop.gesture({ type: 'drag-start', x: sx, y: sy });
+    const [tx, ty] = [sx + 25, sy - 30];
+    t.loop.gesture({ type: 'drag', x: tx, y: ty });
+    t.step();
+    const [wx, wy] = unpx(tx, ty);
+    const got = project(EYE, zl, t.loop.placement!.p)!;
+    expect(got[0]).toBeCloseTo(wx, 2);
+    expect(got[1]).toBeCloseTo(wy, 2);
+  });
+
+  it('the same finger travel moves the object 1/zoom as far in the room (it follows the finger on the zoomed picture)', () => {
+    const drag = (zoomDy: number) => {
+      const t = placed();
+      if (zoomDy) t.loop.gesture({ type: 'zoom', dy: zoomDy });
+      t.step(2);
+      const x0 = t.loop.placement!.p[0];
+      t.loop.gesture({ type: 'drag-start', x: 180, y: 320 });
+      t.loop.gesture({ type: 'drag', x: 220, y: 320 });
+      t.step();
+      return { dx: t.loop.placement!.p[0] - x0, z: t.loop.state().zoom };
+    };
+    const a = drag(0);
+    const b = drag(115);
+    expect(a.dx).toBeGreaterThan(0.01);
+    expect(b.dx * b.z).toBeCloseTo(a.dx, 2);
+  });
+
+  it('Height strip travel lifts the object 1/zoom as far in the room', () => {
+    const lift = (zoomDy: number) => {
+      const t = placed();
+      if (zoomDy) t.loop.gesture({ type: 'zoom', dy: zoomDy });
+      t.step(2);
+      t.loop.gesture({ type: 'lift', dy: 50 });
+      t.step();
+      return { h: t.loop.placement!.h ?? 0, z: t.loop.state().zoom };
+    };
+    const a = lift(0);
+    const b = lift(115);
+    expect(a.h).toBeGreaterThan(0);
+    expect(b.h * b.z).toBeCloseTo(a.h, 4);
+  });
+
+  it('a take records the zoom per frame; a take that never zoomed has no zoom track; the camera clip gets the un-zoomed picture', () => {
+    const t = placed();
+    let n = 0;
+    const pushed: unknown[] = [];
+    t.loop.startRecording({ push: (p) => (pushed.push(p), n++) });
+    for (let i = 0; i < 30; i++) {
+      if (i === 10) t.loop.gesture({ type: 'zoom', dy: 100 });
+      if (i === 22) t.loop.gesture({ type: 'zoom-reset' });
+      t.step();
+    }
+    const rec = t.loop.stopRecording()!;
+    expect(pushed.every((p) => p === t.painter.cameraPicture)).toBe(true);
+    const take = buildWorldTake(rec.samples, { fps: 30 })!;
+    expect(take.tracks.zm).toBeTruthy();
+    // the un-zoomed lens is what is stored, the zoom beside it
+    expect(sampleWorldTake(take, 2 / 30).zoom).toBeUndefined();
+    expect(sampleWorldTake(take, 2 / 30).lens[0]).toBeCloseTo(t.session.lens[0], 4);
+    const mid = sampleWorldTake(take, 16 / 30);
+    expect(mid.zoom).toBeCloseTo(Math.exp(0.6), 2);
+    expect(mid.lens[0]).toBeCloseTo(t.session.lens[0] * Math.exp(0.6), 2);
+    expect(sampleWorldTake(take, 29 / 30).zoom).toBeUndefined();
+
+    const t2 = placed();
+    t2.loop.startRecording({ push: () => n++ });
+    t2.step(10);
+    const plain = buildWorldTake(t2.loop.stopRecording()!.samples, { fps: 30 })!;
+    expect(plain.tracks.zm).toBeUndefined();
+    expect(sampleWorldTake(plain, 0.1).zoom).toBeUndefined();
+  });
+
+  it('the saved video graph zooms the camera clip by the take, and adds nothing for a take that never zoomed', () => {
+    const reg = new Registry();
+    registerBuiltins(reg);
+    const g0 = createGraph('z');
+    const ar = addNode(g0, reg, 'world-ar', { x: 0, y: 0 });
+    const obj = addNode(ar.graph, reg, 'object-3d', { x: 200, y: 0 });
+    const g = connect(obj.graph, reg, { node: ar.node.id, port: 'camera' }, { node: obj.node.id, port: 'camera' });
+    const mk = (zoom: boolean) => {
+      const t = placed();
+      let n = 0;
+      t.loop.startRecording({ push: () => n++ });
+      for (let i = 0; i < 20; i++) {
+        if (zoom && i === 8) t.loop.gesture({ type: 'zoom', dy: 100 });
+        t.step();
+      }
+      return buildWorldTake(t.loop.stopRecording()!.samples, { fps: 30 })!;
+    };
+    const opts = { arId: ar.node.id, viewedId: obj.node.id, viewedPort: 'image', clipAsset: 'clip', width: 540, height: 960, output: {} };
+    const zoomed = buildWorldArVideoGraph(g, { ...opts, take: mk(true) })!;
+    const zNode = zoomed.graph.nodes.find((n) => n.label === 'Camera zoom')!;
+    expect(zNode.type).toBe('transform');
+    expect(zoomed.graph.edges.some((e) => e.from.node === ar.node.id && e.from.port === 'zoom' && e.to.node === zNode.id && e.to.port === 'scale')).toBe(true);
+    const merge = zoomed.graph.nodes.find((n) => n.label === 'Object over camera')!;
+    expect(zoomed.graph.edges.find((e) => e.to.node === merge.id && e.to.port === 'background')!.from.node).toBe(zNode.id);
+    const plain = buildWorldArVideoGraph(g, { ...opts, take: mk(false) })!;
+    expect(plain.graph.nodes.some((n) => n.label === 'Camera zoom')).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ recording rate */
+
+describe('the recording rate', () => {
+  it('Match project follows the project; an asked rate is lowered to what the AR camera delivers', () => {
+    expect(effectiveRecordRate(null, 25, 30)).toEqual({ fps: 25, asked: 25, clamped: false });
+    expect(effectiveRecordRate(30, 25, 30)).toEqual({ fps: 30, asked: 30, clamped: false });
+    expect(effectiveRecordRate(30, 25, 29)).toEqual({ fps: 30, asked: 30, clamped: false }); // a 30 Hz session measures 29 to 31
+    expect(effectiveRecordRate(60, 25, 30)).toEqual({ fps: 30, asked: 60, clamped: true });
+    expect(effectiveRecordRate(60, 25, 60)).toEqual({ fps: 60, asked: 60, clamped: false });
+    expect(effectiveRecordRate(30, 24, 60)).toEqual({ fps: 30, asked: 30, clamped: false });
+    expect(effectiveRecordRate(60, 24, 0)).toEqual({ fps: 60, asked: 60, clamped: false }); // not measured yet: nothing is lowered
+    expect(effectiveRecordRate(30, 24, 20)).toEqual({ fps: 20, asked: 30, clamped: true });
+  });
+
+  it('the loop measures the session and clamps a 60 request on a 30 per second session, not on a 60 one', () => {
+    const run = (ms: number, asked: number) => {
+      const t = setup();
+      t.loop.setRecordRate(asked);
+      for (let i = 0; i < 40; i++) {
+        t.tick(ms);
+        t.session.step(ms);
+      }
+      return t.loop.recordRateFor(25);
+    };
+    expect(run(33, 60)).toMatchObject({ fps: 30, asked: 60, clamped: true });
+    expect(run(16, 60)).toMatchObject({ fps: 60, clamped: false });
+    expect(run(33, 30)).toMatchObject({ fps: 30, clamped: false });
+  });
+});
+
+describe('the recording rate through the controller', () => {
+  async function recordAt(recordRate: number | null | undefined, ms: number, projectFps = 24) {
+    const xr = new FakeXrSystem();
+    xr.onSession = (s) => {
+      s.camera = { width: 1080, height: 1920 };
+      s.hit = FLOOR;
+    };
+    const t = controller(xr);
+    const h = await t.openWith({ recordRate, fps: projectFps });
+    const step = (n: number) => {
+      for (let i = 0; i < n; i++) {
+        t.f.advance(ms);
+        xr.session!.step(ms);
+      }
+    };
+    step(15);
+    h.place();
+    step(2);
+    h.toggleRecord();
+    step(30);
+    h.toggleRecord();
+    await t.flush();
+    await t.flush();
+    return { t, take: t.takes[0] };
+  }
+
+  it('Match project (the default) records at the project rate, as before', async () => {
+    const { t, take } = await recordAt(undefined, 33, 24);
+    expect(take.take!.fps).toBe(24);
+    expect(take.rate).toEqual({ fps: 24, asked: 24, clamped: false });
+    expect(t.f.recorder.startOpts!.fps).toBe(24);
+  });
+
+  it('30 gives a 30 per second take and a 30 per second video graph, also when the project is 24', async () => {
+    const { t, take } = await recordAt(30, 33, 24);
+    expect(take.take!.fps).toBe(30);
+    expect(take.rate!.clamped).toBe(false);
+    expect(t.f.recorder.startOpts!.fps).toBe(30);
+    const reg = new Registry();
+    registerBuiltins(reg);
+    const g0 = createGraph('r');
+    const ar = addNode(g0, reg, 'world-ar', { x: 0, y: 0 });
+    const obj = addNode(ar.graph, reg, 'object-3d', { x: 200, y: 0 });
+    const built = buildWorldArVideoGraph(connect(obj.graph, reg, { node: ar.node.id, port: 'camera' }, { node: obj.node.id, port: 'camera' }), {
+      arId: ar.node.id, viewedId: obj.node.id, viewedPort: 'image', take: take.take!, clipAsset: 'clip', width: 540, height: 960, output: {},
+    })!;
+    expect(built.graph.project.fps).toBe(30);
+  });
+
+  it('60 asked on a 30 per second session records at 30 and says so', async () => {
+    const { t, take } = await recordAt(60, 33, 24);
+    expect(take.take!.fps).toBe(30);
+    expect(take.rate).toEqual({ fps: 30, asked: 60, clamped: true });
+    expect(t.f.recorder.startOpts!.fps).toBe(30);
+    const state = t.states[t.states.length - 1];
+    expect(state.askedFps).toBe(60);
+    expect(state.recordFps).toBe(30);
+  });
+
+  it('60 asked on a 60 per second session records at 60', async () => {
+    const { take } = await recordAt(60, 16, 24);
+    expect(take.take!.fps).toBe(60);
+    expect(take.rate!.clamped).toBe(false);
+  });
 });

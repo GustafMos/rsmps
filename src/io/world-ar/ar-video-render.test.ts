@@ -11,7 +11,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { addNode, connect, createGraph } from '../../engine/graph';
 import { arVideoSize, buildWorldArVideoGraph } from '../../engine/lib/ar-video-graph';
 import { qAxisAngle, qMul } from '../../engine/lib/motion-math';
-import { buildWorldTake, type WorldMoment, type WorldSample } from '../../engine/lib/world-take';
+import { buildWorldTake, sampleWorldTake, type WorldMoment, type WorldSample } from '../../engine/lib/world-take';
 import { lensFromFov, type XrPose, type Lens } from '../../engine/lib/xr-math';
 import { harness, type Harness } from '../../engine/testing';
 import type { AssetInfo, GraphDoc, Host, ImageValue } from '../../engine/types';
@@ -31,6 +31,9 @@ class Painter implements ArPainter {
   camera() {
     return { canvas: true };
   }
+  backdrop() {
+    return true;
+  }
 }
 class Source implements ArPictureSource {
   private seq = 0;
@@ -48,7 +51,7 @@ class Source implements ArPictureSource {
 }
 
 /** Drive the real loop: place away from the origin, walk, pinch and twist while recording. */
-function record(lens: Lens, camera: { width: number; height: number }) {
+function record(lens: Lens, camera: { width: number; height: number }, zooms: Record<number, number> = {}) {
   const session = new FakeXrSession({ lens, width: camera.width, height: camera.height });
   session.camera = camera;
   session.viewer = { p: [0, 1.4, 0], q: qAxisAngle('x', -25) };
@@ -92,6 +95,7 @@ function record(lens: Lens, camera: { width: number; height: number }) {
       loop.gesture({ type: 'pinch', factor: 1.4 });
       loop.gesture({ type: 'twist', deg: 35 });
     }
+    if (zooms[i]) loop.gesture(zooms[i] === -1 ? { type: 'zoom-reset' } : { type: 'zoom', dy: zooms[i] });
     if (i === 22) loop.gesture({ type: 'lift', dy: 60 }); // raised off the floor: the video must show it as high as live did
     step();
   }
@@ -175,7 +179,7 @@ describe('the finished AR video shows the object where the AR view showed it', (
       let compared = 0;
       for (const i of [0, 2, 6, 12, 20, 30, 40]) {
         const s = samples[Math.min(i, samples.length - 1)];
-        const moment: WorldMoment = { view: s.view, lens: s.lens, object: s.object };
+        const moment: WorldMoment = { view: s.view, lens: s.lens, zoom: s.zoom, object: s.object };
         // live: the way EnginePictureSource renders for a moment
         const stamped = stampWorldAr(p.graph, worldArNodeIds(p.graph), moment);
         const liveRes = await h.engine.evaluate({ graph: stamped, node: p.merge, canvas: live, proxy: 1, quality: 'preview' });
@@ -202,4 +206,56 @@ describe('the finished AR video shows the object where the AR view showed it', (
       expect(compared).toBeGreaterThan(3);
     }, 120000);
   }
+});
+
+describe('a zoom change during the recording reaches the finished video', () => {
+  it('the zoom is in the take, the clip is zoomed by it, and the object stays where live showed it, at its zoomed size', async () => {
+    const shape = SHAPES[0];
+    // zoom in to about 1.9x, further to about 2.7x, then back to 1x
+    const samples = record(shape.lens, shape.camera, { 8: 107, 16: 55, 30: -1 });
+    const zooms = samples.map((s) => s.zoom ?? 1);
+    expect(Math.max(...zooms)).toBeGreaterThan(2.5);
+    expect(zooms[0]).toBe(1);
+    expect(zooms[zooms.length - 1]).toBe(1);
+    const take = buildWorldTake(samples, { fps: FPS })!;
+    expect(take.tracks.zm).toBeTruthy();
+    const p = project();
+    const size = arVideoSize(shape.clip, { width: 100, height: 100 }, 1280);
+    clipColour = h.solid(size.width, size.height, [CLIP_RGB[0], CLIP_RGB[1], CLIP_RGB[2], 255]);
+    const built = buildWorldArVideoGraph(p.graph, { arId: p.ar, viewedId: p.merge, viewedPort: 'image', take, clipAsset: 'clip', width: size.width, height: size.height, output: {} })!;
+    const mergeId = built.graph.nodes.find((n) => n.label === 'Object over camera')!.id;
+    const zoomId = built.graph.nodes.find((n) => n.label === 'Camera zoom')!.id;
+    const live = pictureSize(shape.lens, 960);
+    const isObj = (q: [number, number, number, number]) => q[3] > 40;
+    const isNotClip = (q: [number, number, number, number]) => Math.abs(q[0] - CLIP_RGB[0]) + Math.abs(q[1] - CLIP_RGB[1]) + Math.abs(q[2] - CLIP_RGB[2]) > 60;
+    const covers: number[] = [];
+    let compared = 0;
+    for (const i of [6, 10, 14, 20, 26, 34, 40]) {
+      const s = samples[Math.min(i, samples.length - 1)];
+      if (!s.object) continue;
+      const moment: WorldMoment = { view: s.view, lens: s.lens, zoom: s.zoom, object: s.object };
+      const stamped = stampWorldAr(p.graph, worldArNodeIds(p.graph), moment);
+      const liveRes = await h.engine.evaluate({ graph: stamped, node: p.merge, canvas: live, proxy: 1, quality: 'preview' });
+      const liveC = await centroid(liveRes.value as ImageValue, isObj);
+      const res = await h.engine.evaluate({ graph: built.graph, node: mergeId, seconds: (s.frame ?? 0) / FPS });
+      expect(res.errors.size, [...res.errors.values()].join(';')).toBe(0);
+      const vidC = await centroid(res.value as ImageValue, isNotClip);
+      // the clip is zoomed by the take's zoom for this frame: the Camera zoom node's scale is wired to the node's Zoom output
+      expect(built.graph.edges.some((e) => e.from.node === p.ar && e.from.port === 'zoom' && e.to.node === zoomId && e.to.port === 'scale')).toBe(true);
+      expect(sampleWorldTake(take, (s.frame ?? 0) / FPS).zoom ?? 1).toBeCloseTo(s.zoom ?? 1, 2);
+      // and zooming really enlarges the object: the same pose without the zoom shows it smaller
+      if ((s.zoom ?? 1) > 1.5) {
+        const flat = stampWorldAr(p.graph, worldArNodeIds(p.graph), { view: s.view, lens: [s.lens[0] / s.zoom!, s.lens[1] / s.zoom!, s.lens[2] / s.zoom!, s.lens[3] / s.zoom!], object: s.object });
+        const flatRes = await h.engine.evaluate({ graph: flat, node: p.merge, canvas: live, proxy: 1, quality: 'preview' });
+        const flatC = await centroid(flatRes.value as ImageValue, isObj);
+        expect(liveC.cover / flatC.cover, `frame ${i}: zoomed ${liveC.cover} unzoomed ${flatC.cover}`).toBeGreaterThan(1.5);
+      }
+      expect(Math.abs(vidC.x - liveC.x), `frame ${i}: x live ${liveC.x} video ${vidC.x}`).toBeLessThan(0.03);
+      expect(Math.abs(vidC.y - liveC.y), `frame ${i}: y live ${liveC.y} video ${vidC.y}`).toBeLessThan(0.03);
+      expect(Math.abs(vidC.cover / liveC.cover - 1), `frame ${i}: size live ${liveC.cover} video ${vidC.cover}`).toBeLessThan(0.1);
+      covers.push(vidC.cover);
+      compared++;
+    }
+    expect(compared).toBeGreaterThan(3);
+  }, 120000);
 });

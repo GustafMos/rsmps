@@ -104,7 +104,18 @@ export function buildWorldArVideoGraph(graph: GraphDoc, o: ArVideoOptions): ArVi
   if (o.clipAsset) {
     const mergeId = fresh('ar-video-merge');
     extra.push({ id: mergeId, type: 'merge', x: arNode.x + 200, y: arNode.y + 120, label: 'Object over camera', params: { mode: 'normal', opacity: 1, fit: 'stretch', center: [0.5, 0.5], scale: 1 } });
-    edges.push({ id: `${mergeId}-bg`, from: { node: pictureId, port: 'image' }, to: { node: mergeId, port: 'background' } });
+    // A take that zoomed: the camera clip is the full picture, so the video zooms it the way the AR view did, by the take's zoom at
+    // each frame (the World AR Camera's Zoom output into a Transform's scale, about the middle). The object is already zoomed: the
+    // played-back lens carries the same factor. Takes without a zoom track add nothing.
+    let backdrop = { node: pictureId, port: 'image' };
+    if (o.take.tracks.zm) {
+      const zoomId = fresh('ar-video-zoom');
+      extra.push({ id: zoomId, type: 'transform', x: arNode.x + 100, y: arNode.y + 160, label: 'Camera zoom', params: { translate: [0, 0], rotate: 0, scale: 1, stretch: [1, 1], pivot: [0.5, 0.5], edge: 'clamp', filter: 'linear' } });
+      edges.push({ id: `${zoomId}-src`, from: backdrop, to: { node: zoomId, port: 'image' } });
+      edges.push({ id: `${zoomId}-zoom`, from: { node: ar, port: 'zoom' }, to: { node: zoomId, port: 'scale' } });
+      backdrop = { node: zoomId, port: 'image' };
+    }
+    edges.push({ id: `${mergeId}-bg`, from: backdrop, to: { node: mergeId, port: 'background' } });
     edges.push({ id: `${mergeId}-fg`, from: last, to: { node: mergeId, port: 'foreground' } });
     last = { node: mergeId, port: 'image' };
   }

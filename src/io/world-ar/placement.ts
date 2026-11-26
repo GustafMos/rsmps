@@ -112,7 +112,11 @@ export type Gesture =
   /** Two fingers (or the Height strip) moved up the screen by `dy` CSS pixels (negative = down). */
   | { type: 'lift'; dy: number }
   /** Double tap on the Height strip: back onto the surface. */
-  | { type: 'lift-reset' };
+  | { type: 'lift-reset' }
+  /** The Zoom strip moved up the screen by `dy` CSS pixels (negative = down): zoom in / out. */
+  | { type: 'zoom'; dy: number }
+  /** Double tap on the Zoom strip: back to 1x. */
+  | { type: 'zoom-reset' };
 
 /** A two-finger gesture is a lift or a turn/resize once the fingers have travelled this far (CSS pixels); until then nothing happens. */
 export const MULTI_DEAD = 8;

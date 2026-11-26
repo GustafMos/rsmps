@@ -63,6 +63,12 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
       </p>
       <p className="rs-insp__hint">In the AR view: move the phone slowly until a ring appears on the floor or a table, tap to place, drag to move, two fingers to turn and resize. Record saves the movement here as a take, with the camera picture as a clip where the browser hands it over.</p>
       <p className="rs-insp__hint">
+        Zoom (1x to 4x) is the strip on the left edge of the AR view: drag up to zoom in, double tap for 1x. It is digital, the phone's AR camera cannot change its real zoom, and it needs the camera picture. The recording keeps the full camera picture and notes the zoom, so the saved video zooms the same way.
+      </p>
+      <p className="rs-insp__hint">
+        Recording rate (in the AR view settings below) is how many times a second the movement and the camera picture are taken. The phone's AR camera often runs at 30 per second: if you ask for more, it records at what the phone gives, and the AR view and the message after recording say so.
+      </p>
+      <p className="rs-insp__hint">
         The Picture output is what the camera sees right now. Wire it into a Material's colour map, or into any effect, to use the room as a texture. In the AR view it is the AR camera picture; outside it, the back camera of this device. It only costs work while it is wired.
       </p>
       {active && !active.state().features.cameraAccess && <p className="rs-insp__hint" role="status">This phone does not hand over the camera picture in AR, so the Picture output is transparent while the AR view is open.</p>}
