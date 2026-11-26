@@ -80,6 +80,7 @@
 .rs-viewer__rec:disabled { opacity: 0.6; cursor: default; }
 .rs-viewer__recdot { width: 12px; height: 12px; border-radius: 50%; background: #e5484d; }
 .rs-viewer__rec.is-on { border-color: #e5484d; }
+.rs-viewer__reccancel { padding-left: var(--s-2); border-left: 1px solid var(--line-strong); font-weight: 400; color: var(--text-dim); }
 .rs-viewer__rec.is-on .rs-viewer__recdot { border-radius: 2px; animation: rs-recblink 1s steps(2, start) infinite; }
 @keyframes rs-recblink { to { opacity: 0.35; } }
 @media (pointer: coarse) { .rs-viewer__rec { min-height: var(--touch, 44px); } }

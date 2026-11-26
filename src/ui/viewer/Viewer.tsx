@@ -444,18 +444,21 @@ function ViewerRecordButton() {
   const target = ui.phase !== 'idle' && ui.nodeId ? ui.nodeId : pick;
   const mine = ui.nodeId === target;
   const recording = mine && ui.phase === 'recording';
+  // A smooth take is rendered after Stop: the button then shows how far that is, and a tap on it cancels (the raw clip is kept).
+  const rendering = mine && ui.phase === 'rendering';
   return (
     <button
       className={`rs-viewer__rec${recording ? ' is-on' : ''}`}
       disabled={ui.phase === 'saving'}
-      title={recording ? 'Stop and save the clip' : 'Record through the Recorder node: shows it in the viewer, starts playback and records picture and sound'}
-      aria-label={recording ? 'Stop recording' : 'Record'}
+      title={rendering ? 'The effects are being rendered onto the recording. Press to cancel: the raw camera clip stays in Media' : recording ? (ui.smooth ? 'Stop: the clip is then rendered and saved' : 'Stop and save the clip') : 'Record through the Recorder node: shows it in the viewer, starts playback and records picture and sound'}
+      aria-label={rendering ? 'Cancel rendering' : recording ? 'Stop recording' : 'Record'}
       onPointerDown={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
-      onClick={() => recorder.toggle(target, recorderSettings(params))}
+      onClick={() => (rendering ? recorder.cancelRender() : recorder.toggle(target, recorderSettings(params)))}
     >
       <span className="rs-viewer__recdot" />
       {recordLabel(ui, mine)}
+      {rendering && <span className="rs-viewer__reccancel">Cancel</span>}
     </button>
   );
 }

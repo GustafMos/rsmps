@@ -262,6 +262,17 @@ export const createIo: CreateIo = async () => {
     phone,
     sensors,
     liveRecorder,
+    take: {
+      drawable: (source) => library.live.drawable(source),
+      captureSignals(fps) {
+        const t0 = performance.now();
+        const got = router.startCapture(() => Math.floor(((performance.now() - t0) * fps) / 1000));
+        return () => {
+          router.stopCapture();
+          return got.size ? got : null;
+        };
+      },
+    },
     addons: new AddonsImpl(desktop),
     capabilities: () => new Set([...(phone.available ? (['local-server'] as const) : []), ...(desktop ? (['desktop'] as const) : [])]),
     stream: {

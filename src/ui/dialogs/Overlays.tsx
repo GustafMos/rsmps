@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Icon } from '../components/Icon';
 import { SUPPORT } from '../supportCopy';
 import { useApp, useEd } from '../store/context';
+import { formatRemaining, remainingSeconds } from '../store/recorder';
 import { ExportDialog } from './ExportDialog';
 import { PluginsDialog } from './PluginsDialog';
 import { PresetsDialog, SavePresetDialog } from './PresetsDialog';
@@ -79,12 +80,21 @@ export function SupportCard() {
 export function ExportBar() {
   const { ed } = useApp();
   const job = useEd((s) => s.exportJob);
-  if (!job) return null;
+  // When this export began, to say how long it still needs. An export renders every frame, however long each one takes: the file
+  // is smooth on any device, only the waiting differs, so the bar says how much waiting is left.
+  const began = useRef(0);
+  if (!job) {
+    began.current = 0;
+    return null;
+  }
+  if (!began.current) began.current = performance.now();
+  const left = formatRemaining(remainingSeconds((performance.now() - began.current) / 1000, job.fraction));
   return (
-    <div className="rs-expbar" role="status">
+    <div className="rs-expbar" role="status" title="Every frame is rendered in full, one after the other: the file plays smoothly however long this takes.">
       <div className="rs-dlg__bar"><div style={{ width: `${Math.round(job.fraction * 100)}%` }} /></div>
       <div className="rs-dlg__row">
         <span className="rs-mono" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.label}</span>
+        {left && <span className="rs-num">{left}</span>}
         <span className="rs-num">{Math.round(job.fraction * 100)}%</span>
         <button className="rs-btn rs-btn--danger" onClick={() => ed.cancelExport()}>Cancel</button>
       </div>

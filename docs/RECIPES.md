@@ -153,14 +153,56 @@ To keep what you do live (a camera through effects, a performance with a MIDI co
 
 1. Add a **Recorder** (category Time) where the picture you want passes: before the Output for the finished look, right after the
    Webcam for the raw camera. It passes the picture on unchanged.
-2. Select it and press **Record**. The viewer switches to that node, playback starts, and what the viewer shows is recorded with
-   the sound that is playing (press Enable audio first for sound).
+2. Select it and press **Record** (or the Record button in the corner of the viewer). The viewer switches to that node, playback
+   starts, and the take is recorded with the sound that is playing (press Enable audio first for sound).
 3. Press **Stop**: the clip is saved to Media. Use it with a Media In, or export it.
+
+**Quality** decides how the clip is made:
+
+- **As seen, instant** records exactly what the viewer shows. The clip is there the moment you stop, and everything you do while
+  recording (sliders, a MIDI controller) is in it. It is only as smooth as the preview: when the device cannot keep up with the
+  effects, the clip stutters the same way. Raise the preview scale for a sharp clip, and keep the window visible.
+- **Smooth, effects after** records the camera itself (every Webcam, Phone Camera or URL / Stream that feeds the Recorder, inside
+  groups too) at its own frame rate, which costs almost nothing, together with the sound as you hear it. The preview may stutter
+  while you record; that does not matter. When you stop, the effects are rendered onto the recording frame by frame, each frame at
+  the moment it was seen at, so the clip is smooth however slow the device is. The rendering takes a while (on a phone often longer
+  than the take itself): the Recorder shows "Rendering 42%" with the time left and a **Cancel**. Keep the page open and on screen.
+- **Automatic** (the default) is the smooth way on a phone or tablet and the instant way on a computer.
+
+A smooth recording, in detail:
+
+- The clip has the project frame rate and the frame of the Output (the long side at most **Clip size**), like an export. If the
+  camera runs at another rate than the project, the Recorder says so while recording: set the project frame rate to the camera's
+  (25 or 30) and every camera picture becomes one frame of the clip.
+- The sound is the recording of what was heard (the sound wired into the Recorder, else what the Audio Output plays). It is not
+  rendered again, so a microphone, a live synth or a hand on a fader sound exactly as they did.
+- The raw camera clips go to Media as "Webcam raw take ..." (the first one carries the sound) and stay there with **Keep raw
+  clips** on: put one in a Media In to try other effects on the same take. If the rendering fails or you cancel it, they are
+  always kept, the message says where they are, and **Render again** on the Recorder makes the clip from them, with the effects
+  as they are at that moment.
+- The clip is rendered with the settings as they are when you stop. Changes made by hand DURING the take are not replayed as a
+  performance: for that, use "As seen".
+- Recorded along with the picture: motion sensors (Phone Motion and AR Camera nodes that feed the Recorder record a take for the
+  clip; a project that loops gets the motion of its first pass only) and the values pictures take from live sound (Sound to
+  Numbers on a microphone, for example, needs Enable audio). Not recorded: a Webcam's **Freeze** (the raw clip keeps running),
+  and a live picture that is not upstream of the Recorder.
+- Pausing ends the take, as does the end of a project that neither loops nor runs on. Do not move the playhead while recording.
+- Up to 4 live pictures are recorded side by side; a phone is comfortable with one or two. With nothing live upstream (a video clip
+  with effects) there is nothing to record separately, so the Recorder records as seen and says so: use **Export** for a smooth
+  file of a clip with effects.
+- Storage: a raw clip takes about 25 MB a minute at 1280 x 720 and 55 MB a minute at 1920 x 1080 (30 pictures a second), the
+  rendered clip about as much again, and both are held in memory until they are saved. A take ends by itself after 30 minutes
+  or 1.5 GB. On a phone, takes of a few minutes are a sensible size.
+- Nothing in the project is changed: the rendering works on a copy, and the viewer goes back to what it showed.
 
 **While recording** decides what the clock does. **Time runs on** (the default): time keeps going until you stop, so effects keep
 changing instead of repeating every loop; the project plays with Loop off for the take. Movements that are a cycle by nature (a
-spin, a wobble) still come round. **Loop the project**: plays as usual, repeating at the project length. The clip is what the
-viewer shows, so raise the preview scale for a sharp one, and keep the window visible.
+spin, a wobble) still come round. **Loop the project**: plays as usual, repeating at the project length. A smooth recording is
+rendered with the same clock, frame by frame.
+
+**Export is always smooth.** Exporting an Output does not record the preview: it renders every frame of the project in full, one
+after the other, and writes each at its exact place in time. On a slow device only the waiting is longer (the bar shows the frame
+it is on and the time left); the file plays at the right speed with no frame missing.
 
 ## Go live on Twitch or YouTube (desktop app)
 

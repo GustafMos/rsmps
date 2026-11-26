@@ -6,7 +6,13 @@ import { defineAudio } from '../../audio/types';
  *
  * The node itself only passes its picture on, so it can sit anywhere in a chain (record the raw camera AND the finished look with
  * two of them). The recording is made by the app (src/ui/store/recorder.ts): the Record button in the inspector shows this node
- * in the viewer, starts playback and records what the viewer shows together with the sound mix. Exports are not affected.
+ * in the viewer, starts playback and records. Exports are not affected.
+ *
+ * `quality` decides how the clip is made:
+ *  - seen: what the viewer shows is recorded as it happens. Instant, but only as smooth as the preview;
+ *  - smooth: the live pictures that feed this node (cameras, streams) are recorded as they come in, and the effects are rendered
+ *    onto them when the recording stops, every frame at the time it was seen at. Smooth on a slow device; the rendering takes a while;
+ *  - auto: smooth on a phone or tablet, as seen on a computer.
  *
  * `time` decides what the clock does while recording:
  *  - loop: the project plays as usual, repeating at its length;
@@ -22,6 +28,17 @@ export default defineNode({
   inputs: { image: { type: 'image', required: true, label: 'Image' }, audio: { type: 'audio', label: 'Sound' } },
   outputs: { image: { type: 'image', label: 'Image' }, audio: { type: 'audio', label: 'Sound' } },
   params: {
+    quality: {
+      type: 'enum',
+      default: 'auto',
+      label: 'Quality',
+      options: [
+        { value: 'auto', label: 'Automatic' },
+        { value: 'smooth', label: 'Smooth, effects after' },
+        { value: 'seen', label: 'As seen, instant' },
+      ],
+      hint: 'Smooth, effects after: records the camera itself at its full frame rate and renders the effects onto it when you stop. The clip is smooth even when the preview stutters; the rendering takes a while. As seen, instant: records exactly what the viewer shows, stutters included; changes you make while recording are in the clip. Automatic: smooth on a phone or tablet, as seen on a computer.',
+    },
     time: {
       type: 'enum',
       default: 'run',
@@ -43,8 +60,9 @@ export default defineNode({
         { value: '1920', label: 'Up to 1920 px' },
         { value: '3840', label: 'Up to 3840 px' },
       ],
-      hint: 'Longest side of the clip. The recording is what the viewer shows, so a low preview scale gives a soft clip: raise it for a sharp one.',
+      hint: 'Longest side of the clip. As seen: the recording is what the viewer shows, so a low preview scale gives a soft clip: raise it for a sharp one. Smooth: the clip is rendered at full quality whatever the preview scale is.',
     },
+    keepRaw: { type: 'bool', default: true, label: 'Keep raw clips', hint: 'Smooth recordings: the untouched camera clips stay in Media after the clip is rendered, so you can put them in a Media In and try other effects on the same take. Off: they are removed once the clip is made (they are always kept when rendering fails or is cancelled).' },
   },
   summary: (p) => `${p.time === 'run' ? 'time runs on' : 'loops'}${p.sound ? ' · with sound' : ''}`,
   render(ctx) {
