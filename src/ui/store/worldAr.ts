@@ -36,10 +36,12 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
   const overlay = createArOverlay();
   const params = node?.params ?? {};
   let recorded = false;
+  let tookTake = false;
   const saveTake = (t: WorldArTake) => {
     const m = takeMessage(t);
     ed.toast(m.text, m.kind);
     if (!t.take) return;
+    tookTake = true;
     recorded = !!t.clip;
     ed.beginHold(); // the take and its clip node: one undo step
     // the take remembers its camera clip and what was shown, so the video can be made later, also after a reload
@@ -59,12 +61,11 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
     (handle) => {
       overlay.attach(handle);
       overlay.update(handle.state());
-      void handle.closed.then((end) => {
+      void handle.closed.then(async (end) => {
         overlay.remove();
         if (end.error) ed.toast(end.error, 'error');
-        // the AR session is over, so the camera and the GPU are free: render the video now (plain function, nothing awaited in the session)
-        const now = ed.state.graph.nodes.find((n) => n.id === nodeId);
-        if (recorded && now?.params.saveVideo !== false) void getLive(app).worldArVideo.start(fullId);
+        // the AR session is over (the take and its clip are stored, the camera and the GPU are free): render the video now
+        await saveVideoAfter(app, fullId, nodeId, { tookTake, recorded });
       });
     },
     (err) => {
@@ -72,4 +73,29 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
       ed.toast(err instanceof Error ? err.message : String(err), 'error');
     },
   );
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * After the AR view closed (Exit, the phone's Back button, or the system ending the session): make the finished video of the
+ * recording when the node's "Save video" is on. Never silent: whenever no video is started, a plain message says why.
+ */
+export async function saveVideoAfter(app: Ctx, fullId: string, nodeId: string, o: { tookTake: boolean; recorded: boolean }, wait = 250): Promise<void> {
+  const { ed } = app;
+  try {
+    const node = ed.state.graph.nodes.find((n) => n.id === nodeId);
+    if (!o.tookTake || node?.params.saveVideo === false) return;
+    if (!o.recorded) {
+      ed.toast('No finished video was made: the phone did not hand the camera picture over, so there is only the movement. Press "Save object alone as video" on the World AR Camera node if you want the object over black.', 'info');
+      return;
+    }
+    const video = getLive(app).worldArVideo;
+    // the camera, the GPU or another render may still be letting go for a moment: wait up to 10 s before refusing
+    for (let i = 0; i < 40 && video.busy(); i++) await sleep(wait);
+    ed.toast('Making the finished video now: the camera picture with the object over it. It is saved to your downloads and to Media when it is ready. Keep this page open.', 'info');
+    await video.start(fullId);
+  } catch (err) {
+    ed.toast(`The video could not be started: ${err instanceof Error ? err.message : String(err)}. Press "Save as video" on the World AR Camera node to try again.`, 'error');
+  }
 }
