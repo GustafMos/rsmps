@@ -11,7 +11,7 @@ const { Editor } = await import('../store/editor');
 const { Registry } = await import('../../engine/define');
 const { registerBuiltins } = await import('../../engine/nodes');
 const { addNode, connect, createGraph } = await import('../../engine/graph');
-const { patchIsNoop, resetPatch, transformOf } = await import('./xform3d');
+const { drivenParams, patchIsNoop, resetPatch, transformOf } = await import('./xform3d');
 const { gizmoTarget } = await import('../viewer/gizmoTarget');
 import type { GraphDoc } from '../../engine/types';
 import type { Io } from '../../io/api';
@@ -184,5 +184,16 @@ describe('which node gets the handles in the viewer', () => {
     expect(gizmoTarget(ed.state.level, [ids[0]], ids[0], ed.state.path, registry)).toBeNull();
     const g = setup(['glass']);
     expect(gizmoTarget(g.ed.state.level, [g.ids[0]], g.ids[0], g.ed.state.path, registry)).toBeNull();
+  });
+});
+
+describe('a vector wire counts as driving the settings it bundles', () => {
+  it('rotation bundle port drives rotX / rotY / rotZ, so Reset and the handles leave them alone', () => {
+    const def = registry.get('object-3d')!;
+    const t = transformOf(def)!;
+    const driven = drivenParams(def, ['rot@xyz', 'posX']);
+    expect([...driven].sort()).toEqual(['posX', 'rot@xyz', 'rotX', 'rotY', 'rotZ']);
+    expect(Object.keys(resetPatch(t, 'rotation', driven))).toEqual([]);
+    expect(Object.keys(resetPatch(t, 'position', driven)).sort()).toEqual(['posY', 'posZ', 'x', 'y']);
   });
 });

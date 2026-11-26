@@ -47,7 +47,7 @@ import { DepthAiPanel } from './DepthAiPanel';
 import { StyleAiPanel } from './StyleAiPanel';
 import { GroupPanel } from './GroupPanel';
 import { defOf, GROUP_TYPE } from '../../engine/group';
-import { patchIsNoop, resetPatch, transformOf, type ResetKind, type Transform3d } from '../lib/xform3d';
+import { drivenParams, patchIsNoop, resetPatch, transformOf, type ResetKind, type Transform3d } from '../lib/xform3d';
 import './inspector.css';
 
 /** Messages that only say what to set up first (nothing is broken): shown as a note, not as an error. */
@@ -284,7 +284,7 @@ function TransformReset({ node, def, wired }: { node: NodeInstance; def: AnyNode
   const { ed } = useApp();
   const t = useMemo(() => transformOf(def), [def]);
   if (!t) return null;
-  const skip = new Set(wired.keys());
+  const skip = drivenParams(def, wired.keys());
   const params: Record<string, unknown> = {};
   for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.default;
   return (

@@ -3,6 +3,7 @@
  * handles in the viewer (viewer/XformGizmo.tsx). Pure.
  */
 import { resolveCamera, type XformP } from '../../engine/lib/gen-3d';
+import { paramBundle } from '../../engine/define';
 import type { AnyNodeDef, CameraValue } from '../../engine/types';
 
 export type ResetKind = 'position' | 'rotation' | 'size' | 'all';
@@ -69,3 +70,14 @@ export function cameraOf(params: Record<string, unknown>, wired: CameraValue | n
 
 /** Nominal radius of the family's objects in scene units before Object scale (primitives and fitted models fill about this). */
 export const OBJECT_RADIUS = 0.95;
+
+/** Params of a node that a wire decides: the wired ports, plus every param a wired bundle (vector) port drives. */
+export function drivenParams(def: AnyNodeDef, ports: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const p of ports) {
+    out.add(p);
+    const b = paramBundle(def, p);
+    if (b) for (const m of b.members) out.add(m);
+  }
+  return out;
+}
