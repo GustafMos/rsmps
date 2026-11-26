@@ -155,6 +155,12 @@ export interface Player {
   subscribe(listener: (state: PlayerState) => void): () => void;
   /** Copy the currently shown image to a PNG blob (for thumbnails / "save frame"). */
   snapshot(): Promise<Blob | null>;
+  /**
+   * Render one node of the current graph at full resolution (proxy 1, final quality, live sources refreshed) and encode it as a PNG (or a JPEG),
+   * whatever the viewer shows. `maxSide` > 0 scales it down so its longer side is at most that. Null when it has no picture.
+   * Used by Stop Motion to take a shot of its input.
+   */
+  grabNode(nodeId: string, port: string | undefined, maxSide?: number, mime?: 'image/png' | 'image/jpeg'): Promise<Blob | null>;
   /** Mute/unmute and volume for the live audio graph. */
   setVolume(volume: number): void;
   /** Resume audio (must be called from a user gesture) and start microphone capture if a mic node exists. */

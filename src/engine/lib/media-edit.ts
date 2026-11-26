@@ -301,6 +301,11 @@ export interface SourceInfo {
   assetIn?: number;
   /** The asset has a sound track. */
   hasAudio?: boolean;
+  /**
+   * The source is a sequence of shots (Stop Motion): one cut per part, in order. `start` and `duration` are seconds of the SOURCE's own
+   * time, so each cut shows `in = start` for `duration`.
+   */
+  parts?: { start: number; duration: number }[];
 }
 
 export const DEFAULT_CLIP_SECONDS = 5;
@@ -314,6 +319,15 @@ export function appendSource(edit: MediaEdit, port: 'clips' | 'sounds', wire: nu
   const clips = [...edit.clips];
   let counter = Number(nextId(edit).slice(1));
   const base = { in: 0, duration, fadeIn: 0, fadeOut: 0, level: 1, name: info.name };
+  if (port === 'clips' && info.parts && info.parts.length > 0) {
+    // a sequence of shots: one cut per shot, laid end to end, each reading its own span of the source
+    let start = editEnd(edit, 'video');
+    info.parts.forEach((part, k) => {
+      clips.push({ ...base, id: `c${counter++}`, kind: 'video', source: wire, track: 0, start, in: part.start, duration: Math.max(MIN_DURATION, part.duration), name: `${info.name} ${k + 1}` });
+      start += Math.max(MIN_DURATION, part.duration);
+    });
+    return { clips: clips.map((c) => (c.link === undefined ? stripLink(c) : c)) };
+  }
   if (port === 'clips') {
     const start = editEnd(edit, 'video');
     const link = info.asset && info.hasAudio ? `l${counter}` : undefined;
@@ -354,4 +368,28 @@ export function remapSources(edit: MediaEdit, port: 'clips' | 'sounds', before: 
   }
   const kept = clips.filter((c) => !(c.link && gone.has(`link:${c.link}`)));
   return { clips: kept };
+}
+
+/**
+ * Bring the cuts of a sequence source (Stop Motion wired into `clips` as wire `wire`) in step with its shots, keeping what was edited:
+ * a part that still has a cut (any clip of this wire whose `in` lies inside the part's span: trimmed, moved or split cuts count) keeps
+ * it; a part without one gets a new cut at the end of the video track; a cut that reads outside every part (its shot was deleted or
+ * moved) is removed. Pure.
+ */
+export function syncParts(edit: MediaEdit, wire: number, info: Pick<SourceInfo, 'name' | 'parts'>): MediaEdit {
+  const parts = info.parts ?? [];
+  const eps = 1e-6;
+  const inPart = (t: number) => parts.findIndex((p) => t >= p.start - eps && t < p.start + p.duration - eps);
+  const clips = edit.clips.filter((c) => !(c.kind === 'video' && c.source === wire && inPart(c.in) < 0));
+  const have = new Set<number>();
+  for (const c of clips) if (c.kind === 'video' && c.source === wire) have.add(inPart(c.in));
+  let counter = Number(nextId({ clips }).slice(1));
+  let start = editEnd({ clips }, 'video');
+  parts.forEach((part, k) => {
+    if (have.has(k)) return;
+    const duration = Math.max(MIN_DURATION, part.duration);
+    clips.push({ id: `c${counter++}`, kind: 'video', source: wire, track: 0, start, in: part.start, duration, fadeIn: 0, fadeOut: 0, level: 1, name: `${info.name} ${k + 1}` });
+    start += duration;
+  });
+  return { clips };
 }

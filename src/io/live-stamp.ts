@@ -41,3 +41,28 @@ export function stampLive(graph: GraphDoc, live: Set<string>, tick: number): Gra
   for (const id of live) if (id.includes(PATH_SEP)) g = updateNodeAtPath(g, id, (n) => ({ ...n, params: { ...n.params, [LIVE_TICK_PARAM]: String(tick) } }));
   return g;
 }
+
+/** Hidden param of Stop Motion that the player stamps while paused: the node then shows the live picture (Shoot view) in "Automatic". */
+export const SHOOT_VIEW_PARAM = 'shootView';
+export const STOP_MOTION_ID = 'stop-motion';
+
+/**
+ * Ids of the Stop Motion nodes the player may put in Shoot view: those that do not feed a Media Timeline (a timeline always gets
+ * the animation, so its cuts look the same paused and playing).
+ */
+export function shootNodeIds(graph: GraphDoc): Set<string> {
+  const ids = new Set<string>();
+  for (const n of graph.nodes) if (n.type === STOP_MOTION_ID) ids.add(n.id);
+  if (ids.size === 0) return ids;
+  for (const t of graph.nodes) {
+    if (t.type !== 'media-timeline') continue;
+    for (const id of upstream(graph, t.id)) ids.delete(id);
+  }
+  return ids;
+}
+
+/** Copy of the graph in which the given Stop Motion nodes are in Shoot view (the picture while paused). */
+export function stampShoot(graph: GraphDoc, ids: Set<string>): GraphDoc {
+  if (ids.size === 0) return graph;
+  return { ...graph, nodes: graph.nodes.map((n) => (ids.has(n.id) ? { ...n, params: { ...n.params, [SHOOT_VIEW_PARAM]: '1' } } : n)) };
+}
