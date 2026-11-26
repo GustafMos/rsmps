@@ -41,9 +41,13 @@ export const MAIN_DWELL_MS = 1500;
 /** Pause between closing one camera and opening the next (Android needs a moment to free the camera). */
 export const RELEASE_GAP_MS = 60;
 /** A visit waits at most this long for the first picture. */
-export const FIRST_FRAME_MS = 3000;
+export const FIRST_FRAME_MS = 5000;
+/** After the element gave no picture, a grab straight from the camera track may still get one within this time. */
+export const GRAB_FRAME_MS = 1500;
+/** Inside ONE visit, opening the visited camera is tried again with these waits (Android frees a camera slowly): about 3.5 s in all. */
+export const OPEN_RETRY_MS = [80, 200, 400, 800, 1500];
 /** The main camera is asked for again this many times (with these waits) before the page gives up on it. */
-export const RETURN_RETRY_MS = [150, 400, 1000];
+export const RETURN_RETRY_MS = [150, 400, 1000, 1500, 2000];
 /** A camera that cannot be visited is left alone for this long, doubling each time up to the largest. */
 export const VISIT_BACKOFF_MS = [5000, 10000, 20000, 40000, 60000];
 /** The scheduler looks at the situation this often. */
@@ -114,7 +118,21 @@ export interface TurnStatus {
   visiting: boolean;
   /** The last visit to this camera failed and the page waits before trying again. */
   failed: boolean;
+  /** Visits that failed in a row, why the last one did (plain words) and when the next try is (ms from now, null: not set). */
+  fails?: number;
+  failReason?: string;
+  retryIn?: number | null;
 }
+
+/** The plain reason a visit failed. */
+export type VisitFail = 'busy' | 'denied' | 'noframe' | 'copy' | 'paused' | 'other';
+export const failWords = (why: VisitFail, detail = ''): string =>
+  why === 'busy' ? 'the camera could not be opened (busy)'
+  : why === 'denied' ? 'the camera was not allowed'
+  : why === 'noframe' ? 'no picture arrived in time'
+  : why === 'copy' ? 'the picture could not be copied'
+  : why === 'paused' ? 'the camera was needed elsewhere'
+  : `the camera could not be opened${detail ? ` (${detail})` : ''}`;
 
 /** The one line the Webcam inspector shows for a camera that takes turns. */
 export function turnLine(s: TurnStatus): string {
@@ -124,7 +142,10 @@ export function turnLine(s: TurnStatus): string {
     return `Main camera: live${s.visitMs !== null ? ` · the other camera visits, a visit takes about ${seconds(s.visitMs + (s.returnMs ?? 0))}` : ''}`;
   }
   const how = s.every > 0 ? `Visited every ${Math.round(s.every * 10) / 10} s` : 'Visited only when asked (Refresh now)';
-  const last = s.visiting ? 'taking its picture now' : s.failed ? 'could not be opened, trying again later' : s.age === null ? 'no picture yet' : `last picture ${Math.max(0, Math.round(s.age / 1000))} s ago`;
+  const fails = s.fails ?? 0;
+  const ago = s.age === null ? null : `last picture ${Math.max(0, Math.round(s.age / 1000))} s ago`;
+  const bad = fails > 0 && s.failReason ? `the last ${fails === 1 ? 'visit' : `${fails} visits`} failed: ${s.failReason}${s.retryIn !== null && s.retryIn !== undefined && s.retryIn > 0 ? `, next try in ${Math.ceil(s.retryIn / 1000)} s` : ''}` : s.failed ? 'could not be opened, trying again later' : '';
+  const last = s.visiting ? 'taking its picture now' : bad ? (ago ? `${ago} · ${bad}` : bad) : (ago ?? 'waiting for its first turn');
   const lost = s.lostMain ? ' · another Webcam set to Main camera came first, so this one is visited' : '';
   return `${how} · ${last}${cost}${lost}`;
 }

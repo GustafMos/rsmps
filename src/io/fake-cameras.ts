@@ -5,14 +5,58 @@ export class FakeVideo {
   static created = 0;
   /** While true no video shows a new picture (the playhead stands still). */
   static freezeAll = false;
+  /** Realistic phone behaviour (all off by default): a video shows nothing until play() is called, then after `firstFrameMs`. */
+  static needPlay = false;
+  /** With needPlay: only cameras with these device ids behave so (null: all). */
+  static needPlayIds: Set<string> | null = null;
+  static firstFrameMs = 0;
+  /** requestVideoFrameCallback exists but never calls back (a video that is not in the page). */
+  static silentRvfc = false;
+  /** The video is as big as the camera says it delivers (settings width and height). */
+  static followTrack = false;
   muted = false;
   playsInline = false;
-  srcObject: unknown = null;
-  readyState = 2;
-  videoWidth = 640;
-  videoHeight = 480;
+  autoplay = false;
+  requestVideoFrameCallback?: (cb: () => void) => number;
+  private src: unknown = null;
+  private shown = true;
+  private armed = false;
+  get srcObject(): unknown {
+    return this.src;
+  }
+  set srcObject(v: unknown) {
+    this.src = v;
+    this.shown = !this.needs();
+    if (v !== null && this.autoplay) this.arm();
+  }
+  private needs(): boolean {
+    if (!FakeVideo.needPlay || !this.src) return false;
+    const t = (this.src as { getVideoTracks?: () => { getSettings(): Record<string, unknown> }[] }).getVideoTracks?.()[0];
+    return !FakeVideo.needPlayIds || FakeVideo.needPlayIds.has(String(t?.getSettings().deviceId));
+  }
+  private arm(): void {
+    if (!this.needs() || this.armed || !this.src) return;
+    this.armed = true;
+    setTimeout(() => {
+      this.shown = true;
+    }, FakeVideo.firstFrameMs);
+  }
+  private size(): { w: number; h: number } {
+    const t = (this.src as { getVideoTracks?: () => { getSettings(): Record<string, unknown> }[] } | null)?.getVideoTracks?.()[0];
+    if (FakeVideo.followTrack && t) return { w: Number(t.getSettings().width) || 640, h: Number(t.getSettings().height) || 480 };
+    return { w: 640, h: 480 };
+  }
+  get readyState(): number {
+    return this.shown ? 2 : 0;
+  }
+  get videoWidth(): number {
+    return this.shown ? this.size().w : 0;
+  }
+  get videoHeight(): number {
+    return this.shown ? this.size().h : 0;
+  }
   get currentTime(): number {
-    return FakeVideo.freezeAll ? 0 : performance.now() / 1000;
+    return FakeVideo.freezeAll || !this.shown ? 0 : performance.now() / 1000;
   }
   set currentTime(_v: number) {}
   plays = 0;
@@ -22,9 +66,11 @@ export class FakeVideo {
   onemptied: (() => void) | null = null;
   constructor() {
     FakeVideo.created++;
+    if (FakeVideo.silentRvfc) this.requestVideoFrameCallback = () => 1;
   }
   play() {
     this.plays++;
+    this.arm();
     return Promise.resolve();
   }
   pause() {}
@@ -35,6 +81,7 @@ export class FakeVideo {
 export class FakeTrack {
   readyState: 'live' | 'ended' = 'live';
   stopped = false;
+  stoppedAt = 0;
   applied: MediaTrackConstraints[] = [];
   onended: (() => void) | null = null;
   onmute: (() => void) | null = null;
@@ -59,6 +106,7 @@ export class FakeTrack {
   }
   stop() {
     this.stopped = true;
+    this.stoppedAt = performance.now();
     this.readyState = 'ended';
   }
 }
@@ -86,6 +134,10 @@ export interface Kit {
   failWith: string | null;
   /** getUserMedia fails with NotReadableError for these devices only. */
   failIds: Set<string>;
+  /** After a track was stopped, any camera that is opened within this many ms fails with NotReadableError (the phone frees the camera slowly). */
+  releaseMs: number;
+  /** These devices deliver a rotated picture (height and width swapped). */
+  swapIds: Set<string>;
   visibility: 'visible' | 'hidden';
   fire(type: string): void;
   live(): FakeTrack[];
@@ -101,6 +153,8 @@ export function installCameras(rule: Rule, devices: FakeDevice[] = PHONE, caps: 
     rule,
     failWith: null,
     failIds: new Set(),
+    releaseMs: 0,
+    swapIds: new Set(),
     visibility: 'visible',
     fire: (type) => (handlers.get(type) ?? []).forEach((h) => h()),
     live: () => kit.tracks.filter((t) => !t.stopped),
@@ -136,9 +190,11 @@ export function installCameras(rule: Rule, devices: FakeDevice[] = PHONE, caps: 
         const width = num(v.width) ?? 1920;
         const height = num(v.height) ?? Math.round((width * 9) / 16);
         const live = kit.live();
+        if (kit.releaseMs && kit.tracks.some((t) => t.stopped && performance.now() - t.stoppedAt < kit.releaseMs)) return fail('NotReadableError');
         if (live.length && kit.rule === 'never') return fail('NotReadableError');
         if (live.length && kit.rule === 'pair720' && (width > 1280 || live.some((t) => Number(t.settings.width) > 1280))) return fail('NotReadableError');
-        const t = new FakeTrack(caps, { width, height, frameRate: 30, deviceId: dev.id, facingMode: dev.facing }, dev.label);
+        const swap = kit.swapIds.has(dev.id);
+        const t = new FakeTrack(caps, { width: swap ? height : width, height: swap ? width : height, frameRate: 30, deviceId: dev.id, facingMode: dev.facing }, dev.label);
         kit.tracks.push(t);
         return { getTracks: () => [t], getVideoTracks: () => [t] } as unknown as MediaStream;
       },
@@ -148,5 +204,10 @@ export function installCameras(rule: Rule, devices: FakeDevice[] = PHONE, caps: 
 }
 
 export function removeCameras(): void {
+  FakeVideo.needPlay = false;
+  FakeVideo.needPlayIds = null;
+  FakeVideo.firstFrameMs = 0;
+  FakeVideo.silentRvfc = false;
+  FakeVideo.followTrack = false;
   vi.unstubAllGlobals();
 }

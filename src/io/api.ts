@@ -448,6 +448,8 @@ export interface DeviceApi {
   testCamerasTogether(): Promise<{ ok: boolean; message?: string; lines: string[] }>;
   /** Cameras that take turns: visit this camera now (Refresh now). False when it is not a visited camera. */
   refreshCamera(source: LiveSource): boolean;
+  /** A short plain-text log of what the cameras did lately (opens, errors, turns), to copy and send when a camera misbehaves. */
+  cameraReport(): string;
   /** Tell the page which Webcam is being looked at (its inspector is open), or null: under Role Automatic that camera is the main one. */
   viewCamera(source: LiveSource | null): void;
   /** Open each camera briefly to learn what it reports (zoom range, largest picture, torch), so the camera names say more. */
