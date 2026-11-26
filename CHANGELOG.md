@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.31.0] - 2026-11-26
+
+### Added
+- **World AR Camera (experimental): the phone's own AR tracking.** A new node that uses the browser's built-in AR (WebXR, on phones that support it, in Chrome on Android) so 3D objects stay fixed in the room. Wire its Camera output into a 3D Object or Model 3D, view that node, select the World AR Camera and press **Start AR**. Move the phone until a ring appears on the floor or a table, tap to place; drag moves the object, two fingers turn and resize it; Reset, Record and Exit are on screen. On a device or browser without AR the button is greyed out with the reason, and the rest of the app is unaffected. This has only been tested against a simulated AR session, never on a real device: a small readout at the bottom right of the AR view shows numbers worth reporting back.
+
 ## [0.30.0] - 2026-11-26
 
 ### Added
