@@ -168,6 +168,8 @@ export default defineNode({
     found: { type: 'number', label: 'Found' },
     regions: { type: 'regions', label: 'Marker region' },
     distance: { type: 'number', label: 'Distance' },
+    position: { type: 'vector', label: 'Camera position XYZ', hint: 'Where the phone is in the scene, on one wire (the marker is at 0, 0, 0). Zero while no marker has been seen.' },
+    aim: { type: 'vector', label: 'Camera turn XYZ', hint: 'Which way the phone looks, in degrees on one wire: pitch (x), yaw (y) and roll (z). Zero while no marker has been seen.' },
     flat: { type: 'image', label: 'Flat picture on marker' },
   },
   optionalOutputs: ['picture', 'flat'],
@@ -334,9 +336,16 @@ export default defineNode({
       const ys = [1, 3, 5, 7].map((i) => sighting!.c[i]);
       items.push({ id: sighting.id, label: 'marker', score: sighting.s, box: [Math.max(0, Math.min(...xs)), Math.max(0, Math.min(...ys)), Math.min(1, Math.max(...xs)), Math.min(1, Math.max(...ys))] });
     }
-    const out: { camera: typeof camera; found: number; regions: { kind: 'regions'; items: Region[] }; distance: number; picture?: ImageValue | null; flat?: ImageValue | null } = {
+    // where the phone is and which way it looks, as three numbers each (zero while there is nothing to follow)
+    const deg = 180 / Math.PI;
+    const look = [camera.target[0] - camera.position[0], camera.target[1] - camera.position[1], camera.target[2] - camera.position[2]];
+    const flatLen = Math.hypot(look[0], look[2]);
+    const aim: [number, number, number] = show ? [Math.atan2(look[1], flatLen) * deg, Math.atan2(look[0], -look[2]) * deg, camera.roll] : [0, 0, 0];
+    const out: { camera: typeof camera; found: number; position: [number, number, number]; aim: [number, number, number]; regions: { kind: 'regions'; items: Region[] }; distance: number; picture?: ImageValue | null; flat?: ImageValue | null } = {
       camera,
       found: res.visible,
+      position: show ? [camera.position[0], camera.position[1], camera.position[2]] : [0, 0, 0],
+      aim,
       regions: { kind: 'regions', items },
       distance: pose ? Math.hypot(pose.t[0], pose.t[1], pose.t[2]) * p.printSize : 0,
     };

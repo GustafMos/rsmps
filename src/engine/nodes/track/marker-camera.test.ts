@@ -141,6 +141,8 @@ describe('marker-camera: outputs and options', () => {
     expect(out.found).toBe(0);
     expect((out.regions as RegionsValue).items).toEqual([]);
     expect(out.distance).toBe(0);
+    expect(out.position).toEqual([0, 0, 0]);
+    expect(out.aim).toEqual([0, 0, 0]);
     const obj = await t.run('object-3d', { shape: 'cube' }, { camera: out.camera as CameraValue } as never, { project: { width: 96, height: 96 } });
     expect((await centreOf(t, obj.image as ImageValue)).n).toBe(0);
   });
