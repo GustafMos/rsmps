@@ -1140,7 +1140,7 @@ export class Engine {
       const pulled: GPUTexture[] = [];
       let selfBase: string | null = null;
       const selfBaseOf = () =>
-        (selfBase ??= `${this.structSig(id, scope, new Set())}|u${ref.unit}|${scope.canvas.width}x${scope.canvas.height}|${scope.quality}|${scope.item}/${scope.itemCount}`);
+        (selfBase ??= `${this.structSig(id, scope, new Set(), false, new Map(), def.previousKey)}|u${ref.unit}|${scope.canvas.width}x${scope.canvas.height}|${scope.quality}|${scope.item}/${scope.itemCount}`);
       const ctx = {
         inputVaries: (input: string) => tvPorts.has(input),
         previous: (opts?: { wrap?: boolean; carry?: boolean }) => {
@@ -1254,7 +1254,7 @@ export class Engine {
   }
 
   /** Hash of a node and everything upstream of it (types, stored params, wiring): changes only when the graph is edited. */
-  private structSig(id: string, scope: Scope, seen: Set<string>, full = false, memo: Map<string, string> = new Map()): string {
+  private structSig(id: string, scope: Scope, seen: Set<string>, full = false, memo: Map<string, string> = new Map(), onlyParams?: string[]): string {
     const done = memo.get(id);
     if (done) return done;
     if (seen.has(id)) return 'cycle';
@@ -1285,7 +1285,7 @@ export class Engine {
     }
     // `full`: independent of the playback proxy, so a signature taken while playing equals one taken while paused.
     const c = full ? scope.fullCanvas : scope.canvas;
-    const sig = hash(`${node.type}|${stableStringify(node.params)}${media}|${node.bypass ? 1 : 0}|${ins}|${c.width}x${c.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
+    const sig = hash(`${node.type}|${stableStringify(onlyParams ? Object.fromEntries(Object.entries(node.params).filter(([k]) => onlyParams.includes(k))) : node.params)}${media}|${node.bypass ? 1 : 0}|${ins}|${c.width}x${c.height}|${p.fps}|${p.duration}|${p.loop}|${p.lengthMode}|${p.referenceSide}`);
     seen.delete(id);
     memo.set(id, sig);
     return sig;
