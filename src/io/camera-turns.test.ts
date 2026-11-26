@@ -182,8 +182,8 @@ describe('cameras that take turns (a phone that opens one camera at a time)', ()
     expect(kit.live()).toHaveLength(1);
     expect(kit.live()[0].settings.deviceId).toBe('back0');
     expect(await live.frame(B, 0)).not.toBeNull(); // the picture from before
-    // backing off: far fewer attempts than one every 5 seconds
-    expect(kit.gum.length - before).toBeLessThan(20);
+    // backing off: a visit now asks up to six times (a phone frees its camera slowly), but visits are far apart, not one every 5 seconds
+    expect(kit.gum.length - before).toBeLessThan(40);
     kit.failIds.clear();
     await run(70_000, [A, B]);
     expect(live.cameraInfo(B).turnLine).toMatch(/last picture \d s ago/);

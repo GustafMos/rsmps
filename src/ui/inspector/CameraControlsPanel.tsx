@@ -54,6 +54,7 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
   const [busy, setBusy] = useState('');
   const [report, setReport] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
+  const [shownReport, setShownReport] = useState('');
   const camId = String(node.params.device || info.deviceId || '');
   const camName = devices.find((d) => d.id === camId)?.label ?? '';
   const zoomNow = typeof node.params.zoom === 'number' ? node.params.zoom : 1;
@@ -78,6 +79,17 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
     const r = await io.devices.testCamerasTogether();
     setBusy('');
     setReport(r.ok ? r.lines : [r.message ?? 'The test could not run.']);
+  };
+  const copyReport = async () => {
+    const text = io.devices.cameraReport();
+    try {
+      await navigator.clipboard.writeText(text);
+      setShownReport('');
+      setReport(['The camera report was copied. Paste it into a message.']);
+    } catch {
+      setShownReport(text); // no clipboard here: show it, selected, to copy by hand
+      setReport(['Your browser did not allow copying. The report is below: select it all and copy it.']);
+    }
   };
   const rename = () => {
     io.devices.renameCamera(camId, draft);
@@ -149,8 +161,10 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
       <div className="rs-insp__actions">
         <button className="rs-btn" disabled={!!busy} onClick={() => void restart()}>{busy === 'restart' ? 'Restarting…' : 'Restart camera'}</button>
         <button className="rs-btn" disabled={!!busy} onClick={() => void measure()}>{busy === 'measure' ? 'Measuring…' : 'Measure cameras'}</button>
+        <button className="rs-btn" onClick={() => void copyReport()}>Copy camera report</button>
         {devices.length >= 2 && <button className="rs-btn" disabled={!!busy} onClick={() => void together()}>{busy === 'test' ? 'Testing…' : 'Test cameras together'}</button>}
       </div>
+      {shownReport && <textarea className="rs-input" aria-label="Camera report" data-camera-report-text readOnly rows={8} value={shownReport} onFocus={(e) => e.currentTarget.select()} autoFocus />}
       <Row label="Name">
         <div className="rs-camrange">
           <input className="rs-input" aria-label="Camera name" placeholder={camName || 'Name this camera'} value={draft} disabled={!camId} onChange={(e) => setDraft(e.target.value)} />

@@ -16,7 +16,9 @@ import {
   CHEAP_FIX_MS, CLASH_MESSAGE, GAVE_UP_MESSAGE, MUTE_GRACE_MS, PAIR_FAIL_MS, RESTART_BACKOFF_MS, SIZE_HD, SIZE_SD, STUCK_MS, TEST_SIZES,
   describePairTests, isClashError, ladderRungs, pairKey, reducedNote, type PairOutcome, type PairTest, type Selector, type Size,
 } from './camera-ladder';
-import { DEFAULT_TURNS, FIRST_FRAME_MS, MAIN_DWELL_MS, ONE_AT_A_TIME_LINE, RECORDING_QUIET_MS, RELEASE_GAP_MS, RETURN_RETRY_MS, TURN_TICK_MS, resolveRoles, turnLine, visitBackoff, type Roles, type TurnSettings } from './camera-turns';
+import { DEFAULT_TURNS, FIRST_FRAME_MS, GRAB_FRAME_MS, MAIN_DWELL_MS, ONE_AT_A_TIME_LINE, OPEN_RETRY_MS, RECORDING_QUIET_MS, RELEASE_GAP_MS, RETURN_RETRY_MS, TURN_TICK_MS, failWords, resolveRoles, turnLine, visitBackoff, type Roles, type TurnSettings, type VisitFail } from './camera-turns';
+import { CameraLog, constraintsText, errorText } from './camera-log';
+import pkg from '../../package.json';
 
 type UrlMode = 'auto' | 'image' | 'mjpeg' | 'video';
 export type LiveRequest = LiveSource & { freeze?: boolean };
@@ -221,6 +223,9 @@ interface Entry {
   backoffUntil: number;
   fails: number;
   asked: boolean;
+  /** Why the last visit failed (empty: it did not), in the words of `failWords`. */
+  failWhy: VisitFail | '';
+  failDetail: string;
 }
 
 export class LiveSources {
@@ -251,6 +256,9 @@ export class LiveSources {
   /** Taking turns: the timer, a visit or a change of main camera is going on, who is main, who is looked at, the measured costs. */
   private turnTimer: ReturnType<typeof setInterval> | null = null;
   private turnBusy = false;
+  /** What the cameras did lately, for the camera report (memory only). */
+  readonly log = new CameraLog();
+  private lastDecision = '';
   private roles: Roles = { main: '', visited: [], lostMain: [] };
   private viewedKey = '';
   private mainSince = 0;
@@ -547,7 +555,7 @@ export class LiveSources {
   /* --------------------------------------- opening ------------------------------------------- */
 
   private open(key: string, req: LiveRequest): Entry {
-    const base = { key, req, phoneVersion: -1, stream: null, track: null, caps: null, initial: {}, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false, seq: ++this.seqCounter, opened: false, deviceId: '', mutedAt: 0, lastFrameAt: performance.now(), lastSeenTime: -1, stalledAt: 0, trackEnded: false, recStage: 0, recAt: 0, restarting: false, reduced: null, original: null, turn: false, turnIdle: false, turns: (req.kind === 'camera' && req.turns) || DEFAULT_TURNS, maxSide: 0, lastGoodAt: 0, backoffUntil: 0, fails: 0, asked: false } as const;
+    const base = { key, req, phoneVersion: -1, stream: null, track: null, caps: null, initial: {}, texture: null, frame: null, error: null, lastUsed: performance.now(), fresh: true, lastTime: -1, uploadedBucket: '', heldAt: null, heldTexture: null, held: null, refreshTimer: null, rvfc: 0, closed: false, seq: ++this.seqCounter, opened: false, deviceId: '', mutedAt: 0, lastFrameAt: performance.now(), lastSeenTime: -1, stalledAt: 0, trackEnded: false, recStage: 0, recAt: 0, restarting: false, reduced: null, original: null, turn: false, turnIdle: false, turns: (req.kind === 'camera' && req.turns) || DEFAULT_TURNS, maxSide: 0, lastGoodAt: 0, backoffUntil: 0, fails: 0, asked: false, failWhy: '', failDetail: '' } as const;
     if (req.kind === 'phone') {
       const e: Entry = { ...base, el: document.createElement('video'), isVideo: false, ready: Promise.resolve() };
       return e;
@@ -623,8 +631,40 @@ export class LiveSources {
     return video;
   }
 
-  private gum(video: MediaTrackConstraints | boolean): Promise<MediaStream> {
-    return navigator.mediaDevices.getUserMedia({ video, audio: false });
+  private async gum(video: MediaTrackConstraints | boolean): Promise<MediaStream> {
+    this.log.add(`open asked: ${constraintsText(video)}`);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      const t = stream.getVideoTracks?.()[0];
+      const st = (t?.getSettings?.() ?? {}) as Record<string, unknown>;
+      const id = typeof st.deviceId === 'string' ? st.deviceId : '';
+      this.log.add(`opened ${this.labelOf(id, t?.label)}: delivers ${st.width ?? '?'} x ${st.height ?? '?'} at ${st.frameRate ?? '?'} fps`);
+      return stream;
+    } catch (err) {
+      this.log.add(`open failed: ${errorText(err)}`);
+      throw err;
+    }
+  }
+
+  private labelOf(id: string, label?: string): string {
+    const l = label || (id ? loadCatalogue()[id]?.label : '') || '';
+    return l ? `"${l}"` : id ? `camera ${id.slice(0, 6)}` : 'a camera';
+  }
+
+  /** A short plain-text report of the last camera events, for the owner to copy and send. Nothing but camera labels and settings. */
+  cameraReport(): string {
+    const now = performance.now();
+    const cat = loadCatalogue();
+    const cams = Object.keys(cat).map((id) => `  ${cat[id].label || id.slice(0, 6)}: ${facingOfId(id, cat)}`);
+    const head = [
+      `Camera report (RSMPS ${pkg.version})`,
+      `Browser: ${typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent : 'unknown'}`,
+      `Cameras known (${cams.length}):`,
+      ...(cams.length ? cams : ['  none yet']),
+      `Taking turns: ${this.roles.main ? `main is ${this.labelOf(this.entries.get(this.roles.main)?.deviceId ?? '')}, ${this.roles.visited.length} visited` : 'no'}`,
+      'Events (seconds before this report):',
+    ];
+    return [...head, ...this.log.lines(now)].join('\n');
   }
 
   private primaryConstraints(e: Entry, req: Extract<LiveRequest, { kind: 'camera' }>): MediaTrackConstraints {
@@ -762,6 +802,7 @@ export class LiveSources {
       for (const r of rungs) {
         if (e.closed) return null;
         try {
+          this.log.add(`ladder step ${r.id}`);
           return { stream: await this.gum(r.constraints), rung: r };
         } catch (err) {
           if (!isClashError(err)) throw err;
@@ -822,6 +863,7 @@ export class LiveSources {
   }
 
   private releaseStream(e: Entry): void {
+    if (e.stream) this.log.add(`closed ${this.labelOf(e.deviceId)}`);
     e.stream?.getTracks().forEach((t) => {
       t.onended = null;
       t.onmute = null;
@@ -891,6 +933,7 @@ export class LiveSources {
   private watchPage(): void {
     if (this.pageOff || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
     const back = () => {
+      this.log.add(`page is ${pageHidden() ? 'hidden' : 'visible'}`);
       if (!pageHidden()) this.checkCameras(performance.now(), true);
     };
     document.addEventListener('visibilitychange', back);
@@ -940,6 +983,7 @@ export class LiveSources {
   }
 
   private recover(e: Entry, now: number, hard: boolean): void {
+    this.log.add(`watchdog: ${this.labelOf(e.deviceId)} is stuck (${hard ? 'ended or muted' : 'no new pictures'}), recovery step ${hard ? Math.max(e.recStage, 2) : e.recStage}`);
     const stage = hard ? Math.max(e.recStage, 2) : e.recStage;
     if (stage === 0) {
       void (e.el as HTMLVideoElement).play?.()?.catch?.(() => undefined);
@@ -1199,6 +1243,9 @@ export class LiveSources {
       returnMs: this.returnMs,
       visiting: this.visiting !== '' && (role === 'main' || this.visiting === e.key),
       failed: e.fails > 0 && performance.now() < e.backoffUntil,
+      fails: e.fails,
+      failReason: e.failWhy ? failWords(e.failWhy, e.failDetail) : '',
+      retryIn: e.fails > 0 ? Math.max(0, e.backoffUntil - performance.now()) : null,
     });
   }
 
@@ -1218,6 +1265,22 @@ export class LiveSources {
     return v.turns.every > 0 && now - v.lastGoodAt >= v.turns.every * 1000;
   }
 
+  /** Write a scheduler decision to the log, only when it changed. */
+  private decide(text: string): void {
+    const key = text.replace(/\d+ s/g, '');
+    if (key === this.lastDecision) return;
+    this.lastDecision = key;
+    this.log.add(`turns: ${text}`);
+  }
+
+  private dueWhy(v: Entry, now: number): string {
+    if (v.asked) return 'due (Refresh now)';
+    if (now < v.backoffUntil) return `not due (waits ${Math.ceil((v.backoffUntil - now) / 1000)} s after a failure)`;
+    if (now - v.lastUsed > IDLE_CLOSE_MS) return 'not due (no node asks for it)';
+    if (!v.lastGoodAt) return 'due (no picture yet)';
+    return v.turns.every > 0 && now - v.lastGoodAt >= v.turns.every * 1000 ? 'due' : 'not due (picture is fresh)';
+  }
+
   private turnTick(): void {
     if (this.turnBusy) return;
     const group = this.turnGroup();
@@ -1227,7 +1290,9 @@ export class LiveSources {
     }
     const now = performance.now();
     if (this.turnsPaused() || pageHidden() || group.some((x) => x.restarting)) return;
+    const before = this.roles.main;
     this.roles = resolveRoles(group.map((x) => ({ key: x.key, role: x.turns.role, seq: x.seq, viewed: x.key === this.viewedKey })));
+    if (before !== this.roles.main) this.log.add(`turns: main is now ${this.labelOf(this.entries.get(this.roles.main)?.deviceId ?? '')}`);
     const main = group.find((x) => x.key === this.roles.main);
     if (!main) return;
     for (const x of group) if (x !== main) x.turnIdle = true;
@@ -1235,8 +1300,9 @@ export class LiveSources {
       void this.runTurn(() => this.bringMain(main, group));
       return;
     }
-    if (now - this.mainSince < MAIN_DWELL_MS || now - this.lastDrawable < RECORDING_QUIET_MS) return;
+    if (now - this.mainSince < MAIN_DWELL_MS || now - this.lastDrawable < RECORDING_QUIET_MS) return this.decide(`main ${this.labelOf(main.deviceId)} stays: ${now - this.lastDrawable < RECORDING_QUIET_MS ? 'a recording is running' : 'it just came back'}`);
     const due = group.filter((x) => x !== main && this.visitDue(x, now)).sort((a, b) => a.lastGoodAt - b.lastGoodAt);
+    this.decide(`main ${this.labelOf(main.deviceId)}; ${group.filter((x) => x !== main).map((x) => `${this.labelOf(x.deviceId)} ${this.dueWhy(x, now)}`).join('; ')}`);
     if (due.length) void this.runTurn(() => this.visit(main, due[0]));
   }
 
@@ -1291,39 +1357,56 @@ export class LiveSources {
     this.mainSince = performance.now();
   }
 
-  /** One visit: the main camera pauses, the visited camera gives one picture, the main camera comes back. */
+  /** One visit: the main camera pauses, the visited camera gives one picture, the main camera comes back (always, whatever happened). */
   private async visit(main: Entry, v: Entry): Promise<void> {
     const t0 = performance.now();
     this.visiting = v.key;
-    await this.keepPicture(main);
-    main.turnIdle = true;
-    this.releaseStream(main);
-    await this.sleep(RELEASE_GAP_MS);
-    let got = false;
+    this.log.add(`visit starts: ${this.labelOf(v.deviceId)} (${v.fails} failed so far), main is ${this.labelOf(main.deviceId)}`);
+    let got: { why: VisitFail | ''; detail: string } = { why: 'other', detail: '' };
     try {
-      got = !this.turnsPaused() && (await this.takePicture(v));
+      try {
+        await this.keepPicture(main);
+      } catch {
+        /* the old picture stays */
+      }
+      main.turnIdle = true;
+      this.releaseStream(main);
+      await this.sleep(RELEASE_GAP_MS);
+      got = this.turnsPaused() ? { why: 'paused', detail: '' } : await this.takePicture(v);
     } catch (err) {
       const name = (err as { name?: string })?.name;
       if (name === 'NotAllowedError' || name === 'SecurityError') this.cameraRefused = true;
+      got = { why: name === 'NotAllowedError' || name === 'SecurityError' ? 'denied' : 'other', detail: name ?? '' };
+      this.log.add(`visit error: ${errorText(err)}`);
     }
     const t1 = performance.now();
     v.asked = false;
-    if (got) {
+    if (!got.why) {
       v.fails = 0;
+      v.failWhy = '';
       v.lastGoodAt = t1;
       v.backoffUntil = 0;
       this.visitMs = t1 - t0;
+      this.log.add(`visit done in ${Math.round(t1 - t0)} ms: picture kept`);
     } else {
       v.fails++;
+      v.failWhy = got.why;
+      v.failDetail = got.detail;
       v.backoffUntil = t1 + visitBackoff(v.fails); // the main camera comes back at once; this one is tried again later
-    }
-    await this.sleep(RELEASE_GAP_MS);
-    const ok = this.turnsPaused() ? false : await this.reopen(main);
-    if (ok) {
-      this.returnMs = performance.now() - t1;
-      main.turnIdle = false;
+      this.log.add(`visit failed after ${Math.round(t1 - t0)} ms: ${failWords(got.why, got.detail)}; next try in ${Math.round(visitBackoff(v.fails) / 1000)} s`);
     }
     this.mainSince = performance.now();
+    try {
+      await this.sleep(RELEASE_GAP_MS);
+      const ok = this.turnsPaused() ? false : await this.reopen(main);
+      if (ok) {
+        this.returnMs = performance.now() - t1;
+        main.turnIdle = false;
+        this.log.add(`main camera back after ${Math.round(this.returnMs)} ms`);
+      } else this.log.add('main camera did NOT come back');
+    } finally {
+      this.mainSince = performance.now();
+    }
   }
 
   /** Open a camera directly (no ladder, no memory of earlier clashes, no failure cooldown), a few times if it is slow to come back. */
@@ -1350,19 +1433,68 @@ export class LiveSources {
     }
   }
 
+  /** What a visit asks for: the node's size and rate as wishes (never exact), and the camera by its id or its side. */
+  private visitConstraints(v: Entry, plain: boolean): MediaTrackConstraints {
+    const req = v.req as Extract<LiveRequest, { kind: 'camera' }>;
+    if (plain) return req.deviceId ? { deviceId: { exact: req.deviceId } } : req.facing ? { facingMode: req.facing } : {};
+    return this.primaryConstraints(v, req);
+  }
+
+  /** Open the visited camera. The phone may need a moment to free the camera the main one just gave up: ask again with growing waits. */
+  private async openVisited(v: Entry): Promise<{ stream: MediaStream | null; why: VisitFail; detail: string }> {
+    let plain = false;
+    let last = { why: 'busy' as VisitFail, detail: '' };
+    for (let i = 0; i <= OPEN_RETRY_MS.length; i++) {
+      if (i > 0) {
+        this.log.add(`open retry ${i} in ${OPEN_RETRY_MS[i - 1]} ms`);
+        await this.sleep(OPEN_RETRY_MS[i - 1]);
+      }
+      if (v.closed || this.turnsPaused()) return { stream: null, why: 'paused', detail: '' };
+      try {
+        return { stream: await this.gum(this.visitConstraints(v, plain)), why: 'busy', detail: '' };
+      } catch (err) {
+        const name = (err as { name?: string })?.name ?? '';
+        if (name === 'NotAllowedError' || name === 'SecurityError') throw err;
+        if ((name === 'OverconstrainedError' || name === 'TypeError') && !plain) {
+          plain = true;
+          i--; // the same step again, with only the camera chosen
+          continue;
+        }
+        last = name === 'NotReadableError' || name === 'AbortError' ? { why: 'busy', detail: name } : { why: 'other', detail: name };
+      }
+    }
+    return { stream: null, ...last };
+  }
+
   /** Open the visited camera, wait for a real picture (and a few more so the exposure has settled), keep it, close the camera. */
-  private async takePicture(v: Entry): Promise<boolean> {
-    const stream = await this.gum(this.primaryConstraints(v, v.req as Extract<LiveRequest, { kind: 'camera' }>));
+  private async takePicture(v: Entry): Promise<{ why: VisitFail | ''; detail: string }> {
+    const opened = await this.openVisited(v);
+    const stream = opened.stream;
+    if (!stream) return { why: opened.why, detail: opened.detail };
     const video = this.newVideo();
     try {
-      if (v.closed || this.turnsPaused()) return false;
-      const settings = (stream.getVideoTracks?.()[0]?.getSettings?.() ?? {}) as Record<string, unknown>;
+      if (v.closed || this.turnsPaused()) return { why: 'paused', detail: '' };
+      const track = stream.getVideoTracks?.()[0];
+      const settings = (track?.getSettings?.() ?? {}) as Record<string, unknown>;
       if (settings.deviceId) v.deviceId = String(settings.deviceId);
+      video.autoplay = true;
       video.srcObject = stream;
-      await video.play().catch(() => undefined);
-      if (!(await this.waitPicture(video, v.turns.settle))) return false;
-      v.el = video;
-      return !!(await this.snapshot(v, v.maxSide, -1));
+      await Promise.race([video.play().catch((err) => this.log.add(`play refused: ${errorText(err)}`)), this.sleep(1000)]);
+      const t = performance.now();
+      let from: CanvasImageSource | null = null;
+      if (await this.waitPicture(video, v.turns.settle, FIRST_FRAME_MS)) {
+        from = video;
+        this.log.add(`first picture after ${Math.round(performance.now() - t)} ms (${video.videoWidth} x ${video.videoHeight})`);
+      } else {
+        this.log.add(`no picture from the video after ${FIRST_FRAME_MS} ms (ready ${video.readyState}, ${video.videoWidth} x ${video.videoHeight}); trying to grab one from the camera`);
+        from = await this.grabFrame(track);
+        if (from) this.log.add('picture grabbed from the camera track');
+      }
+      if (!from) return { why: 'noframe', detail: '' };
+      const held = await this.snapshotFrom(v, from, v.maxSide, -1);
+      if (!held) return { why: 'copy', detail: '' };
+      this.log.add(`picture copied (${held.width} x ${held.height})`);
+      return { why: '', detail: '' };
     } finally {
       stream.getTracks().forEach((t) => t.stop());
       video.pause?.();
@@ -1370,31 +1502,64 @@ export class LiveSources {
     }
   }
 
-  /** Resolves true once the video shows a real picture and `settle` more have gone by; false when no picture came in time. */
-  private waitPicture(video: HTMLVideoElement, settle: number): Promise<boolean> {
+  /** Second way to a picture: the track's own still grab, where the browser has it. */
+  private async grabFrame(track: MediaStreamTrack | undefined): Promise<CanvasImageSource | null> {
+    const IC = (globalThis as unknown as { ImageCapture?: new (t: MediaStreamTrack) => { grabFrame(): Promise<ImageBitmap> } }).ImageCapture;
+    if (!IC || !track) return null;
+    const end = performance.now() + GRAB_FRAME_MS;
+    const cap = new IC(track);
+    while (performance.now() < end) {
+      try {
+        const bmp = await cap.grabFrame();
+        if (bmp.width > 0 && bmp.height > 0) return bmp;
+      } catch {
+        /* not ready yet */
+      }
+      await this.sleep(100);
+    }
+    return null;
+  }
+
+  /**
+   * Resolves true once the video shows a real picture and `settle` more have gone by; false when none came within `limit`.
+   * Two ways run together: the frame callback (where it works) and polling the element (ready, has a size, playhead moves).
+   */
+  private waitPicture(video: HTMLVideoElement, settle: number, limit: number): Promise<boolean> {
     return new Promise((resolve) => {
-      let first = false;
-      const timer = setTimeout(() => resolve(first), FIRST_FRAME_MS);
-      const done = () => {
+      let first = 0;
+      let frames = 0;
+      let lastTime = -1;
+      let over = false;
+      const finish = (ok: boolean) => {
+        if (over) return;
+        over = true;
         clearTimeout(timer);
-        resolve(true);
+        resolve(ok);
       };
+      const timer = setTimeout(() => finish(false), limit);
       const v = video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
+      const ready = () => video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
       if (typeof v.requestVideoFrameCallback === 'function') {
-        let seen = 0;
         const step = () => {
-          if (video.videoWidth > 0) first = true;
-          if (first && ++seen > settle) return done();
+          if (over) return;
+          if (ready()) frames++;
           v.requestVideoFrameCallback!(step);
         };
         v.requestVideoFrameCallback(step);
-        return;
       }
       const poll = () => {
-        if (video.readyState >= 2 && video.videoWidth > 0) {
-          first = true;
-          setTimeout(done, settle * 33);
-        } else setTimeout(poll, 30);
+        if (over) return;
+        if (ready()) {
+          const now = performance.now();
+          if (!first) first = now;
+          if (video.currentTime !== lastTime) {
+            if (lastTime >= 0) frames++;
+            lastTime = video.currentTime;
+          }
+          // enough pictures went by; or the playhead cannot be seen moving: give it the time they would take
+          if (frames > settle || now - first >= settle * 100 + 300) return finish(true);
+        }
+        setTimeout(poll, 30);
       };
       poll();
     });
@@ -1438,12 +1603,19 @@ export class LiveSources {
 
   /** Take the picture the source shows right now into the entry's held texture, for project time `at`. Null while there is no picture. */
   private async snapshot(e: Entry, maxSide: number, at: number): Promise<LiveFrame | null> {
-    const el = this.pictureOf(e);
+    return this.snapshotFrom(e, this.pictureOf(e), maxSide, at);
+  }
+
+  /** Copy a picture (a video that shows one, or a bitmap) into the camera's own held texture. Says in the log why when it cannot. */
+  private async snapshotFrom(e: Entry, el: CanvasImageSource | null, maxSide: number, at: number): Promise<LiveFrame | null> {
     if (!el) return null;
     const dims = el as { videoWidth?: number; videoHeight?: number; naturalWidth?: number; naturalHeight?: number; width?: number; height?: number };
     const nw = dims.videoWidth || dims.naturalWidth || dims.width || 0;
     const nh = dims.videoHeight || dims.naturalHeight || dims.height || 0;
-    if (!nw || !nh) return null;
+    if (!nw || !nh) {
+      this.log.add('copy skipped: the picture has no size');
+      return null;
+    }
     const { width, height } = targetSize(nw, nh, maxSide, this.gpu.device.limits.maxTextureDimension2D);
     if (!e.heldTexture || e.heldTexture.width !== width || e.heldTexture.height !== height) {
       if (e.heldTexture) this.gpu.release(e.heldTexture);
@@ -1452,7 +1624,8 @@ export class LiveSources {
     }
     try {
       await uploadExternal(this.gpu.device, el as never, e.heldTexture, width, height, { width: nw, height: nh });
-    } catch {
+    } catch (err) {
+      this.log.add(`copy failed: ${errorText(err)}`);
       return null;
     }
     e.held = { texture: e.heldTexture, width, height };
