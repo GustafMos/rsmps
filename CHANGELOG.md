@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.33.0] - 2026-11-26
+
+### Added
+- **Sweep 360.** A new node that builds a 360 panorama over time: wire a Webcam into it and Phone Motion's Yaw, Pitch and Roll (Sensors from: This device), then turn around and each camera frame is painted where the phone is pointing, like a photo sphere. Settings: View angle (the camera's field of view), Edge softness, Paint (Always, Only new areas, Paused), Fade old, Empty look (Black, Transparent, Blurred fill), Mirror picture, Canvas height, and Clear (wire a tap to it to wipe). Output as a panorama, Tiny planet, Look around, or **Follow phone**, which shows the live picture surrounded by what was painted before. It relies on the phone's motion sensors, so it drifts, and only the area being pointed at is live; a sweep is live state and is not rebuilt by scrubbing or export. Tested with a simulated sweep only.
+
 ## [0.32.0] - 2026-11-26
 
 ### Added
