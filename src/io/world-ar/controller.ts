@@ -25,8 +25,12 @@ import { EnginePictureSource, fedByWorldAr, probeCanvasCopy, type CopyRoute, typ
 import { ArLoop, type ArClipRecorder, type ArLoopState, type ArPainter } from './loop';
 import { GlPainter, createXrGl, type CameraBinding } from './painter';
 import type { Gesture } from './placement';
-import { browserSupportEnv, checkWorldAr, startErrorMessage, type WorldArSupport } from './support';
-import { OPTIONAL_FEATURES, featuresOf, type GrantedFeatures, type XrLayerLike, type XrSessionLike, type XrSystemLike } from './xr-api';
+import { browserSupportEnv, checkWorldAr, noCameraPictureMessage, startErrorMessage, type WorldArSupport } from './support';
+import type { QualitySummary } from '../../engine/lib/scan-coverage';
+import type { ScanData } from '../../engine/lib/scan-data';
+import { browserScanEnv } from './scan-grab';
+import { ScanSession, type ScanEnv } from './scan-session';
+import { DEPTH_INIT, OPTIONAL_FEATURES, SCAN_FEATURES, depthGranted, featuresOf, type GrantedFeatures, type XrLayerLike, type XrSessionLike, type XrSystemLike } from './xr-api';
 
 /** Longest side of the object's picture. A modest size: it is copied from WebGPU into WebGL for every picture. */
 export const PICTURE_MAX_SIDE = 960;
@@ -46,6 +50,40 @@ export interface WorldArOpen {
   onState(state: WorldArViewState): void;
   /** A recording was saved: the take, and the camera clip when the session handed the camera picture over. */
   onTake(take: WorldArTake): void;
+  /** Present = open the 3D Scan view instead of showing an object in the room. */
+  scan?: WorldArScanOpen;
+}
+
+/** Opening the scan view (the 3D Scan node): the same AR session, a different mode. */
+export interface WorldArScanOpen {
+  /** Start with automatic capture on (default) or off. */
+  auto?: boolean;
+  /** The scan was saved (Done, Back, or the session ended): the photos are in Media; `scan` is null when none were kept. */
+  onScan(r: WorldArScanOutcome): void;
+}
+
+export interface WorldArScanOutcome {
+  scan: ScanData | null;
+  /** The photos as added to Media, in order. */
+  assets: AssetInfo[];
+  summary: QualitySummary | null;
+  rejected: number;
+  /** The session granted depth sensing. */
+  depth: boolean;
+  error: string | null;
+}
+
+export interface ScanControls {
+  /** Start the walk once the dome is sized and lifted. */
+  begin(): void;
+  /** One photo now, wherever the phone is. */
+  shutter(): void;
+  setAuto(on: boolean): void;
+}
+
+/** A picture source that never has a picture, for the scan view. */
+function noPictureSource(): EnginePictureSource {
+  return { request: () => false, latest: () => null, error: () => null, route: 'pixels', timing: { render: 0, copy: 0 }, dispose: () => undefined } as unknown as EnginePictureSource;
 }
 
 export interface WorldArTake {
@@ -73,6 +111,8 @@ export interface WorldArViewState extends ArLoopState {
 }
 
 export interface WorldArHandle {
+  /** The scan view's buttons (only when opened with `scan`). */
+  scan?: ScanControls;
   place(): void;
   reset(): void;
   gesture(g: Gesture): void;
@@ -123,6 +163,8 @@ export interface WorldArEnv {
   canvasCopyWorks(gpu: Gpu, canvas: { el: HTMLCanvasElement | OffscreenCanvas; ctx: GPUCanvasContext }): boolean;
   makeRecorder(): LiveRecorder | null;
   now(): number;
+  /** What grabs-to-JPEG for the scan view; absent = the browser's (scan-grab.ts). */
+  makeScanEnv?: () => ScanEnv;
 }
 
 type XrGlobals = {
@@ -223,9 +265,9 @@ export class WorldArController implements WorldArApi {
     const cams = this.d.suspendCameras?.bind(this.d);
     cams?.(true);
     let session: XrSessionLike;
-    const asked = OPTIONAL_FEATURES.filter((f) => f !== 'dom-overlay' || !!o.overlay);
+    const asked = (o.scan ? SCAN_FEATURES : OPTIONAL_FEATURES).filter((f) => f !== 'dom-overlay' || !!o.overlay);
     try {
-      session = await env.xr.requestSession('immersive-ar', { optionalFeatures: [...asked], ...(o.overlay ? { domOverlay: { root: o.overlay } } : {}) });
+      session = await env.xr.requestSession('immersive-ar', { optionalFeatures: [...asked], ...(o.overlay ? { domOverlay: { root: o.overlay } } : {}), ...(o.scan ? { depthSensing: DEPTH_INIT } : {}) });
     } catch (err) {
       cams?.(false);
       throw new Error(startErrorMessage(err));
@@ -234,6 +276,8 @@ export class WorldArController implements WorldArApi {
     let disposePainter: (() => void) | null = null;
     try {
       const features = featuresOf(session, asked);
+      // a scan is photos: without the AR camera picture there is nothing to take
+      if (o.scan && !features.cameraAccess) throw new Error(noCameraPictureMessage);
       let lost: () => void = () => undefined;
       const made = await env.makePainter(session, features, () => lost());
       disposePainter = made.dispose;
@@ -248,12 +292,13 @@ export class WorldArController implements WorldArApi {
         }
       }
       const graph0 = o.graph();
-      const layerMode = fedByWorldAr(graph0, o.node);
-      const gpuCanvas = env.makeGpuCanvas(this.d.gpu);
+      const layerMode = !o.scan && fedByWorldAr(graph0, o.node);
+      // the scan view renders no picture of the graph at all (the phone's GPU is kept for the photos)
+      const gpuCanvas = o.scan ? null : env.makeGpuCanvas(this.d.gpu);
       const route: CopyRoute = gpuCanvas && env.canvasCopyWorks(this.d.gpu, gpuCanvas) ? 'canvas' : 'pixels';
       const fps = graph0.project.fps;
       const startedAt = env.now();
-      const source = new EnginePictureSource({
+      const source = o.scan ? noPictureSource() : new EnginePictureSource({
         gate: this.d.gate,
         gpu: this.d.gpu,
         registry: this.d.registry,
@@ -287,7 +332,9 @@ export class WorldArController implements WorldArApi {
       const emit = () => {
         if (lastLoop) o.onState(view(lastLoop));
       };
+      const scanSession = o.scan ? new ScanSession({ env: env.makeScanEnv?.() ?? browserScanEnv(), depth: depthGranted(session), auto: o.scan.auto }) : undefined;
       const loop = new ArLoop({
+        scan: scanSession,
         session,
         referenceSpace,
         hitTestSource,
@@ -317,7 +364,37 @@ export class WorldArController implements WorldArApi {
       // itself closed before the take and its clip are stored (and the finished video would never start)
       let saving$: Promise<void> | null = null;
       const stopAndSave = (): Promise<void> => (saving$ ??= save().finally(() => (saving$ = null)));
+      let scanSaved = false;
+      const saveScan = async (): Promise<void> => {
+        if (!scanSession || scanSaved || !o.scan) return;
+        scanSaved = true;
+        saving = true;
+        emit();
+        const out: WorldArScanOutcome = { scan: null, assets: [], summary: null, rejected: 0, depth: scanSession.state().depth, error: null };
+        try {
+          // waits for the photos still being encoded, so nothing taken just before Done or the Back button is lost
+          const res = await scanSession.finish();
+          out.summary = res.summary;
+          out.rejected = res.rejected;
+          if (!res.blobs.length) out.error = 'No photos were taken, so nothing was saved.';
+          else {
+            const files = res.blobs.map((b, i) => new File([b], `Scan photo ${String(i + 1).padStart(3, '0')}.jpg`, { type: 'image/jpeg' }));
+            const assets = await this.d.add(files);
+            // each photo keeps its place by its position; a photo Media did not take is left out of the scan
+            const shots = res.scan.shots.flatMap((s, i) => (assets[i] ? [{ ...s, asset: assets[i].id }] : []));
+            out.assets = assets;
+            if (shots.length) out.scan = { ...res.scan, shots };
+            if (shots.length < files.length) out.error = `${files.length - shots.length} of ${files.length} photos could not be added to Media and were left out.`;
+          }
+        } catch (err) {
+          out.error = `The scan could not be saved (${err instanceof Error ? err.message : String(err)}).`;
+        }
+        saving = false;
+        emit();
+        o.scan.onScan(out);
+      };
       const save = async (): Promise<void> => {
+        if (scanSession) return saveScan();
         const rec = loop.stopRecording();
         if (!rec) return;
         saving = true;
@@ -363,6 +440,7 @@ export class WorldArController implements WorldArApi {
       };
 
       const handle: WorldArHandle = {
+        ...(scanSession ? { scan: { begin: () => loop.scanBegin(), shutter: () => scanSession.shutter(), setAuto: (on: boolean) => scanSession.setAuto(on) } } : {}),
         place: () => loop.placeHere(),
         reset: () => loop.reset(),
         gesture: (g) => loop.gesture(g),
@@ -402,7 +480,7 @@ export class WorldArController implements WorldArApi {
           await ended(null);
         },
         closed,
-        state: () => view(lastLoop ?? loop.state()),
+        state: () => view(loop.state()),
       };
       lost = () => {
         if (source.route === 'canvas') canvasCopyBroken = true;

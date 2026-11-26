@@ -14,6 +14,8 @@
  */
 import type { Corners } from '../../engine/lib/xr-math';
 import type { ArPainter } from './loop';
+import { copyToGrab } from './scan-grab';
+import type { ScanGrab } from './scan-session';
 import type { XrViewLike, XrViewportLike } from './xr-api';
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
@@ -49,6 +51,23 @@ void main() {
   }
 }`;
 
+/** Coloured geometry (the scan's coverage dome): one colour per vertex, already premultiplied by alpha. */
+const MESH_VERT = `
+attribute vec3 aPos;
+attribute vec4 aCol;
+uniform mat4 uViewProjection;
+varying vec4 vCol;
+void main() {
+  vCol = aCol;
+  gl_Position = uViewProjection * vec4(aPos, 1.0);
+}`;
+const MESH_FRAG = `
+precision mediump float;
+varying vec4 vCol;
+void main() {
+  gl_FragColor = vCol;
+}`;
+
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 /** Longest side of the camera picture kept for the clip. */
 export const CAMERA_MAX_SIDE = 1280;
@@ -73,6 +92,9 @@ export class GlPainter implements ArPainter {
   private tex: WebGLTexture;
   private loc: { pos: number; uv: number; vp: WebGLUniformLocation | null; tex: WebGLUniformLocation | null; opacity: WebGLUniformLocation | null; mode: WebGLUniformLocation | null };
   private data = new Float32Array(20);
+  private meshProgram: WebGLProgram | null = null;
+  private meshBuffer: WebGLBuffer | null = null;
+  private meshLoc: { pos: number; col: number; vp: WebGLUniformLocation | null } | null = null;
   private hasPicture = false;
   private cameraSize: { width: number; height: number; maxSide: number } | null = null;
   /** Set once camera access is known to work in this session. */
@@ -150,6 +172,47 @@ export class GlPainter implements ArPainter {
     gl.bindTexture(gl.TEXTURE_2D, texture ?? this.tex);
     gl.uniform1i(this.loc.tex, 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  /** Coloured triangles and lines in the room (premultiplied colours, 7 floats per vertex: x y z r g b a). Made on first use. */
+  mesh(m: { tris: Float32Array; lines: Float32Array }, viewProjection: Float32Array): void {
+    const gl = this.gl;
+    if (!this.meshProgram) {
+      const program = gl.createProgram();
+      const buffer = gl.createBuffer();
+      if (!program || !buffer) return;
+      gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, MESH_VERT));
+      gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, MESH_FRAG));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(`WebGL program: ${gl.getProgramInfoLog(program) ?? 'failed'}`);
+      this.meshProgram = program;
+      this.meshBuffer = buffer;
+      this.meshLoc = { pos: gl.getAttribLocation(program, 'aPos'), col: gl.getAttribLocation(program, 'aCol'), vp: gl.getUniformLocation(program, 'uViewProjection') };
+    }
+    const loc = this.meshLoc!;
+    gl.useProgram(this.meshProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshBuffer);
+    gl.enableVertexAttribArray(loc.pos);
+    gl.vertexAttribPointer(loc.pos, 3, gl.FLOAT, false, 28, 0);
+    gl.enableVertexAttribArray(loc.col);
+    gl.vertexAttribPointer(loc.col, 4, gl.FLOAT, false, 28, 12);
+    gl.uniformMatrix4fv(loc.vp, false, viewProjection);
+    for (const [data, mode] of [[m.tris, gl.TRIANGLES], [m.lines, gl.LINES]] as [Float32Array, number][]) {
+      if (!data.length) continue;
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      gl.drawArrays(mode, 0, data.length / 7);
+    }
+    gl.disableVertexAttribArray(loc.col);
+  }
+
+  /**
+   * A photo for the scan: the camera picture of this frame at up to `maxSide` pixels on its longer side (never larger than the camera's
+   * own picture), copied into a canvas of its own right now, because the browser's camera texture only lives inside the frame
+   * callback. Null when the camera picture is not there.
+   */
+  still(view: XrViewLike, maxSide: number): ScanGrab | null {
+    const c = this.camera(view, maxSide) as HTMLCanvasElement | OffscreenCanvas | null;
+    return c ? copyToGrab(c) : null;
   }
 
   picture(corners: Corners, viewProjection: Float32Array, opacity: number): void {
@@ -255,6 +318,8 @@ export class GlPainter implements ArPainter {
     gl.deleteTexture(this.tex);
     gl.deleteBuffer(this.buffer);
     gl.deleteProgram(this.program);
+    if (this.meshProgram) gl.deleteProgram(this.meshProgram);
+    if (this.meshBuffer) gl.deleteBuffer(this.meshBuffer);
   }
 }
 

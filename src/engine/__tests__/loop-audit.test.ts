@@ -272,6 +272,7 @@ export const OUT_OF_SCOPE: Record<string, string> = {
   'midi-trigger': 'live MIDI',
   'midi-value': 'live MIDI',
   'media-in': 'reads footage; its own loop / in-out mapping (lib/media-time)',
+  'scan-3d': 'plays the stored photos of a scan as a slideshow spread over the project loop (index = floor(phase * count), so it wraps by construction; needs asset frames the audit host does not have); an empty scan is a still picture (nodes/input/scan-3d.test.ts)',
   'stop-motion': 'plays stored shots from Media (needs asset frames the audit host does not have); it wraps on its own length by construction, and with Set project length the project loops on it (nodes/input/stop-motion.test.ts). The live Shoot view is live input by design',
   freeze: 'constant moment: nothing to loop',
   cache: 'serves a bake of whatever it was fed',

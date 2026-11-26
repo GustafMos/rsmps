@@ -22,7 +22,10 @@ import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
 import { cardCorners, clampZoom, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, viewMatrix, viewRay, zoomLens, zoomProjection, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
 import { rotate } from '../../engine/lib/motion-math';
 import { hintFor, initialPlaceState, liftedPlacement, placeStep, type Gesture, type PlaceState } from './placement';
-import type { GrantedFeatures, XrAnchorLike, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrRigidTransform, XrSessionLike, XrViewLike, XrViewportLike } from './xr-api';
+import { SCAN_MAX_SIDE, type DepthMap } from '../../engine/lib/scan-data';
+import { DEFAULT_RADIUS } from '../../engine/lib/scan-data';
+import { RADIUS_PER_PIXEL, type ScanGrab, type ScanSession, type ScanViewState } from './scan-session';
+import type { GrantedFeatures, XrAnchorLike, XrCpuDepthLike, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrRigidTransform, XrSessionLike, XrViewLike, XrViewportLike } from './xr-api';
 
 /** What draws into the AR view (WebGL in the app, a recorder of calls in the tests). */
 export interface ArPainter {
@@ -39,6 +42,10 @@ export interface ArPainter {
    * covers the system's own passthrough. Returns false when the camera picture is not there (then nothing zoomed may be drawn).
    */
   backdrop?(view: XrViewLike, zoom: number): boolean;
+  /** Scan view: coloured triangles and lines in the room (the coverage dome). Vertices are x y z r g b a, premultiplied. */
+  mesh?(m: { tris: Float32Array; lines: Float32Array }, viewProjection: Float32Array): void;
+  /** Scan view: this frame's camera picture as a photo, at most `maxSide` on the longer side, copied now. Null = no picture. */
+  still?(view: XrViewLike, maxSide: number): ScanGrab | null;
 }
 
 /** A finished picture of the object, already in the painter's texture. */
@@ -97,9 +104,13 @@ export interface ArLoopState {
   cameraFps: number;
   error: string | null;
   ended: boolean;
+  /** The scan view's numbers (only in the scan view). */
+  scan?: ScanViewState;
 }
 
 export interface ArLoopDeps {
+  /** The scan view's brain. Present = this loop is the 3D Scan view: no picture of an object, a coverage dome instead. */
+  scan?: ScanSession;
   session: XrSessionLike;
   referenceSpace: unknown;
   /** The `viewer` space for the hit test in the middle of the screen; null when hit testing is not available. */
@@ -124,7 +135,22 @@ export interface ArLoopDeps {
 }
 
 const pt = (v: { x: number; y: number; z: number }): Vec3 => [v.x, v.y, v.z];
-export const poseOf = (t: XrRigidTransform): XrPose => ({ p: pt(t.position), q: [t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w] });
+/** The depth API's CPU depth picture as 16-bit values: luminance-alpha is that already, float32 (metres) becomes millimetres. */
+export function depthMapOf(info: XrCpuDepthLike | null): DepthMap | null {
+  if (!info || !(info.width > 0) || !(info.height > 0)) return null;
+  const n = info.width * info.height;
+  const matrix = Array.from(info.normDepthBufferFromNormView.matrix);
+  if (info.data.byteLength === n * 2) return { width: info.width, height: info.height, rawValueToMeters: info.rawValueToMeters, normDepthBufferFromNormView: matrix, data: new Uint16Array(info.data.slice(0)) };
+  if (info.data.byteLength === n * 4) {
+    const f = new Float32Array(info.data);
+    const data = new Uint16Array(n);
+    for (let i = 0; i < n; i++) data[i] = Number.isFinite(f[i]) ? Math.min(65535, Math.max(0, Math.round(f[i] * info.rawValueToMeters * 1000))) : 0;
+    return { width: info.width, height: info.height, rawValueToMeters: 0.001, normDepthBufferFromNormView: matrix, data };
+  }
+  return null;
+}
+
+export const poseOf =(t: XrRigidTransform): XrPose => ({ p: pt(t.position), q: [t.orientation.x, t.orientation.y, t.orientation.z, t.orientation.w] });
 
 /** The hint for a picture that cannot be made: the reason in plain words, and what to do about it. */
 export function renderFailHint(reason: string): string {
@@ -165,7 +191,7 @@ export function effectiveRecordRate(asked: number | null, project: number, measu
   return { fps: fit ?? Math.max(1, Math.round(measured)), asked: want, clamped: true };
 }
 
-type Action = { type: 'place' } | { type: 'reset' } | { type: 'gesture'; g: Gesture };
+type Action = { type: 'place' } | { type: 'reset' } | { type: 'gesture'; g: Gesture } | { type: 'scan-begin' };
 
 export class ArLoop {
   private place: PlaceState = initialPlaceState();
@@ -227,6 +253,10 @@ export class ArLoop {
   placeHere(): void {
     this.actions.push({ type: 'place' });
   }
+  /** Scan view: the Start button, once the dome is sized and lifted. */
+  scanBegin(): void {
+    this.actions.push({ type: 'scan-begin' });
+  }
   /** The Reset button: pick the object up again. */
   reset(): void {
     this.actions.push({ type: 'reset' });
@@ -254,7 +284,7 @@ export class ArLoop {
   }
   /** Whether this session can zoom: the page needs the camera picture to draw it larger. */
   get canZoom(): boolean {
-    return this.d.features.cameraAccess && !!this.d.painter.backdrop;
+    return !this.d.scan && this.d.features.cameraAccess && !!this.d.painter.backdrop; // the scan's photos are never zoomed
   }
 
   get isRecording(): boolean {
@@ -373,6 +403,12 @@ export class ArLoop {
     const base = this.place.placement;
     const pl = base ? liftedPlacement(base) : null; // where the object really stands: the surface point plus its height
     if (this.place.phase !== 'placed' && this.place.reticle) d.painter.ring(reticleCorners(this.place.reticle, RING_RADIUS), viewProjection);
+    // the scan view: the coverage dome around the target instead of a picture of an object
+    const scanTarget = d.scan && pl ? { center: pl.p, up: rotate(pl.q, [0, 1, 0]) as Vec3, h: base?.h ?? 0 } : null;
+    if (d.scan && d.painter.mesh) {
+      const m = d.scan.mesh(scanTarget);
+      if (m) d.painter.mesh(m, viewProjection);
+    }
     // the lens of the zoomed picture: the engine renders the object through it, so it stays locked to the room while the camera is zoomed
     const zlens = zoomLens(lens, zoom);
     const moment: WorldMoment = { view: pose, lens: zlens, ...(zoom !== 1 ? { zoom } : {}), object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale } : null };
@@ -381,7 +417,7 @@ export class ArLoop {
       this.lastSeq = pic.seq;
       this.tick(this.pictureTimes, now);
     }
-    if (pl && pic) {
+    if (pl && pic && !d.scan) {
       if (d.show.kind === 'layer') {
         // only a picture rendered WITH a placement shows the object; one from before the tap is empty
         if (pic.moment.object) d.painter.picture(layerCorners(pic.moment.view, pic.moment.lens, pic.depth), viewProjection, 1);
@@ -399,7 +435,7 @@ export class ArLoop {
     }
 
     // 5. the next picture, for this pose
-    if (!this.paused && (pl || d.show.kind === 'card')) {
+    if (!this.paused && !d.scan && (pl || d.show.kind === 'card')) {
       const depth = pl ? Math.max(0.05, depthOf(pose, pl.p)) : 1;
       d.source.request({ moment, depth, size: pictureSize(zlens, d.maxSide), seconds: d.seconds() });
     }
@@ -416,10 +452,39 @@ export class ArLoop {
         if (n >= 0) r.samples.push({ t, frame: n, ...moment });
       } else r.samples.push({ t, ...moment });
     }
+
+    // 7. the scan: a photo of this frame when one is due (the camera texture is only valid inside this callback)
+    if (d.scan) {
+      d.scan.frame({
+        now,
+        pose,
+        lens,
+        tracking,
+        paused: this.paused,
+        viewport: { width: d.layer.framebufferWidth, height: d.layer.framebufferHeight },
+        placed: scanTarget,
+        grab: () => d.painter.still?.(view, SCAN_MAX_SIDE) ?? null,
+        depth: () => {
+          try {
+            return depthMapOf(frame.getDepthInformation?.(view) ?? null);
+          } catch {
+            return null; // depth was granted on paper only, or this frame has none
+          }
+        },
+      });
+    }
     this.emit(false);
   }
 
   private act(a: Action, frame: XrFrameLike, pose: XrPose, lens: Lens): void {
+    const scan = this.d.scan;
+    if (a.type === 'scan-begin') {
+      const b = this.place.placement;
+      const l = b ? liftedPlacement(b) : null;
+      scan?.begin(l && b ? { center: l.p, up: rotate(l.q, [0, 1, 0]) as Vec3, h: b.h ?? 0 } : null);
+      return;
+    }
+    if (scan?.phase === 'capture' && (a.type === 'reset' || a.type === 'place')) return; // the dome is fixed once the walk has begun
     if (a.type === 'reset') {
       this.dropAnchor();
       this.drag = null;
@@ -430,6 +495,14 @@ export class ArLoop {
     const g = a.g;
     const base = this.place.placement;
     const pl = base ? liftedPlacement(base) : null;
+    if (scan) {
+      // in the scan view the Size strip and the pinch change the dome's radius, and nothing moves the target once the walk began
+      if (g.type === 'zoom') return void (scan.radius *= Math.exp(g.dy * RADIUS_PER_PIXEL));
+      if (g.type === 'zoom-reset') return void (scan.radius = DEFAULT_RADIUS);
+      if (g.type === 'pinch') return void (g.factor > 0 && (scan.radius *= g.factor));
+      if (g.type === 'twist' || g.type === 'drag-start' || g.type === 'drag' || g.type === 'drag-end') return;
+      if (scan.phase === 'capture' && g.type !== 'tap') return;
+    }
     if (g.type === 'zoom') {
       if (this.canZoom) this.zoom = clampZoom(this.zoom * Math.exp(g.dy * ZOOM_PER_PIXEL));
       return;
@@ -439,7 +512,7 @@ export class ArLoop {
       return;
     }
     if (g.type === 'tap') {
-      if (this.place.phase !== 'placed') this.placeNow(frame, pose);
+      if (this.place.phase !== 'placed' && scan?.phase !== 'capture') this.placeNow(frame, pose);
       return;
     }
     if (!pl || !base) return;
@@ -576,10 +649,12 @@ export class ArLoop {
   state(): ArLoopState {
     const r = this.recording;
     const sourceError = this.d.source.error();
+    const scan = this.d.scan;
     return {
+      ...(scan ? { scan: scan.state() } : {}),
       phase: this.place.phase,
       tracking: this.place.tracking,
-      hint: sourceError ? renderFailHint(sourceError) : hintFor(this.place, { gestures: this.d.features.domOverlay, recording: !!r, paused: this.paused }),
+      hint: scan ? scan.hint(this.place, { gestures: this.d.features.domOverlay, paused: this.paused }) : sourceError ? renderFailHint(sourceError) : hintFor(this.place, { gestures: this.d.features.domOverlay, recording: !!r, paused: this.paused }),
       recording: !!r,
       recSeconds: r && r.t0 >= 0 ? (this.d.now() - r.t0) / 1000 : 0,
       fps: this.rate(this.frameTimes),
