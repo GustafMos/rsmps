@@ -555,3 +555,30 @@ See docs/LIVE_INPUT.md, "Stop-motion capture". Put a camera on a tripod, capture
 2. Open the **Output** window on the projector and press F in it. Use Alt+B for blackout and Alt+F to freeze it.
 3. Turn Loop on, choose **Record** next to a mapping, and play the knob for one pass of the loop. A **Keyframes** node appears, wired to the setting, with your movement as editable keys.
 4. Export as usual: the keyframes (or the values you set) are in the project, so the export matches what you played.
+
+## A cube with more than three dimensions (Hypercube)
+
+1. Add **Hypercube** (Generate) and wire it to the output. The default is a 5D cube: 32 corners and 80 edges, turning slowly.
+2. *Dimensions* picks the cube: 3D, 4D (tesseract), 5D or 6D. *Motion* picks how it turns: **Slow tumble**, **Inside out** (the inner cube swells and swaps places with the outer one),
+   **Through itself**, **Chaos**, or **Custom** with one setting per kind of turn. Every turn is a whole number per loop, so the loop always joins; *Speed* multiplies them all.
+3. *Color*: **By dimension** gives the edges that run along the fourth, fifth and sixth direction their own color, which is what lets the eye pick the nested cubes apart. **By depth** shades from near to far.
+4. *Depth* is the strength of the perspective. At 0 the cubes land exactly on top of each other; raise it and the far ones shrink inside the near ones. *Fold angle* turns the shape a fixed amount into the higher dimensions.
+5. *Faces* fills every square face with a little light; *Corner dots*, *Glow* and *Line thickness* (a share of the picture height, so it looks the same at any resolution) shape the lines.
+6. To put it over a clip, set the *Background* alpha to 0 and put it over the clip with **Merge**. Or wire a picture or clip into **Picture**: it is drawn on the six faces of the inner or outer cube, or behind the lines.
+
+## See a clip's frames standing in space (Frame Array)
+
+A clip has width, height and time. **Frame Array** (Time) shows time as a third direction: many frames at once, as panes in a 3D scene.
+
+1. Wire a clip into **Frame Array**. The default is a **Stack**: ten panes one behind the other, the present frame in front with a bright border, later frames behind it.
+2. *Time* decides what moves:
+   - **Frames flow past**: every pane holds one frame and the panes travel toward the front, so the clip plays at one fixed spot, like film through a gate.
+   - **Every pane plays**: the panes stay put and each plays the clip, a little later than the one before.
+   - **Still frames, playhead**: nothing moves but the highlight, like a contact sheet with a cursor.
+   - **Custom travel**: choose how many steps the panes move per loop.
+3. *Time span* is the share of the loop the panes cover between them (negative looks back in time). *Present moment at* puts "now" on the first pane or the middle one.
+4. *Layout*: **Row**, **Ring** (a carousel; with *Time span* 1 it is the whole loop going round), **Helix** (raise *Arc* to 720 for two turns), **Grid 3D** (columns x rows x layers) and
+   **Tunnel** (the four walls of a corridor; set *View from side*, *View from above* and *Swing* to 0 and *Distance* near 0.45 to stand inside it).
+5. Camera: *Swing* rocks it from side to side, *Orbit* takes it all the way around, both a whole number of times per loop. *Distance* 1 always fits the whole layout.
+6. *Pane opacity* below 1 with *Blend* **Add** turns a stack into layers of light. *Dim other panes* and *Fade with distance* keep the present frame the brightest.
+7. Cost: every pane makes whatever feeds the node render once more per frame (a still picture costs nothing extra), so keep *Panes* low on a heavy chain, or freeze the chain in front first (see "Freeze a finished part of the graph").
