@@ -1,5 +1,5 @@
 /**
- * What is on the screen over the camera picture in the World AR view: a hint, four buttons (Place, Reset, Record, Exit) and a line of
+ * What is on the screen over the camera picture in the World AR view: a hint, four buttons (Place, Reset, Record, Exit), a slim Height strip on the right edge (drag it up or down to raise or lower the object, double tap to put it back on the surface) and a line of
  * numbers for reporting problems. Plain DOM, not React: the browser lifts this one element out of the page and shows it full-screen
  * over the camera (the WebXR "DOM overlay"), so it must stand on its own, with its own styles.
  *
@@ -54,7 +54,24 @@ export function createArOverlay(doc: Document = document): ArOverlay {
   const reset = button('Reset', 'Pick it up and choose another spot');
   const record = button('Record', 'Record the movement (and the camera picture where the browser hands it over)');
   const exit = button('Exit', 'Leave the AR view');
-  root.append(touch, hint, badge, stats, bar);
+  // The Height strip: a slim, full-reach strip on the right edge (at least 44 px wide, clear of the notch and the gesture bar). Dragging
+  // it moves the object up and down; the same finger travel as two fingers on the picture. Shown once something is placed.
+  const strip = doc.createElement('div');
+  strip.style.cssText = 'position:absolute;right:max(8px,env(safe-area-inset-right));top:28%;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 120px);width:52px;display:none;flex-direction:column;align-items:center;justify-content:space-between;border-radius:26px;background:rgba(20,24,32,.55);border:1px solid rgba(255,255,255,.35);touch-action:none;font:600 12px system-ui,sans-serif;';
+  strip.setAttribute('role', 'slider');
+  strip.setAttribute('aria-label', 'Height');
+  strip.title = 'Drag up or down to raise or lower it. Double tap to put it back on the surface.';
+  const arrowUp = doc.createElement('div');
+  arrowUp.textContent = '\u25B2';
+  arrowUp.style.cssText = 'padding-top:10px;pointer-events:none;';
+  const heightLabel = doc.createElement('div');
+  heightLabel.style.cssText = 'pointer-events:none;writing-mode:vertical-rl;transform:rotate(180deg);letter-spacing:.05em;white-space:nowrap;';
+  heightLabel.textContent = 'Height';
+  const arrowDown = doc.createElement('div');
+  arrowDown.textContent = '\u25BC';
+  arrowDown.style.cssText = 'padding-bottom:10px;pointer-events:none;';
+  strip.append(arrowUp, heightLabel, arrowDown);
+  root.append(touch, hint, badge, stats, strip, bar);
   doc.body.appendChild(root);
 
   let handle: WorldArHandle | null = null;
@@ -76,6 +93,53 @@ export function createArOverlay(doc: Document = document): ArOverlay {
   // The session would also report every tap as its own "select". The page handles the fingers itself, so that one is switched off
   // for the whole overlay (the DOM Overlays module's `beforexrselect`).
   root.addEventListener('beforexrselect', (e) => e.preventDefault());
+  // Height strip: its own finger, never a tap or drag on the room. Travel up the screen raises; a quick double tap lowers back to the surface.
+  let stripY: number | null = null;
+  let stripId = -1;
+  let lastStripTap = -1e9;
+  let stripMoved = 0;
+  strip.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    if (stripY !== null) return;
+    stripY = e.clientY;
+    stripId = e.pointerId;
+    stripMoved = 0;
+    try {
+      strip.setPointerCapture(e.pointerId);
+    } catch {
+      /* the moves still arrive while the finger stays on the strip */
+    }
+  });
+  strip.addEventListener('pointermove', (e) => {
+    e.stopPropagation();
+    if (stripY === null || e.pointerId !== stripId) return;
+    const dy = stripY - e.clientY;
+    stripY = e.clientY;
+    stripMoved += Math.abs(dy);
+    if (dy) handle?.gesture({ type: 'lift', dy });
+  });
+  const stripEnd = (e: PointerEvent, cancelled: boolean) => {
+    e.stopPropagation();
+    if (stripY === null || e.pointerId !== stripId) return;
+    stripY = null;
+    if (cancelled || stripMoved >= 8) return;
+    if (e.timeStamp - lastStripTap <= 400) {
+      handle?.gesture({ type: 'lift-reset' });
+      lastStripTap = -1e9;
+    } else lastStripTap = e.timeStamp;
+  };
+  strip.addEventListener('pointerup', (e) => stripEnd(e, false));
+  strip.addEventListener('pointercancel', (e) => stripEnd(e, true));
+  let shownHeight = 0;
+  let heightTimer: ReturnType<typeof setTimeout> | null = null;
+  const showHeight = (metres: number) => {
+    heightLabel.textContent = `${metres >= 0 ? '+' : '-'}${Math.round(Math.abs(metres) * 100)} cm`;
+    if (heightTimer) clearTimeout(heightTimer);
+    heightTimer = setTimeout(() => {
+      heightLabel.textContent = 'Height';
+      heightTimer = null;
+    }, 1500);
+  };
   place.addEventListener('click', () => handle?.place());
   reset.addEventListener('click', () => handle?.reset());
   record.addEventListener('click', () => handle?.toggleRecord());
@@ -93,6 +157,12 @@ export function createArOverlay(doc: Document = document): ArOverlay {
       place.style.opacity = place.disabled ? '0.4' : '1';
       reset.disabled = s.phase !== 'placed';
       reset.style.opacity = reset.disabled ? '0.4' : '1';
+      strip.style.display = s.phase === 'placed' ? 'flex' : 'none';
+      strip.setAttribute('aria-valuenow', String(Math.round(s.height * 100)));
+      if (Math.abs(s.height - shownHeight) > 1e-4) {
+        shownHeight = s.height;
+        showHeight(s.height); // the number shows briefly while it changes, then the word again
+      }
       record.textContent = s.saving ? 'Saving' : s.recording ? `Stop ${formatElapsed(s.recSeconds)}` : 'Record';
       record.disabled = s.saving;
       record.style.background = s.recording ? 'rgba(200,30,30,.85)' : 'rgba(20,24,32,.72)';
@@ -106,6 +176,7 @@ export function createArOverlay(doc: Document = document): ArOverlay {
       ].join('\n');
     },
     remove() {
+      if (heightTimer) clearTimeout(heightTimer);
       handle = null;
       root.remove();
     },

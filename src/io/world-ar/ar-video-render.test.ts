@@ -92,6 +92,7 @@ function record(lens: Lens, camera: { width: number; height: number }) {
       loop.gesture({ type: 'pinch', factor: 1.4 });
       loop.gesture({ type: 'twist', deg: 35 });
     }
+    if (i === 22) loop.gesture({ type: 'lift', dy: 60 }); // raised off the floor: the video must show it as high as live did
     step();
   }
   const rec = loop.stopRecording()!;

@@ -40,6 +40,8 @@ export interface Placement {
   yaw: number;
   /** Size multiplier (the pinch). 1 = the node's "Object size". */
   scale: number;
+  /** Raised above the surface, metres along its normal (the AR view's Height control). Absent = 0. */
+  h?: number;
 }
 
 /** How the scene is laid on the placement (the World AR Camera node's own settings). */
