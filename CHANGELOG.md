@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.33.1] - 2026-11-26
+
+### Fixed
+- **World AR Camera no longer stalls on "Waiting for the camera…".** While the AR view is open the phone's AR system owns the camera, so a Webcam node in the viewed graph could not get a picture and nothing was drawn. Webcam nodes now give a see-through picture during AR, so a graph such as Webcam, Merge and 3D Object shows just the object over the real camera view. The app's own camera is released when Start AR is pressed and comes back after Exit. The message shown when a picture cannot be rendered now says what to do, and sits below the phone's status bar.
+
 ## [0.33.0] - 2026-11-26
 
 ### Added
