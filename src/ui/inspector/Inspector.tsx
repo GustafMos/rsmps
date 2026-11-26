@@ -30,6 +30,7 @@ import { bakeSelection } from '../store/bake';
 import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
 import { PhoneMotionPanel } from './PhoneMotionPanel';
+import { MarkerCameraPanel } from './MarkerCameraPanel';
 import { LiveRecordPanel } from './LiveRecordPanel';
 import { CameraPermissionPanel } from './CameraPermissionPanel';
 import { FastCopyPanel } from './FastCopyPanel';
@@ -225,6 +226,7 @@ function NodePanel({ id }: { id: string }) {
       {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : node.type === 'datamosh-real' ? <DatamoshPanel node={node} /> : node.type === 'style-transfer-ai' ? <StyleAiPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && node.params.device !== 'this' && <PhonePanel node={node} />}
       {(node.type === 'phone-motion' || node.type === 'ar-camera') && !missing.length && <PhoneMotionPanel node={node} />}
+      {node.type === 'marker-camera' && <MarkerCameraPanel node={node} />}
       {node.type === 'camera-in' && <CameraPermissionPanel />}
       {node.type === 'media-in' && <FastCopyPanel node={node} />}
       {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}

@@ -291,6 +291,36 @@ The orientation it uses stays true to gravity (the horizon is level wherever you
 - Same sources and takes as Phone Motion: *Sensors from* (this device or a linked phone), **Record motion**, *Source: Recorded take*, take smoothing. An export needs a recorded take, and the
   camera picture under it must be recorded too (the Webcam's Record button, or the Recorder node): record both in the same go if they have to match.
 - Recipe: `docs/RECIPES.md`, "A 3D object that stays put in the room".
+- For an object that also stays put while you walk, use **Marker Camera** (below).
+
+### Marker Camera (a 3D camera that knows where the phone is)
+
+**Marker Camera** (`marker-camera`, Detect & Track) anchors 3D objects in the room for real, also while you walk. Motion sensors cannot measure where the phone is, only how it is turned;
+a printed square marker in the picture can. The node finds the marker in every frame, works out the phone's position and direction from its four corners, and outputs a normal camera.
+A 3D Object wired to it stands on the marker with the right perspective from every side.
+
+- **The marker** is a black square with a 4 x 4 pattern inside, on white. Six different ones exist. Print one from the node's panel (**Print marker**, a PDF at an exact size, with the
+  top edge and a check line marked), or show an **AR Marker** node full screen on a tablet or a second phone and lay that down. Keep the white margin round the black square.
+- **The scene's axes**: the paper is the ground. x is the marker's right, z is where its top edge points ("away"), y is up. **Floor height** -0.55 (the default) puts the paper at the
+  underside of the standard cube, so it stands on the marker (a ball needs -0.95); at **Object size** 1 the black square is 2 scene units wide.
+- **Field of view** is the real camera's, across the picture's shorter side (about 40 for wide video, about 52 for 4:3 on a phone's main camera). Browsers do not report it, so set it by
+  eye: when it is wrong a tall object leans or slides as you walk round the marker.
+- **No delay between object and picture.** The node waits for the search of each frame, so the camera it outputs belongs to exactly the picture it was given. Its **Picture** output is
+  that picture: merge the object over it (and wire it into the 3D Object's *Size from*, so both have the same shape).
+- **When the marker is lost** (covered, out of view, blurred by a fast move): the object stays for the **Hold time**, then stays on, fades or hides, as chosen. The **Found** output
+  (0 to 1) can drive the opacity of the merge. A marker that is partly covered or cut off by the edge of the picture counts as lost on purpose: half-seen corners would give a wrong pose.
+- **Smoothing** calms the trembling of a hand-held picture; it smooths little while the phone moves, so the object does not trail.
+- **Filmed clips**: wire a clip into *Picture in* instead of the Webcam and it works the same, frame for frame. Press **Analyze clip** for a result that is identical however you scrub and
+  in the export, with smoothing that looks at both neighbours of a frame and so does not trail at all.
+- **Show what is found** draws the outline, the top-left corner and the three axes on the Picture; **Cover the marker** paints the black square over with the paper round it;
+  the **Flat picture** input and output lay any 2D picture on the marker's plane.
+- A mirrored picture (a front camera with Mirror on) is recognised and flipped back on the Picture output.
+- Search cost on the CPU, measured in Node on a desktop-class core: about 2.5 ms a frame at the small search size (320), 6 ms at medium (480), 12 ms at large (640). Reading the small
+  picture back from the GPU comes on top, as for the other Detect nodes.
+- Recipe: `docs/RECIPES.md`, "An object standing on a marker".
+
+What can only be confirmed on a real phone: the field of view of its back camera (and whether the browser's picture is cropped compared with the full sensor), how well the marker is found
+in your light, on glossy paper or on a bright screen, how much a rolling shutter and motion blur disturb it while walking, and the speed of the GPU read-back on the phone.
 
 ### Other sensors that could be used
 
