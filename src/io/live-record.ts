@@ -24,6 +24,8 @@ export const MAX_SECONDS = 30 * 60;
 export const MAX_BYTES = 1.5e9;
 export const MIN_FPS = 5;
 export const MAX_FPS = 60;
+/** Manual mode: frames that may wait for the encoder before new ones are dropped. */
+export const MAX_PENDING = 4;
 
 /** Frame rate of a recording: the project's, kept between 5 and 60. */
 export function clampFps(fps: number): number {
@@ -121,6 +123,11 @@ export interface LiveRecorderOptions {
   audio?: () => MediaStreamTrack | null;
   /** Longest side of the clip (default 1920). */
   maxSide?: number;
+  /**
+   * No timer: the owner hands over each picture itself with `push()`, at the moment it has one, and is told which frame of the clip it
+   * became. For a source whose pictures must stay matched to something else recorded with them (the AR view: one pose per frame).
+   */
+  manual?: boolean;
 }
 
 interface Session {
@@ -147,6 +154,9 @@ interface Session {
   height: number;
   /** performance.now() of frame 0; 0 until the encoder is ready. */
   t0: number;
+  /** Manual mode: the encoder is being set up / frames handed to the encoder and not yet taken. */
+  settingUp: boolean;
+  pending: number;
   lastN: number;
   frames: number;
   bytes: number;
@@ -217,6 +227,8 @@ export class LiveRecorder {
       width: 0,
       height: 0,
       t0: 0,
+      settingUp: false,
+      pending: 0,
       lastN: -1,
       frames: 0,
       bytes: 0,
@@ -227,9 +239,98 @@ export class LiveRecorder {
     this._state = 'recording';
     // Twice per frame: a timer that fires exactly once per frame lands on the same frame index twice now and then (timer jitter)
     // and so leaves a gap; a tick whose frame was already recorded costs nothing.
+    if (opts.manual) {
+      this.emit();
+      return;
+    }
     s.timer = setInterval(() => this.tick(s), 500 / fps);
     this.emit();
     this.tick(s);
+  }
+
+  /**
+   * Manual mode: record `src` as it is right now. Returns the frame of the clip it became, or -1 when it was not taken (the encoder
+   * is still being set up, this frame of the clip already has a picture, or the encoder is behind). The picture is read before this
+   * returns, so the caller may change it straight after.
+   */
+  push(src: CanvasImageSource): number {
+    const s = this.s;
+    if (!s || this._state !== 'recording' || s.stopping || s.error) return -1;
+    const size = sourceSize(src);
+    if (!size.width || !size.height) return -1;
+    if (!s.output) {
+      if (!s.settingUp) {
+        s.settingUp = true;
+        s.work = s.work
+          .then(() => this.setup(s, size.width, size.height))
+          .catch((err) => {
+            s.error = asError(err);
+            this.halt(s);
+            this.onAutoStop?.('error', s.error);
+          });
+      }
+      return -1;
+    }
+    if (s.pending >= MAX_PENDING) return -1; // the encoder is behind: drop this picture rather than pile frames up in memory
+    const now = performance.now();
+    if (!s.t0) s.t0 = now;
+    const n = frameIndexAt((now - s.t0) / 1000, s.fps);
+    if (n <= s.lastN) return -1;
+    if (!this.draw(s, src, size)) return -1;
+    const frame = new VideoFrame(s.canvas!, { timestamp: Math.round(((n + s.shiftFrames) / s.fps) * 1e6), duration: Math.round(1e6 / s.fps) });
+    const sample = new VideoSample(frame);
+    s.lastN = n;
+    s.frames++;
+    s.pending++;
+    s.work = s.work
+      .then(() => s.source!.add(sample))
+      .catch((err) => {
+        if (!s.error) {
+          s.error = asError(err);
+          this.halt(s);
+          this.onAutoStop?.('error', s.error);
+        }
+      })
+      .then(() => {
+        sample.close();
+        s.pending--;
+      });
+    if (limitReached((now - s.t0) / 1000, s.bytes) && !s.stopping) {
+      this.halt(s);
+      this.onAutoStop?.('limit');
+    }
+    const second = Math.floor(this.elapsed);
+    if (second !== s.shownSecond) {
+      s.shownSecond = second;
+      this.emit();
+    }
+    return n;
+  }
+
+  /** Draw the source into the clip's canvas the way the node shows it. False when the picture went away mid-draw. */
+  private draw(s: Session, src: CanvasImageSource, size: { width: number; height: number }): boolean {
+    const { mirror, turns } = s.orient();
+    const swap = turns % 2 === 1;
+    const g = s.ctx!;
+    const W = s.width;
+    const H = s.height;
+    try {
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.fillStyle = '#000';
+      g.fillRect(0, 0, W, H);
+      // The picture as the node shows it (turned, then mirrored), fitted into the clip: a source that changes size mid-take is letterboxed.
+      const r = containRect(swap ? size.height : size.width, swap ? size.width : size.height, W, H);
+      g.translate(W / 2, H / 2);
+      if (mirror) g.scale(-1, 1);
+      g.rotate((turns * Math.PI) / 2);
+      const dw = swap ? r.h : r.w;
+      const dh = swap ? r.w : r.h;
+      g.drawImage(src, -dw / 2, -dh / 2, dw, dh);
+      return true;
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'SecurityError') throw err;
+      return false; // a picture that went away between the check and the draw (a replaced phone frame): skip this tick
+    }
   }
 
   private tick(s: Session): void {
@@ -268,7 +369,7 @@ export class LiveRecorder {
     if (!src) return;
     const size = sourceSize(src);
     if (!size.width || !size.height) return;
-    const { mirror, turns } = s.orient();
+    const { turns } = s.orient();
     const swap = turns % 2 === 1;
     if (!s.output) {
       await this.setup(s, swap ? size.height : size.width, swap ? size.width : size.height);
@@ -277,25 +378,7 @@ export class LiveRecorder {
     if (!s.t0) s.t0 = performance.now();
     const n = frameIndexAt((performance.now() - s.t0) / 1000, s.fps);
     if (n <= s.lastN) return;
-    const g = s.ctx!;
-    const W = s.width;
-    const H = s.height;
-    try {
-      g.setTransform(1, 0, 0, 1, 0, 0);
-      g.fillStyle = '#000';
-      g.fillRect(0, 0, W, H);
-      // The picture as the node shows it (turned, then mirrored), fitted into the clip: a source that changes size mid-take is letterboxed.
-      const r = containRect(swap ? size.height : size.width, swap ? size.width : size.height, W, H);
-      g.translate(W / 2, H / 2);
-      if (mirror) g.scale(-1, 1);
-      g.rotate((turns * Math.PI) / 2);
-      const dw = swap ? r.h : r.w;
-      const dh = swap ? r.w : r.h;
-      g.drawImage(src, -dw / 2, -dh / 2, dw, dh);
-    } catch (err) {
-      if ((err as { name?: string })?.name === 'SecurityError') throw err;
-      return; // a picture that went away between the check and the draw (a replaced phone frame): skip this tick
-    }
+    if (!this.draw(s, src, size)) return;
     const frame = new VideoFrame(s.canvas!, { timestamp: Math.round(((n + s.shiftFrames) / s.fps) * 1e6), duration: Math.round(1e6 / s.fps) });
     const sample = new VideoSample(frame);
     try {
