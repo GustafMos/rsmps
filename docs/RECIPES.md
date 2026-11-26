@@ -358,6 +358,23 @@ Needs the phone link (see `docs/LIVE_INPUT.md`): the desktop app, or `npm run de
 5. Record it: press **Record motion** in the inspector, play the move, press **Stop**. The node switches to **Source: Recorded take**, so the move plays back without the phone and exports exactly. Raise
    **Take smoothing** (with **Keep fast moves**) to calm a shaky take and press **Smooth take** to keep it.
 
+## A 3D object that stays put in the room (phone or tablet)
+
+Open the app on the phone itself (Android Chrome, or Safari on iPhone / iPad). No second device is needed.
+
+1. Add a **Webcam**: on a phone it opens the back camera. Allow the camera.
+2. Add an **AR Camera**. Its inspector shows **This device's motion**; on iPhone and iPad press **Allow motion sensors** and answer the question (Android asks nothing). The small cube follows the phone.
+3. Add a **3D Object** and wire **AR Camera > Camera** into its **Camera** input (the object is drawn on a transparent background).
+4. Add a **Merge**: the Webcam is the background, the 3D Object goes on top. View the Merge.
+5. Hold the phone upright, point it where the object should be and press **Recenter**. Turn around: the object stays where it was, and comes back when you look there again.
+6. If the object slides against the camera picture while you turn, change **Field of view** (about 40 for wide video, about 52 for 4:3) until it sticks. Lower **Smoothing** if it trails behind.
+7. **Distance** moves the object nearer or farther; **Eye height** above 0 puts it lower, as if it stood on the floor.
+8. To export: press **Record motion** on the AR Camera and record the camera picture in the same go (the Webcam's Record button, or a Recorder node). Then use the recorded clip instead of
+   the live Webcam and set the AR Camera's **Source** to *Recorded take*.
+
+It follows turning only: if you walk, the object walks with you. More of the phone's sensors as numbers (tilt, shake, jolt, gravity, compass): add a **Phone Motion** node; on a phone it reads
+this device too. Wire **Gravity X / Y** into an object's position to make it fall towards the low side of the screen.
+
 ## Gaussian splats (Gaussian Splat, Picture to Splats)
 
 **View a scan.** Import a `.ply` from a 3D Gaussian Splatting trainer (or a `.splat` file; compressed `.ply` / `.spz` are not supported) into the library, add a **Gaussian Splat** node and choose the file in its *Splat file* field. *Fit to view* centers and scales the scan (floaters are

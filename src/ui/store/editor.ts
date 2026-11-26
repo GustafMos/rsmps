@@ -35,7 +35,7 @@ import { applyTake, normalizeTimeline, type LoopRecordMode } from '../../engine/
 import { rateForFirstVideo } from '../lib/firstVideoRate';
 import { soundToWire } from '../lib/exportSound';
 import { makeWire, wireError } from '../lib/wireConvert';
-import { cameraNodeFor, isHandheld } from '../lib/handheld';
+import { cameraNodeFor, isHandheld, motionNodeParams } from '../lib/handheld';
 import { firstImagePort, inputsAccepting, outputsFeeding, paletteInputPort, sourceDefFor } from '../lib/sockets';
 import { layoutFor } from '../lib/layout';
 import { frameRects, nodeRects } from '../lib/geometry';
@@ -717,6 +717,7 @@ export class Editor {
         params = cam.params;
       }
     }
+    params = motionNodeParams(type, isHandheld(), params); // motion nodes read this device's own sensors on a phone
     const def = this.registry.get(type);
     if (!def) return null;
     let id = '';

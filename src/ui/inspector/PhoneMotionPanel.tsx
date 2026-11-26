@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { NodeInstance } from '../../engine/types';
 import { matFromQuat, type Quat } from '../../engine/lib/motion-math';
 import { bakeSmoothing, isTake, resetToRaw, takeDense, takeDuration, takeRawDense, type MotionTake } from '../../engine/lib/motion-take';
+import { THIS_DEVICE, motionSession } from '../../engine/lib/motion-source';
+import type { DeviceSensorStatus } from '../../io/device-sensors';
 import type { PhoneMotionStatus } from '../../io/phone-motion';
 import { useApp, useEd } from '../store/context';
 
@@ -20,11 +22,31 @@ function useMotionStatus(token: string): PhoneMotionStatus | null {
       setSt(null);
       return;
     }
-    const tick = () => setSt(io.phone.motion?.has(token) ? io.phone.motion.session(token).status() : null);
+    const tick = () => {
+      if (token === THIS_DEVICE) io.sensors?.demand(); // an open panel keeps this device's sensors on, so the preview moves
+      setSt(io.phone.motion?.has(token) ? io.phone.motion.session(token).status() : null);
+    };
     tick();
     const t = setInterval(tick, 50);
     return () => clearInterval(t);
   }, [io, token]);
+  return st;
+}
+
+/** State of this device's own sensors (null for a linked phone), refreshed a few times a second while the panel is open. */
+function useDeviceSensors(on: boolean): DeviceSensorStatus | null {
+  const { io } = useApp();
+  const [st, setSt] = useState<DeviceSensorStatus | null>(null);
+  useEffect(() => {
+    if (!on || !io.sensors) {
+      setSt(null);
+      return;
+    }
+    const tick = () => setSt(io.sensors!.status());
+    tick();
+    const t = setInterval(tick, 300);
+    return () => clearInterval(t);
+  }, [io, on]);
   return st;
 }
 
@@ -103,10 +125,23 @@ function Curve({ a, b }: { a: number[]; b: number[] }) {
 /** Inspector section of Phone Motion: sensors, live preview, Recenter, Record and the take tools. */
 export function PhoneMotionPanel({ node }: { node: NodeInstance }) {
   const { ed, io } = useApp();
-  const token = String(node.params.session ?? '');
+  const local = node.params.device === 'this'; // the sensors of the device the app runs on, not a linked phone
+  const token = motionSession(node.params);
   const fps = useEd((s) => s.graph.project.fps);
   const st = useMotionStatus(token);
+  const dev = useDeviceSensors(local);
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const isCamera = node.type === 'ar-camera';
+  const allow = async () => {
+    if (!io.sensors) return;
+    setBusy(true);
+    setNote('');
+    const r = await io.sensors.allow(); // called straight from the click: iOS only asks then
+    setBusy(false);
+    setNote(r.state === 'denied' ? r.message : '');
+  };
   const take: MotionTake | null = isTake(node.params.take) ? node.params.take : null;
   const session = token && io.phone.motion?.has(token) ? io.phone.motion.session(token) : null;
   const recording = !!st?.recording;
@@ -119,7 +154,7 @@ export function PhoneMotionPanel({ node }: { node: NodeInstance }) {
   const startRec = () => {
     setErr('');
     if (!session || !st?.live) {
-      setErr('Start motion on the phone first: the live indicator on this panel must be on.');
+      setErr(local ? 'No motion is arriving from this device yet: the live indicator on this panel must be on.' : 'Start motion on the phone first: the live indicator on this panel must be on.');
       return;
     }
     session.startRecording();
@@ -129,7 +164,7 @@ export function PhoneMotionPanel({ node }: { node: NodeInstance }) {
     const loop = !!node.params.recLoop;
     const t = session.stopRecording({ fps, loop, loopBlend: loop ? Number(node.params.recBlend ?? 0) : 0 });
     if (!t) {
-      setErr('Nothing was recorded (no motion arrived). Keep the phone page open and moving.');
+      setErr(local ? 'Nothing was recorded (no motion arrived).' : 'Nothing was recorded (no motion arrived). Keep the phone page open and moving.');
       return;
     }
     setParams([['take', t], ['source', 'recorded'], ['takeSmoothing', 0]]);
@@ -146,23 +181,35 @@ export function PhoneMotionPanel({ node }: { node: NodeInstance }) {
     return { a: pick(before), b: pick(after) };
   })();
 
-  if (!token) return <div className="rs-insp__sec"><div className="rs-caps">Phone motion</div><p className="rs-insp__hint">Link a phone above, open the page on it and press Start motion.</p></div>;
+  if (!token) return <div className="rs-insp__sec"><div className="rs-caps">Phone motion</div><p className="rs-insp__hint">Link a phone above, open the page on it and press Start motion. On a phone or tablet, set "Sensors from" to This device to use its own sensors.</p></div>;
+  const canAsk = !!dev && dev.state !== 'unsupported' && dev.state !== 'insecure';
+  const deviceLine = dev ? (st?.live ? `Receiving motion from this device (${st.hz} per second)` : dev.message) : 'This device\'s sensors are not available here.';
   return (
     <div className="rs-insp__sec">
-      <div className="rs-caps">Phone motion</div>
+      <div className="rs-caps">{local ? 'This device\'s motion' : 'Phone motion'}</div>
+      {local && (
+        <>
+          <div className="rs-insp__actions">
+            <button className="rs-btn" disabled={busy || !canAsk} onClick={() => void allow()} title="Motion sensors are only read while a node uses them. Nothing leaves this device.">
+              {busy ? 'Waiting for your answer' : 'Allow motion sensors'}
+            </button>
+          </div>
+          {(note || (dev && !dev.needsButton && dev.state === 'idle')) && <p className="rs-insp__hint">{note || 'This browser does not ask: the sensors switch on by themselves while a node uses them.'}</p>}
+        </>
+      )}
       <div style={{ display: 'flex', gap: 'var(--s-3)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <Preview st={st} />
         <div style={{ fontSize: 12, lineHeight: 1.6 }}>
           <div role="status">
             <span aria-hidden="true" style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', marginRight: 6, background: st?.live ? '#22c55e' : '#64748b' }} />
-            {st?.live ? `Receiving motion (${st.hz} per second)` : st?.caps ? 'Phone linked: press Start motion on the phone' : 'Waiting for the phone'}
+            {local ? deviceLine : st?.live ? `Receiving motion (${st.hz} per second)` : st?.caps ? 'Phone linked: press Start motion on the phone' : 'Waiting for the phone'}
           </div>
-          {st?.caps && CAPS.map(([k, label]) => <div key={k} style={{ opacity: st.caps![k] ? 1 : 0.45 }}>{st.caps![k] ? '✓' : '–'} {label}{k === 'ar' && st.caps![k] ? ' (untested)' : ''}</div>)}
-          {st?.live && <div className="rs-insp__hint">Position comes from: {st.positionSource === 'ar' ? 'AR tracking' : st.positionSource === 'location' ? 'location (meters from where you started)' : 'the touch pad (two fingers = virtual dolly)'}</div>}
+          {st?.caps && (local ? CAPS.slice(0, 3) : CAPS).map(([k, label]) => <div key={k} style={{ opacity: st.caps![k] ? 1 : 0.45 }}>{st.caps![k] ? '✓' : '–'} {label}{k === 'ar' && st.caps![k] ? ' (untested)' : ''}</div>)}
+          {st?.live && !local && !isCamera && <div className="rs-insp__hint">Position comes from: {st.positionSource === 'ar' ? 'AR tracking' : st.positionSource === 'location' ? 'location (meters from where you started)' : 'the touch pad (two fingers = virtual dolly)'}</div>}
         </div>
       </div>
       <div className="rs-insp__actions">
-        <button className="rs-btn" disabled={!session} onClick={() => session?.recenter()} title="Make the current pose the neutral one (double-tap on the phone does the same)">Recenter</button>
+        <button className="rs-btn" disabled={!session} onClick={() => session?.recenter()} title={isCamera ? 'The direction the phone points in now becomes straight ahead: the 3D scene is put in front of you' : local ? 'Make the current pose the neutral one' : 'Make the current pose the neutral one (double-tap on the phone does the same)'}>Recenter</button>
         {!recording ? (
           <button className="rs-btn" disabled={!session} onClick={startRec} title="Capture the phone's movement until you press Stop">● Record motion</button>
         ) : (
@@ -170,7 +217,8 @@ export function PhoneMotionPanel({ node }: { node: NodeInstance }) {
         )}
       </div>
       {err && <p className="rs-insp__warn" role="alert">{err}</p>}
-      {!take && !recording && <p className="rs-insp__hint">Record a move, then play it back with Source: Recorded. Exports and the command line use the take; they cannot use the live phone.</p>}
+      {isCamera && <p className="rs-insp__hint">Hold the phone upright, point it where the 3D scene should be and press Recenter. If the object slides against the camera picture when you turn, change Field of view.</p>}
+      {!take && !recording && <p className="rs-insp__hint">Record a move, then play it back with Source: Recorded. Exports and the command line use the take; they cannot use the live {local ? 'sensors' : 'phone'}.</p>}
       {take && (
         <>
           <p className="rs-insp__hint">

@@ -254,6 +254,7 @@ export const ROWS: Row[] = [
 export const OUT_OF_SCOPE: Record<string, string> = {
   'phone-motion': 'live sensor input (and a recorded take with its own loop blend)',
   'phone-camera': 'live phone camera',
+  'ar-camera': 'live sensor input: a camera that follows the phone (and a recorded take with its own loop blend)',
   'camera-in': 'live webcam',
   'url-in': 'live stream',
   'audio-level': 'live audio level',

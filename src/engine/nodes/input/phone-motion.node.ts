@@ -1,16 +1,18 @@
 import { defineNode } from '../../define';
 import { clamp, deadzone } from '../../lib/motion-math';
-import { isTake, sampleTake, takeDense, type MotionFrame } from '../../lib/motion-take';
+import { isTake } from '../../lib/motion-take';
+import { SENSORS_FROM_OPTIONS, motionReader } from '../../lib/motion-source';
 
 /**
- * Phone Motion: the phone's gyroscope, accelerometer, compass, touch pad and (optionally) position as numbers you can wire into any number
- * setting. Live values come through the signal bridge (`Host.signal('phone.<session>', channel)`, see io/phone-motion.ts); with a recorded
+ * Phone Motion: a phone's gyroscope, accelerometer, compass, touch pad and (optionally) position as numbers you can wire into any number
+ * setting. The phone is either one linked by QR code or, with "Sensors from: This device", the phone or tablet the app itself runs on
+ * (io/device-sensors.ts feeds the same channels). Live values come through the signal bridge (`Host.signal('phone.<session>', channel)`, see io/phone-motion.ts); with a recorded
  * take (the inspector's Record button) it can instead read the take, which needs no phone and reproduces exactly in exports and the CLI.
  * Angles are in degrees and unwrapped, so they do not jump at +-180.
  */
 
 /** Channels that are not smoothed (counts, pulses, the shake envelope already has its own attack and release). */
-const NO_SMOOTH = new Set(['tc', 'tap', 'shake']);
+export const NO_SMOOTH: ReadonlySet<string> = new Set(['tc', 'tap', 'jolt', 'shake']);
 
 export const MOTION_OUTPUTS = {
   yaw: { type: 'number', label: 'Yaw', hint: 'Turning right is positive.' },
@@ -26,6 +28,9 @@ export const MOTION_OUTPUTS = {
   accY: { type: 'number', label: 'Acceleration Y (m/s²)' },
   accZ: { type: 'number', label: 'Acceleration Z (m/s²)' },
   shake: { type: 'number', label: 'Shake (0..1)' },
+  jolt: { type: 'number', label: 'Jolt (1 for a moment)', hint: 'A short pulse each time the phone is bumped or flicked.' },
+  gravX: { type: 'number', label: 'Gravity X (-1..1)', hint: 'Which way is down on the screen. Above 0 when the right edge is lower. Wire it into a position to make things fall.' },
+  gravY: { type: 'number', label: 'Gravity Y (-1..1)', hint: '-1 when the phone is upright, 0 when it lies flat, +1 upside down.' },
   tiltX: { type: 'number', label: 'Tilt X (-1..1)' },
   tiltY: { type: 'number', label: 'Tilt Y (-1..1)' },
   touchX: { type: 'number', label: 'Touch X (-1..1)' },
@@ -85,6 +90,9 @@ export function shapeOutputs(read: (name: string) => number, p: ShapeParams): Re
     accY: read('ay') * sy,
     accZ: read('az') * sz,
     shake: clamp(read('shake') * p.shakeGain, 0, 1),
+    jolt: read('jolt'),
+    gravX: clamp(read('gx'), -1, 1),
+    gravY: clamp(read('gy'), -1, 1),
     tiltX: clamp(roll / tr, -1, 1),
     tiltY: clamp(pitch / tr, -1, 1),
     touchX: read('tx'),
@@ -107,14 +115,21 @@ export default defineNode({
   title: 'Phone Motion',
   category: 'input',
   description:
-    'Turns a linked phone into a controller: tilt and turn (gyro), shake, touch pad, pinch and twist, compass and position become numbers for any setting. Wire yaw / pitch / roll into a 3D object\'s rotation or into a Phone Camera Rig. Record a move and replay it exactly, even in exports.',
-  keywords: ['gyro', 'gyroscope', 'accelerometer', 'tilt', 'sensor', 'orientation', 'motion control', 'wii', 'remote', 'phone', 'shake', 'touch', 'compass', 'imu', 'controller', 'joystick'],
+    'Turns a phone into a controller: tilt and turn (gyro), shake, gravity, touch pad, pinch and twist, compass and position become numbers for any setting. Use a phone linked by QR code, or the sensors of the phone or tablet the app runs on (Sensors from: This device). Wire yaw / pitch / roll into a 3D object\'s rotation or into a Phone Camera Rig. Record a move and replay it exactly, even in exports.',
+  keywords: ['gyro', 'gyroscope', 'accelerometer', 'tilt', 'sensor', 'orientation', 'motion control', 'wii', 'remote', 'phone', 'shake', 'touch', 'compass', 'imu', 'controller', 'joystick', 'gravity', 'device', 'this device', 'jolt'],
   inputs: {},
   outputs: MOTION_OUTPUTS,
   params: {
     session: { type: 'string', default: '', label: 'Session', visibleIf: () => false },
     liveTick: { type: 'string', default: '', label: 'Live tick', visibleIf: () => false },
     take: { type: 'json', default: null, label: 'Recorded take', visibleIf: () => false },
+    device: {
+      type: 'enum',
+      default: 'linked',
+      label: 'Sensors from',
+      hint: 'Linked phone: a second phone linked by QR code (needs the desktop app or LAN mode). This device: the motion sensors of the phone or tablet this app is running on. Nothing leaves the device.',
+      options: [...SENSORS_FROM_OPTIONS],
+    },
     source: {
       type: 'enum',
       default: 'live',
@@ -155,37 +170,12 @@ export default defineNode({
   },
   summary: (p) => {
     const take = isTake(p.take);
-    return `${p.source === 'recorded' && take ? 'recorded take' : 'live'} · ${p.mode} · position: AR if tracking, else location, else touch pad`;
+    const from = p.source === 'recorded' && take ? 'recorded take' : p.device === 'this' ? 'live, this device' : 'live';
+    return p.device === 'this' ? `${from} · ${p.mode}` : `${from} · ${p.mode} · position: AR if tracking, else location, else touch pad`;
   },
   render(ctx) {
     const p = ctx.params;
-    const t = ctx.time.seconds; // live: re-render every frame
-    const take = isTake(p.take) ? p.take : null;
-    const host = ctx.host;
-    const id = `phone.${p.session}`;
-    const shape: ShapeParams = p;
-
-    const fromTake = (): Record<keyof typeof MOTION_OUTPUTS, number> => {
-      const d = takeDense(take!, { amount: p.takeSmoothing, keepFast: p.keepFast });
-      const fr: MotionFrame = sampleTake(d, t, p.loopTake || take!.loop);
-      return shapeOutputs((n) => fr[n] ?? 0, shape);
-    };
-    if (take && p.source === 'recorded') return fromTake();
-
-    const exporting = !!host.signal && host.signal(id, 'export', t) === 1;
-    if (exporting || !host.signal) {
-      if (take) return fromTake(); // a take exists: use it where live input cannot exist
-      throw new Error('Phone Motion is live only. Exports and headless runs have no phone: record a take (Record in the inspector) and set Source to Recorded.');
-    }
-    if (!p.session) {
-      if (take) return fromTake();
-      throw new Error('Not linked to a phone yet. Use "Link a phone" in the inspector, scan the QR code and press Start motion on the phone.');
-    }
-    const live = host.signal(id, 'live', t) === 1;
-    // linked, but no motion arriving (the phone has not pressed Start motion, or its page is hidden): neutral values, not an error
-    if (!live) return shapeOutputs((n) => (n === 'pinch' ? 1 : 0), shape);
-    const sig = host.signal;
-    const read = (n: string): number => sig.call(host, id, p.smoothing > 0 && !NO_SMOOTH.has(n) ? `${n}@${p.smoothing}` : n, t);
-    return shapeOutputs(read, shape);
+    // the reader takes the clock, so the node renders again every frame while live
+    return shapeOutputs(motionReader(p, ctx.host, ctx.time.seconds, 'Phone Motion', NO_SMOOTH), p);
   },
 });

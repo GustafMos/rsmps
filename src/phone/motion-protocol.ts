@@ -41,6 +41,11 @@ export interface MotionMsg {
   abs?: 0 | 1;
   /** iOS `webkitCompassHeading` (degrees clockwise from north), when reported. */
   h?: number;
+  /**
+   * Degrees to turn `q` about the world's vertical axis to reference it to north, when `q` itself is not (abs = 0) but a compass is
+   * known. Lets the orientation come from the steadier gyro-only sensor while the compass heading is still available.
+   */
+  n?: number;
   /** Rotation rate about the device x, y, z axes, degrees per second. */
   r?: Vec3;
   /** Acceleration without gravity, device axes, m/s^2. */
@@ -129,6 +134,7 @@ export function parseMotionMessage(raw: unknown): PhoneMotionMessage | null {
       if (vec(m.q, 4)) out.q = m.q as Quat;
       if (m.abs === 1 || m.abs === 0) out.abs = m.abs;
       if (num(m.h)) out.h = m.h;
+      if (num(m.n)) out.n = m.n;
       if (vec(m.r, 3)) out.r = m.r as Vec3;
       if (vec(m.a, 3)) out.a = m.a as Vec3;
       if (vec(m.g, 3)) out.g = m.g as Vec3;

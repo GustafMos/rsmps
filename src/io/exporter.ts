@@ -275,7 +275,7 @@ export class ExporterImpl implements Exporter {
     const errors: string[] = [];
     // Phone Motion also needs the router in export mode: live phone values answer 0 there, so the node reads its recorded take (or says so).
     const audioSignals = this.d.audio.hasSignals(graph, registry);
-    const sigs = this.d.router && (audioSignals || graph.nodes.some((n) => n.type === 'phone-motion')) ? this.d.router : null;
+    const sigs = this.d.router && (audioSignals || graph.nodes.some((n) => n.type === 'phone-motion' || n.type === 'ar-camera')) ? this.d.router : null;
     let sigItem = -1;
     try {
     for (current = 0; current < jobs.length; current++) {

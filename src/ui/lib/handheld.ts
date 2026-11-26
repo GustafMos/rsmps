@@ -20,6 +20,15 @@ export function isHandheld(nav: NavigatorLike | undefined = typeof navigator !==
 }
 
 /**
+ * Starting settings of a motion node (Phone Motion, AR Camera) added on this device: on a phone or tablet the sensors are the
+ * device's own, as its camera is. On a computer the node keeps its default, a phone linked by QR code.
+ */
+export function motionNodeParams(type: string, handheld: boolean, params?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!handheld || (type !== 'phone-motion' && type !== 'ar-camera')) return params;
+  return { device: 'this', ...params };
+}
+
+/**
  * The node to add, and its starting settings, when `type` is asked for on this device.
  *  - Webcam on a phone: starts on the back camera, not mirrored (a phone's default camera is the selfie one).
  *  - Phone Camera on a phone, where the phone link is not available (the website): that node streams a SECOND phone to a

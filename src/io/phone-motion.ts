@@ -13,7 +13,7 @@
  */
 import type { PhoneMotionMessage, CapsMsg, MotionMsg, TouchMsg, GeoMsg, ArMsg } from '../phone/motion-protocol';
 import { parseMotionMessage } from '../phone/motion-protocol';
-import { OneEuro, Unwrapper, envelope, lookAngles, objectRotation, qNorm, qSlerp, quatFromLook, relativeTo, rotate, smoothingToEuro, worldToScene, type Quat, type Vec3 } from '../engine/lib/motion-math';
+import { OneEuro, Unwrapper, envelope, lookAngles, objectRotation, qAlign, qAxisAngle, qConj, qMul, qNorm, qSlerp, quatFromLook, relativeTo, rotate, smoothingToEuro, worldToScene, type Quat, type Vec3 } from '../engine/lib/motion-math';
 import { buildTake, neutralFrame, type MotionFrame, type MotionTake, type RawSample } from '../engine/lib/motion-take';
 
 /** How far behind "now" the live value is read, so interpolation has data on both sides. */
@@ -24,6 +24,25 @@ export const LIVE_MS = 1500;
 export const TAP_PULSE_MS = 150;
 /** Acceleration (m/s^2, no gravity) that counts as a full shake. */
 export const SHAKE_FULL = 18;
+/** A jolt: the acceleration (m/s^2, no gravity) jumps above this from below. One pulse per bump, then a short rest. */
+export const JOLT_AT = 12;
+export const JOLT_REST_MS = 250;
+
+/**
+ * The "level" orientation: true to gravity, only the heading is taken out (`yawRef`, degrees). Looking at the horizon stays looking at
+ * the horizon wherever Recenter was pressed, which is what a camera that must match the real world needs.
+ */
+export function levelQuat(scene: Quat, yawRef: number): Quat {
+  return qNorm(qMul(quatFromLook(-yawRef, 0, 0), scene));
+}
+/**
+ * Which way is down, seen on the screen: x to the right, y up, each -1..1 (the part of gravity that lies in the screen plane).
+ * Upright phone: (0, -1). Flat on a table: (0, 0). Right edge lower: x above 0. `q` = device -> world with the screen orientation applied.
+ */
+export function screenGravity(q: Quat): [number, number] {
+  const d = rotate(qConj(q), [0, 0, -1]);
+  return [d[0], d[1]];
+}
 
 export type PositionSource = 'ar' | 'location' | 'touch';
 
@@ -33,6 +52,8 @@ interface OrientSample {
   /** Device -> world quaternion from the phone. */
   q: Quat | null;
   abs: boolean;
+  /** Degrees about the vertical that reference `q` to north (null = unknown). */
+  n: number | null;
   r: Vec3 | null;
   a: Vec3 | null;
   g: Vec3 | null;
@@ -74,6 +95,10 @@ export class MotionSession {
   private arRef: { p: Vec3; yaw: number } | null = null;
   private refRel: Quat | null = null;
   private lastTapAt = -1e9;
+  private lastJoltAt = -1e9;
+  private accMag = 0;
+  private yawRef: number | null = null;
+  private lastLevel: Quat | null = null;
   private unwrap: Record<string, Unwrapper> = {};
   private shake = 0;
   private shakeT = -1;
@@ -133,7 +158,13 @@ export class MotionSession {
     const t = this.localTime(m.t, arrival);
     const last = this.buf[this.buf.length - 1];
     if (last && t <= last.t) return; // out of order or duplicate
-    this.buf.push({ t, q: m.q ?? null, abs: m.abs === 1, r: m.r ?? null, a: m.a ?? null, g: m.g ?? null });
+    this.buf.push({ t, q: m.q ?? null, abs: m.abs === 1, n: m.n ?? null, r: m.r ?? null, a: m.a ?? null, g: m.g ?? null });
+    if (m.a) {
+      // jolts are found on every packet (not on the frames that happen to be rendered), so a short bump is never missed
+      const mag = Math.hypot(m.a[0], m.a[1], m.a[2]);
+      if (mag >= JOLT_AT && this.accMag < JOLT_AT && arrival - this.lastJoltAt > JOLT_REST_MS) this.lastJoltAt = arrival;
+      this.accMag = mag;
+    }
     if (this.buf.length > BUFFER) this.buf.shift();
     this.lastMotionAt = arrival;
     this.arrivals.push(arrival);
@@ -160,7 +191,10 @@ export class MotionSession {
   /** The current pose becomes neutral: orientation, position (AR / location / dolly) and the angles restart from 0. */
   recenter(): void {
     const q = this.sceneQuatAt(this.now() - RENDER_DELAY_MS);
-    if (q) this.refRel = q;
+    if (q) {
+      this.refRel = q;
+      this.yawRef = lookAngles(q).yaw;
+    }
     this.dolly = [0, 0, 0];
     if (this.ar) this.arRef = this.arReference(this.ar);
     if (this.geo) this.geoRef = { x: this.geo.x, y: this.geo.y, alt: this.geo.alt ?? 0 };
@@ -176,19 +210,20 @@ export class MotionSession {
 
   /* ------------------------------------------------ sampling */
 
-  private orientAt(tLocal: number): { q: Quat | null; abs: boolean } {
+  private orientAt(tLocal: number): { q: Quat | null; abs: boolean; n: number | null } {
     const b = this.buf;
-    if (!b.length) return { q: null, abs: false };
+    if (!b.length) return { q: null, abs: false, n: null };
     let hi = b.length - 1;
     while (hi > 0 && b[hi - 1].t >= tLocal) hi--;
     // b[hi] is the first sample with t >= tLocal (or the last one)
-    if (tLocal >= b[b.length - 1].t) return { q: b[b.length - 1].q, abs: b[b.length - 1].abs };
-    if (hi === 0) return { q: b[0].q, abs: b[0].abs };
+    const end = b[b.length - 1];
+    if (tLocal >= end.t) return { q: end.q, abs: end.abs, n: end.n };
+    if (hi === 0) return { q: b[0].q, abs: b[0].abs, n: b[0].n };
     const a = b[hi - 1];
     const c = b[hi];
-    if (!a.q || !c.q) return { q: c.q ?? a.q, abs: c.abs };
+    if (!a.q || !c.q) return { q: c.q ?? a.q, abs: c.abs, n: c.n };
     const u = (tLocal - a.t) / Math.max(1e-6, c.t - a.t);
-    return { q: qSlerp(a.q, c.q, Math.max(0, Math.min(1, u))), abs: c.abs };
+    return { q: qSlerp(a.q, c.q, Math.max(0, Math.min(1, u))), abs: c.abs, n: c.n };
   }
 
   private sceneQuatAt(tLocal: number): Quat | null {
@@ -219,7 +254,8 @@ export class MotionSession {
       const qs = worldToScene(o.q);
       if (!this.refRel) this.refRel = qs; // the first pose is the neutral one until Recenter is pressed
       const rel = relativeTo(this.refRel, qs);
-      const abq: Quat = o.abs ? qs : rel;
+      // absolute: the phone's own north-referenced orientation, else its orientation turned by the known compass offset, else relative
+      const abq: Quat = o.abs ? qs : o.n !== null ? worldToScene(qMul(qAxisAngle('z', o.n), o.q)) : rel;
       for (const [prefix, q, keys] of [['', rel, ['qx', 'qy', 'qz', 'qw']], ['abs.', abq, ['aqx', 'aqy', 'aqz', 'aqw']]] as [string, Quat, string[]][]) {
         keys.forEach((k, i) => (f[k] = q[i]));
         const a = lookAngles(q);
@@ -232,6 +268,11 @@ export class MotionSession {
         f[`${prefix}orz`] = this.uw(`${prefix}orz`).push(e[2]);
       }
       f.heading = f['abs.yaw'];
+      if (this.yawRef === null) this.yawRef = lookAngles(qs).yaw; // until Recenter is pressed, "straight ahead" is where the phone first pointed
+      // one hemisphere from answer to answer, so the four numbers can be smoothed one by one without a sign flip in between
+      const lq: Quat = (this.lastLevel = qAlign(levelQuat(qs, this.yawRef), this.lastLevel ?? [0, 0, 0, 1]));
+      [f.lqx, f.lqy, f.lqz, f.lqw] = lq;
+      [f.gx, f.gy] = screenGravity(o.q);
     }
     const s = this.nearest(tLocal);
     if (s?.r) [f.rx, f.ry, f.rz] = s.r;
@@ -270,6 +311,7 @@ export class MotionSession {
       f.py = (this.geo.alt ?? 0) - this.geoRef.alt;
     } else [f.px, f.py, f.pz] = this.dolly;
     f.tap = this.now() - this.lastTapAt < TAP_PULSE_MS ? 1 : 0;
+    f.jolt = this.now() - this.lastJoltAt < TAP_PULSE_MS ? 1 : 0;
     return f;
   }
 
@@ -377,7 +419,7 @@ export class PhoneMotionStore {
   /** The bridge: Host.signal('phone.<token>', channel). Unknown sessions answer neutral values (0, identity). */
   signal(token: string, name: string): number {
     const s = this.sessions.get(token);
-    if (!s) return name === 'qw' || name === 'aqw' || name === 'pinch' ? 1 : 0;
+    if (!s) return /^(qw|aqw|lqw|pinch)(@|$)/.test(name) ? 1 : 0;
     return s.channel(name, this.now());
   }
   drop(token: string): void {

@@ -29,6 +29,7 @@ import { NodePresetStore } from './node-presets';
 import { processParamsPatch } from '../engine/process';
 import { ProjectStoreImpl } from './projects';
 import { PhoneLink } from './phone';
+import { DeviceSensors, THIS_DEVICE } from './device-sensors';
 import { PhoneAudioRouter } from './phone-audio';
 import { RecordingController } from './recording';
 import { SignalRouter } from './signals';
@@ -150,7 +151,13 @@ export const createIo: CreateIo = async () => {
   const phone = new PhoneLink(desktop);
   await phone.init();
   library.live.phone = phone;
-  router.phone = (token, name) => phone.motion.signal(token, name);
+  // The motion sensors of this very device answer under a reserved session name. Reading one of its channels is what switches the
+  // sensors on (and they switch off again a few seconds after the last read), so they only run while a node uses them.
+  const sensors = new DeviceSensors(phone.motion.session(THIS_DEVICE));
+  router.phone = (token, name) => {
+    if (token === THIS_DEVICE) sensors.demand();
+    return phone.motion.signal(token, name);
+  };
   phone.onStream((token, stream) => phoneAudio.setStream(token, stream));
   const recording = new RecordingController(audio, player, library);
   const liveRecorder = new LiveRecordController({ live: library.live, add: (files) => library.add(files) });
@@ -253,6 +260,7 @@ export const createIo: CreateIo = async () => {
       };
     },
     phone,
+    sensors,
     liveRecorder,
     addons: new AddonsImpl(desktop),
     capabilities: () => new Set([...(phone.available ? (['local-server'] as const) : []), ...(desktop ? (['desktop'] as const) : [])]),
