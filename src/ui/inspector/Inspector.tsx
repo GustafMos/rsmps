@@ -1,11 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORIES, type AnyNodeDef, type InputSchema, type NodeInstance, type ParamDef } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
 import { parseHex, toHex } from '../lib/colorMath';
 import { LayerList } from '../graph/LayerList';
-import { paramSocketType } from '../../engine/define';
+import { paramBundles, paramSocketType, type ParamBundle } from '../../engine/define';
+import { bundleAxes } from '../lib/compat';
 import { useSelector } from '../store/createStore';
 import { nodeViewStore, setPin } from '../store/nodeView';
 import { effectivePins } from '../lib/layout';
@@ -307,6 +308,7 @@ function ParamGroups({
     return out;
   }, [def, node.params]);
 
+  const bundles = useMemo(() => paramBundles(def), [def]);
   if (!groups.length) return <div className="rs-insp__sec"><p className="rs-insp__hint">This node has no parameters.</p></div>;
   // A node with a very long inspector (SDF 3D has about a hundred settings) starts with its groups closed, except the shape slots that are switched on.
   const big = groups.reduce((n, g) => n + g.items.length, 0) > 60;
@@ -328,16 +330,49 @@ function ParamGroups({
             </button>
           )}
           {!isClosed(g.name) &&
-            g.items.map(([key, p]) => (
-              <ParamControl key={key} node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} wiredFrom={label(key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(key)} onDisconnect={() => onDisconnect(key)} />
-            ))}
+            g.items.map(([key, p]) => {
+              // a bundle socket sits right above its first setting; a vector wire on it also drives the settings without a wire of their own
+              const starts = bundles.find((b) => b.members[0] === key);
+              const via = wired.has(key) ? undefined : bundles.find((b) => wired.has(b.port) && b.members.includes(key));
+              return (
+                <Fragment key={key}>
+                  {starts && <BundleRow node={node} bundle={starts} isWired={wired.has(starts.port)} wiredFrom={label(starts.port)} onSelectSource={() => onSelectSource(starts.port)} onDisconnect={() => onDisconnect(starts.port)} />}
+                  <ParamControl node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} via={via} wiredFrom={label(via ? via.port : key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(via ? via.port : key)} onDisconnect={() => onDisconnect(key)} />
+                </Fragment>
+              );
+            })}
         </div>
       ))}
     </>
   );
 }
 
-function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin, onSelectSource, onDisconnect }: { node: NodeInstance; def: AnyNodeDef; keyName: string; p: ParamDef; isWired: boolean; wiredFrom: string; pinned: boolean; onPin: (on: boolean) => void; onSelectSource: () => void; onDisconnect: () => void }) {
+/** The socket of a bundle (one vector wire for an X / Y / Z group of settings): a slim row, a drop target like every wireable setting. */
+function BundleRow({ node, bundle, isWired, wiredFrom, onSelectSource, onDisconnect }: { node: NodeInstance; bundle: ParamBundle; isWired: boolean; wiredFrom: string; onSelectSource: () => void; onDisconnect: () => void }) {
+  const axes = bundleAxes(bundle);
+  const what = `${bundle.label} ${axes.split('').join(', ')}`;
+  return (
+    <div className="rs-insp__row rs-insp__bundle" title={`One vector wire sets ${what} together. A number wired into one of them still wins for that one.`} data-bundle-port={bundle.port} data-insp-sock="" data-node={node.id} data-port={bundle.port} data-dir="in" data-type="vector">
+      <label className="rs-insp__label">
+        <span className="rs-insp__dot rs-sock--vector" />
+        <span className="rs-insp__lt">{bundle.label} <span className="rs-insp__axes">{axes}</span></span>
+      </label>
+      <div className="rs-insp__ctl">
+        {isWired ? (
+          <div className="rs-insp__wired">
+            <Icon name="plug" size={13} />
+            <button className="rs-insp__chip2" onClick={onSelectSource} title="Select the driving node">driven by {wiredFrom || 'a node'}</button>
+            <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onDisconnect} title="Disconnect and use the values below" aria-label="Disconnect"><Icon name="close" size={12} /></button>
+          </div>
+        ) : (
+          <div className="rs-insp__bundlehint">one vector wire for all {axes.length}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ParamControl({ node, def, keyName, p, isWired, via, wiredFrom, pinned, onPin, onSelectSource, onDisconnect }: { node: NodeInstance; def: AnyNodeDef; keyName: string; p: ParamDef; isWired: boolean; via?: ParamBundle; wiredFrom: string; pinned: boolean; onPin: (on: boolean) => void; onSelectSource: () => void; onDisconnect: () => void }) {
   const sockType = paramSocketType(def, keyName);
   const { ed, io } = useApp();
   const label = p.label ?? keyName;
@@ -347,7 +382,14 @@ function ParamControl({ node, def, keyName, p, isWired, wiredFrom, pinned, onPin
   const stacked = (p.type === 'vec2' && p.range) || p.type === 'curve' || p.type === 'palette' || p.type === 'assets' || p.type === 'json' || (p.type === 'string' && (p.multiline || p.kind === 'code'));
 
   let control: React.ReactNode;
-  if (isWired) {
+  if (via && !isWired) {
+    control = (
+      <div className="rs-insp__wired" title="Driven by the vector wire of this group. Wire a number onto this row to set this one yourself.">
+        <Icon name="plug" size={13} />
+        <button className="rs-insp__chip2" onClick={onSelectSource} title="Select the driving node">from {wiredFrom || 'a node'} <span className="rs-insp__via">{'XYZ'[via.members.indexOf(keyName)]}</span></button>
+      </div>
+    );
+  } else if (isWired) {
     control = (
       <div className="rs-insp__wired">
         <Icon name="plug" size={13} />

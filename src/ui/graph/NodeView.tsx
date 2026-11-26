@@ -8,6 +8,7 @@ import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
 import { hexOf } from '../lib/drag';
 import { paletteInputPort } from '../lib/sockets';
+import { bundleAxes } from '../lib/compat';
 import { PaletteHint } from '../components/PaletteHint';
 import { DeviceField } from '../components/DeviceField';
 import { FontField } from '../components/FontField';
@@ -19,7 +20,7 @@ import { missingCapabilities } from '../lib/requirements';
 import { PhoneChip, hasSessionParam } from '../inspector/PhonePanel';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
-import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row } from '../lib/layout';
+import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row , isParamPort } from '../lib/layout';
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
 import { useSelector } from '../store/createStore';
 import { nodeViewStore, toggleExpanded } from '../store/nodeView';
@@ -68,7 +69,8 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   }, [def, wiredSig, node.id]);
   const pinned = useSelector(nodeViewStore, (s) => s.pins[node.id]);
   const expanded = useSelector(nodeViewStore, (s) => !!s.expanded[node.id]);
-  const view = useMemo(() => ({ pinned, expanded, wired: def ? [...wired].filter((k) => k in def.params) : [] }), [pinned, expanded, wired, def]);
+  const bundles = useSelector(nodeViewStore, (s) => s.bundles);
+  const view = useMemo(() => ({ pinned, expanded, wired: def ? [...wired].filter((k) => isParamPort(def, k)) : [], bundles }), [pinned, expanded, wired, def, bundles]);
   const layout = layoutNode(node, def, def ? undefined : parsePortSignature(portSig), hint, counts, view);
   const [renaming, setRenaming] = useState(false);
   const kbd = useKeyboardTarget() === node.id;
@@ -366,6 +368,24 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
       </div>
     );
   }
+  if (row.kind === 'bundle') {
+    const b = row.bundle;
+    const isWired = wired.has(b.port);
+    const axes = bundleAxes(b);
+    return (
+      <div className="rs-row rs-row--param rs-row--bundle" data-bundle-port={b.port} style={{ top: row.y, height: ROW_H }} title={`One vector wire sets ${b.label} ${axes.split('').join(', ')} together. A number wired into one of them still wins for that one.`}>
+        <Socket node={node.id} port={b.port} type="vector" dir="in" wired={isWired} />
+        {isWired ? (
+          <div className="rs-row__wired">
+            <span>{b.label} <span className="rs-row__axes">{axes}</span></span>
+            <Icon name="plug" size={12} />
+          </div>
+        ) : (
+          <span className="rs-row__label">{b.label} <span className="rs-row__axes">{axes}</span></span>
+        )}
+      </div>
+    );
+  }
   return <ParamRowView row={row} node={node} isWired={wired.has(row.key)} />;
 }
 
@@ -376,9 +396,9 @@ function ParamRowView({ row, node, isWired }: { row: ParamRow; node: NodeInstanc
   const value = node.params[row.key] ?? p.absent ?? p.default;
   const set = (v: unknown) => ed.setParam(node.id, row.key, v);
   let control: React.ReactNode;
-  if (isWired) {
+  if (isWired || row.via) {
     control = (
-      <div className="rs-row__wired" title="Driven by a connected node">
+      <div className={`rs-row__wired${isWired ? '' : ' is-via'}`} title={isWired ? 'Driven by a connected node' : 'Driven by the vector wire of this group. Wire a number here to set this one yourself.'}>
         <span>{label}</span>
         <Icon name="plug" size={12} />
       </div>

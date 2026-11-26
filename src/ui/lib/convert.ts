@@ -14,7 +14,7 @@
  * no extra nodes are created.
  */
 import type { Registry } from '../../engine/define';
-import { canConnect, paramSocketType } from '../../engine/define';
+import { canConnect, paramBundle, paramSocketType } from '../../engine/define';
 import { defaultParams } from '../../engine/engine';
 import type { AnyNodeDef, Edge, GraphDoc, ParamDef } from '../../engine/types';
 
@@ -120,7 +120,9 @@ export function convertNode(graph: GraphDoc, registry: Registry, nodeId: string,
     const fromType = registry.get(graph.nodes.find((n) => n.id === e.from.node)?.type ?? '')?.outputs[e.from.port]?.type;
     const input = newDef.inputs[e.to.port];
     const socket = !input && e.to.port in newDef.params && e.to.port in oldDef.params && newDef.params[e.to.port].type === oldDef.params[e.to.port].type ? paramSocketType(newDef, e.to.port) : null;
-    const accepts = input ? input.type : socket;
+    // a bundle socket (one vector wire for an X / Y / Z group) follows when the new type has the same group
+    const bundle = !input && !socket && paramBundle(newDef, e.to.port) && paramBundle(oldDef, e.to.port) ? ('vector' as const) : null;
+    const accepts = input ? input.type : (socket ?? bundle);
     if (fromType && accepts && !newLayerPorts.has(e.to.port) && canConnect(fromType, accepts)) kept.push(e);
     else droppedOther++;
   }

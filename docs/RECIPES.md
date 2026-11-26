@@ -351,6 +351,8 @@ Needs the phone link (see `docs/LIVE_INPUT.md`): the desktop app, or `npm run de
 1. Add a **Phone Motion** node and press **Link a phone** in its inspector; scan the QR code. On the phone press **Start motion**. The panel shows a small cube that follows the phone.
    Hold the phone upright the way you will use it and press **Recenter**.
 2. Add a **3D Object**. Wire Phone Motion's **Object rotate X / Y / Z** into the object's **Rotate X / Y / Z** (the sockets next to each slider). The object now copies the phone's orientation.
+   One wire instead of three: drag Phone Motion's **Object rotate XYZ** output (at the bottom of the node) onto the 3D Object and pick **Rotate XYZ**. The same works for **Position XYZ** into **Move XYZ**.
+   A number wired into one of the three (say Rotate Y) still wins for that one.
    If an axis feels mirrored tick **Invert X / Y / Z** on Phone Motion.
 3. To look around a scene instead: add a **Phone 3D Camera Rig**, wire **Yaw / Pitch / Roll** from Phone Motion into it and its **Camera** output into the 3D Object's **Camera** input. Turn on **Orbit mode** to swing
    the camera round the object with the phone, **Lock roll** to keep the horizon level.

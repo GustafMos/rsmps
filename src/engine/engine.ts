@@ -4,7 +4,7 @@
  * from its type, resolved params and the signatures of its inputs. A node is
  * re-rendered per frame only if it (or something upstream) actually read the clock.
  */
-import { Registry, canConnect, paramSocketType } from './define';
+import { Registry, canConnect, paramBundles, paramSocketType } from './define';
 import { Gpu } from './gpu/gpu';
 import { clampProxy, proxySize } from './lib/proxy-size';
 import { stableStringify } from './lib/stable-json';
@@ -256,6 +256,17 @@ function coerceParam(p: ParamDef, value: unknown): unknown {
     default:
       return raw === undefined ? p.default : raw;
   }
+}
+
+/** A vector wire on a vec2 param: x and y, held to the param's min / max like a wired number. */
+function vec2FromVector(p: Extract<ParamDef, { type: 'vec2' }>, wired: unknown): [number, number] {
+  const pick = (i: number): number => {
+    let n = Array.isArray(wired) && typeof wired[i] === 'number' && Number.isFinite(wired[i]) ? (wired[i] as number) : p.default[i];
+    if (p.min !== undefined) n = Math.max(p.min, n);
+    if (p.max !== undefined) n = Math.min(p.max, n);
+    return n;
+  };
+  return [pick(0), pick(1)];
 }
 
 /** A node's params as `render` would see them before unit conversion: defaults applied, values clamped, unknown keys dropped. */
@@ -1024,6 +1035,19 @@ export class Engine {
           wiredParams[port] = value;
         }
       }
+      // Bundled param sockets: a vector wire fills in its member params, except those that have a wire of their own (that wire wins,
+      // even while it carries nothing). From here on the members are ordinary wired numbers: clamping, rounding and px follow below.
+      for (const b of paramBundles(def)) {
+        const vec = wiredParams[b.port];
+        if (vec === undefined) continue;
+        delete wiredParams[b.port];
+        b.members.forEach((key, i) => {
+          if (edges.some((e) => e.to.port === key)) return;
+          const n = (vec as number[])[i];
+          if (typeof n === 'number') wiredParams[key] = n;
+          if (tvPorts.has(b.port)) tvPorts.add(key);
+        });
+      }
 
       // 2. Bypass: pass the first input through to the first output of a compatible type.
       if (node.bypass) {
@@ -1061,6 +1085,7 @@ export class Engine {
         let v: unknown;
         if (wired === undefined) v = coerceParam(p, node.params[key]);
         else if (p.type === 'palette') v = (wired as { colors: unknown }).colors;
+        else if (p.type === 'vec2') v = vec2FromVector(p, wired);
         else v = coerceParam(p, wired);
         raw[key] = v;
         if (p.type === 'number' && p.unit === 'px') v = (v as number) * ref.unit;
@@ -1303,7 +1328,8 @@ export class Engine {
       const odef = def.outputs[name] ?? (name === 'carry' && def.usesPrevious ? { type: 'image' as const } : undefined); // `carry`: see NodeDef.usesPrevious
       if (!odef) throw new Error(`render() returned unknown output "${name}"`);
       if (v === null || v === undefined) continue;
-      const kind = typeof v === 'number' ? 'number' : Array.isArray(v) ? 'color' : (v as { kind: string }).kind;
+      // plain arrays: a vector has three numbers, a colour four
+      const kind = typeof v === 'number' ? 'number' : Array.isArray(v) ? (v.length === 3 ? 'vector' : 'color') : (v as { kind: string }).kind;
       if (kind !== odef.type) throw new Error(`output "${name}" should be ${odef.type} but render() returned ${kind}`);
     }
   }

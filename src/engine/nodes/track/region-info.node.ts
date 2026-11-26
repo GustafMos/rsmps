@@ -17,6 +17,8 @@ export default defineNode({
     score: { type: 'number', label: 'Score' },
     id: { type: 'number', label: 'Id' },
     count: { type: 'number', label: 'Count' },
+    center: { type: 'vector', label: 'Center XY' },
+    size: { type: 'vector', label: 'Size XY' },
   },
   params: {
     index: { type: 'number', default: 0, min: 0, max: 63, step: 1, integer: true, label: 'Region number', hint: '0 = the first region in the list.' },
@@ -29,10 +31,10 @@ export default defineNode({
     const items = validRegions(ctx.in.regions.items);
     const r = p.id >= 0 ? items.find((x) => x.id === p.id) : items[p.index];
     if (!r) {
-      return { x: p.fallback, y: p.fallback, width: p.fallback, height: p.fallback, score: p.fallback, id: -1, count: items.length };
+      return { x: p.fallback, y: p.fallback, width: p.fallback, height: p.fallback, score: p.fallback, id: -1, count: items.length, center: [p.fallback, p.fallback, 0], size: [p.fallback, p.fallback, 0] };
     }
     const [x, y] = centerOf(r.box);
     const [width, height] = sizeOf(r.box);
-    return { x, y, width, height, score: r.score, id: r.id, count: items.length };
+    return { x, y, width, height, score: r.score, id: r.id, count: items.length, center: [x, y, 0], size: [width, height, 0] };
   },
 });
