@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.42.0] - 2026-11-26
+
+### Added
+- **Stop Motion with a linked phone.** With RSMPS on the computer (desktop app or LAN mode) and a phone linked over the local network, the Stop Motion panel has **Shoot with a linked phone**: the phone becomes the capture rig, with a live view, a shutter, the onion skin of the previous shots, auto shoot for time-lapse, and a tick on each shot once the computer has stored it. The computer's own Take picture, Undo last and Auto shoot buttons drive the phone. Shots are sent in order, checked, and resent after a dropped connection; settings stay in sync both ways. Record snippet does not go over the link. Tested with simulated links only.
+
 ## [0.41.0] - 2026-11-26
 
 ### Added
