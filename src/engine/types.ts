@@ -536,12 +536,14 @@ export interface Host {
 
 /** Settings of one reconstruction (fixed choices only: nothing here reaches a command line as free text). */
 export interface SplatTrainSettings {
-  input: 'video' | 'photos';
+  input: 'video' | 'photos' | 'scan';
   quality: 'draft' | 'normal' | 'high';
   matcher: 'auto' | 'sequential' | 'exhaustive';
   solver: 'auto' | 'incremental' | 'global';
   /** Keep the solved cameras so a re-run with other training settings skips COLMAP. */
   keepPoses: boolean;
+  /** With input 'scan': refine the saved camera positions with a bundle adjustment (off: they are used as they are). */
+  refine?: boolean;
 }
 
 export interface SplatTrainRequest {
@@ -549,6 +551,11 @@ export interface SplatTrainRequest {
   frameCount: number;
   /** Frame `index` (0-based, in time order) as straight RGBA. Called once per frame, in order; the host encodes and sends it. */
   frame(index: number): Promise<{ pixels: Uint8ClampedArray; width: number; height: number }>;
+  /**
+   * Input 'scan': the saved camera model (COLMAP text, `scan-export.ts`) for the frames as they were sent, given their real pixel sizes
+   * (the camera numbers are scaled to them). Called once, after the last frame.
+   */
+  known?(sizes: { width: number; height: number }[]): { cameras: string; images: string };
   signal: AbortSignal;
   onProgress(fraction: number, note: string): void;
 }

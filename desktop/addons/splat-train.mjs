@@ -43,7 +43,8 @@ export function cleanSettings(raw = {}) {
   const pick = (v, list, d) => (list.includes(v) ? v : d);
   return {
     quality: ONE.has(raw.quality) ? raw.quality : 'normal',
-    input: pick(raw.input, ['video', 'photos'], 'video'),
+    input: pick(raw.input, ['video', 'photos', 'scan'], 'video'),
+    refine: raw.refine === true,
     matcher: pick(raw.matcher, ['auto', 'sequential', 'exhaustive'], 'auto'),
     solver: pick(raw.solver, ['auto', 'incremental', 'global'], 'auto'),
     keepPoses: raw.keepPoses !== false,
@@ -54,7 +55,7 @@ export function cleanSettings(raw = {}) {
 
 export function matcherFor(s, frames) {
   if (s.matcher !== 'auto') return s.matcher;
-  return s.input === 'photos' && frames <= EXHAUSTIVE_MAX ? 'exhaustive' : 'sequential';
+  return (s.input === 'photos' || s.input === 'scan') && frames <= EXHAUSTIVE_MAX ? 'exhaustive' : 'sequential';
 }
 
 /** Argument arrays of every COLMAP step. `p` = absolute paths built by the service. */
@@ -64,19 +65,26 @@ export function colmapArgs(step, p, s, { gpu = false, frames = 0 } = {}) {
   const t = String(s.threads);
   switch (step) {
     case 'extract':
-      return ['feature_extractor', '--database_path', p.db, '--image_path', p.images, '--ImageReader.camera_model', 'SIMPLE_RADIAL', '--ImageReader.single_camera', s.singleCamera ? '1' : '0', '--FeatureExtraction.type', 'SIFT', '--FeatureExtraction.use_gpu', g, '--FeatureExtraction.num_threads', t, '--FeatureExtraction.max_image_size', '1600', '--SiftExtraction.max_num_features', '8192', ...log];
+      // a 3D Scan brings its own cameras (PINHOLE, one per photo as far as the database goes): the model it is triangulated with decides the real ones
+      return ['feature_extractor', '--database_path', p.db, '--image_path', p.images, '--ImageReader.camera_model', s.input === 'scan' ? 'PINHOLE' : 'SIMPLE_RADIAL', '--ImageReader.single_camera', s.input !== 'scan' && s.singleCamera ? '1' : '0', '--FeatureExtraction.type', 'SIFT', '--FeatureExtraction.use_gpu', g, '--FeatureExtraction.num_threads', t, '--FeatureExtraction.max_image_size', '1600', '--SiftExtraction.max_num_features', '8192', ...log];
     case 'match': {
       const m = matcherFor(s, frames);
       const common = ['--database_path', p.db, '--FeatureMatching.type', 'SIFT_BRUTEFORCE', '--FeatureMatching.use_gpu', g, '--FeatureMatching.num_threads', t];
       if (m === 'exhaustive') return ['exhaustive_matcher', ...common, '--ExhaustiveMatching.block_size', '25', ...log];
       // photo sets that are too big for exhaustive matching come here too: a wider window helps when the order is less strict
-      const overlap = s.input === 'photos' ? '20' : '10';
+      const overlap = s.input === 'photos' || s.input === 'scan' ? '20' : '10';
       return ['sequential_matcher', ...common, '--SequentialMatching.overlap', overlap, '--SequentialMatching.quadratic_overlap', '1', '--SequentialMatching.loop_detection', '0', ...log];
     }
     case 'solve':
       return s.solver === 'global'
         ? ['global_mapper', '--database_path', p.db, '--image_path', p.images, '--output_path', p.sparse, '--GlobalMapper.num_threads', t, ...log]
         : ['mapper', '--database_path', p.db, '--image_path', p.images, '--output_path', p.sparse, '--Mapper.num_threads', t, ...log];
+    case 'triangulate':
+      // known cameras and poses in, points out: p.known holds cameras.txt, images.txt and an empty points3D.txt (COLMAP's own text model);
+      // the image names in it are the names in the database, and the output folder has to exist already
+      return ['point_triangulator', '--database_path', p.db, '--image_path', p.images, '--input_path', p.known, '--output_path', p.triOut, ...log];
+    case 'refine':
+      return ['bundle_adjuster', '--input_path', p.triOut, '--output_path', p.refined, ...log];
     case 'undistort':
       return ['image_undistorter', '--image_path', p.images, '--input_path', p.model, '--output_path', p.dense, '--output_type', 'COLMAP', '--max_image_size', String(QUALITY[s.quality].resolution), ...log];
     default:
@@ -127,8 +135,29 @@ export const STEPS = [
   { id: 'train', label: 'Train', from: 0.43, to: 1 },
 ];
 
-export function overall(step, done, total) {
-  const s = STEPS.find((x) => x.id === step);
+/** The steps of a job: the same list for video and photos; a 3D Scan triangulates with its known cameras instead of solving them (`solve` stays in the list for the fallback). */
+export function stepPlan(s) {
+  if (s?.input !== 'scan') return STEPS;
+  return [
+    { id: 'extract', label: 'Extract features', from: 0, to: 0.08 },
+    { id: 'match', label: 'Match', from: 0.08, to: 0.25 },
+    { id: 'triangulate', label: 'Place points with the saved cameras', from: 0.25, to: s.refine ? 0.32 : 0.36 },
+    ...(s.refine ? [{ id: 'refine', label: 'Refine cameras', from: 0.32, to: 0.37 }] : []),
+    { id: 'solve', label: 'Solve cameras', from: 0.3, to: 0.4 },
+    { id: 'undistort', label: 'Prepare frames', from: 0.4, to: 0.43 },
+    { id: 'train', label: 'Train', from: 0.43, to: 1 },
+  ];
+}
+
+export const KNOWN_POSES_MISFIT = 'The saved camera positions did not fit the photos; solving them from the pictures instead.';
+
+/** Did point_triangulator give a usable model? `images` placed, `points` triangulated, of `frames` photos. Pure. */
+export function triangulationOk({ images, points }, frames) {
+  return images >= Math.max(3, Math.ceil(frames * 0.5)) && points >= Math.max(50, frames * 3);
+}
+
+export function overall(step, done, total, plan = STEPS) {
+  const s = plan.find((x) => x.id === step);
   if (!s) return 0;
   const f = total > 0 ? Math.min(1, Math.max(0, done / total)) : 0;
   return s.from + (s.to - s.from) * f;
@@ -137,7 +166,7 @@ export function overall(step, done, total) {
 /** A readable message for a failed step, from its exit code and the end of its log (signatures recorded in stage 0). */
 export function explainFailure(step, code, log, extra = {}) {
   const tail = String(log ?? '').slice(-6000);
-  if (extra.timedOut) return `${STEPS.find((s) => s.id === step)?.label ?? step} took longer than ${Math.round(extra.timedOut / 60000)} minutes and was stopped. Try fewer frames, a smaller frame size or the Draft quality.`;
+  if (extra.timedOut) return `${[...STEPS, ...stepPlan({ input: 'scan', refine: true })].find((s) => s.id === step)?.label ?? step} took longer than ${Math.round(extra.timedOut / 60000)} minutes and was stopped. Try fewer frames, a smaller frame size or the Draft quality.`;
   if (extra.spawnError) return `The program could not be started (${extra.spawnError}). Check the add-on in Plugins > Official add-ons.`;
   if (step === 'extract') {
     if (/No images found|could not read|Failed to read image/i.test(tail)) return 'COLMAP could not read the frames.';
@@ -150,6 +179,8 @@ export function explainFailure(step, code, log, extra = {}) {
     if (/Failed to create any sparse model/.test(tail)) return 'COLMAP could not place the cameras. Move around the subject slowly, keep it sharp and textured, and avoid moving objects.';
     return `COLMAP could not solve the cameras (exit code ${code}).`;
   }
+  if (step === 'triangulate') return KNOWN_POSES_MISFIT;
+  if (step === 'refine') return `COLMAP could not refine the cameras (exit code ${code}).`;
   if (step === 'undistort') return `COLMAP could not prepare the frames for training (exit code ${code}).`;
   if (step === 'train') {
     const err = /Error: (.+)/.exec(tail);
@@ -158,6 +189,36 @@ export function explainFailure(step, code, log, extra = {}) {
     return err ? `Brush stopped: ${err[1].trim()}` : `Brush stopped (exit code ${code}).`;
   }
   return `${step} failed (exit code ${code}).`;
+}
+
+const NUM = '-?\\d+(?:\\.\\d+)?(?:e[-+]?\\d+)?';
+const CAMERA_LINE = new RegExp(`^\\d+ PINHOLE \\d+ \\d+ ${NUM} ${NUM} ${NUM} ${NUM}$`, 'i');
+const IMAGE_LINE = new RegExp(`^\\d+ (?:${NUM} ){7}\\d+ (frame_\\d{4}\\.(?:jpg|jpeg|png))$`, 'i');
+
+/**
+ * The known camera model a 3D Scan job brings (COLMAP text: cameras and images with poses), checked line by line against the strict
+ * shape the app writes, and against the frames that were sent: one image line per frame, every name one of them. Throws SplatTrainError.
+ * Returns { cameras, images } as text to write (the points file is always empty).
+ */
+export function cleanKnown(raw, frames) {
+  const bad = () => new SplatTrainError('The saved camera positions are not in the expected form.');
+  if (!raw || typeof raw.cameras !== 'string' || typeof raw.images !== 'string' || raw.cameras.length > 1e6 || raw.images.length > 1e7) throw bad();
+  const lines = (t) => t.split(/\r?\n/).filter((l) => !l.startsWith('#'));
+  const cams = lines(raw.cameras).map((l) => l.trim()).filter(Boolean);
+  if (!cams.length || !cams.every((l) => CAMERA_LINE.test(l))) throw bad();
+  const ids = new Set(cams.map((l) => l.split(' ')[0]));
+  const imgs = lines(raw.images);
+  const seen = new Set();
+  for (let i = 0; i < imgs.length; i++) {
+    if (i === imgs.length - 1 && imgs[i].trim() === '') break; // trailing newline
+    const m = IMAGE_LINE.exec(imgs[i].trim());
+    if (!m || !ids.has(imgs[i].trim().split(' ')[8]) || !frames.includes(m[1]) || seen.has(m[1])) throw bad();
+    if (imgs[i + 1] === undefined || imgs[i + 1].trim() !== '') throw bad(); // the (empty) 2D points line
+    seen.add(m[1]);
+    i++;
+  }
+  if (seen.size !== frames.length) throw bad();
+  return { cameras: raw.cameras, images: raw.images };
 }
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}\.(jpg|jpeg|png)$/;
@@ -189,6 +250,17 @@ export function pickModel(sparseDir, read = (f) => readFileSync(f)) {
 }
 
 const ab = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+
+/** How many images and points a COLMAP binary model folder holds (0 and 0 when it is missing or unreadable). */
+export function readModelCounts(dir) {
+  try {
+    const images = parseImagesBin(ab(readFileSync(join(dir, 'images.bin')))).length;
+    const points = parsePointsBin(ab(readFileSync(join(dir, 'points3D.bin')))).length / 3;
+    return { images, points };
+  } catch {
+    return { images: 0, points: 0 };
+  }
+}
 
 /** The solved model as compact JSON for the renderer (cameras + poses + stats; no 2D points). */
 export function modelJson(modelDir) {
@@ -277,7 +349,7 @@ export function runTool(bin, args, { cwd, env, timeoutMs, onLine, signal, logFil
 /* ------------------------------------------------------------------------------------------------------------------------------ */
 
 const MIN = 60_000;
-export const TIMEOUTS = { extract: 30 * MIN, match: 90 * MIN, solve: 90 * MIN, undistort: 15 * MIN, train: 6 * 60 * MIN };
+export const TIMEOUTS = { extract: 30 * MIN, match: 90 * MIN, triangulate: 30 * MIN, refine: 30 * MIN, solve: 90 * MIN, undistort: 15 * MIN, train: 6 * 60 * MIN };
 const JOB_TTL_MS = 24 * 60 * MIN;
 const CACHE_KEEP = 3;
 
@@ -319,7 +391,7 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
     id: j.id,
     state: j.state,
     step: j.step,
-    stepLabel: STEPS.find((s) => s.id === j.step)?.label ?? '',
+    stepLabel: (j.plan ?? STEPS).find((s) => s.id === j.step)?.label ?? '',
     progress: j.progress,
     note: j.note,
     frames: j.frames.length,
@@ -365,7 +437,7 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
   }
 
   function cacheKey(j, s) {
-    return createHash('sha256').update(j.frameHash).update(JSON.stringify({ input: s.input, matcher: matcherFor(s, j.frames.length), solver: s.solver, single: s.singleCamera, res: QUALITY[s.quality].resolution })).digest('hex').slice(0, 24);
+    return createHash('sha256').update(j.frameHash).update(JSON.stringify({ input: s.input, matcher: matcherFor(s, j.frames.length), solver: s.solver, single: s.singleCamera, res: QUALITY[s.quality].resolution, known: j.known ? createHash('sha256').update(j.known.cameras).update(j.known.images).digest('hex') : '', refine: !!(j.known && s.refine) })).digest('hex').slice(0, 24);
   }
 
   function trimCache(keep) {
@@ -379,8 +451,8 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
   async function step(j, id, bin, args, opts = {}) {
     if (j.abort.signal.aborted) throw new SplatTrainError('Cancelled.', 499);
     j.step = id;
-    j.progress = overall(id, 0, 1);
-    j.note = STEPS.find((s) => s.id === id)?.label ?? id;
+    j.progress = overall(id, 0, 1, j.plan);
+    j.note = j.plan.find((s) => s.id === id)?.label ?? id;
     const started = Date.now();
     const r = await runTool(bin, args, {
       cwd: opts.cwd ?? j.dir,
@@ -392,8 +464,8 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
       onLine: (line) => {
         const p = parseProgress(id, line, { frames: j.frames.length, steps: QUALITY[j.settings.quality].steps });
         if (!p) return;
-        j.progress = overall(id, p.done, p.total);
-        j.note = id === 'train' ? `${j.note.split(':')[0]}: step ${p.done} of ${p.total}${p.splats ? `, ${p.splats.toLocaleString('en-US')} splats` : ''}` : `${STEPS.find((s) => s.id === id)?.label}: ${p.done} of ${p.total}`;
+        j.progress = overall(id, p.done, p.total, j.plan);
+        j.note = id === 'train' ? `${j.note.split(':')[0]}: step ${p.done} of ${p.total}${p.splats ? `, ${p.splats.toLocaleString('en-US')} splats` : ''}` : `${j.plan.find((s) => s.id === id)?.label}: ${p.done} of ${p.total}`;
       },
     });
     j.timings[id] = (Date.now() - started) / 1000;
@@ -402,12 +474,50 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
     return r;
   }
 
+  /**
+   * A 3D Scan's saved cameras: write them as a COLMAP text model, triangulate points from the database matches with them
+   * (point_triangulator keeps the poses as they are), optionally refine with bundle_adjuster. True when the model is usable and p.model
+   * points at it; false (with the warning) when the matches did not fit, so the caller solves the cameras from the photos instead.
+   * Refining failing is not fatal: the unrefined model is kept.
+   */
+  async function useKnownPoses(j, s, t, p) {
+    try {
+      mkdirSync(p.known, { recursive: true });
+      mkdirSync(p.triOut, { recursive: true });
+      writeFileSync(join(p.known, 'cameras.txt'), j.known.cameras);
+      writeFileSync(join(p.known, 'images.txt'), j.known.images);
+      writeFileSync(join(p.known, 'points3D.txt'), '# 3D point list with one line of data per point:\n# Number of points: 0, mean track length: 0\n');
+      await step(j, 'triangulate', t.colmap.path, colmapArgs('triangulate', p, s));
+      const m = readModelCounts(p.triOut);
+      if (!triangulationOk(m, j.frames.length)) throw new SplatTrainError(KNOWN_POSES_MISFIT);
+    } catch (err) {
+      if (j.abort.signal.aborted) throw err;
+      j.warnings.push(KNOWN_POSES_MISFIT);
+      return false;
+    }
+    p.model = p.triOut;
+    if (s.refine) {
+      try {
+        mkdirSync(p.refined, { recursive: true });
+        await step(j, 'refine', t.colmap.path, colmapArgs('refine', p, s));
+        if (existsSync(join(p.refined, 'images.bin')) && triangulationOk(readModelCounts(p.refined), j.frames.length)) {
+          p.model = p.refined;
+          j.refined = true;
+        } else j.warnings.push('Refining the cameras gave no usable result; the saved camera positions were used as they are.');
+      } catch (err) {
+        if (j.abort.signal.aborted) throw err;
+        j.warnings.push('Refining the cameras failed; the saved camera positions were used as they are.');
+      }
+    }
+    return true;
+  }
+
   async function pipeline(j, s) {
     const t = await tools();
     if (!t.colmap || !t.brush) throw new SplatTrainError(`Missing add-on: ${[!t.colmap && 'COLMAP', !t.brush && 'Brush'].filter(Boolean).join(' and ')}. Install it in Plugins > Official add-ons.`, 409);
     const key = cacheKey(j, s);
     const cached = join(cacheDir, key);
-    const p = { db: join(j.dir, 'database.db'), images: join(j.dir, 'images'), sparse: join(j.dir, 'sparse'), dense: join(j.dir, 'dense'), out: join(j.dir, 'result'), model: '' };
+    const p = { db: join(j.dir, 'database.db'), images: join(j.dir, 'images'), sparse: join(j.dir, 'sparse'), dense: join(j.dir, 'dense'), out: join(j.dir, 'result'), known: join(j.dir, 'known'), tri: join(j.dir, 'triangulated'), triOut: join(j.dir, 'triangulated', '0'), refined: join(j.dir, 'triangulated', 'refined'), model: '' };
     for (const v of Object.values(p)) if (v && !inside(j.dir, v)) throw new SplatTrainError('Bad work folder.', 500);
     mkdirSync(p.out, { recursive: true });
     let reused = false;
@@ -419,10 +529,14 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
       mkdirSync(p.sparse, { recursive: true });
       await step(j, 'extract', t.colmap.path, colmapArgs('extract', p, s, { gpu: t.colmap.gpu }));
       await step(j, 'match', t.colmap.path, colmapArgs('match', p, s, { gpu: t.colmap.gpu, frames: j.frames.length }));
-      const solve = await step(j, 'solve', t.colmap.path, colmapArgs('solve', p, s));
-      const best = pickModel(p.sparse);
-      if (!best) throw new SplatTrainError(explainFailure('solve', 0, solve.log + '\nFailed to create any sparse model'), 500);
-      p.model = best.dir;
+      const usable = j.known && (await useKnownPoses(j, s, t, p));
+      if (usable) j.poses = 'known';
+      else {
+        const solve = await step(j, 'solve', t.colmap.path, colmapArgs('solve', p, s));
+        const best = pickModel(p.sparse);
+        if (!best) throw new SplatTrainError(explainFailure('solve', 0, solve.log + '\nFailed to create any sparse model'), 500);
+        p.model = best.dir;
+      }
       await step(j, 'undistort', t.colmap.path, colmapArgs('undistort', p, s));
     }
     const model = modelJson(join(p.dense, 'sparse'));
@@ -446,7 +560,7 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
     const ply = join(p.out, 'splat.ply');
     if (!existsSync(ply)) throw new SplatTrainError('Brush finished without writing a splat file.', 500);
     writeFileSync(join(p.out, 'model.json'), JSON.stringify(model));
-    j.report = { frames: j.frames.length, registered: reg, parallax: +model.stats.parallax.toFixed(3), sparsePoints: model.stats.points, quality: s.quality, steps: QUALITY[s.quality].steps, matcher: matcherFor(s, j.frames.length), solver: s.solver === 'global' ? 'global' : 'incremental', colmapGpu: t.colmap.gpu, reusedPoses: reused, timings: j.timings, plyBytes: statSync(ply).size, warnings: j.warnings };
+    j.report = { frames: j.frames.length, registered: reg, parallax: +model.stats.parallax.toFixed(3), sparsePoints: model.stats.points, quality: s.quality, steps: QUALITY[s.quality].steps, matcher: matcherFor(s, j.frames.length), solver: s.solver === 'global' ? 'global' : 'incremental', colmapGpu: t.colmap.gpu, reusedPoses: reused, ...(j.known ? { poses: reused ? 'cached' : j.poses === 'known' ? 'saved' : 'solved', refined: !!j.refined } : {}), timings: j.timings, plyBytes: statSync(ply).size, warnings: j.warnings };
     writeFileSync(join(p.out, 'report.json'), JSON.stringify(j.report, null, 1));
     // the frames, the database and (unless kept) the solved model are no longer needed
     for (const d of ['images', 'database.db', 'sparse', 'dense']) rmSync(join(j.dir, d), { recursive: true, force: true });
@@ -461,6 +575,15 @@ export function createSplatTrainService({ root, tools, free = freeBytes, spawnIm
     const have = free(root);
     if (have < needBytes) throw new SplatTrainError(`Not enough free disk space: about ${(needBytes / 1e9).toFixed(1)} GB is needed in the app data folder, ${(have / 1e9).toFixed(1)} GB is free.`, 507);
     j.settings = s;
+    j.known = null;
+    if (s.input === 'scan') {
+      try {
+        j.known = cleanKnown(rawSettings?.known, j.frames);
+      } catch (err) {
+        j.warnings.push(KNOWN_POSES_MISFIT);
+      }
+    }
+    j.plan = stepPlan(j.known ? s : { ...s, input: 'video' });
     j.frameHash = j.hash.digest('hex');
     j.timings = {};
     j.state = 'running';

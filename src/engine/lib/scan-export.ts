@@ -342,3 +342,22 @@ IN RSMPS (desktop app)
 Scan: ${model.images.length} photos, target radius ${scan.target.radius.toFixed(2)} m, ${scan.shots.filter((s) => s.depth).length} with depth.
 `;
 }
+
+/* ------------------------------------------------------------------ for the desktop pipeline */
+
+/**
+ * The COLMAP text model (cameras.txt and images.txt) of a scan for photos that were sent at other pixel sizes than the stored stills
+ * (`sizes[i]` = the real size of photo i): every shot's intrinsics and size are scaled to it. Image names are `names[i]`.
+ * World = the recentred export world, like the zip. Used by Splat from Video to triangulate with the saved camera positions.
+ */
+export function colmapTextForSizes(raw: ScanData, sizes: { width: number; height: number }[], names: string[]): { cameras: string; images: string } {
+  const scan = normalizeScan(raw);
+  const shots = scan.shots.map((s, i) => {
+    const z = sizes[i] ?? { width: s.w, height: s.h };
+    const sx = z.width / s.w;
+    const sy = z.height / s.h;
+    return { ...s, w: z.width, h: z.height, fx: s.fx * sx, fy: s.fy * sy, cx: s.cx * sx, cy: s.cy * sy };
+  });
+  const m = colmapExport({ ...scan, shots }, names);
+  return { cameras: camerasTxt(m), images: imagesTxt(m) };
+}
