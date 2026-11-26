@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.36.0] - 2026-11-26
+
+### Added
+- **World AR: move the object up and down.** In the AR view, drag two fingers up or down together to lift or lower the placed object; turning (twist) and resizing (pinch) still work and are kept apart from lifting. A "Height" strip on the right edge does the same with one thumb and shows the height in centimetres while it changes; double-tap the strip, or press Reset, to put the object back on the surface. Dragging along the floor keeps the height, and the height is recorded, so Save as video shows it as it was live. Tested against a simulated AR session only.
+
 ## [0.35.2] - 2026-11-26
 
 ### Fixed
