@@ -4,6 +4,12 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.28.0] - 2026-11-26
+
+### Added
+- **Move and turn 3D objects by dragging in the viewer.** Select an Object 3D, Model 3D, Shape 3D, Image to 3D or splat node and the viewer shows a small bar with **Move**, **Turn** and **Size**. Move: drag the circle; the knob beside it pushes the object away or pulls it closer. Turn: drag on the object to turn it freely, drag the outer ring to roll it. Size: drag the corner knob. Works with a finger or a mouse; one drag is one undo step; press the lit button again to put the handles away. Settings driven by a wire are left alone.
+- **Reset buttons for 3D placement.** The inspector has a "Place in 3D" section with Reset position, Reset rotation (every angle to exactly 0) and Reset all, and the viewer bar has a Reset for the current mode. Glass and Hypercube get the reset buttons too.
+
 ## [0.27.0] - 2026-11-26
 
 ### Added

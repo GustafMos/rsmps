@@ -14,6 +14,8 @@ import { getLive } from '../store/live';
 import { recordLabel, recorderForViewer, recorderSettings } from '../store/recorder';
 import { PaintOverlay } from './PaintOverlay';
 import { PointsOverlay } from './PointsOverlay';
+import { XformGizmo } from './XformGizmo';
+import { gizmoTarget } from './gizmoTarget';
 import { FrameControl, useFrameMenuItems } from './FrameControl';
 import { Loupe } from './Loupe';
 import { CompareBar, CompareOverlay, CompareStrip, useCompareMenus } from './CompareUi'; // snapshots + A/B compare
@@ -233,6 +235,16 @@ export function Viewer() {
     const ps = d?.params as Record<string, { type: string }> | undefined;
     return n && ps?.points?.type === 'json' && ps?.closed?.type === 'bool' && n.params.mode !== 'curves' ? n : undefined;
   });
+  // a node of the 3D family gets move / turn / size handles on the picture (which node: see gizmoTarget.ts)
+  const gizmoId = useEd((s) => gizmoTarget(s.level, s.selection, s.viewedNodeId, s.path, io.registry));
+  const gizmoType = useEd((s) => (gizmoId ? s.level.nodes.find((n) => n.id === gizmoId)?.type : undefined));
+  const gizmoDef = gizmoType ? io.registry.get(gizmoType) : undefined;
+  // Once its picture has been seen the handles stay, even while the picture is briefly gone (a frame that failed, a slow re-render):
+  // handles that blink away under the finger in the middle of a drag would be worse than handles over a picture that is a moment late.
+  const gizmoSeen = useRef<string | null>(null);
+  if (!gizmoId) gizmoSeen.current = null;
+  else if (imageSize) gizmoSeen.current = gizmoId;
+  const showGizmo = !!gizmoId && !!gizmoDef && !!viewedNode && gizmoSeen.current === gizmoId;
   const emptyMsg = !hasNodes
     ? 'The graph is empty. Add nodes with Shift+A in the graph below.'
     : !viewedNode
@@ -414,6 +426,7 @@ export function Viewer() {
       <CompareStrip />
       {pointsNode && <PointsOverlay nodeId={pointsNode.id} stage={stage} />}
       {paint && <PaintOverlay nodeId={paint.id} stage={stage} />}
+      {showGizmo && gizmoId && gizmoDef && !paint && !pointsNode && <XformGizmo key={gizmoId} nodeId={gizmoId} def={gizmoDef} stage={stage} width={iw} height={ih} />}
 
     </div>
     </div>

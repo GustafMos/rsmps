@@ -201,6 +201,12 @@ export interface NumberParam extends ParamBase {
    * Set it on every param whose cost grows with its value (resolutions, counts, iterations, radii).
    */
   softMax?: number;
+  /**
+   * How much of the value one long drag across the field (about 400 px) should cover, when that is far less than `min`..`max`.
+   * Move X of a 3D object may go from -20 to 20, but the picture only shows about 3 units: without this a finger-width of drag
+   * throws the object out of view. UI only: it changes no value and no limit.
+   */
+  scrubSpan?: number;
 }
 export interface BoolParam extends ParamBase {
   type: 'bool';

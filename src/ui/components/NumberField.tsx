@@ -16,6 +16,8 @@ export interface NumberFieldProps {
   defaultValue?: number;
   /** Typical maximum: scrubbing stops here and typed values above it ask for confirmation. */
   softMax?: number;
+  /** One long drag (about 400 px) covers this much, instead of the whole range (see `scrubSpan` in engine/types.ts). */
+  scrubSpan?: number;
   /** Identifies the field for "don't ask again" (defaults to the label). */
   askKey?: string;
   /** Name used in the confirmation text (defaults to the label). */
@@ -70,6 +72,7 @@ export function NumberField(p: NumberFieldProps) {
    * the value itself (0.5% per px, never below half a step).
    */
   const rate = (v: number) => {
+    if (p.scrubSpan !== undefined && p.scrubSpan > 0) return Math.max(p.scrubSpan / 400, step / 12);
     let top = p.softMax ?? max;
     // a very wide hard range with no soft max (blur radius 0..400, default 8): scale by the default instead, so a drag stays usable
     const dv = p.defaultValue;

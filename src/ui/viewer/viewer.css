@@ -84,3 +84,35 @@
 .rs-viewer__rec.is-on .rs-viewer__recdot { border-radius: 2px; animation: rs-recblink 1s steps(2, start) infinite; }
 @keyframes rs-recblink { to { opacity: 0.35; } }
 @media (pointer: coarse) { .rs-viewer__rec { min-height: var(--touch, 44px); } }
+
+/* Move / turn / size handles for 3D objects (XformGizmo.tsx). The layer itself lets every touch through: only the handles catch. */
+.rs-giz { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.rs-giz__svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.rs-giz__h { pointer-events: auto; cursor: grab; touch-action: none; }
+.rs-giz.is-busy .rs-giz__h { cursor: grabbing; }
+.rs-giz__hit { fill: transparent; pointer-events: all; }
+.rs-giz__hitring { fill: none; stroke: transparent; pointer-events: stroke; }
+.rs-giz__line { fill: none; stroke: var(--yellow); stroke-width: 2; pointer-events: none; }
+.rs-giz__line--under { stroke: #000; stroke-width: 4; opacity: 0.6; }
+.rs-giz__line--ring { stroke-dasharray: 2 7; stroke-width: 5; stroke-linecap: round; }
+.rs-giz__glyph { fill: none; stroke: var(--yellow); stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+.rs-giz__glyph--under { stroke: #000; stroke-width: 4; opacity: 0.6; }
+.rs-giz__glyph--dark { stroke: #000; }
+.rs-giz__knob { fill: var(--yellow); stroke: #000; stroke-width: 2; pointer-events: none; }
+.rs-giz__h:hover .rs-giz__knob, .rs-giz__h:hover .rs-giz__line:not(.rs-giz__line--under) { stroke-width: 3; }
+.rs-giz__axis { pointer-events: none; }
+.rs-giz__axis line { stroke-width: 2; stroke-linecap: round; }
+.rs-giz__axis .rs-giz__axisunder { stroke: #000; stroke-width: 4; opacity: 0.6; }
+.rs-giz__axis text { font-size: 11px; font-weight: 700; stroke: #000; stroke-width: 3; paint-order: stroke; }
+.rs-giz__axis--x line:not(.rs-giz__axisunder) { stroke: #ff6b6b; } .rs-giz__axis--x text { fill: #ff6b6b; }
+.rs-giz__axis--y line:not(.rs-giz__axisunder) { stroke: #6fdc6f; } .rs-giz__axis--y text { fill: #6fdc6f; }
+.rs-giz__axis--z line:not(.rs-giz__axisunder) { stroke: #6fa8ff; } .rs-giz__axis--z text { fill: #6fa8ff; }
+/* top left: the bottom middle is where the zoom hint and error messages appear, the top right is the Record button */
+.rs-giz__bar { left: var(--s-2); top: var(--s-2); pointer-events: auto; gap: 2px; padding: 0 2px; white-space: nowrap; }
+.rs-giz__bar .rs-btn { height: 26px; padding: 0 var(--s-2); }
+.rs-giz__sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line-strong); }
+.rs-giz__note { padding: 0 var(--s-2); color: var(--text-dim); font-size: var(--fs-xs); }
+@media (pointer: coarse) {
+  .rs-giz__bar { height: calc(var(--touch, 44px) + 4px); }
+  .rs-giz__bar .rs-btn { height: var(--touch, 44px); min-width: var(--touch, 44px); padding: 0 var(--s-3); }
+}
