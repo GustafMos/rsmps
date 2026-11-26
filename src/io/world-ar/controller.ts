@@ -96,6 +96,8 @@ export interface WorldArDeps {
   add(files: File[]): Promise<AssetInfo[]>;
   /** Stops the normal viewer from rendering while the AR view is open (both would compete for the same engine). */
   holdPlayer(): () => void;
+  /** Release the device cameras and keep them closed (true), or let them come back (false). The AR system owns the camera meanwhile. */
+  suspendCameras?(on: boolean): void;
 }
 
 /** The handful of browser calls, so tests and the desktop self-check can put a fake in their place. */
@@ -209,12 +211,16 @@ export class WorldArController implements WorldArApi {
     if (this.current) throw new Error('The AR view is already open.');
     const env = this.env;
     if (!env.xr) throw new Error(startErrorMessage({ name: 'NotSupportedError' }));
-    // FIRST thing after the press: browsers only start a session while the press still counts
+    // FIRST thing after the press: browsers only start a session while the press still counts. Letting go of the app's own camera
+    // is synchronous, so the press still counts; an open camera stream can make the AR session fail or stutter.
+    const cams = this.d.suspendCameras?.bind(this.d);
+    cams?.(true);
     let session: XrSessionLike;
     const asked = OPTIONAL_FEATURES.filter((f) => f !== 'dom-overlay' || !!o.overlay);
     try {
       session = await env.xr.requestSession('immersive-ar', { optionalFeatures: [...asked], ...(o.overlay ? { domOverlay: { root: o.overlay } } : {}) });
     } catch (err) {
+      cams?.(false);
       throw new Error(startErrorMessage(err));
     }
     let release: (() => void) | null = null;
@@ -335,6 +341,7 @@ export class WorldArController implements WorldArApi {
         source.dispose();
         disposePainter?.();
         release?.();
+        cams?.(false);
         this.current = null;
         resolveClosed({ error });
       };
@@ -392,6 +399,7 @@ export class WorldArController implements WorldArApi {
     } catch (err) {
       disposePainter?.();
       release?.();
+      cams?.(false);
       this.current = null;
       try {
         await session.end();

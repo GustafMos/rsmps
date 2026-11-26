@@ -502,6 +502,12 @@ export interface Host {
    */
   liveFrame?(source: LiveSource, maxSide: number, at?: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
   /**
+   * True while this live source cannot run at the moment (the device camera while the AR view owns it). A node that gets true
+   * must not ask `liveFrame`: it gives a fully transparent picture of the canvas size instead, so what is merged over it
+   * still shows. Remote sources (a phone link, a network address) are never blocked.
+   */
+  liveBlocked?(source: LiveSource): boolean;
+  /**
    * Value of a named signal that a stream-domain (audio/MIDI) node publishes, at `seconds`:
    * loudness, pitch, note, gate… This is the bridge that lets sound drive picture parameters.
    * Live it returns the latest measured value; during export, the value analysed from the rendered audio.

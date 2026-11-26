@@ -1154,6 +1154,14 @@ export class Library implements MediaLibrary {
     const hold = at !== undefined && now !== undefined ? { at, held: Math.abs(at - now) > 1e-6 } : undefined;
     return this.live.frame(source as LiveRequest, maxSide, hold);
   }
+  /** Host.liveBlocked: the device camera is not available while the AR view is open. */
+  liveBlocked(source: LiveSource): boolean {
+    return source.kind === 'camera' && this.live.camerasBlocked;
+  }
+  /** The AR view opened (true: device cameras are released and stay closed) or closed (false: they come back by themselves). */
+  setCamerasSuspended(on: boolean): void {
+    this.live.suspendCameras(on);
+  }
   /** The player's present, in project seconds. Set by createIo. */
   liveNow: (() => number) | null = null;
 

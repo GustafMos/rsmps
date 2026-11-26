@@ -264,7 +264,7 @@ export const createIo: CreateIo = async () => {
     sensors,
     liveRecorder,
     // nothing is asked of the browser until its `open()` is called from a button press
-    worldAr: new WorldArController({ gpu, gate, registry, add: (files) => library.add(files), holdPlayer: () => player.hold() }),
+    worldAr: new WorldArController({ gpu, gate, registry, add: (files) => library.add(files), holdPlayer: () => player.hold(), suspendCameras: (on) => library.setCamerasSuspended(on) }),
     take: {
       drawable: (source) => library.live.drawable(source),
       captureSignals(fps) {

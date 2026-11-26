@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Registry } from '../engine/define';
 import { addNode, connect, createGraph } from '../engine/graph';
 import { registerBuiltins } from '../engine/nodes';
-import { IDLE_CLOSE_MS, classifyUrl, corsMessage, hostOf, isIdle, loadFailureMessage, sourceKey, targetSize } from './live';
+import { LiveSources, IDLE_CLOSE_MS, classifyUrl, corsMessage, hostOf, isIdle, loadFailureMessage, sourceKey, targetSize } from './live';
 import { feedsFromLive, liveNodeIds, stampLive } from './live-stamp';
 
 describe('live source helpers', () => {
@@ -64,5 +64,20 @@ describe('live stamping', () => {
     expect(s1.nodes.find((n) => n.id === noise.node.id)).toBe(g.nodes.find((n) => n.id === noise.node.id)); // untouched
     expect(g.nodes.find((n) => n.id === cam.node.id)!.params.liveTick).toBe(''); // original not mutated
     expect(stampLive(g, new Set(), 5)).toBe(g);
+  });
+});
+
+describe('cameras while the AR view is open', () => {
+  it('device cameras are blocked and answer nothing until the view is closed; other sources are untouched', async () => {
+    const live = new LiveSources({} as never);
+    expect(live.camerasBlocked).toBe(false);
+    live.suspendCameras(true);
+    expect(live.camerasBlocked).toBe(true);
+    expect(await live.frame({ kind: 'camera', deviceId: '' }, 0)).toBeNull();
+    expect(live.drawable({ kind: 'camera', deviceId: '' })).toBeNull();
+    expect(live.active).toBe(false); // nothing was opened
+    expect((await live.askCamera()).ok).toBe(false);
+    live.suspendCameras(false);
+    expect(live.camerasBlocked).toBe(false);
   });
 });

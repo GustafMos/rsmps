@@ -68,3 +68,13 @@ describe('Start AR button', () => {
     expect(takeMessage({ take: {}, clip: null, seconds: 2, error: null } as never).kind).toBe('info');
   });
 });
+
+describe('Start AR and the camera', () => {
+  it('opens the view through the controller, which is what lets go of the camera', () => {
+    const open = vi.fn(() => new Promise(() => undefined));
+    const a = app({ worldAr: { active: null, open }, viewed: 'x' });
+    stubDocument();
+    openWorldAr(a.ctx, 'n', 'n');
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+});

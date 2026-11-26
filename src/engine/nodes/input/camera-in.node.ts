@@ -60,6 +60,13 @@ export default defineNode({
     const host = ctx.host;
     if (!host.liveFrame) throw new Error('A live camera is not available here (exports and headless runs cannot use one). Record it first.');
     const source = cameraSource(ctx.params);
+    if (host.liveBlocked?.(source)) {
+      // the AR view owns the camera: nothing here, so what is merged over it shows over the phone's own camera picture
+      const width = Math.max(1, Math.round(ctx.canvas.width));
+      const height = Math.max(1, Math.round(ctx.canvas.height));
+      const image = ctx.gpu.pass({ label: 'camera-blocked', size: { width, height, unit: ctx.unitFor(width, height) }, wgsl: 'fn fx(uv: vec2f, px: vec2f) -> vec4f { return vec4f(0.0); }' });
+      return { image };
+    }
     const maxSide = ctx.proxy < 1 ? Math.ceil(Math.max(ctx.canvas.width, ctx.canvas.height)) : 0;
     const frame = await host.liveFrame(source, maxSide, ctx.time.seconds);
     if (!frame) throw new Error('Waiting for the camera…');

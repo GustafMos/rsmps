@@ -77,3 +77,41 @@ it('phone-camera rotates on the GPU and asks the host for the phone session', as
   const plain = await t.run('phone-camera', { session: 'tok', rotate: 'auto' });
   expect((plain.image as { width: number }).width).toBe(4);
 });
+
+it('camera-in gives a transparent picture of the canvas size while the AR view owns the camera, and works as before after', async () => {
+  const base = await harness();
+  let blocked = true;
+  let asked = 0;
+  const host: Host = {
+    ...nullHost,
+    liveBlocked: (s) => blocked && s.kind === 'camera',
+    async liveFrame() {
+      asked++;
+      const img = base.solid(8, 4, [255, 0, 0, 255]);
+      return { texture: img.texture, width: 8, height: 4 };
+    },
+  };
+  const t = await harness([], host);
+  const out = await t.run('camera-in', { mirror: false });
+  const img = out.image as { width: number; height: number };
+  expect(asked).toBe(0);
+  const px = await t.pixels(out.image as never);
+  expect(px.at(Math.floor(img.width / 2), Math.floor(img.height / 2))).toEqual([0, 0, 0, 0]);
+  blocked = false;
+  const back = await t.run('camera-in', { mirror: false });
+  expect(asked).toBe(1);
+  expect((await t.pixels(back.image as never)).at(0, 0)).toEqual([255, 0, 0, 255]);
+});
+
+it('a Webcam under a foreground still renders while blocked: the foreground stands over nothing', async () => {
+  const base = await harness();
+  const host: Host = { ...nullHost, liveBlocked: (s) => s.kind === 'camera', liveFrame: async () => { throw new Error('must not be asked'); } };
+  const t = await harness([], host);
+  const cam = await t.run('camera-in', {});
+  const top = base.solid(4, 4, [0, 255, 0, 255]);
+  const out = await t.run('merge', {}, { background: cam.image as never, foreground: top as never });
+  const px = await t.pixels(out.image as never);
+  const w = (out.image as { width: number }).width;
+  const h = (out.image as { height: number }).height;
+  expect(px.at(Math.floor(w / 2), Math.floor(h / 2))[1]).toBeGreaterThan(0);
+});
