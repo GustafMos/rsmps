@@ -33,6 +33,7 @@ import { AssetsEditor, CodeEditor, JsonEditor, PaletteEditor } from './editors';
 import { CopyCode, PhonePanel, hasSessionParam } from './PhonePanel';
 import { PhoneMotionPanel } from './PhoneMotionPanel';
 import { WorldArPanel } from './WorldArPanel';
+import { ScanPanel } from './ScanPanel';
 import { MarkerCameraPanel } from './MarkerCameraPanel';
 import { LiveRecordPanel } from './LiveRecordPanel';
 import { CameraPermissionPanel } from './CameraPermissionPanel';
@@ -238,6 +239,7 @@ function NodePanel({ id }: { id: string }) {
       {hasSessionParam(def) && !missing.length && node.params.device !== 'this' && <PhonePanel node={node} />}
       {(node.type === 'phone-motion' || node.type === 'ar-camera') && !missing.length && <PhoneMotionPanel node={node} />}
       {node.type === 'world-ar' && <WorldArPanel node={node} fullId={fullId} />}
+      {node.type === 'scan-3d' && <ScanPanel node={node} />}
       {node.type === 'marker-camera' && <MarkerCameraPanel node={node} />}
       {node.type === 'camera-in' && <CameraPermissionPanel />}
       {node.type === 'camera-in' && !missing.length && <CameraControlsPanel node={node} wired={new Set(wired.keys())} />}

@@ -42,6 +42,15 @@ export interface XrHitTestResultLike {
   /** Anchors module: absent when the `anchors` feature was not granted. */
   createAnchor?: () => Promise<XrAnchorLike>;
 }
+/** Depth Sensing module, CPU path (`XRCPUDepthInformation`): the low-resolution depth picture of one view. */
+export interface XrCpuDepthLike {
+  width: number;
+  height: number;
+  /** Row-major; 16-bit unsigned for the luminance-alpha format, 32-bit float for float32. */
+  data: ArrayBuffer;
+  rawValueToMeters: number;
+  normDepthBufferFromNormView: { matrix: ArrayLike<number> };
+}
 export interface XrFrameLike {
   getViewerPose(referenceSpace: unknown): XrViewerPoseLike | null;
   getPose(space: unknown, baseSpace: unknown): XrPoseLike | null;
@@ -49,6 +58,8 @@ export interface XrFrameLike {
   /** Anchors module: the anchors the device still tracks in this frame. */
   trackedAnchors?: { has(anchor: XrAnchorLike): boolean };
   createAnchor?: (pose: unknown, space: unknown) => Promise<XrAnchorLike>;
+  /** Depth Sensing module: absent when the `depth-sensing` feature was not granted; null when this frame has no depth. */
+  getDepthInformation?: (view: XrViewLike) => XrCpuDepthLike | null;
 }
 export interface XrViewportLike {
   x: number;
@@ -82,14 +93,33 @@ export interface XrSessionLike {
   /** DOM Overlays module: set when the overlay is shown. */
   domOverlayState?: { type: string } | null;
   visibilityState?: string;
+  /** Depth Sensing: what the browser chose of the preferences asked for ('cpu-optimized', 'luminance-alpha' or 'float32'). */
+  depthUsage?: string;
+  depthDataFormat?: string;
+}
+export interface XrSessionInit {
+  requiredFeatures?: string[];
+  optionalFeatures?: string[];
+  domOverlay?: { root: unknown };
+  /** Depth Sensing: only read when `depth-sensing` is among the features. */
+  depthSensing?: { usagePreference: string[]; dataFormatPreference: string[] };
 }
 export interface XrSystemLike {
   isSessionSupported(mode: string): Promise<boolean>;
-  requestSession(mode: string, init?: { requiredFeatures?: string[]; optionalFeatures?: string[]; domOverlay?: { root: unknown } }): Promise<XrSessionLike>;
+  requestSession(mode: string, init?: XrSessionInit): Promise<XrSessionLike>;
+}
+
+/** Did the browser grant depth sensing? Only the browser's own list can say (there is nothing to probe without it). */
+export function depthGranted(session: XrSessionLike): boolean {
+  return !!session.enabledFeatures && Array.from(session.enabledFeatures).includes('depth-sensing');
 }
 
 /** The features asked for. All optional: the session must still start on a device that has none of them (see `featuresOf`). */
 export const OPTIONAL_FEATURES = ['hit-test', 'anchors', 'dom-overlay', 'camera-access'] as const;
+
+/** The scan view asks for depth on top of the usual extras, as an OPTIONAL feature: a phone without it still scans. */
+export const SCAN_FEATURES = [...OPTIONAL_FEATURES, 'depth-sensing'] as const;
+export const DEPTH_INIT = { usagePreference: ['cpu-optimized'], dataFormatPreference: ['luminance-alpha', 'float32'] };
 
 export interface GrantedFeatures {
   hitTest: boolean;
