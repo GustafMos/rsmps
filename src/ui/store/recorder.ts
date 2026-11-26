@@ -548,6 +548,15 @@ export class RecorderController {
    */
   private async render(p: PendingRender): Promise<void> {
     const { ed, io, env } = this;
+    const elsewhere = (ed as unknown as { exportBusy?: string | null }).exportBusy;
+    if (elsewhere) {
+      // another rendering (an export, a World AR video) holds the GPU: the raw clips are kept and this take waits for "Render again"
+      ed.toast(`${elsewhere} The raw camera clips are in Media: ${p.rawNames.join(', ')}. Press "Render again" on the Recorder when it has finished.`, 'info');
+      ed.setViewed(p.prevViewed);
+      if (p.wasPlaying) io.player.play();
+      this.store.set((s) => ({ ...IDLE, lastName: s.lastName, retry: !!this.pending }));
+      return;
+    }
     const began = env.now();
     const ac = new AbortController();
     this.renderAbort = ac;

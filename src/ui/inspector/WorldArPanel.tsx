@@ -4,6 +4,9 @@ import { isWorldTake, worldTakeDuration } from '../../engine/lib/world-take';
 import { fedByWorldAr } from '../../io/world-ar/engine-source';
 import type { WorldArSupport } from '../../io/world-ar/support';
 import { useApp, useEd } from '../store/context';
+import { useSelector } from '../store/createStore';
+import { getLive } from '../store/live';
+import { formatRemaining } from '../store/recorder';
 import { openWorldAr } from '../store/worldAr';
 
 /** The notice shown wherever World AR appears: it shipped without an AR phone to test on. */
@@ -30,6 +33,12 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
   const through = target ? fedByWorldAr(graph, target) : false;
   const ok = support.state === 'ok';
   const active = io.worldAr?.active ?? null;
+  const video = getLive(app).worldArVideo;
+  const vui = useSelector(video.store, (s) => s);
+  const rendering = vui.nodeId === fullId && vui.phase !== 'idle';
+  const otherBusy = vui.phase !== 'idle' && !rendering;
+  const left = formatRemaining(vui.remaining);
+  const plan = take ? video.plan(fullId) : null;
   return (
     <div className="rs-insp__sec">
       <div className="rs-caps">AR view</div>
@@ -64,8 +73,42 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
             {worldTakeDuration(take).toFixed(1)} s at {take.fps} frames per second. {take.clip ? 'It matches the camera clip recorded with it frame for frame: keep that Media In clip starting at the same time.' : 'Movement only (no camera clip was recorded with it).'} It plays in the normal viewer and in exports.
           </p>
           <div className="rs-insp__actions">
-            <button className="rs-btn" onClick={() => ed.setParam(node.id, 'take', null)} title="Removes the recorded movement from this node (the camera clip stays in Media)">Remove take</button>
+            <button
+              className="rs-btn"
+              disabled={vui.phase !== 'idle' || !!active}
+              title={plan?.clipAsset ? 'Makes a video file: the camera picture with the object over it, as it looked in the AR view. It is added to Media and downloaded.' : 'There is no camera picture with this take, so the object is rendered alone over black.'}
+              onClick={() => void video.start(fullId, { alone: !plan?.clipAsset })}
+            >
+              {plan?.clipAsset ? 'Save as video' : 'Save object alone as video'}
+            </button>
+            {rendering && (
+              <button className="rs-btn rs-btn--danger" title="Stop making the video. The recording and its camera clip stay as they are" onClick={() => video.cancel()}>
+                Cancel
+              </button>
+            )}
+            {vui.lastName && vui.phase === 'idle' && (
+              <button className="rs-btn" title={`Save ${vui.lastName} as a video file on this device`} onClick={() => video.saveLast()}>
+                Save last video as file
+              </button>
+            )}
+            <button className="rs-btn" disabled={rendering} onClick={() => ed.setParam(node.id, 'take', null)} title="Removes the recorded movement from this node (the camera clip stays in Media)">Remove take</button>
           </div>
+          {rendering && (
+            <div className="rs-dlg__bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(vui.progress * 100)}>
+              <div style={{ width: `${Math.round(vui.progress * 100)}%` }} />
+            </div>
+          )}
+          <p className="rs-insp__hint" role="status">
+            {rendering
+              ? `Making the video, frame by frame${left ? `, ${left}` : ''}. This can take longer than the recording. Keep this page open and on screen.`
+              : otherBusy
+                ? 'Another video is being made.'
+                : plan?.clipAsset
+                  ? 'Save as video puts the viewed node over the recorded camera picture and makes a video file. The recording and the camera clip stay as they are, so you can make it again with other effects. The setting "Save video" does this by itself when you close the AR view.'
+                  : plan?.clipMissing
+                    ? 'The camera clip of this take is no longer in Media. You can still save the object alone over black.'
+                    : 'This take has only the movement (the phone did not hand over the camera picture). You can save the object alone over black.'}
+          </p>
         </>
       )}
     </div>
