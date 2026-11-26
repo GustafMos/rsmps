@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.37.0] - 2026-11-26
+
+### Added
+- **Webcam: zoom, frame rate and camera controls.** The Webcam node has a **Zoom** setting that uses the camera's own zoom where the device offers it and a digital zoom otherwise; it can be wired, so another node can drive it. **Frame rate** can be Auto, Match project, 24, 25, 30, 50 or 60; changing it does not restart the camera, and the inspector shows the rate the camera actually delivers (the picture is shown at the project frame rate at most). A new **Camera controls** section in the inspector lists whatever the camera reports it can do: torch, focus, exposure and exposure compensation, white balance and colour temperature, ISO, brightness, contrast, saturation and sharpness, with a Reset button. Exposure compensation, focus distance and colour temperature can be wired too. Not yet tried on a real phone camera.
+
 ## [0.36.0] - 2026-11-26
 
 ### Added

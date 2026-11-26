@@ -35,6 +35,7 @@ import { WorldArPanel } from './WorldArPanel';
 import { MarkerCameraPanel } from './MarkerCameraPanel';
 import { LiveRecordPanel } from './LiveRecordPanel';
 import { CameraPermissionPanel } from './CameraPermissionPanel';
+import { CameraControlsPanel } from './CameraControlsPanel';
 import { FastCopyPanel } from './FastCopyPanel';
 import { RecorderPanel } from './RecorderPanel';
 import { isLivePictureType } from '../../engine/lib/live-source';
@@ -232,6 +233,7 @@ function NodePanel({ id }: { id: string }) {
       {node.type === 'world-ar' && <WorldArPanel node={node} fullId={fullId} />}
       {node.type === 'marker-camera' && <MarkerCameraPanel node={node} />}
       {node.type === 'camera-in' && <CameraPermissionPanel />}
+      {node.type === 'camera-in' && !missing.length && <CameraControlsPanel node={node} wired={new Set(wired.keys())} />}
       {node.type === 'media-in' && <FastCopyPanel node={node} />}
       {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}
       {node.type === 'recorder' && <RecorderPanel fullId={fullId} params={node.params} />}

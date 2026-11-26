@@ -500,7 +500,7 @@ export interface Host {
    * `at`: the project time (seconds) this render is for. Pass `ctx.time.seconds`: when a time node asks for a moment that is
    * not the present, the host keeps the picture it took for that moment, so stop-motion holds work on a live source.
    */
-  liveFrame?(source: LiveSource, maxSide: number, at?: number): Promise<{ texture: GPUTexture; width: number; height: number } | null>;
+  liveFrame?(source: LiveSource, maxSide: number, at?: number): Promise<{ texture: GPUTexture; width: number; height: number; nativeZoom?: boolean } | null>;
   /**
    * True while this live source cannot run at the moment (the device camera while the AR view owns it). A node that gets true
    * must not ask `liveFrame`: it gives a fully transparent picture of the canvas size instead, so what is merged over it
@@ -567,9 +567,31 @@ export interface SplatTrainHost {
   train(req: SplatTrainRequest): Promise<SplatTrainOutput>;
 }
 
+/**
+ * What a Webcam node asks of the camera itself (not part of the stream's identity: it is applied to the live track).
+ * Ranges the camera defines for itself are 0..1 (0 = its minimum, 1 = its maximum); zoom is x, exposureComp is EV, colorTemp is K, frameRate is fps.
+ */
+export interface CameraControls {
+  frameRate?: number;
+  zoom?: number;
+  torch?: boolean;
+  focus?: 'auto' | 'manual';
+  focusDistance?: number;
+  exposure?: 'auto' | 'manual';
+  exposureTime?: number;
+  exposureComp?: number;
+  whiteBalance?: 'auto' | 'manual';
+  colorTemp?: number;
+  iso?: number;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  sharpness?: number;
+}
+
 /** A live picture source for `Host.liveFrame`. */
 export type LiveSource =
-  | { kind: 'camera'; deviceId: string; width?: number; height?: number; facing?: 'user' | 'environment' }
+  | { kind: 'camera'; deviceId: string; width?: number; height?: number; facing?: 'user' | 'environment'; controls?: CameraControls }
   | { kind: 'url'; url: string; mode?: 'auto' | 'image' | 'mjpeg' | 'video'; refresh?: number }
   /** A phone streaming its camera through the LAN phone link (QR code). `session` is the pairing token. */
   | { kind: 'phone'; session: string };

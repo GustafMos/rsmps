@@ -115,3 +115,70 @@ it('a Webcam under a foreground still renders while blocked: the foreground stan
   const h = (out.image as { height: number }).height;
   expect(px.at(Math.floor(w / 2), Math.floor(h / 2))[1]).toBeGreaterThan(0);
 });
+
+it('camera-in without a zoom of its own crops and enlarges about the centre; a camera that zooms itself is not zoomed twice', async () => {
+  const base = await harness();
+  const band = (x: number): [number, number, number, number] => (x < 4 ? [255, 0, 0, 255] : x < 12 ? [0, 255, 0, 255] : [0, 0, 255, 255]);
+  let native = false;
+  const host: Host = {
+    ...nullHost,
+    async liveFrame() {
+      const img = base.fromFn(16, 4, (x) => band(x));
+      return { texture: img.texture, width: 16, height: 4, nativeZoom: native };
+    },
+  };
+  const t = await harness([], host);
+  const plain = await t.pixels((await t.run('camera-in', { mirror: false })).image as never);
+  expect(plain.at(1, 1)).toEqual([255, 0, 0, 255]);
+  const zoomed = await t.pixels((await t.run('camera-in', { mirror: false, zoom: 2 })).image as never);
+  expect(zoomed.at(1, 1)).toEqual([0, 255, 0, 255]); // the centre half fills the picture
+  expect(zoomed.at(14, 1)).toEqual([0, 255, 0, 255]);
+  const below = await t.pixels((await t.run('camera-in', { mirror: false, zoom: 0.5 })).image as never);
+  expect(below.at(1, 1)).toEqual([255, 0, 0, 255]); // never below 1x
+  native = true;
+  const twice = await t.pixels((await t.run('camera-in', { mirror: false, zoom: 2 })).image as never);
+  expect(twice.at(1, 1)).toEqual([255, 0, 0, 255]);
+});
+
+it('camera-in without the new params renders as before and asks the camera for nothing', async () => {
+  const base = await harness();
+  const seen: LiveSource[] = [];
+  const host: Host = {
+    ...nullHost,
+    async liveFrame(source) {
+      seen.push(source);
+      const img = base.fromFn(8, 4, (x) => (x < 4 ? [255, 0, 0, 255] : [0, 0, 255, 255]));
+      return { texture: img.texture, width: 8, height: 4 };
+    },
+  };
+  const t = await harness([], host);
+  const px = await t.pixels((await t.run('camera-in', { device: 'cam1', mirror: true })).image as never);
+  expect(px.at(0, 0)).toEqual([0, 0, 255, 255]);
+  expect(px.at(7, 0)).toEqual([255, 0, 0, 255]);
+  const c = (seen[0] as { controls?: Record<string, unknown> }).controls ?? {};
+  expect(c.frameRate).toBeUndefined();
+  expect(c.zoom).toBe(1);
+  expect(c.exposureComp).toBe(0);
+});
+
+it('camera-in turns Frame rate into the rate to ask for, and Match project into the project rate', async () => {
+  const base = await harness();
+  const seen: LiveSource[] = [];
+  const host: Host = {
+    ...nullHost,
+    async liveFrame(source) {
+      seen.push(source);
+      const img = base.solid(8, 4, [255, 0, 0, 255]);
+      return { texture: img.texture, width: 8, height: 4 };
+    },
+  };
+  const t = await harness([], host);
+  await t.run('camera-in', { frameRate: '60' });
+  await t.run('camera-in', { frameRate: 'project' });
+  await t.run('camera-in', { frameRate: 'auto', cameraExtra: '{"torch":true,"focus":"manual"}', focusDistance: 0.25 });
+  const rates = seen.map((s) => (s as { controls: { frameRate?: number } }).controls.frameRate);
+  expect(rates[0]).toBe(60);
+  expect(rates[1]).toBeGreaterThan(0);
+  expect(rates[2]).toBeUndefined();
+  expect((seen[2] as unknown as { controls: Record<string, unknown> }).controls).toMatchObject({ torch: true, focus: 'manual', focusDistance: 0.25 });
+});

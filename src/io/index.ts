@@ -293,6 +293,8 @@ export const createIo: CreateIo = async () => {
       canChooseAudioOutput: () => audio.canChooseOutput(),
       cameraPermission: () => cameraPermission(),
       askCamera: () => library.live.askCamera(),
+      cameraInfo: (source) => library.live.cameraInfo(source),
+      applyCamera: (source, controls) => library.live.applyCamera(source, controls),
       onChanged: (l) => {
         const offs = [audio.onDevicesChanged(l), onVideoDevicesChanged(l)];
         return () => offs.forEach((off) => off());
