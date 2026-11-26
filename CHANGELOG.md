@@ -4,6 +4,16 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.27.0] - 2026-11-26
+
+### Added
+- **Smooth recording: effects are applied after you stop.** The Recorder has a new "Quality" setting. **Smooth, effects after** records the live pictures themselves (Webcam, Phone Camera, URL / Stream) at the camera's full frame rate, together with the sound, the live sound values and the phone's motion sensors, and renders the effects onto them frame by frame when you stop. The clip is smooth even when the preview stutters on a slow device. **As seen, instant** is the recording as before. **Automatic** (the default) uses smooth on phones and tablets. While the effects are rendered the Recorder shows progress, the time left and Cancel; the page must stay open. The untouched camera clips stay in Media ("Keep raw clips"), so the same take can be tried with other effects, and "Render again" appears if rendering was cancelled or failed. Not yet tried on a real phone.
+
+## [0.26.1] - 2026-11-26
+
+### Added
+- **3D objects can spin around their own axes.** Object 3D, Model 3D, Shape 3D, Image to 3D and the splat viewer have a new "Spin around" setting next to Spin X / Y / Z: **The object's own axes** (the default for new nodes) or The scene's axes. On its own axes an object spins about itself however it is tilted: tilt a disc with Rotate X and Z, set Spin Y to 1, and it turns on its own tilted spindle like a record. Before, the spin was added to the rotation angles, so a tilted object wobbled round the scene's upright axis. Nodes in existing projects keep spinning the way they did until you change the setting.
+
 ## [0.26.0] - 2026-11-26
 
 ### Added

@@ -1,3 +1,4 @@
+import { SPIN_AROUND_PARAM } from './gen-common';
 /**
  * Shared pieces of the 3D family (3D Object, Image to 3D, SDF 3D): the camera ray, the light, the sphere-tracing march with
  * cheap edge anti-aliasing, SDF ambient occlusion and soft shadows, the quality levels and the depth output.
@@ -69,6 +70,7 @@ export const XFORM_PARAMS = {
   spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
   spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
   spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
+  spinAround: SPIN_AROUND_PARAM,
 } satisfies ParamSchema;
 
 export interface XformP {
@@ -87,6 +89,7 @@ export interface XformP {
   spinX: number;
   spinY: number;
   spinZ: number;
+  spinAround?: string;
 }
 export interface LightP {
   lightAzimuth: number;

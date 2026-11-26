@@ -3,7 +3,7 @@ import { cameraBasis, PROJECTION_ID, simpleCamera } from '../../lib/gen-camera';
 import { RAY_WGSL } from '../../lib/gen-3d';
 import { materialKey, materialTextures, materialUniforms, materialWgsl } from '../../lib/gen-material';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformUniforms, deformWgsl, deformStepScale, deformAny, type DeformP } from '../../lib/gen-deform';
-import { rgba, rotationZYX } from '../../lib/gen-common';
+import { SPIN_AROUND_PARAM, spunRotation, rgba, rotationZYX } from '../../lib/gen-common';
 import { modelFilesSummary, renderModel } from '../../lib/model-render';
 import type { CameraValue } from '../../types';
 
@@ -98,6 +98,7 @@ export default defineNode({
     spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
     spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
+    spinAround: SPIN_AROUND_PARAM,
     bevel: { type: 'number', default: 0, min: 0, max: 1, step: 0.01, label: 'Edge bevel', group: 'Object', hint: '0 = perfectly sharp edges and corners. About 0.07 gives the slightly soft edge older versions had; 1 rounds the shape right off. Applies to cube, cylinder, cone, pyramid and octahedron.', visibleIf: (p) => p.shape !== 'custom' },
     lightAzimuth: { type: 'number', default: -35, min: -180, max: 180, step: 1, unit: 'deg', label: 'Light azimuth', hint: 'Left to right.', group: 'Lighting' },
     lightElevation: { type: 'number', default: 40, min: -90, max: 90, step: 1, unit: 'deg', label: 'Light height', group: 'Lighting' },
@@ -124,7 +125,7 @@ export default defineNode({
     }
     const spinning = p.spinX !== 0 || p.spinY !== 0 || p.spinZ !== 0;
     const phase = spinning || deformAnimated(dp) ? ctx.time.phase : 0;
-    const R = rotationZYX(p.rotX + 360 * p.spinX * phase, p.rotY + 360 * p.spinY * phase, p.rotZ + 360 * p.spinZ * phase);
+    const R = spunRotation(p, phase);
     const az = (p.lightAzimuth * Math.PI) / 180;
     const el = (p.lightElevation * Math.PI) / 180;
     const light = [Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)];

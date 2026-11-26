@@ -1772,6 +1772,11 @@ export class Editor {
   /* -------------------------------- export --------------------------------- */
 
   private exportAbort: AbortController | null = null;
+  /**
+   * Set while something else renders through the exporter (the Recorder rendering a take): an Export started then would render at
+   * the same time on the same GPU, so it is refused with this message.
+   */
+  exportBlocked: string | null = null;
   private supportShown = new Set<string>();
 
   /** Each trigger shows its prompt at most once EVER (flag set when shown), never in safe mode or over another prompt. */
@@ -1819,6 +1824,10 @@ export class Editor {
   async runExportGraph(graph: GraphDoc, outputs: string[], items: 'current' | 'all', item: number, zip: boolean, audioFormat?: 'wav' | 'm4a' | 'webm'): Promise<boolean> {
     if (this.exportAbort) {
       this.toast('An export is already running.', 'info');
+      return false;
+    }
+    if (this.exportBlocked) {
+      this.toast(this.exportBlocked, 'info');
       return false;
     }
     const s = { graph, item };
