@@ -4,6 +4,13 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.44.0] - 2026-11-26
+
+### Changed
+- **Joining two picture outputs now makes a Stack Layers node** instead of a Merge. The output you drop onto is the bottom layer and the one you pulled is the top layer. Dropping another output onto a Stack's output adds it as a new top layer of that Stack. Merge is still there as a node and through "Convert to…"; joining two sounds still makes a Mixer.
+- **Stack Layers lists its layers the way picture editors do.** The top row is the top layer: rows read Top, 2, 3 and "Bottom · sets size", with "+ add on top" above them. Existing projects render the same; only the list and its labels changed.
+- Other nodes with several wires on one input (Media Timeline, Switch, Frame Interleave, Parallax, Region Stamp) now list them 1, 2, 3 downward in wire order.
+
 ## [0.43.0] - 2026-11-26
 
 ### Added
