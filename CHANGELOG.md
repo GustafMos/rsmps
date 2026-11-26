@@ -4,6 +4,12 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.46.1] - 2026-11-26
+
+### Fixed
+- **Take turns: the visited camera now gets its picture on real phones.** A visit asked for the second camera once, 60 ms after closing the first; a phone needs longer to let go of a camera, so the visit was refused every time and the visited camera stayed empty. A visit now retries for about 3.5 seconds, waits up to 5 seconds for the first picture and detects it in more than one way, falls back to a simpler camera request when the asked size is refused, and always brings the main camera back.
+- **Failed visits are no longer silent.** The Webcam inspector says what happened ("the last 4 visits failed: the camera could not be opened (busy), next try in 20 s"), and a new **Copy camera report** button copies a short log of what the cameras did, for bug reports.
+
 ## [0.46.0] - 2026-11-26
 
 ### Added
