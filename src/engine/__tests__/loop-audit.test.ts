@@ -263,6 +263,7 @@ export const OUT_OF_SCOPE: Record<string, string> = {
   'phone-motion': 'live sensor input (and a recorded take with its own loop blend)',
   'phone-camera': 'live phone camera',
   'ar-camera': 'live sensor input: a camera that follows the phone (and a recorded take with its own loop blend)',
+  'marker-camera': 'follows a marker in the picture it is given (a live camera or a clip): its motion is the footage\'s, there is nothing to loop',
   'camera-in': 'live webcam',
   'url-in': 'live stream',
   'audio-level': 'live audio level',

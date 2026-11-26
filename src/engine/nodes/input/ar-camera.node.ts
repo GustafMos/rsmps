@@ -17,7 +17,7 @@ export default defineNode({
   title: 'AR Camera',
   category: 'input',
   description:
-    'A 3D camera that follows the way the phone is pointing, so a 3D object stays put in the room while you look around (turning only, not walking). Wire it into a 3D Object\'s Camera input and merge the object over the Webcam picture of the back camera. Record a move to export it.',
+    'A 3D camera that follows the way the phone is pointing, so a 3D object stays put in the room while you look around (turning only, not walking). Wire it into a 3D Object\'s Camera input and merge the object over the Webcam picture of the back camera. Record a move to export it. For an object that also stays put while you walk, use Marker Camera.',
   keywords: ['ar', 'augmented reality', 'gyro', 'gyroscope', 'device camera', 'phone', 'orientation', 'look around', '3d', 'camera', 'window', 'world', 'sensor', 'this device', 'vr'],
   inputs: {},
   outputs: { camera: { type: 'camera', label: 'Camera' } },

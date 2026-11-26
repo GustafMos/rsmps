@@ -419,6 +419,30 @@ Open the app on the phone itself (Android Chrome, or Safari on iPhone / iPad). N
 It follows turning only: if you walk, the object walks with you. More of the phone's sensors as numbers (tilt, shake, jolt, gravity, compass): add a **Phone Motion** node; on a phone it reads
 this device too. Wire **Gravity X / Y** into an object's position to make it fall towards the low side of the screen.
 
+## An object standing on a marker (walk round it)
+
+The AR Camera above follows turning only. For an object that is really anchored, so you can walk round it, come close and step back, use a printed marker. The start screen has this graph
+ready: **An object standing on a marker** (3D).
+
+1. Add a **Marker Camera** (Detect & Track). In its panel choose a size and press **Print marker**. Print the PDF at 100% (actual size, not "fit to page") and lay the sheet flat on a table
+   or the floor. No printer: on a tablet or a second phone add an **AR Marker** node, view it full screen and lay that device down.
+2. Add a **Webcam** (on a phone it opens the back camera) and wire it into the Marker Camera's **Picture in**.
+3. Add a **3D Object**. Wire **Marker Camera > Camera** into its **Camera** input and **Marker Camera > Picture** into its **Size from**.
+4. Add a **Merge**: **Marker Camera > Picture** is the background, the 3D Object goes on top. View the Merge.
+5. Point the camera at the marker: the object stands on it. Walk round it. The paper is the ground of the scene: x is the marker's right, z is where its top edge points, y is up, so the
+   object's **Move X / Y / Z** place it on and above the paper. **Object size** scales the scene against the marker (at 1 the black square is 2 scene units wide). **Floor height** is the
+   height of the paper in the scene: the default suits the standard cube; a ball needs -0.95.
+6. If the object leans or slides as you move round, change **Field of view** (about 40 for wide video, about 52 for 4:3) until a tall object stands straight from every side.
+7. Turn on **Show what is found** to see what the node sees: a green outline with a yellow dot on the marker's top-left corner, the three axes, and a red rim when the marker is not found.
+8. When the marker is covered or leaves the picture the object holds for a moment and then fades or hides (**When lost**). For a soft fade wire **Found** into the Merge's **Opacity**.
+9. Hide the marker under the object with **Cover the marker**, or lay a picture flat on it: wire any picture into **Flat picture** and merge the **Flat picture on marker** output over the
+   camera picture.
+10. To export: record the camera picture first (the Webcam's Record button), put the recorded clip in place of the Webcam and press **Analyze clip** on the Marker Camera. The export is then
+    exactly what the viewer shows. The same works for any clip filmed with the marker in view.
+
+Tips: a larger marker and good, even light give a calmer object; the marker should be at least a tenth of the picture wide. Glossy paper and screens at full brightness can reflect or bloom:
+matte paper is best. Several markers in view: pick one by number with **Marker**.
+
 ## Gaussian splats (Gaussian Splat, Picture to Splats)
 
 **View a scan.** Import a `.ply` from a 3D Gaussian Splatting trainer (or a `.splat` file; compressed `.ply` / `.spz` are not supported) into the library, add a **Gaussian Splat** node and choose the file in its *Splat file* field. *Fit to view* centers and scales the scan (floaters are

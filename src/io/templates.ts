@@ -214,6 +214,24 @@ export const TEMPLATES: Template[] = [
     ),
   }),
 
+  make({
+    id: 'marker-object',
+    title: 'An object standing on a marker',
+    group: '3D',
+    description: 'Augmented reality with a printed marker. Put a Webcam (back camera) in place of the marker picture, print the marker from Marker Camera, and walk round it.',
+    graph: build(
+      'An object standing on a marker',
+      [
+        { id: 'cam', type: 'marker', params: { marker: '1', fill: 0.3 }, label: 'Replace with a Webcam (back camera)' },
+        { id: 'track', type: 'marker-camera', params: { marker: 'any', fov: 45, objectSize: 1, floor: -0.55, lost: 'fade' }, label: 'Print the marker here' },
+        { id: 'obj', type: 'object-3d', params: { shape: 'cube', rotX: 0, rotY: 30, rotZ: 0, baseColor: gold } },
+        { id: 'comp', type: 'merge', params: { mode: 'normal' } },
+        OUT,
+      ],
+      ['cam>track', 'track.camera>obj.camera', 'track.picture>obj.size', 'track.picture>comp.background', 'obj>comp.foreground', 'comp>out'],
+    ),
+  }),
+
   /* ------------------------------------------ Paper & scan ------------------------------------------ */
   make({ id: 'scan-cleanup', title: 'Scanned drawing cleanup', group: 'Paper & scan', description: 'Photos or scans of pencil drawings: remove the paper, keep the line.', needs: 'photos', graph: builtin('scanned-drawing-cleanup') }),
   make({ id: 'scan-relief', title: 'Scan line relief', group: 'Paper & scan', description: 'Turns scanned lines into lit, raised relief.', needs: 'photos', graph: builtin('scan-line-relief') }),
