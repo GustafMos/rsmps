@@ -4,6 +4,12 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.40.0] - 2026-11-26
+
+### Added
+- **Stabilize.** A new node that steadies shaky footage and hyperlapses. Press **Analyse** once: it measures how the camera moved between frames (shift, rotation and optionally zoom) on the device itself, with no download, and stores the result with the project. Then each frame is moved to cancel the shake, identically in the viewer and in export. Mode: Smooth camera (keeps intended pans and walking) or Locked off (holds the first framing). Settings: Smoothness, Strength, Fix rotation, Fix zoom, Edges (zoom in to hide, mirror, stretch, transparent, fill from nearby frames), Max zoom and Show track. Works after a Stop Motion node (held shots are analysed once) and on ordinary video. It reports how many frames it was unsure about. Tested on synthetic shake only; there is no live mode for the Webcam.
+- **3D Scan (experimental).** A new node for capturing a 3D scan with the phone's AR view (Android Chrome). Start scan, tap the surface next to the object, fit the dome around it, and walk round: photos are taken automatically when you are at a new angle, aimed at the object and holding steady, and blurry ones are rejected. The dome's patches turn green as they are covered, with a coverage percentage, a small coverage map and one line of guidance (Move slower, Go lower, Walk to the left). Every photo is stored in Media with where the phone was and how its lens was set, and the node shows a quality verdict afterwards. Where the phone provides depth in AR, a small depth map is stored with each photo. Built without an AR phone to test on.
+
 ## [0.39.0] - 2026-11-26
 
 ### Added
