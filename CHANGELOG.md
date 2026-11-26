@@ -4,6 +4,13 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.38.0] - 2026-11-26
+
+### Added
+- **World AR: zoom.** A "Zoom" strip on the left edge of the AR view zooms from 1x to 4x: drag up to zoom in, down to zoom out, double-tap for 1x. It is a digital zoom (the camera picture and the object are enlarged together, so the object stays locked to the room) and needs a phone that hands the camera picture over in AR. The zoom is recorded, and Save as video reproduces it; the stored camera clip stays un-zoomed at full quality. The World AR Camera node has a new Zoom number output.
+- **World AR: Recording rate.** Match project (as before), 24, 25, 30 or 60 per second for AR recordings and their saved video. If the phone's AR camera delivers less than asked, the recording uses what it delivers and says so.
+Both are tested against a simulated AR session only.
+
 ## [0.37.0] - 2026-11-26
 
 ### Added
