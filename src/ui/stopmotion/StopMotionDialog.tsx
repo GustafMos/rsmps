@@ -1,3 +1,4 @@
+import { nameCameras } from '../../io/camera-catalogue';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MAX_FRAMES, addFrame, deleteFrame, duplicateFrame, emptyStrip, frameAtTime, frameName, moveFrame, nextTakeName, normalizePlan, onionFrames, onionWeights, runtime, setHold, setShootOn, timelapseDue, timelineIds, type SmStrip } from '../../io/stopmotion';
 import { Dialog } from '../dialogs/Dialog';
@@ -230,7 +231,7 @@ export function StopMotionDialog() {
           {devices.length > 1 && (
             <label>Camera
               <select value={deviceId} onChange={(e) => { setDeviceId(e.target.value); void startCamera(e.target.value); }}>
-                {devices.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
+                {nameCameras(devices.map((d) => ({ id: d.deviceId, label: d.label }))).map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
               </select>
             </label>
           )}

@@ -22,6 +22,7 @@ import { GpuWatch } from './gpu-watch';
 import { EvalGate } from './gate';
 import { Library } from './library';
 import { cameraPermission, listVideoInputs, onVideoDevicesChanged } from './live';
+import { renameCamera } from './camera-catalogue';
 import { LiveRecordController } from './live-record';
 import { WorldArController } from './world-ar/controller';
 import { PlayerImpl } from './player';
@@ -295,6 +296,9 @@ export const createIo: CreateIo = async () => {
       askCamera: () => library.live.askCamera(),
       cameraInfo: (source) => library.live.cameraInfo(source),
       applyCamera: (source, controls) => library.live.applyCamera(source, controls),
+      testCamerasTogether: () => library.live.testCamerasTogether(),
+      measureCameras: () => library.live.measureCameras(),
+      renameCamera: (id, name) => renameCamera(id, name),
       onChanged: (l) => {
         const offs = [audio.onDevicesChanged(l), onVideoDevicesChanged(l)];
         return () => offs.forEach((off) => off());

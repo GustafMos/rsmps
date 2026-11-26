@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useDevices } from '../components/DeviceField';
 import { useApp } from '../store/context';
 import type { NodeInstance } from '../../engine/types';
 import { cameraSource, parseCameraExtra } from '../../engine/lib/live-source';
 import { fromUnit, hasTorch, modesOf, rangeOf, toUnit, type Range } from '../../io/camera-controls';
 import type { CameraInfo } from '../../io/live';
 
-const EMPTY: CameraInfo = { open: false, capabilities: {}, settings: {}, digitalZoom: 1, error: '' };
+const EMPTY: CameraInfo = { open: false, capabilities: {}, settings: {}, digitalZoom: 1, error: '', reducedTo: null, note: '', deviceId: '' };
 
 const fmt = (v: number): string => (Math.abs(v) >= 100 ? String(Math.round(v)) : String(Math.round(v * 100) / 100));
 
@@ -44,6 +45,40 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
     const t = setInterval(read, 1000);
     return () => clearInterval(t);
   }, [io, sourceText]);
+
+  const { devices } = useDevices('video-input');
+  const [busy, setBusy] = useState('');
+  const [report, setReport] = useState<string[]>([]);
+  const [draft, setDraft] = useState('');
+  const camId = String(node.params.device || info.deviceId || '');
+  const camName = devices.find((d) => d.id === camId)?.label ?? '';
+  const zoomNow = typeof node.params.zoom === 'number' ? node.params.zoom : 1;
+  const sideWord = node.params.device ? '' : node.params.facing === 'back' ? 'back' : node.params.facing === 'front' ? 'front' : '';
+  const restart = async () => {
+    setBusy('restart');
+    const r = await io.devices.askCamera();
+    setBusy('');
+    setReport([r.ok ? 'The camera was restarted.' : (r.message ?? 'The camera could not be restarted.')]);
+  };
+  const measure = async () => {
+    if (info.open && !window.confirm('Measuring opens each camera for a moment, so the picture stops briefly. Go on?')) return;
+    setBusy('measure');
+    const r = await io.devices.measureCameras();
+    setBusy('');
+    setReport([r.ok ? `Measured ${r.measured} camera${r.measured === 1 ? '' : 's'}. The names in the Camera list now say more.` : (r.message ?? 'The cameras could not be measured.')]);
+  };
+  const together = async () => {
+    if (info.open && !window.confirm('The test opens the cameras two at a time, so the picture stops for a while. Go on?')) return;
+    setBusy('test');
+    setReport(['Testing the cameras two at a time, this takes a little while…']);
+    const r = await io.devices.testCamerasTogether();
+    setBusy('');
+    setReport(r.ok ? r.lines : [r.message ?? 'The test could not run.']);
+  };
+  const rename = () => {
+    io.devices.renameCamera(camId, draft);
+    setDraft('');
+  };
 
   const caps = info.capabilities;
   const extra = parseCameraExtra(node.params.cameraExtra) as Record<string, unknown>;
@@ -96,6 +131,31 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
 
   return (
     <div className="rs-insp__sec" data-camera-controls>
+      <div className="rs-caps">Camera</div>
+      <p className="rs-insp__hint" data-camera-status role="status">
+        {info.open ? `Using ${camName || (sideWord ? `the ${sideWord} camera` : 'the default camera')} · zoom ${fmt(zoomNow)}x${w && h ? ` · ${w} × ${h}` : ''}` : 'The camera is not open right now.'}
+      </p>
+      {info.note && <p className="rs-insp__hint" data-camera-reduced>{info.note}.</p>}
+      {info.error && <p className="rs-insp__hint" role="alert">{info.error}</p>}
+      <div className="rs-insp__actions">
+        <button className="rs-btn" disabled={!!busy} onClick={() => void restart()}>{busy === 'restart' ? 'Restarting…' : 'Restart camera'}</button>
+        <button className="rs-btn" disabled={!!busy} onClick={() => void measure()}>{busy === 'measure' ? 'Measuring…' : 'Measure cameras'}</button>
+        {devices.length >= 2 && <button className="rs-btn" disabled={!!busy} onClick={() => void together()}>{busy === 'test' ? 'Testing…' : 'Test cameras together'}</button>}
+      </div>
+      <Row label="Name">
+        <div className="rs-camrange">
+          <input className="rs-input" aria-label="Camera name" placeholder={camName || 'Name this camera'} value={draft} disabled={!camId} onChange={(e) => setDraft(e.target.value)} />
+          <button className="rs-btn" disabled={!camId} onClick={rename}>{draft.trim() ? 'Name this camera' : 'Clear name'}</button>
+        </div>
+      </Row>
+      <p className="rs-insp__hint">Browsers do not say which lens a camera is (wide, main, zoom lens). Look at the picture and name the camera yourself; the name shows in the Camera list. Measure cameras fills in what each camera reports, such as its zoom range.</p>
+      {report.length > 0 && (
+        <div className="rs-insp__hint" data-camera-report>
+          {report.map((l) => (
+            <p key={l}>{l}</p>
+          ))}
+        </div>
+      )}
       <div className="rs-caps">Camera controls</div>
       {!info.open ? (
         <p className="rs-insp__hint">Start the camera to see its controls. They appear here once the camera is open, for the things it can do.</p>
@@ -131,7 +191,6 @@ export function CameraControlsPanel({ node, wired }: { node: NodeInstance; wired
           {nothing && <p className="rs-insp__hint">This camera offers no controls of its own beyond a frame rate request. Zoom is done in the picture.</p>}
         </>
       )}
-      {info.error && <p className="rs-insp__hint" role="status">{info.error}</p>}
       <div className="rs-insp__actions">
         <button className="rs-btn" onClick={reset}>Reset camera controls</button>
       </div>

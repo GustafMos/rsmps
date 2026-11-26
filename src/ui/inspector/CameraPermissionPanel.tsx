@@ -45,7 +45,7 @@ export function CameraPermissionPanel() {
       <div className="rs-caps">Camera permission</div>
       <div className="rs-insp__actions">
         <button className="rs-btn" disabled={busy} onClick={() => void ask()}>
-          {busy ? 'Waiting for your answer' : state === 'granted' ? 'Ask again / restart camera' : 'Allow camera'}
+          {busy ? 'Waiting for your answer' : state === 'granted' ? 'Ask again (also restarts the camera)' : 'Allow camera'}
         </button>
       </div>
       <p className="rs-insp__hint">{note || STATUS[state]}</p>

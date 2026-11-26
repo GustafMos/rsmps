@@ -21,7 +21,7 @@ export default defineNode({
     tap: { type: 'audio', label: 'Silent tap (always live)' },
   },
   params: {
-    device: { type: 'device', device: 'video-input', default: '', label: 'Camera' },
+    device: { type: 'device', device: 'video-input', default: '', label: 'Camera', hint: 'Automatic opens the camera that Side (below) asks for. Pick a camera from the list to use exactly that one: the side is then set by the chosen camera, so Side is hidden. Two Webcam nodes that pick the same camera share one picture. Use Name this camera in Camera controls to give a camera a name you recognise.' },
     facing: {
       type: 'enum',
       default: 'auto',
@@ -31,7 +31,7 @@ export default defineNode({
         { value: 'back', label: 'Back camera' },
         { value: 'front', label: 'Front camera' },
       ],
-      hint: 'On a phone or tablet: which of its own cameras to open. Used while Camera is on the default; picking a camera by name overrides it. The back camera is never mirrored.',
+      hint: 'On a phone or tablet: which of its own cameras to open. Used while Camera is on Automatic; a camera picked from the list sets the side by itself. The back camera is never mirrored.',
       visibleIf: (p) => !p.device,
     },
     resolution: {
@@ -74,7 +74,12 @@ export default defineNode({
     gateThreshold: { type: 'number', default: -50, min: -90, max: -10, step: 0.5, unit: 'db', label: 'Gate level', group: 'Sound', visibleIf: (p) => !!p.gate },
     liveTick: { type: 'string', default: '', label: 'Live tick', visibleIf: () => false },
   },
-  summary: (p) => (p.freeze ? 'frozen' : p.device ? 'camera' : p.facing === 'back' ? 'back camera' : p.facing === 'front' ? 'front camera' : 'default camera'),
+  summary: (p) => {
+    if (p.freeze) return 'frozen';
+    const side = p.device ? 'camera' : p.facing === 'back' ? 'back' : p.facing === 'front' ? 'front' : 'automatic';
+    const z = Number(p.zoom ?? 1);
+    return `${side} · ${Number.isFinite(z) ? Math.round(z * 100) / 100 : 1}x`;
+  },
   async render(ctx) {
     void ctx.time.seconds; // live: re-render every frame
     const host = ctx.host;

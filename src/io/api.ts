@@ -444,6 +444,12 @@ export interface DeviceApi {
   cameraInfo(source: LiveSource): CameraInfo;
   /** Set some of a camera's own controls now. Kept and applied again whenever the camera is reopened. Says plainly when the camera cannot do it. */
   applyCamera(source: LiveSource, controls: CameraControls): { ok: boolean; message?: string };
+  /** Try every back camera with every front camera at 1080p, 720p and 480p: which pairs work at which size, in plain words. Whatever was open is opened again afterwards. */
+  testCamerasTogether(): Promise<{ ok: boolean; message?: string; lines: string[] }>;
+  /** Open each camera briefly to learn what it reports (zoom range, largest picture, torch), so the camera names say more. */
+  measureCameras(): Promise<{ ok: boolean; measured: number; message?: string }>;
+  /** Give a camera a name of the owner's choosing (empty clears it). Shown everywhere that camera is listed. */
+  renameCamera(id: string, name: string): void;
 }
 
 /** State of a phone link session (QR code). */

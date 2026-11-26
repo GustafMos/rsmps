@@ -16,7 +16,7 @@ function deviceApi(io: Io): AnyDevices {
   };
 }
 
-const EMPTY_LABEL = { 'audio-input': 'System default', 'midi-input': 'All devices', 'video-input': 'Default camera' } as const;
+const EMPTY_LABEL = { 'audio-input': 'System default', 'midi-input': 'All devices', 'video-input': 'Automatic' } as const;
 const GENERIC = /^(microphone|audio input|midi input|input|default)?\s*\d*$/i;
 
 /** Live device list; refreshes when devices are plugged in or out. */
