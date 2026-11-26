@@ -29,7 +29,7 @@ import {
 export type GizmoMode = 'move' | 'turn' | 'size' | 'off';
 const MODES: { id: Exclude<GizmoMode, 'off'>; label: string; title: string; reset: ResetKind; resetTitle: string }[] = [
   { id: 'move', label: 'Move', title: 'Drag the object to move it. The round handle beside it pushes it away or pulls it closer.', reset: 'position', resetTitle: 'Back to the middle' },
-  { id: 'turn', label: 'Turn', title: 'Drag on the object to turn it freely. Drag the outer ring to roll it.', reset: 'rotation', resetTitle: 'No rotation: 0, 0, 0' },
+  { id: 'turn', label: 'Turn', title: 'Drag on the object to turn it freely. Drag the outer ring to roll it. This sets the starting angles; any Spin is added on top.', reset: 'rotation', resetTitle: 'No rotation: 0, 0, 0' },
   { id: 'size', label: 'Size', title: 'Drag the corner handle away from the object to make it larger.', reset: 'size', resetTitle: 'Normal size' },
 ];
 const MODE_KEY = 'rsmps.ui.gizmoMode';
