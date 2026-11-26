@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.46.0] - 2026-11-26
+
+### Added
+- **Cameras take turns when the browser allows only one at a time.** Some phone browsers refuse a second camera at any size. Two Webcam nodes (for example Back and Front into Fake 360) now keep working: one camera is the main one and stays live, and the other gets a short visit every few seconds for a fresh picture while the main one pauses for a moment. Each Webcam node shows its last picture between visits, so the graph no longer fails. New Webcam settings: **When cameras clash** (Take turns, Always take turns, Stop with a message), **Role** (Automatic, Main camera, Visited camera), **Refresh every** and **Settle frames**, plus a **Refresh now** button; the inspector shows how long a visit takes. Test cameras together now ends with a plain conclusion. Tested with a simulated one-camera phone only.
+
 ## [0.45.0] - 2026-11-26
 
 ### Fixed
