@@ -45,8 +45,8 @@ timelapse pictures on a fixed grid. "Lock exposure and focus" asks the camera fo
 Where the browser has ImageCapture the still is the camera's full-resolution photo, otherwise the current video frame. **Save to library** stores a picture sequence at the project frame rate
 (holds are baked in); **Save and open** also opens it in a new project (Media In to Output). Everything stays on your computer.
 
-Not done yet: the phone as the capture rig (a `stopmotion` phone mode next to camera, scan and controller, with the onion skin shown on the phone). The pure transfer state it needs (chunks, acks,
-size checks) is already in `src/io/stopmotion.ts` (`FrameTransfer`) and tested; the phone page and the link negotiation are not written. Until then use the Phone Camera node to see the phone live.
+**Shoot with a linked phone.** With RSMPS running on the computer and a phone linked over the local network, the phone is the camera for the Stop Motion node (see "Stop motion with a linked phone" under
+"What the phone page does: modes"). The older File > Stop-motion capture panel is unchanged and still works with the computer's own camera.
 
 ## URL / Stream
 
@@ -130,7 +130,7 @@ Tailscale. If no phone reaches the computer within 20 seconds the app shows this
 
 ### What the phone page does: modes
 
-The pairing link opens the page in one of three modes (an optional `&mode=camera|scan|controller` after the unchanged token; no parameter means camera, as before). The three buttons at the top of
+The pairing link opens the page in one of four modes (an optional `&mode=camera|scan|controller|stopmotion` after the unchanged token; no parameter means camera, as before). The three buttons at the top of
 the page switch between them, and the computer can switch a phone that is already linked (the Scan tab does this to reuse a linked phone instead of showing a second QR code).
 
 | Mode | The phone sends | The link counts as complete when |
@@ -138,11 +138,41 @@ the page switch between them, and the computer can switch a phone that is alread
 | **Webcam** | camera picture (WebRTC, JPEG fallback) and microphone | frames arrive (as before) |
 | **Scan** | full-resolution photos of printed sheets, see PRINT_AND_SCAN.md "Scan with phone" | the phone's `hello` arrives |
 | **Controller only** | motion, touch, location (the Motion section) and no picture | the phone's `hello` arrives |
+| **Stop motion** | full-resolution stills for the Stop Motion node, plus the live camera picture (WebRTC, JPEG fallback) | frames arrive, like Webcam; if the camera is refused, the `hello` arrives |
 
 The phone says what it does with a small typed message, `hello {mode, media}` (`media`: `video`, `none` or `refused`), at every connect and every mode change. Without a picture the link no longer waits for
 camera or microphone frames: if you refuse the camera, or choose Controller only or Scan, the pairing ticks complete (the third one reads "Scan mode ready", "Controller linked" or "Phone linked (no picture)")
 and the phone shows as connected in the app. A Phone Camera node of such a phone has no picture to show. Camera mode with a working camera is unchanged: connected means video frames are flowing.
 The page also says in one line that pictures, photos and motion go only to your own computer over this link.
+
+#### Stop motion with a linked phone
+
+*On the computer:* select the Stop Motion node, and in its panel press **Shoot with a linked phone**. If a phone is already linked (for example for a Phone Camera) it is switched to this mode and no second QR code is
+shown; otherwise scan the QR code like for the Webcam. The panel then says "Phone connected", how many shots were received, the progress of the picture that is arriving, and how many pictures are still on the phone.
+Without the desktop app or LAN mode the panel only says that it needs one of them. While the phone is connected the panel's own buttons work the phone: **Take picture** is the shutter, **Start auto shoot** runs on the
+phone and **Undo last shot** takes the last shot out (and tells the phone). Every picture arrives as an ordinary shot (added to Media, appended to the node's `shots`, one editor undo step each). If the link drops the panel
+says so, the buttons work on the computer's own picture again, and the phone keeps its pictures and sends them when it is back. Shot size, Onion skin, Onion strength, Onion shots, Auto shoot every and Stop after shots are
+the node's own settings: they are shown on the phone and a change on either side shows on the other.
+
+*On the phone:* a full-screen camera with a big shutter button, the previous shot(s) faintly over the live picture (switch and strength on the phone; the pictures are kept on the phone, so nothing waits for the
+computer), the shot count, a strip of the last shots with a tick on each one once the computer has saved it, **Undo last** (removes the newest shot of this phone, also when it is still on its way), **Auto shoot** with a
+countdown (interval and stop-after on the phone, same fixed grid as the node's own Auto shoot: picture k is due at start + k x interval, a slow picture skips the ticks it covered), **Lock exposure and focus** (only where the
+camera offers manual modes to a web page; otherwise it says so), front or back camera, and the screen is kept awake while the capture screen is open. Stills use the camera's full resolution where the browser has ImageCapture
+(`takePhoto`), otherwise the current video frame, then are scaled to the node's Shot size (Full / 1080 / 720 on the longer side).
+
+*Live picture and stills together:* the live camera picture still flows to the computer in this mode (a Phone Camera node of the same link wired into Stop Motion keeps working as the live view and the onion skin there),
+and the full-resolution stills are taken from the same camera track. This works where `takePhoto` works while the stream runs (Chrome on Android); on other browsers the stills are the video frames at the stream's size
+(the phone asks for 1080p in this mode). A `takePhoto` can make the live picture stutter for a moment. The link counts as complete when the first video frame arrives (like Webcam); if the camera is refused the `hello`
+completes it ("Stop motion ready") and the phone shows a camera error instead of a picture.
+
+*How the stills travel* (code: `src/phone/stopmotion-protocol.ts`, `src/io/phone-stopmotion.ts`): each still is announced with its size, chunk count and CRC-32 (`sm-begin`), sent in base64 chunks of 48 KB with at most six
+unanswered (`sm-chunk`, answered by `sm-ack {next}`), collected by `FrameTransfer`, checked for size and CRC, put into the project, and only then acknowledged (`sm-stored`). A shot is named by the phone page's id and
+its number, so a repeat changes nothing (exactly once); the phone sends the oldest first and the computer hands pictures to the project one at a time (in order). After a dropped connection the phone begins the same picture again
+and the answer says where to continue. The phone keeps at most three pictures that the computer has not stored; when that is full the shutter says "Sending..." and Auto shoot skips a tick instead of queuing more. A damaged
+picture is refused and sent again; if the computer has no Stop Motion open the phone keeps its pictures and waits. Settings travel as `sm-settings {rev, ...}` from the computer (the authority) and `sm-set {patch}` from the phone.
+
+*Not included:* Record snippet (a clip) over the link is not offered; the Record snippet button still records a live picture on the computer. A shot undone with the editor's own Undo (Ctrl+Z) on the computer is not announced to the phone,
+which keeps showing it until the next Undo last. After the phone page is reloaded the onion skin starts empty until the next shot, and a phone that is closed before its pictures were sent loses them.
 
 ### Security notes
 

@@ -22,9 +22,11 @@ import {
   replaceShot,
   setHold,
   shotMaxSide,
+  clampFps,
   type Shot,
 } from '../../engine/lib/stop-motion';
 import { isLivePictureType, liveOrientOfNode, liveSourceOfNode } from '../../engine/lib/live-source';
+import type { ReceivedShot, ReceiverTarget, SinkResult } from '../../phone/stopmotion-protocol';
 import type { Editor } from './editor';
 import { createStore, type Store } from './createStore';
 
@@ -39,6 +41,23 @@ export interface AutoShoot {
   nextAt: number;
 }
 
+/** A linked phone that shoots for a Stop Motion (see phone-stopmotion.ts). */
+export interface PhoneShootUi {
+  token: string | null;
+  /** off: no phone chosen. waiting: chosen, not in stop motion mode yet. connected. dropped: it was connected and the link is gone. */
+  state: 'off' | 'waiting' | 'connected' | 'dropped';
+  /** Pictures stored from the phone since it was linked. */
+  received: number;
+  /** 0..1 of the picture arriving now, or null. */
+  arriving: number | null;
+  /** Pictures the phone has taken that are not on the computer yet. */
+  unsent: number;
+  /** What the phone says it is waiting for. */
+  note: string;
+  /** The shutter was pressed here and the picture has not arrived yet. */
+  asked: boolean;
+}
+
 export interface StopMotionUi {
   /** Stop Motion node (id) a take / auto run / snippet belongs to, or null. */
   nodeId: string | null;
@@ -46,10 +65,12 @@ export interface StopMotionUi {
   busy: boolean;
   snippet: 'idle' | 'recording' | 'saving';
   auto: AutoShoot;
+  phone: PhoneShootUi;
 }
 
 const NO_AUTO: AutoShoot = { running: false, every: 2, limit: 0, count: 0, nextAt: 0 };
-const IDLE: StopMotionUi = { nodeId: null, busy: false, snippet: 'idle', auto: NO_AUTO };
+const NO_PHONE: PhoneShootUi = { token: null, state: 'off', received: 0, arriving: null, unsent: 0, note: '', asked: false };
+const IDLE: StopMotionUi = { nodeId: null, busy: false, snippet: 'idle', auto: NO_AUTO, phone: NO_PHONE };
 
 export interface StopMotionEnv {
   /** `performance.now()`. */
@@ -119,7 +140,7 @@ export function stopMotionForViewer(nodes: readonly { id: string; type: string; 
 export const MAX_SHOTS = 5000;
 
 type EditorLike = Pick<Editor, 'state' | 'setParam' | 'toast'>;
-type IoLike = Pick<Io, 'player' | 'library' | 'liveRecorder'> & Partial<Pick<Io, 'registry'>>;
+type IoLike = Pick<Io, 'player' | 'library' | 'liveRecorder'> & Partial<Pick<Io, 'registry' | 'phone'>>;
 
 export class StopMotionController {
   readonly store: Store<StopMotionUi> = createStore<StopMotionUi>({ ...IDLE });
@@ -142,6 +163,7 @@ export class StopMotionController {
 
   dispose(): void {
     this.stopAuto();
+    this.unlinkPhone();
     this.offFinished();
   }
 
@@ -170,7 +192,10 @@ export class StopMotionController {
 
   private edit(id: string, fn: (s: Shot[]) => Shot[]): void {
     if (!this.node(id)) return;
-    this.ed.setParam(id, 'shots', fn(this.shots(id)));
+    const before = this.shots(id);
+    const after = fn(before);
+    this.ed.setParam(id, 'shots', after);
+    this.phoneShotsChanged(id, before, after);
   }
 
   /* ------------------------------------------------------------ the sequence ------------------------------------------------------------ */
@@ -198,6 +223,7 @@ export class StopMotionController {
   /** Take picture: append the current input frame as a shot. True when a shot was added. */
   async take(id: string): Promise<boolean> {
     const ui = this.store.get();
+    if (this.remote(id)) return this.remoteShutter();
     if (ui.busy || !this.node(id)) return false;
     if (this.shots(id).length >= MAX_SHOTS) {
       this.ed.toast(`That is the most shots one Stop Motion holds (${MAX_SHOTS}).`, 'info');
@@ -308,11 +334,191 @@ export class StopMotionController {
     this.edit(sn.node, (s) => addShot(s, { asset, kind: 'clip', seconds }));
   }
 
+  /* ------------------------------------------------------------ a linked phone as the capture rig ------------------------------------------------------------ */
+
+  private link: { node: string; token: string } | null = null;
+  private offPhone: (() => void)[] = [];
+  private wasConnected = false;
+  private remoteAuto = false;
+  private askedReceived = 0;
+  private askedTime = 0;
+
+  private phoneSm() {
+    return this.io.phone?.stopmotion ?? null;
+  }
+
+  /** Can a phone be linked here (the desktop app or LAN mode)? */
+  phoneAvailable(): boolean {
+    return !!this.io.phone?.available && !!this.phoneSm();
+  }
+
+  /** The phone is linked, in stop motion mode, and shooting for this node: the computer's buttons drive it. */
+  private remote(id: string): boolean {
+    return !!this.link && this.link.node === id && this.phoneReady();
+  }
+
+  private phoneReady(): boolean {
+    const l = this.link;
+    if (!l || !this.io.phone) return false;
+    return this.io.phone.state(l.token) === 'connected' && !!this.phoneSm()?.info(l.token)?.active;
+  }
+
+  /** Make this phone the capture rig of Stop Motion `id`: its pictures land in this node. Switching the phone page to the mode is `io.phone.setMode`. */
+  linkPhone(id: string, token: string): void {
+    const sm = this.phoneSm();
+    if (!sm || !this.node(id)) return;
+    this.unlinkPhone();
+    this.link = { node: id, token };
+    this.wasConnected = false;
+    const target: ReceiverTarget = {
+      add: (shot) => this.receiveShot(id, shot),
+      remove: (asset) => this.removeAsset(id, asset),
+    };
+    sm.setTarget(token, target);
+    this.offPhone = [
+      sm.subscribe(token, () => this.refreshPhone()),
+      sm.onPatch(token, (patch) => this.phoneChangedSettings(id, patch)),
+      this.io.phone!.onState((t) => t === token && this.refreshPhone()),
+    ];
+    this.store.set((s) => ({ ...s, nodeId: id }));
+    this.refreshPhone();
+  }
+
+  unlinkPhone(): void {
+    const l = this.link;
+    if (!l) return;
+    if (this.remoteAuto && this.phoneReady()) this.phoneSm()?.command(l.token, 'auto-stop');
+    this.offPhone.forEach((f) => f());
+    this.offPhone = [];
+    this.phoneSm()?.setTarget(l.token, null);
+    this.link = null;
+    const wasRemoteAuto = this.remoteAuto;
+    this.remoteAuto = false;
+    this.store.set((s) => ({ ...s, phone: NO_PHONE, auto: wasRemoteAuto ? { ...s.auto, running: false } : s.auto }));
+  }
+
+  /** Re-reads the link: connected or dropped, what the phone reports, its auto shoot. */
+  private refreshPhone(): void {
+    const l = this.link;
+    const sm = this.phoneSm();
+    if (!l || !sm) return;
+    const info = sm.info(l.token);
+    const ready = this.phoneReady();
+    if (ready && !this.wasConnected) {
+      this.wasConnected = true;
+      this.syncPhoneSettings();
+      this.pushCount();
+    } else if (!ready && this.wasConnected) {
+      this.wasConnected = false;
+      this.ed.toast('The phone is not connected. You can still shoot here; the phone keeps its pictures and sends them when it is back.', 'info');
+      if (this.remoteAuto) {
+        this.remoteAuto = false;
+        this.store.set((s) => ({ ...s, auto: { ...s.auto, running: false } }));
+      }
+    }
+    const st = info?.status ?? null;
+    const received = info?.received ?? 0;
+    const asked = this.store.get().phone.asked && received <= this.askedReceived && this.env.now() - this.askedTime < 20_000;
+    const state: PhoneShootUi['state'] = ready ? 'connected' : this.store.get().phone.state === 'connected' || this.store.get().phone.state === 'dropped' ? 'dropped' : 'waiting';
+    this.store.set((s) => ({ ...s, phone: { token: l.token, state, received, arriving: info?.arriving?.fraction ?? null, unsent: ready ? st?.unsent ?? 0 : s.phone.unsent, note: ready ? st?.note ?? '' : '', asked } }));
+    if (ready && st && (st.auto.running || this.remoteAuto)) {
+      this.remoteAuto = st.auto.running;
+      const every = Number(this.params(l.node).interval);
+      this.store.set((s) => ({ ...s, auto: { running: st.auto.running, every: Number.isFinite(every) ? every : s.auto.every, limit: st.auto.limit, count: st.auto.count, nextAt: this.env.now() + st.auto.nextInMs } }));
+    }
+  }
+
+  /** Remote shutter: the phone takes the picture, it arrives as a shot. True when the phone was asked. */
+  private remoteShutter(): boolean {
+    const l = this.link;
+    if (!l) return false;
+    this.askedReceived = this.phoneSm()?.info(l.token)?.received ?? 0;
+    this.askedTime = this.env.now();
+    this.store.set((s) => ({ ...s, phone: { ...s.phone, asked: true } }));
+    this.env.later(20_100, () => this.refreshPhone()); // the label does not stay on "waiting" if nothing arrives
+    return !!this.phoneSm()?.command(l.token, 'shoot');
+  }
+
+  /** A picture from the phone arrived complete and checked: it becomes Media and one shot, one undo step, exactly like a local shot. */
+  private async receiveShot(id: string, shot: ReceivedShot): Promise<SinkResult> {
+    if (!this.node(id)) return { ok: false, code: 'no-target', reason: 'This Stop Motion is not in the project any more.' };
+    if (this.shots(id).length >= MAX_SHOTS) return { ok: false, code: 'full', reason: `A Stop Motion holds at most ${MAX_SHOTS} shots.` };
+    try {
+      const ext = shot.mime === 'image/png' ? 'png' : shot.mime === 'image/webp' ? 'webp' : 'jpg';
+      const file = new File([shot.bytes as BlobPart], `Stop motion shot ${this.shots(id).length + 1}.${ext}`, { type: shot.mime });
+      const [asset] = await this.io.library.add([file]);
+      if (!asset) return { ok: false, code: 'failed', reason: 'The picture could not be added to Media.' };
+      if (!this.node(id)) return { ok: false, code: 'no-target', reason: 'This Stop Motion is not in the project any more.' };
+      this.edit(id, (s) => addShot(s, { asset: asset.id, kind: 'still' }));
+      return { ok: true, asset: asset.id };
+    } catch (err) {
+      return { ok: false, code: 'failed', reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** The phone's Undo for a shot that is already in the node: take that very shot out (not just the last one). One undo step. */
+  private removeAsset(id: string, asset: string): void {
+    const i = this.shots(id).findIndex((x) => x.asset === asset);
+    if (i >= 0) this.ed.setParam(id, 'shots', removeShot(this.shots(id), i));
+    this.pushCount();
+  }
+
+  /** Shots changed in the node: tell the phone which of its pictures are gone, and the new count. */
+  private phoneShotsChanged(id: string, before: Shot[], after: Shot[]): void {
+    const l = this.link;
+    if (!l || l.node !== id) return;
+    const keep = new Set(after.map((x) => x.asset));
+    for (const x of before) if (!keep.has(x.asset)) this.phoneSm()?.removedOnComputer(l.token, x.asset);
+    this.pushCount();
+  }
+
+  private pushCount(): void {
+    const l = this.link;
+    if (l) this.phoneSm()?.setCount(l.token, this.shots(l.node).length);
+  }
+
+  /** The node's settings as the phone shows them. Called when the link is made and whenever the panel sees a setting change. */
+  syncPhoneSettings(): void {
+    const l = this.link;
+    if (!l) return;
+    const p = this.params(l.node);
+    const s = stopMotionSettings(p);
+    this.phoneSm()?.setSettings(l.token, {
+      maxSide: s.maxSide,
+      onion: p.onion !== false,
+      onionStrength: Number.isFinite(Number(p.onionStrength)) ? Number(p.onionStrength) : 0.4,
+      onionFrames: Number.isFinite(Number(p.onionFrames)) ? Number(p.onionFrames) : 1,
+      interval: s.every,
+      stopAfter: s.limit,
+      fps: clampFps(p.fps),
+    });
+  }
+
+  /** A setting changed on the phone: it goes into the node (so the project keeps it) and back to the phone as the new truth. */
+  private phoneChangedSettings(id: string, patch: Partial<{ maxSide: number; onion: boolean; onionStrength: number; onionFrames: number; interval: number; stopAfter: number }>): void {
+    if (!this.node(id)) return;
+    const set = (key: string, value: unknown) => {
+      if (this.params(id)[key] !== value) this.ed.setParam(id, key, value);
+    };
+    if (patch.maxSide !== undefined) set('shotSize', patch.maxSide === 0 ? 'full' : String(patch.maxSide));
+    if (patch.onion !== undefined) set('onion', patch.onion);
+    if (patch.onionStrength !== undefined) set('onionStrength', patch.onionStrength);
+    if (patch.onionFrames !== undefined) set('onionFrames', patch.onionFrames);
+    if (patch.interval !== undefined) set('interval', patch.interval);
+    if (patch.stopAfter !== undefined) set('stopAfter', patch.stopAfter);
+    this.syncPhoneSettings();
+  }
+
   /* ------------------------------------------------------------ auto shoot (time-lapse / hyperlapse) ------------------------------------------------------------ */
 
   /** Start taking a picture every `interval` seconds (from the node's settings). */
   startAuto(id: string): void {
     if (this.store.get().auto.running || !this.node(id)) return;
+    if (this.remote(id)) {
+      // the phone runs the schedule (its own clock, its own wake lock); its status comes back and fills `auto`
+      this.phoneSm()?.command(this.link!.token, 'auto-start');
+      return;
+    }
     if (!this.source(id)) return this.ed.toast('Wire a Webcam or any picture into the Picture input of Stop Motion first.', 'info');
     const { every, limit } = stopMotionSettings(this.params(id));
     this.autoStart = this.env.now();
@@ -364,6 +570,7 @@ export class StopMotionController {
   }
 
   stopAuto(): void {
+    if (this.link && this.remoteAuto && this.phoneReady()) this.phoneSm()?.command(this.link.token, 'auto-stop');
     this.stopTick?.();
     this.stopTick = null;
     this.releaseLock?.();
