@@ -1,4 +1,5 @@
 import { defineNode } from '../../define';
+import { PANO_WGSL } from '../../lib/pano';
 
 /**
  * Fake 360: builds a full sphere (an equirectangular panorama, 2:1) from one or two ordinary pictures.
@@ -20,18 +21,9 @@ export const fake360Height = (frontHeight: number): number => Math.max(2, Math.m
 
 function fake360Wgsl(hasBack: boolean): string {
   return /* wgsl */ `
+${PANO_WGSL}
 struct Cam { col: vec4f, real: f32 }
 
-fn rotX(v: vec3f, a: f32) -> vec3f {
-  // pitch: positive looks up
-  let c = cos(a); let s = sin(a);
-  return vec3f(v.x, v.y * c + v.z * s, -v.y * s + v.z * c);
-}
-fn rotY(v: vec3f, a: f32) -> vec3f {
-  // yaw: positive looks right
-  let c = cos(a); let s = sin(a);
-  return vec3f(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
-}
 // reflect x back and forth between -h and h
 fn tri(x: f32, h: f32) -> f32 {
   let per = 4.0 * h;
@@ -115,24 +107,7 @@ fn camera(dw: vec3f, isBack: bool) -> Cam {
 
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let outMode = i32(u.output);
-  var d: vec3f;
-  if (outMode == 0) {
-    let lon = (uv.x - 0.5) * TAU;
-    let lat = (0.5 - uv.y) * PI;
-    d = vec3f(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon));
-  } else if (outMode == 1) {
-    // stereographic little planet: the ground (straight down) in the middle, the sky round the edge
-    let p = vec2f((uv.x - 0.5) * 2.0 * u.size.x / u.size.y, (0.5 - uv.y) * 2.0);
-    let th = 2.0 * atan(length(p) / u.zoom);
-    let ph = atan2(p.x, p.y);
-    let lat = th - PI * 0.5;
-    d = vec3f(cos(lat) * sin(ph), sin(lat), cos(lat) * cos(ph));
-  } else {
-    let t = tan(u.lookView * 0.5);
-    let p = vec2f((uv.x - 0.5) * 2.0 * t, (0.5 - uv.y) * 2.0 * t * u.size.y / u.size.x);
-    d = normalize(vec3f(p.x, p.y, 1.0));
-    d = rotY(rotX(d, u.lookTilt), u.lookTurn);
-  }
+  var d = panoView(uv, outMode);
   // the whole sphere: turned, then tilted
   d = rotY(rotX(d, -u.tilt), -u.turn);
 

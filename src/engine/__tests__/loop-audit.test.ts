@@ -297,6 +297,7 @@ export const OUT_OF_SCOPE: Record<string, string> = {
   'splat-3d': 'needs a splat asset: spin is phase x whole cycles (its own test uses loopCheck)',
   'depth-ai': 'owned by the AI-depth work: temporal smoothing pulls neighbouring frames (not touched here)',
   'render-scale': 'pulls at another resolution, not another time',
+  'sweep-360': 'live sensor input: paints the camera into a canvas that keeps its history from frame to frame (live phone sweep; with Loop on the first frame continues from the last, so it never resets by itself)',
 };
 
 const inputsFor = (t: Harness, row: Row): Record<string, never> => {

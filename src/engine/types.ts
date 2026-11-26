@@ -898,6 +898,12 @@ export interface NodeDef<
    * Not combinable with `maskable` (the cached output would already be mixed).
    */
   usesPrevious?: boolean;
+  /**
+   * With `usesPrevious`: the only params that identify the chain of previous frames. Changing any OTHER param keeps the history (the node
+   * still gets `ctx.previous()`), instead of starting over. For a node whose history is live state that no later evaluation can rebuild
+   * (Sweep 360: toggling Paint to Paused must not wipe the canvas). Absent: every param belongs to the chain, as for Feedback.
+   */
+  previousKey?: string[];
   /** Keep the node working in saved graphs but leave it out of the add menu (it was folded into another node). */
   hidden?: boolean;
   /**
