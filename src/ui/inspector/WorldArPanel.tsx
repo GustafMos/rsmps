@@ -29,6 +29,7 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
   const target = viewed && viewed !== fullId ? viewed : null;
   const through = target ? fedByWorldAr(graph, target) : false;
   const ok = support.state === 'ok';
+  const active = io.worldAr?.active ?? null;
   return (
     <div className="rs-insp__sec">
       <div className="rs-caps">AR view</div>
@@ -52,6 +53,10 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
             : 'The viewed node does not look through this camera: it will stand in the room as a flat picture (see Flat pictures below).'}
       </p>
       <p className="rs-insp__hint">In the AR view: move the phone slowly until a ring appears on the floor or a table, tap to place, drag to move, two fingers to turn and resize. Record saves the movement here as a take, with the camera picture as a clip where the browser hands it over.</p>
+      <p className="rs-insp__hint">
+        The Picture output is what the camera sees right now. Wire it into a Material's colour map, or into any effect, to use the room as a texture. In the AR view it is the AR camera picture; outside it, the back camera of this device. It only costs work while it is wired.
+      </p>
+      {active && !active.state().features.cameraAccess && <p className="rs-insp__hint" role="status">This phone does not hand over the camera picture in AR, so the Picture output is transparent while the AR view is open.</p>}
       {take && (
         <>
           <div className="rs-caps">Recorded take</div>

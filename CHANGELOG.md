@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.34.0] - 2026-11-26
+
+### Added
+- **World AR Camera has a Picture output.** The live camera picture is now available from the World AR Camera node itself, so it can be wired into a Material's colour map (the room as a texture on the object) or into any effect while the AR view is open. Outside the AR view the same output gives the normal back camera, so the graph can be built and previewed in the viewer. On phones that do not hand the camera picture over in AR the output is see-through and the panel says so. Experimental: tested against a simulated AR session only.
+
 ## [0.33.1] - 2026-11-26
 
 ### Fixed

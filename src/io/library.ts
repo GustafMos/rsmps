@@ -19,6 +19,7 @@ import type { PcmAudio } from '../engine/audio/api';
 import type { Gpu } from '../engine/gpu/gpu';
 import type { AssetInfo, LiveSource, TextSpec } from '../engine/types';
 import { LiveSources, type LiveRequest } from './live';
+import { ArCameraFeed, type ArCameraState } from './world-ar/camera-feed';
 import type { AssetProblem, FastCopyFormat, LibraryAsset, MediaLibrary } from './api';
 import { mixToStereo } from './audio-util';
 import { hapName, hapToRgba } from './hap';
@@ -331,6 +332,8 @@ export class Library implements MediaLibrary {
   private thumbs = new Map<string, Promise<string | null>>();
   private textCanvas: OffscreenCanvas | null = null;
   readonly live: LiveSources;
+  /** The AR view's camera picture, filled by the AR loop while a session is open. */
+  readonly arCamera: ArCameraFeed;
   /** Bumps on every change to the asset list; the player folds it into its frame-cache key. */
   version = 0;
   /** Set by createIo: called when decoded content for an existing id may have changed. */
@@ -340,6 +343,7 @@ export class Library implements MediaLibrary {
 
   constructor(private gpu: Gpu) {
     this.live = new LiveSources(gpu);
+    this.arCamera = new ArCameraFeed(gpu);
     this.frames = new TimedFrameStore<Frame>(this.frameBudget, (f) => this.gpu.release(f.texture));
   }
 
@@ -1157,6 +1161,10 @@ export class Library implements MediaLibrary {
   /** Host.liveBlocked: the device camera is not available while the AR view is open. */
   liveBlocked(source: LiveSource): boolean {
     return source.kind === 'camera' && this.live.camerasBlocked;
+  }
+  /** Host.arCameraFrame: the camera picture of the open AR view (see world-ar/camera-feed.ts). */
+  arCameraFrame(): ArCameraState {
+    return this.arCamera.ask();
   }
   /** The AR view opened (true: device cameras are released and stay closed) or closed (false: they come back by themselves). */
   setCamerasSuspended(on: boolean): void {

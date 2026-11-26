@@ -15,13 +15,14 @@ export const LIVE_TICK_PARAM = 'liveTick';
 export function liveNodeIds(graph: GraphDoc, registry: Registry): Set<string> {
   const ids = new Set<string>();
   // live nodes inside groups count too (by path: group/inner)
-  const walk = (nodes: GraphDoc['nodes'], prefix: string, depth: number) => {
+  const walk = (nodes: GraphDoc['nodes'], edges: GraphDoc['edges'], prefix: string, depth: number) => {
     for (const n of nodes) {
-      if (registry.get(n.type)?.params[LIVE_TICK_PARAM]) ids.add(prefix + n.id);
-      if (n.type === GROUP_TYPE && depth < GROUP_MAX_DEPTH) walk(groupData(n).nodes, prefix + n.id + PATH_SEP, depth + 1);
+      // the World AR Camera is live only while its Picture output is wired (its camera output alone does not change by itself)
+      if (registry.get(n.type)?.params[LIVE_TICK_PARAM] && (n.type !== 'world-ar' || edges.some((e) => e.from.node === n.id && e.from.port === 'picture'))) ids.add(prefix + n.id);
+      if (n.type === GROUP_TYPE && depth < GROUP_MAX_DEPTH) walk(groupData(n).nodes, groupData(n).edges, prefix + n.id + PATH_SEP, depth + 1);
     }
   };
-  walk(graph.nodes, '', 0);
+  walk(graph.nodes, graph.edges, '', 0);
   return ids;
 }
 

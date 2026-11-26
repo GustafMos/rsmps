@@ -204,3 +204,38 @@ export class FakeXrSystem implements XrSystemLike {
     return Promise.resolve(this.session);
   }
 }
+
+/** A stand-in for the painter's WebGL canvas holding the camera picture of one frame (the browser copies it into a texture). */
+export interface FakeCameraCanvas {
+  width: number;
+  height: number;
+  /** Which frame it was drawn for. */
+  frame: number;
+}
+export const fakeCameraCanvas = (width: number, height: number, frame = 0): FakeCameraCanvas => ({ width, height, frame });
+
+/** The GPU side of the camera feed, counting what it was asked to do. Textures are plain objects. */
+export class FakeFeedGpu {
+  textures: { width: number; height: number; released: boolean }[] = [];
+  copies: { width: number; height: number; source: unknown }[] = [];
+  acquire(width: number, height: number): GPUTexture {
+    const t = { width, height, released: false };
+    this.textures.push(t);
+    return t as unknown as GPUTexture;
+  }
+  retain(): void {}
+  release(tex: GPUTexture): void {
+    (tex as unknown as { released: boolean }).released = true;
+  }
+  device = {
+    queue: {
+      copyExternalImageToTexture: (src: { source: unknown }, _dst: unknown, size: number[]) => {
+        this.copies.push({ width: size[0], height: size[1], source: src.source });
+      },
+    } as unknown as GPUQueue,
+  };
+  /** Textures that were made and not given back. */
+  get live(): number {
+    return this.textures.filter((t) => !t.released).length;
+  }
+}

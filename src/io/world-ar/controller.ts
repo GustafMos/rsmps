@@ -20,6 +20,7 @@ import { buildWorldTake, type WorldTake } from '../../engine/lib/world-take';
 import type { CardMode } from '../../engine/lib/xr-math';
 import type { AssetInfo, GraphDoc } from '../../engine/types';
 import { LiveRecorder } from '../live-record';
+import type { ArCameraFeed } from './camera-feed';
 import { EnginePictureSource, fedByWorldAr, probeCanvasCopy, type CopyRoute, type PictureTarget } from './engine-source';
 import { ArLoop, type ArClipRecorder, type ArLoopState, type ArPainter } from './loop';
 import { GlPainter, createXrGl, type CameraBinding } from './painter';
@@ -98,6 +99,8 @@ export interface WorldArDeps {
   holdPlayer(): () => void;
   /** Release the device cameras and keep them closed (true), or let them come back (false). The AR system owns the camera meanwhile. */
   suspendCameras?(on: boolean): void;
+  /** Where the World AR Camera's Picture output gets the camera frame while the view is open. */
+  cameraFeed?: ArCameraFeed;
 }
 
 /** The handful of browser calls, so tests and the desktop self-check can put a fake in their place. */
@@ -230,6 +233,7 @@ export class WorldArController implements WorldArApi {
       let lost: () => void = () => undefined;
       const made = await env.makePainter(session, features, () => lost());
       disposePainter = made.dispose;
+      this.d.cameraFeed?.begin(features.cameraAccess);
       const referenceSpace = await session.requestReferenceSpace('local');
       let hitTestSource: unknown = null;
       if (features.hitTest && session.requestHitTestSource) {
@@ -285,6 +289,7 @@ export class WorldArController implements WorldArApi {
         layer: made.layer,
         features,
         painter: made.painter,
+        cameraFeed: this.d.cameraFeed,
         source,
         show: layerMode ? { kind: 'layer' } : { kind: 'card', mode: o.card.mode, width: o.card.width },
         maxSide: PICTURE_MAX_SIDE,
@@ -340,6 +345,7 @@ export class WorldArController implements WorldArApi {
         await stopAndSave().catch(() => undefined);
         source.dispose();
         disposePainter?.();
+        this.d.cameraFeed?.end();
         release?.();
         cams?.(false);
         this.current = null;
@@ -398,6 +404,7 @@ export class WorldArController implements WorldArApi {
       return handle;
     } catch (err) {
       disposePainter?.();
+      this.d.cameraFeed?.end();
       release?.();
       cams?.(false);
       this.current = null;

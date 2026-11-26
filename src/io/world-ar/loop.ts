@@ -17,6 +17,7 @@
  * place while its perspective is a frame or two old.
  */
 import type { Quat, Vec3 } from '../../engine/lib/motion-math';
+import { FEED_MAX_SIDE } from './camera-feed';
 import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
 import { cardCorners, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, viewMatrix, viewRay, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
 import { rotate } from '../../engine/lib/motion-math';
@@ -32,7 +33,7 @@ export interface ArPainter {
   /** Draw the ring that marks a surface. */
   ring(corners: Corners, viewProjection: Float32Array): void;
   /** The camera picture of this frame as something a recorder can read right now, or null (no camera access, or no picture yet). */
-  camera?(view: XrViewLike): unknown | null;
+  camera?(view: XrViewLike, maxSide?: number): unknown | null;
 }
 
 /** A finished picture of the object, already in the painter's texture. */
@@ -96,6 +97,8 @@ export interface ArLoopDeps {
   show: ArShow;
   /** Longest side of the object's picture in pixels. */
   maxSide: number;
+  /** Where the World AR Camera's Picture output gets the camera frame (see camera-feed.ts). Absent in tests that do not need it. */
+  cameraFeed?: { readonly wanted: boolean; push(canvas: unknown): boolean };
   /** The project's clock for animated graphs, seconds. */
   seconds(): number;
   now(): number;
@@ -313,6 +316,16 @@ export class ArLoop {
       } else d.painter.picture(cardCorners(pl, d.show.mode, d.show.width, pic.width / Math.max(1, pic.height), pose.p), viewProjection, 1);
     }
 
+    // 4b. the camera picture for the Picture output, copied now: the browser's camera texture only lives inside this callback, and the
+    // copy goes in before the engine is asked for this frame's picture. One draw serves the clip recorder too.
+    const clipping = !!this.recording?.clip && !this.paused;
+    let cam: unknown | null | undefined;
+    const camera = (): unknown | null => (cam === undefined ? (cam = d.painter.camera ? d.painter.camera(view, clipping ? undefined : FEED_MAX_SIDE) : null) : cam);
+    if (d.cameraFeed?.wanted && !this.paused) {
+      const c = camera();
+      if (c) d.cameraFeed.push(c);
+    }
+
     // 5. the next picture, for this pose
     if (!this.paused && (pl || d.show.kind === 'card')) {
       const depth = pl ? Math.max(0.05, depthOf(pose, pl.p)) : 1;
@@ -324,7 +337,7 @@ export class ArLoop {
     if (r && !this.paused) {
       if (r.t0 < 0) r.t0 = now;
       const t = (now - r.t0) / 1000;
-      const cam = r.clip && d.painter.camera ? d.painter.camera(view) : null;
+      const cam = r.clip ? camera() : null;
       if (r.withClip === null) r.withClip = !!cam; // decided by the first frame: either every sample has a clip frame or none has
       if (r.withClip) {
         const n = cam && r.clip ? r.clip.push(cam) : -1;

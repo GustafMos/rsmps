@@ -65,6 +65,16 @@ describe('live stamping', () => {
     expect(g.nodes.find((n) => n.id === cam.node.id)!.params.liveTick).toBe(''); // original not mutated
     expect(stampLive(g, new Set(), 5)).toBe(g);
   });
+  it('a World AR Camera is live only while its Picture output is wired', () => {
+    let g = createGraph('t');
+    const ar = addNode(g, registry, 'world-ar');
+    g = ar.graph;
+    const fx = addNode(g, registry, 'blur');
+    g = fx.graph;
+    expect(liveNodeIds(g, registry).size).toBe(0);
+    g = connect(g, registry, { node: ar.node.id, port: 'picture' }, { node: fx.node.id, port: 'image' });
+    expect([...liveNodeIds(g, registry)]).toEqual([ar.node.id]);
+  });
 });
 
 describe('cameras while the AR view is open', () => {
