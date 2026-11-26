@@ -82,11 +82,7 @@ export function takeFileName(label: string, at: Date, ext: string): string {
   return `${label} take ${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())} ${p(at.getHours())}.${p(at.getMinutes())}.${p(at.getSeconds())}.${ext}`;
 }
 
-/** "0:12", "12:05": the running time on the Stop button. */
-export function formatElapsed(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
+export { formatElapsed } from './elapsed';
 
 /** Where a w x h picture goes in a W x H frame when it is fitted inside it (centered, aspect kept). */
 export function containRect(w: number, h: number, W: number, H: number): { x: number; y: number; w: number; h: number } {

@@ -6,7 +6,7 @@
  * Fingers anywhere but on the buttons go to the gesture reader (tap, drag, twist, pinch). Where the browser does not grant the
  * overlay, none of this is visible; the AR view then works with taps only and is left with the phone's Back button.
  */
-import { formatElapsed } from '../../io/live-record';
+import { formatElapsed } from '../../io/elapsed';
 import type { WorldArHandle, WorldArViewState } from '../../io/world-ar/controller';
 import { GestureReader } from '../../io/world-ar/placement';
 

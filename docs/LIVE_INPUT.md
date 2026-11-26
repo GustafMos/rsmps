@@ -130,7 +130,7 @@ Tailscale. If no phone reaches the computer within 20 seconds the app shows this
 
 ### What the phone page does: modes
 
-The pairing link opens the page in one of three modes (an optional `&mode=camera|scan|controller` after the unchanged token; no parameter means camera, as before). The three buttons at the top of
+The pairing link opens the page in one of these modes (an optional `&mode=camera|scan|controller|scan3d` after the unchanged token; no parameter means camera, as before). The three buttons at the top of
 the page switch between them, and the computer can switch a phone that is already linked (the Scan tab does this to reuse a linked phone instead of showing a second QR code).
 
 | Mode | The phone sends | The link counts as complete when |
@@ -138,11 +138,51 @@ the page switch between them, and the computer can switch a phone that is alread
 | **Webcam** | camera picture (WebRTC, JPEG fallback) and microphone | frames arrive (as before) |
 | **Scan** | full-resolution photos of printed sheets, see PRINT_AND_SCAN.md "Scan with phone" | the phone's `hello` arrives |
 | **Controller only** | motion, touch, location (the Motion section) and no picture | the phone's `hello` arrives |
+| **3D scan** (experimental) | photos, camera positions and coverage of a 3D Scan, see "3D scan with a linked phone" below | the phone's `hello` arrives |
 
 The phone says what it does with a small typed message, `hello {mode, media}` (`media`: `video`, `none` or `refused`), at every connect and every mode change. Without a picture the link no longer waits for
 camera or microphone frames: if you refuse the camera, or choose Controller only or Scan, the pairing ticks complete (the third one reads "Scan mode ready", "Controller linked" or "Phone linked (no picture)")
 and the phone shows as connected in the app. A Phone Camera node of such a phone has no picture to show. Camera mode with a working camera is unchanged: connected means video frames are flowing.
 The page also says in one line that pictures, photos and motion go only to your own computer over this link.
+
+### 3D scan with a linked phone (experimental)
+
+The 3D Scan node can take its scan from a phone that is linked to the computer, so nothing has to be saved as a zip and moved by hand. The
+computer runs RSMPS (desktop app, or `npm run dev:lan`); the phone opens the link and does the scan; the photos, the phone's positions and the
+coverage arrive in the node over the same Wi-Fi. Nothing leaves your network.
+
+**Step by step.**
+1. On the computer, select a 3D Scan node and press **Scan with a linked phone** in its inspector. If a phone is already linked (for a Phone
+   Camera node, say) it is switched to this mode and no second code is shown; otherwise scan the QR code with the phone (same steps as the
+   phone camera: Tailscale, or plain Wi-Fi with one certificate warning).
+2. On the phone, in **Chrome**, press **Start 3D scan**. Chrome asks for the camera. Aim at the surface next to the object and tap, make the
+   dome fit the object (pinch, or the Size strip), lift its middle (Height strip), press Start and walk slowly round the object, lower and
+   higher. Photos are taken by themselves; the picture, the map and the one line of advice are the same as when the whole app runs on the
+   phone. Press **Done** on the phone (or **Finish scan** on the computer) when the coverage is good.
+3. The computer's panel shows, live: "12 of 15 photos received", coverage, the coverage map, the advice line and the phone's readout (depth
+   yes or no, photo size). When the phone is done, the scan is written into the node and the photos go into Media. That is one undo step.
+
+**What it needs.** AR needs a secure page: the phone page is served over https, and Chrome must have accepted the certificate (on plain
+Wi-Fi: Advanced, then Proceed, on the warning; over Tailscale it is trusted already). If the page was opened without that, `navigator.xr` is
+missing or AR is refused, and the phone page says so in the words used by the World AR view ("Computers have no AR camera...", "AR only works on a
+secure page (https)...", the Google Play Services for AR hint). The phone must be an Android phone with Chrome and ARCore. In the web version the
+panel says "the phone link needs the desktop app or LAN mode" when there is no link; on the phone itself **Start scan** works without any link.
+
+**How the photos travel.** The phone page runs the real scan code (the same rules for when a photo is taken, the same blur check and
+coverage). Each kept photo (JPEG, up to about 1920 px) is sent on its own with its record (position, camera numbers, sharpness, time, depth) over
+the existing link in numbered chunks that the computer acknowledges, with a length and checksum check per photo, one photo at a time, in order.
+The phone never holds more than three photos in memory: when the link is slower than the capture, automatic capture waits and the advice line says
+"Sending photos...". After a short disconnect the phone continues where the computer says it stopped; a photo is identified by its number, so a
+repeat is never stored twice. At the end the phone sends the scan's header (the dome and the grid), and the computer works the coverage out again
+from the photos it received. The result is the same scan a local scan makes, so **Save scan for a computer** and Splat from Video's *From a 3D Scan*
+work on it unchanged.
+
+**If the link drops.** What has arrived is kept. The panel says "link lost, waiting for the phone to come back"; if it does not return within
+30 seconds (or you press **Keep what arrived**) the photos that arrived are written to the node, with a message such as "Kept the 5 photos that
+arrived of the 8 the phone took". Photos the phone had not sent yet cannot be recovered: scan again, or continue with a new scan.
+
+**Not verified on a real device.** The transfer and the whole phone-side flow are tested with a fake link and a fake AR session; the real
+Android Chrome AR session, the real Wi-Fi and the desktop app were not available when this was written.
 
 ### Security notes
 

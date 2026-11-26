@@ -16,6 +16,8 @@ export const FRAME_MAGIC = [0x52, 0x53, 0x43, 0x4e] as const;
 export const FRAME_HEADER = 13;
 export const FRAME_PHOTO = 1;
 export const FRAME_PREVIEW = 2;
+/** A shot of a 3D scan taken with the phone (scan3d-protocol.ts). */
+export const FRAME_SCAN3D = 3;
 
 /** Limits the computer enforces (and announces to the phone in `scan-ready`). */
 export interface TransferLimits {
@@ -67,10 +69,13 @@ export const MAX_CHUNK = 1024 * 1024;
 /* ----------------------------------------------- messages ----------------------------------------------- */
 
 /** Which transfer a message belongs to: photos (phone -> computer) or the preview sprite (computer -> phone). */
-export type TransferPrefix = 'scan' | 'preview';
+export type TransferPrefix = 'scan' | 'preview' | 'scan3d';
+
+/** The binary frame kind of a transfer family. */
+export const frameKindOf = (p: TransferPrefix): number => (p === 'scan' ? FRAME_PHOTO : p === 'preview' ? FRAME_PREVIEW : FRAME_SCAN3D);
 
 export interface BeginMsg {
-  type: 'scan-begin' | 'preview-begin';
+  type: 'scan-begin' | 'preview-begin' | 'scan3d-begin';
   id: number;
   name: string;
   size: number;
@@ -84,32 +89,32 @@ export interface BeginMsg {
   [extra: string]: unknown;
 }
 export interface EndMsg {
-  type: 'scan-end' | 'preview-end';
+  type: 'scan-end' | 'preview-end' | 'scan3d-end';
   id: number;
   /** Total byte length and CRC-32 (hex, 8 digits) of the whole file. */
   len: number;
   crc: string;
 }
 export interface Base64ChunkMsg {
-  type: 'scan-chunk' | 'preview-chunk';
+  type: 'scan-chunk' | 'preview-chunk' | 'scan3d-chunk';
   id: number;
   seq: number;
   data: string;
 }
 /** Receiver -> sender: every chunk below `next` arrived; this is also the resume point. */
 export interface AckMsg {
-  type: 'scan-ack' | 'preview-ack';
+  type: 'scan-ack' | 'preview-ack' | 'scan3d-ack';
   id: number;
   next: number;
 }
 /** Receiver -> sender: chunk `seq` is missing, send again from there. */
 export interface NakMsg {
-  type: 'scan-nak' | 'preview-nak';
+  type: 'scan-nak' | 'preview-nak' | 'scan3d-nak';
   id: number;
   seq: number;
 }
 export interface OkMsg {
-  type: 'scan-ok' | 'preview-ok';
+  type: 'scan-ok' | 'preview-ok' | 'scan3d-ok';
   id: number;
 }
 export type RejectCode =
@@ -126,7 +131,7 @@ export type RejectCode =
   | 'bad-image'
   | 'stalled';
 export interface RejectMsg {
-  type: 'scan-reject' | 'preview-reject';
+  type: 'scan-reject' | 'preview-reject' | 'scan3d-reject';
   id: number;
   code: RejectCode;
   reason: string;
@@ -274,7 +279,7 @@ export function parseChunkFrame(data: ArrayBuffer | Uint8Array): ChunkFrame | nu
   const u = data instanceof Uint8Array ? data : new Uint8Array(data);
   if (!isScanFrame(u)) return null;
   const kind = u[4];
-  if (kind !== FRAME_PHOTO && kind !== FRAME_PREVIEW) return null;
+  if (kind !== FRAME_PHOTO && kind !== FRAME_PREVIEW && kind !== FRAME_SCAN3D) return null;
   const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
   return { kind, id: dv.getUint32(5), seq: dv.getUint32(9), payload: u.subarray(FRAME_HEADER) };
 }

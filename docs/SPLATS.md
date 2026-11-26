@@ -89,6 +89,11 @@ photo, world-to-camera poses in metres, object centre at the origin; conventions
 `image_undistorter` and Brush steps follow, unchanged. If the triangulation fails or finds hardly any points, the job says "The saved camera
 positions did not fit the photos; solving them from the pictures instead." and continues with the normal solver on the same photos.
 
+**Scan with a linked phone.** Instead of saving a zip on the phone and loading it, you can run RSMPS on the computer and scan with a phone that is
+linked to it over the same network: select the 3D Scan node and press *Scan with a linked phone* (the phone's steps are in LIVE_INPUT.md, "3D scan with
+a linked phone"). The photos and positions arrive in the node as they are taken, with live coverage on the computer, and the finished scan is one undo
+step. If the link drops, the photos that arrived are kept and usable. The scan is the same as a local one, so *From a 3D Scan* works unchanged.
+
 **Not verified.** COLMAP and Brush were not available when this was written: the argument lists are tested, and the steps are tested
 against fake programs, but the real `point_triangulator` / `bundle_adjuster` options and output were not run. If a COLMAP version rejects an
 option, the job falls back to the normal solver and shows the sentence above; the job's log (`logs/triangulate.log` in the job folder) has

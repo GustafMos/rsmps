@@ -6,6 +6,7 @@ describe('phone modes', () => {
     expect(modeFromSearch('?token=' + 'a'.repeat(32))).toBe('camera');
     expect(modeFromSearch('?token=x&mode=scan')).toBe('scan');
     expect(modeFromSearch('?mode=controller&token=x')).toBe('controller');
+    expect(modeFromSearch('?mode=scan3d&token=x')).toBe('scan3d');
     expect(modeFromSearch('?mode=explode')).toBe('camera');
     expect(parseMode(undefined)).toBe('camera');
   });
@@ -17,6 +18,8 @@ describe('phone modes', () => {
     expect(parseHello({ type: 'ice' })).toBeNull();
     expect(parseModeMsg({ type: 'mode', mode: 'scan' })).toEqual({ type: 'mode', mode: 'scan' });
     expect(parseModeMsg({ type: 'mode', mode: 'x' })).toBeNull();
+    expect(parseHello({ type: 'hello', v: 1, mode: 'scan3d', media: 'none' })).toEqual({ type: 'hello', v: 1, mode: 'scan3d', media: 'none' });
+    expect(parseModeMsg({ type: 'mode', mode: 'scan3d' })).toEqual({ type: 'mode', mode: 'scan3d' });
   });
   it('only camera mode with a working camera sends a picture', () => {
     expect(sendsVideo({ mode: 'camera', media: 'video' })).toBe(true);
@@ -24,6 +27,9 @@ describe('phone modes', () => {
     expect(sendsVideo({ mode: 'camera', media: 'none' })).toBe(false);
     expect(sendsVideo({ mode: 'scan', media: 'video' })).toBe(false);
     expect(sendsVideo({ mode: 'controller', media: 'none' })).toBe(false);
+    // 3D scan mode: the hello alone completes the link, the camera picture is the phone's own AR view and never flows
+    expect(sendsVideo({ mode: 'scan3d', media: 'none' })).toBe(false);
+    expect(sendsVideo({ mode: 'scan3d', media: 'video' })).toBe(false);
   });
   it('names the third pairing step for what the link does', () => {
     expect(thirdStepLabel('camera', null)).toBe('Video connected');
@@ -31,5 +37,7 @@ describe('phone modes', () => {
     expect(thirdStepLabel('scan', 'none')).toBe('Scan mode ready');
     expect(thirdStepLabel('controller', 'none')).toBe('Controller linked');
     expect(thirdStepLabel('camera', 'refused')).toBe('Phone linked (no picture)');
+    expect(thirdStepLabel('scan3d', 'none')).toBe('3D scan ready');
+    expect(thirdStepLabel('scan3d', null)).toBe('3D scan ready');
   });
 });

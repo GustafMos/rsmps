@@ -9,8 +9,8 @@
  *  - The computer can change the mode of a phone that is already linked with `mode {mode}` (the phone answers with a new hello).
  */
 
-export type PhoneMode = 'camera' | 'scan' | 'controller';
-export const PHONE_MODES: readonly PhoneMode[] = ['camera', 'scan', 'controller'];
+export type PhoneMode = 'camera' | 'scan' | 'controller' | 'scan3d';
+export const PHONE_MODES: readonly PhoneMode[] = ['camera', 'scan', 'controller', 'scan3d'];
 export type PhoneMedia = 'video' | 'none' | 'refused';
 
 export const LINK_TYPES = new Set(['hello', 'mode']);
@@ -64,5 +64,6 @@ export function thirdStepLabel(mode: PhoneMode, media: PhoneMedia | null): strin
   if (media === 'video' || (media === null && mode === 'camera')) return 'Video connected';
   if (mode === 'scan') return 'Scan mode ready';
   if (mode === 'controller') return 'Controller linked';
+  if (mode === 'scan3d') return '3D scan ready';
   return 'Phone linked (no picture)';
 }

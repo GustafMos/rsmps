@@ -11,6 +11,7 @@ import { MOTION_TYPES } from '../phone/motion-protocol';
 import { LINK_TYPES, parseHello, sendsVideo, type PhoneMedia, type PhoneMode } from '../phone/link-modes';
 import { PhoneMotionStore } from './phone-motion';
 import { PhoneScanStore } from './phone-scan';
+import { PhoneScan3dStore } from './phone-scan3d';
 import { DesktopClient, isDesktop, phoneSocketUrl, type LanInfo } from './desktop';
 
 export const LAN_MESSAGE =
@@ -118,6 +119,8 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     },
     buffered: (token) => this.sessions.get(token)?.ws.bufferedAmount ?? 0,
   });
+  /** 3D scan with a linked phone: photos, positions and live coverage from a phone in scan3d mode. See phone-scan3d.ts. */
+  readonly scan3d = new PhoneScan3dStore({ sendJson: (token, msg) => this.sendTo(token, msg) });
   private desktopInfo: LanInfo | null = null;
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
   private origins: string[] = [];
@@ -223,6 +226,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     ws.onclose = (ev) => {
       const why = closeMessage(ev.code);
       if (why) s.detail = why.text;
+      this.scan3d.linkLost(token, true);
       if (ev.code === 4408 && s.state === 'waiting') this.setState(s, 'expired');
       else if (s.state === 'connected' || s.state === 'waiting') this.setState(s, 'disconnected');
     };
@@ -283,6 +287,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     this.sessions.delete(token);
     this.motion.drop(token);
     this.scan.drop(token);
+    this.scan3d.drop(token);
     this.setState(s, 'disconnected');
     this.stopIfIdle();
   }
@@ -377,6 +382,10 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
 
   private async onMessage(s: Session, ev: MessageEvent): Promise<void> {
     if (ev.data instanceof ArrayBuffer) {
+      if (PhoneScan3dStore.handlesBinary(ev.data)) {
+        this.scan3d.ingestBinary(s.token, ev.data); // a photo chunk of a 3D scan (scan magic, kind 3)
+        return;
+      }
       if (PhoneScanStore.handlesBinary(ev.data)) {
         this.scan.ingestBinary(s.token, ev.data); // a photo chunk from scan mode (starts with the scan magic, never FF D8)
         return;
@@ -401,6 +410,10 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     }
     if (msg.type && MOTION_TYPES.has(msg.type)) {
       this.motion.ingest(s.token, msg); // sensor frames from the phone (never touches the video state)
+      return;
+    }
+    if (PhoneScan3dStore.handles(msg.type)) {
+      this.scan3d.ingestJson(s.token, msg); // 3D scan: shots, live numbers, the final message
       return;
     }
     if (PhoneScanStore.handles(msg.type)) {
@@ -431,6 +444,7 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
         break;
       case 'phone-left':
         if (this.scan.has(s.token)) this.scan.session(s.token).active = false;
+        this.scan3d.linkLost(s.token, true);
         s.pc?.close();
         s.pc = null;
         this.emitStream(s, null);
@@ -474,9 +488,11 @@ export class PhoneLink implements PhoneApi, PhoneProvider {
     this.dropPeer(s);
     s.progress = 'connected';
     s.detail = h.mode === 'scan' ? 'Phone linked in scan mode (no camera picture).' : h.mode === 'controller' ? 'Phone linked as a controller (no camera picture).' : h.media === 'refused' ? 'Phone linked, but it did not allow its camera: no picture.' : 'Phone linked without a camera picture.';
+    if (h.mode === 'scan3d') s.detail = 'Phone linked in 3D scan mode (no camera picture).';
     if (s.state === 'connected') this.emit(s);
     else this.setState(s, 'connected');
     if (h.mode === 'scan') this.scan.phoneIsScanning(s.token);
+    if (h.mode === 'scan3d') this.scan3d.phoneIsScanning(s.token);
   }
 
   private async startPeer(s: Session): Promise<void> {

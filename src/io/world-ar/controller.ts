@@ -23,7 +23,7 @@ import { LiveRecorder } from '../live-record';
 import type { ArCameraFeed } from './camera-feed';
 import { EnginePictureSource, fedByWorldAr, probeCanvasCopy, type CopyRoute, type PictureTarget } from './engine-source';
 import { ArLoop, type ArClipRecorder, type ArLoopState, type ArPainter } from './loop';
-import { GlPainter, createXrGl, type CameraBinding } from './painter';
+import { GlPainter, makeBrowserXrPainter } from './painter';
 import type { Gesture } from './placement';
 import { browserSupportEnv, checkWorldAr, noCameraPictureMessage, startErrorMessage, type WorldArSupport } from './support';
 import type { QualitySummary } from '../../engine/lib/scan-coverage';
@@ -168,8 +168,6 @@ export interface WorldArEnv {
 }
 
 type XrGlobals = {
-  XRWebGLLayer?: new (session: unknown, gl: unknown) => XrLayerLike;
-  XRWebGLBinding?: new (session: unknown, gl: unknown) => CameraBinding;
   XRRigidTransform?: new (p: { x: number; y: number; z: number; w: number }, q: { x: number; y: number; z: number; w: number }) => unknown;
 };
 
@@ -183,26 +181,7 @@ export function browserWorldArEnv(): WorldArEnv {
   const g = (typeof window === 'undefined' ? {} : window) as unknown as XrGlobals;
   return {
     xr: browserSupportEnv().xr,
-    async makePainter(session, features, onLost) {
-      const canvas = document.createElement('canvas');
-      const gl = createXrGl(canvas);
-      if (!gl || !g.XRWebGLLayer) throw new Error('This browser could not make a WebGL view for AR.');
-      // already asked for at creation; older browsers want it said again, and it is harmless where it is not needed
-      await (gl as unknown as { makeXRCompatible?: () => Promise<void> }).makeXRCompatible?.();
-      const layer = new g.XRWebGLLayer(session, gl);
-      await session.updateRenderState({ baseLayer: layer });
-      const painter = new GlPainter(gl);
-      // a lost context cannot be drawn into again: the view closes with the reason instead of showing a frozen or empty picture
-      canvas.addEventListener('webglcontextlost', () => onLost?.());
-      if (features.cameraAccess && g.XRWebGLBinding) {
-        try {
-          painter.binding = new g.XRWebGLBinding(session, gl);
-        } catch {
-          painter.binding = null; // granted on paper only: the take is motion only
-        }
-      }
-      return { painter, layer, dispose: () => painter.dispose() };
-    },
+    makePainter: makeBrowserXrPainter,
     makeTransform: g.XRRigidTransform ? (p, q) => new g.XRRigidTransform!({ x: p[0], y: p[1], z: p[2], w: 1 }, { x: q[0], y: q[1], z: q[2], w: q[3] }) : undefined,
     makeGpuCanvas(gpu) {
       try {
