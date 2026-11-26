@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.27.0] - 2026-11-26
+
+### Added
+- **Smooth recording: effects are applied after you stop.** The Recorder has a new "Quality" setting. **Smooth, effects after** records the live pictures themselves (Webcam, Phone Camera, URL / Stream) at the camera's full frame rate, together with the sound, the live sound values and the phone's motion sensors, and renders the effects onto them frame by frame when you stop. The clip is smooth even when the preview stutters on a slow device. **As seen, instant** is the recording as before. **Automatic** (the default) uses smooth on phones and tablets. While the effects are rendered the Recorder shows progress, the time left and Cancel; the page must stay open. The untouched camera clips stay in Media ("Keep raw clips"), so the same take can be tried with other effects, and "Render again" appears if rendering was cancelled or failed. Not yet tried on a real phone.
+
 ## [0.26.1] - 2026-11-26
 
 ### Added
