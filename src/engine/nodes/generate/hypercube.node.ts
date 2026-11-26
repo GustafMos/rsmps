@@ -160,7 +160,7 @@ export default defineNode({
   inputs: { image: { type: 'image', label: 'Picture' }, size: { type: 'image', label: 'Size from' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
-    dimensions: { type: 'enum', default: '5', options: Object.entries(DIMS).map(([value, v]) => ({ value, label: v.label })), label: 'Dimensions', hint: 'Each extra dimension doubles the corners: a 5D cube has 32 corners and 80 edges.' },
+    dimensions: { type: 'enum', default: '4', options: Object.entries(DIMS).map(([value, v]) => ({ value, label: v.label })), label: 'Dimensions', hint: 'Each extra dimension doubles the corners: a 5D cube has 32 corners and 80 edges.' },
     motion: { type: 'enum', default: 'tumble', options: Object.entries(HYPERCUBE_MOTIONS).map(([value, v]) => ({ value, label: v.label })), label: 'Motion', group: 'Motion' },
     speed: { type: 'number', default: 1, min: 0, max: 8, step: 1, integer: true, label: 'Speed', hint: 'Multiplies every turn. Whole numbers only, so the loop joins up. 0 = still.', group: 'Motion' },
     turnCycles: { type: 'number', default: 1, min: -8, max: 8, step: 1, integer: true, label: '3D turn', hint: 'Whole turns per loop, like a cube on a turntable.', group: 'Motion', visibleIf: isCustom },
