@@ -205,6 +205,38 @@ export interface ExportRequest {
   runProcesses?: boolean;
   /** Called with each finished process so the app can write the result into its node (the export itself uses it either way). */
   onProcessResult?: (nodeId: string, result: ProcessResult) => void;
+  /** Render a recorded take instead of the project from start to end (the Recorder's "effects after" way). Videos only. */
+  take?: ExportTake;
+}
+
+/**
+ * A recorded take to render: live input was recorded while it happened, and every frame is now rendered at the project time it was
+ * seen at. The video has `frames` frames at the project frame rate, whatever the project length is.
+ */
+export interface ExportTake {
+  frames: number;
+  /**
+   * Project time of take frame `frame`. `graph` when that frame is rendered from another copy of the request's graph (a later pass of
+   * a looping project, where the recorded clips are further along than the project clock). Called once per frame, in order.
+   */
+  at(frame: number): { seconds: number; graph?: GraphDoc };
+  /** The sound of the video exactly as it was recorded, or null for no sound. The graph's own sound is not rendered. */
+  audio: { sampleRate: number; channels: Float32Array[] } | null;
+  /** Seconds into `audio` that frame 0 is at (default 0; negative = the sound starts later than the picture). */
+  audioStart?: number;
+  /** Live sound-to-picture values recorded during the take. Absent: they are analysed from the graph's own sound, as in any export. */
+  signals?: import('./signals').TrackLookup;
+}
+
+/** What a recording that renders its effects afterwards needs of the app while it records (`Io.take`). */
+export interface TakeApi {
+  /** The picture of a live source right now (the camera's video element...), or null when it has none. Never opens a source. */
+  drawable(source: import('../engine/types').LiveSource): CanvasImageSource | null;
+  /**
+   * Start remembering every live sound-to-picture value (Sound to Numbers and the like), one per frame at `fps`, from now. Call the
+   * returned function to stop; it gives the values (null when none were read: the sound was off, or nothing uses them).
+   */
+  captureSignals(fps: number): () => import('./signals').SignalCapture | null;
 }
 
 export interface Exporter {
@@ -777,6 +809,8 @@ export interface Io {
   sensors?: DeviceSensorsApi;
   /** Record a live picture input into a clip in the Media library (the Record button on Webcam, Phone Camera and URL / Stream). */
   liveRecorder: LiveRecordApi;
+  /** Live input as a take: what the Recorder node needs to record the sources and render the effects afterwards. */
+  take: TakeApi;
   /** Official add-ons (desktop app only; `supported` is false in the web version). */
   addons: AddonsApi;
   /**

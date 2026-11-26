@@ -233,7 +233,7 @@ export class ExporterImpl implements Exporter {
 
     const itemCount = batchCount(graph, registry);
     const items = req.items === 'all' ? Array.from({ length: itemCount }, (_, i) => i) : [Math.min(Math.max(0, req.item), itemCount - 1)];
-    const frames = totalFramesOf(graph.project);
+    const frames = framesOf(req);
 
     const jobs: Job[] = [];
     for (const item of items) {
@@ -284,7 +284,13 @@ export class ExporterImpl implements Exporter {
       run.progress(0, job.label);
       if (sigs && job.item !== sigItem) {
         sigItem = job.item;
-        await this.prepareSignals(sigs, run, frames, job.item, audioSignals);
+        // A take that recorded the live values brings its own tracks; otherwise the sound is analysed over the stretch of project time
+        // the frames cover (one pass of a looping project, however long the take is).
+        const span = req.take && graph.project.loop ? Math.min(frames, totalFramesOf(graph.project)) : frames;
+        if (req.take?.signals) {
+          sigs.beginExport(req.take.signals);
+          await this.d.gate.clearEngine();
+        } else await this.prepareSignals(sigs, run, span, job.item, audioSignals);
       }
       try {
         files.push(...(await this.exportJob(job, run)));
@@ -523,7 +529,7 @@ export class ExporterImpl implements Exporter {
     if (job.params.kind === 'auto') {
       if (this.firstAssetOfKind(graph, job.out.id, job.item, 'video')) kind = 'video';
       else kind = (await this.hasMotion(job, run)) ? 'video' : 'image';
-      if (kind === 'video') job.weight = totalFramesOf(graph.project);
+      if (kind === 'video') job.weight = framesOf(run.req);
     } else kind = job.params.kind;
     switch (kind) {
       case 'image':
@@ -541,7 +547,7 @@ export class ExporterImpl implements Exporter {
 
   /** Auto mode: does the picture change over time? Compares a tiny readback signature of frames 0, 1 and the middle. */
   private async hasMotion(job: Job, run: Run): Promise<boolean> {
-    const frames = totalFramesOf(run.req.graph.project);
+    const frames = framesOf(run.req);
     if (frames <= 1) return false;
     const picks = [...new Set([0, 1, Math.floor(frames / 2)])].filter((f) => f < frames);
     let first: string | null = null;
@@ -601,7 +607,10 @@ export class ExporterImpl implements Exporter {
   }
 
   private async renderFrame(job: Job, run: Run, frame: number): Promise<Img> {
-    const graph = run.req.graph;
+    // A recorded take says which project time each of its frames was taken at (and, for a later pass of a looping project, from which
+    // copy of the graph); an ordinary export is frame / fps of the one graph.
+    const at = run.req.take?.at(frame);
+    const graph = at?.graph ?? run.req.graph;
     this.releaseConformed();
     const fp = readFrameParams(job.out.params);
     const target = resolveFrame(graph.project, fp);
@@ -619,7 +628,7 @@ export class ExporterImpl implements Exporter {
         canvas: isCustomFrame(graph.project, target) ? target : undefined,
         graph,
         node: job.out.id,
-        seconds: frame / graph.project.fps,
+        seconds: at ? at.seconds : frame / graph.project.fps,
         item: job.item,
         itemCount: job.itemCount,
         proxy: 1 / fp.pixelSize,
@@ -780,7 +789,7 @@ export class ExporterImpl implements Exporter {
     job.artMode = job.params.exportArtSize;
     job.keepFloat = stillRow(job.params.imageFormat)?.float === true;
     const graph = run.req.graph;
-    const frames = totalFramesOf(graph.project);
+    const frames = framesOf(run.req);
     const pattern = sequencePattern(job.params.name);
     const files: ExportedFile[] = [];
     for (let f = 0; f < frames; f++) {
@@ -809,7 +818,7 @@ export class ExporterImpl implements Exporter {
     const graph = run.req.graph;
     const project = graph.project;
     const sp = job.params.sheet;
-    const frames = totalFramesOf(project);
+    const frames = framesOf(run.req);
     const itemList = job.sheetItems ?? [job.item];
     const home = job.item;
     const bitmaps: Bitmap[] = [];
@@ -877,7 +886,7 @@ export class ExporterImpl implements Exporter {
     const { gpu } = this.d;
     const graph = run.req.graph;
     const project = graph.project;
-    const frames = totalFramesOf(project);
+    const frames = framesOf(run.req);
     let sheet: { texture: GPUTexture; width: number; height: number } | null = null;
     let layout: ReturnType<typeof layoutSheet> | null = null;
     try {
@@ -965,7 +974,7 @@ export class ExporterImpl implements Exporter {
     return exportPrint({
       params: job.params.print,
       title: sanitizeFileName(baseName),
-      frames: totalFramesOf(graph.project),
+      frames: framesOf(run.req),
       fps: graph.project.fps,
       signal: run.req.signal,
       renderFrame: async (f) => {
@@ -1033,7 +1042,7 @@ export class ExporterImpl implements Exporter {
     const { gpu, ffmpeg } = this.d;
     if (!ffmpeg) throw new Error(ffmpegMissingMessage(isDesktop()));
     const project = run.req.graph.project;
-    const frames = totalFramesOf(project);
+    const frames = framesOf(run.req);
     const render = async (f: number) => {
       throwIfAborted(run.req.signal);
       const img = await this.renderFrame(job, run, f);
@@ -1074,7 +1083,7 @@ export class ExporterImpl implements Exporter {
   private async exportVideoOwn(job: Job, run: Run, row: CodecRow): Promise<ExportedFile[]> {
     const { gpu } = this.d;
     const project = run.req.graph.project;
-    const frames = totalFramesOf(project);
+    const frames = framesOf(run.req);
     const fps = project.fps;
     const p = job.params;
     let session: EncodeSession | null = null;
@@ -1216,7 +1225,7 @@ export class ExporterImpl implements Exporter {
     const { gpu } = this.d;
     const graph = run.req.graph;
     const project = graph.project;
-    const frames = totalFramesOf(project);
+    const frames = framesOf(run.req);
     const fps = project.fps;
     const presenter = this.presenter(true);
 
@@ -1381,6 +1390,9 @@ export class ExporterImpl implements Exporter {
   private async videoAudio(job: Job, run: Run, duration: number): Promise<PcmAudio | null> {
     const { audio, registry, library } = this.d;
     const graph = run.req.graph;
+    // A recorded take carries its sound as it was heard: that is the track, the graph's sound is not rendered again.
+    const take = run.req.take;
+    if (take) return take.audio ? fitAudio(take.audio, take.audioStart ?? 0, duration, false) : null;
     try {
       // Audio Outs exist but every one is switched off (or bypassed): the user asked for no sound, so no track at all.
       const audioNodes = graph.nodes.filter((n) => this.hasInput(n, 'audio') && registry.get(n.type)?.category === 'output');
@@ -1407,6 +1419,11 @@ export class ExporterImpl implements Exporter {
     }
     return null;
   }
+}
+
+/** How many frames a video of this request has: the project's length, or the length of the recorded take being rendered. */
+function framesOf(req: ExportRequest): number {
+  return req.take ? Math.max(1, Math.round(req.take.frames)) : totalFramesOf(req.graph.project);
 }
 
 /** True when a node of this type is upstream of `outId`. */
