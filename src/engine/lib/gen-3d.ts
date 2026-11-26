@@ -45,10 +45,10 @@ export const QUALITY_PARAM = {
 
 /** Move / scale / rotate / spin of the object plus the simple built-in camera: the same params and defaults as 3D Object. */
 export const XFORM_PARAMS = {
-  posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
-  posY: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Y', hint: 'Up is positive.', group: 'Object' },
-  posZ: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, label: 'Move Z', hint: 'Away from the camera is positive.', group: 'Object' },
-  objectScale: { type: 'number', default: 1, min: 0.01, max: 20, step: 0.01, label: 'Object scale', group: 'Object' },
+  posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
+  posY: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move Y', hint: 'Up is positive.', group: 'Object' },
+  posZ: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move Z', hint: 'Away from the camera is positive.', group: 'Object' },
+  objectScale: { type: 'number', default: 1, min: 0.01, max: 20, step: 0.01, scrubSpan: 4, label: 'Object scale', group: 'Object' },
   x: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Frame X', group: 'Built-in camera', hint: 'Ignored when a Camera is wired in.' },
   y: { type: 'number', default: 0.5, min: -0.5, max: 1.5, step: 0.005, unit: 'norm', label: 'Frame Y', hint: 'Position in the frame (built-in camera only).', group: 'Built-in camera' },
   scale: { type: 'number', default: 0.6, min: 0.02, max: 3, step: 0.005, unit: 'norm', label: 'Frame size', group: 'Built-in camera', hint: 'Fraction of the frame’s shorter side. Ignored when a Camera is wired in.' },
@@ -63,9 +63,9 @@ export const XFORM_PARAMS = {
     ],
   },
   fov: { type: 'number', default: 30, min: 5, max: 90, step: 1, unit: 'deg', label: 'Perspective', group: 'Built-in camera', hint: 'Higher = camera closer, stronger perspective.', visibleIf: (p: Record<string, unknown>) => p.cameraType === 'perspective' },
-  rotX: { type: 'number', default: 25, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate X', hint: 'Tilt.', group: 'Rotation' },
-  rotY: { type: 'number', default: 35, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Y', hint: 'Turn.', group: 'Rotation' },
-  rotZ: { type: 'number', default: 0, min: -360, max: 360, step: 1, unit: 'deg', label: 'Rotate Z', hint: 'Roll.', group: 'Rotation' },
+  rotX: { type: 'number', default: 25, min: -360, max: 360, step: 1, scrubSpan: 360, unit: 'deg', label: 'Rotate X', hint: 'Tilt.', group: 'Rotation' },
+  rotY: { type: 'number', default: 35, min: -360, max: 360, step: 1, scrubSpan: 360, unit: 'deg', label: 'Rotate Y', hint: 'Turn.', group: 'Rotation' },
+  rotZ: { type: 'number', default: 0, min: -360, max: 360, step: 1, scrubSpan: 360, unit: 'deg', label: 'Rotate Z', hint: 'Roll.', group: 'Rotation' },
   spinX: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin X', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
   spinY: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Y', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
   spinZ: { type: 'number', default: 0, min: -16, max: 16, step: 1, integer: true, unit: 'cycles', label: 'Spin Z', group: 'Rotation', hint: 'Whole turns per loop, so it loops exactly.' },
