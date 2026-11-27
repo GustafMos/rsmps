@@ -667,3 +667,17 @@ A clip has width, height and time. **Frame Array** (Time) shows time as a third 
 5. Camera: *Swing* rocks it from side to side, *Orbit* takes it all the way around, both a whole number of times per loop. *Distance* 1 always fits the whole layout.
 6. *Pane opacity* below 1 with *Blend* **Add** turns a stack into layers of light. *Dim other panes* and *Fade with distance* keep the present frame the brightest.
 7. Cost: every pane makes whatever feeds the node render once more per frame (a still picture costs nothing extra), so keep *Panes* low on a heavy chain, or freeze the chain in front first (see "Freeze a finished part of the graph").
+
+## Different effects on different tracked regions (Effects On Regions)
+
+You have found things in a clip (Detect Blobs, Detect Color, Detect Motion, then Track so each one keeps its identity) and want each one to look different.
+
+1. Wire the clip into a detector, and the detector's regions into **Track**. The quickest start is the template **Different effects on tracked regions**.
+2. Make the effects the ordinary way, each as its own branch from the same clip: clip into **Pixelate**, clip into **Invert**, clip into a blur, and so on.
+3. Add **Effects On Regions** (Track). Wire the clip into *Original*, the tracked regions into *Regions*, and the branches into *Effect A*, *Effect B*, *Effect C*, *Effect D*. The picture shows the original everywhere, and inside each region the effect that region was given.
+4. *Give effects* decides who gets what. **All regions get A**; **Take turns by region** (A, B, C, D in order of the tracked ids, so a region keeps its effect while it lives); **By size** (largest gets A); **Left to right**; **Top to bottom**; **By label or id** (type labels or ids per effect, like `person, 12`); **Random per region** (stable per region; change *Seed* for another draw). Effects you did not wire are skipped, and a region that gets no effect shows the original.
+5. *Shape* is Box, Rounded box or Ellipse. *Grow* makes the areas bigger (or smaller with a negative number), in percent of each region's own size. *Feather* softens the edge. *Invert* turns it round: the effect shows everywhere except inside the regions (only Effect A is used). *Mix* fades all effects in and out together.
+6. Where regions overlap, the smallest region wins, so a small region inside a large one keeps its own effect.
+7. Optional: wire a mask into *Shape mask* to get a precise outline. The effect then shows only where the mask is white and inside a region's box. The *Affected area* output is a mask of everything that got an effect, to drive other nodes.
+
+To keep only some regions first (the largest few, one label, a list of ids) use **Filter Regions** in front.
