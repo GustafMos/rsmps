@@ -125,3 +125,9 @@
 .rs-viewer__smbtn.is-on { border-color: #e5484d; }
 .rs-viewer__smdot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--text); }
 @media (pointer: coarse) { .rs-viewer__smbtn { min-height: var(--touch, 44px); } }
+
+/* Performance readout (off by default): sits on the picture */
+.rs-perf { position: absolute; left: var(--s-2); top: var(--s-2); z-index: 5; max-width: min(360px, calc(100% - 2 * var(--s-2))); max-height: 70%; overflow: auto; display: flex; flex-direction: column; gap: var(--s-1); padding: var(--s-2); border-radius: 8px; background: rgba(8, 10, 14, 0.86); border: 1px solid var(--border, #333); color: var(--text, #eee); font-size: var(--fs-xs); }
+.rs-perf__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.rs-perf__lines { margin: 0; padding: 0 0 0 var(--s-3); font-family: var(--font-mono); line-height: 1.4; }
+.rs-perf__note { color: var(--text-faint); }

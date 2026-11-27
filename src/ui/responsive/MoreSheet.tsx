@@ -7,6 +7,8 @@ import { useApp } from '../store/context';
 import { ProjectTabs } from '../topbar/ProjectTabs';
 import { checkNow } from '../updateNotice';
 import { showTab } from './shellStore';
+import { copyText, perfStore, performanceReport, setPerfPanel } from '../viewer/PerfOverlay';
+import { useSelector } from '../store/createStore';
 
 function Row({ icon, label, hint, onClick, href }: { icon: IconName; label: string; hint?: string; onClick?: () => void; href?: string }) {
   const body = (
@@ -47,6 +49,7 @@ export function MoreSheet() {
   }, []);
   const bugBody = ['## What happened', '', '', '## Steps', '1. ', '', '## Expected', '', '', '---', `App: RSMPS ${pkg.version}`, `Browser: ${navigator.userAgent}`, `GPU: ${gpu}`].join('\n');
   const bugUrl = `https://github.com/GustafMos/rsmps/issues/new?body=${encodeURIComponent(bugBody)}`;
+  const perfOn = useSelector(perfStore, (st) => st.on);
   const mem = io.memory();
   const mb = Math.round((mem.engineCacheBytes + mem.gpuPoolBytes + mem.frameCacheBytes + mem.decodedMediaBytes) / 1048576);
 
@@ -80,6 +83,31 @@ export function MoreSheet() {
         <Row icon="bug" label="Report a bug" href={bugUrl} />
         <Row icon="coffee" label="Support" href="https://ko-fi.com/ripscorpy" />
         {isDesktop() && <Row icon="check" label="Check for updates…" onClick={() => void checkNow(ed)} />}
+      </Group>
+      <Group title="Performance">
+        <Row
+          icon="check"
+          label={perfOn ? 'Performance readout: on (tap to turn off)' : 'Performance readout: off (tap to turn on)'}
+          hint="shows on the Viewer while it plays"
+          onClick={() => {
+            setPerfPanel(io, !perfOn);
+            if (!perfOn) ed.toast('Performance readout is on. Open the Viewer, press play, and the numbers appear over the picture.', 'ok');
+          }}
+        />
+        {perfOn && (
+          <Row
+            icon="copy"
+            label="Copy performance report"
+            hint="after playing your clip"
+            onClick={() => {
+              const snap = io.player.perfSnapshot();
+              if (!snap) return;
+              void copyText(performanceReport(app, snap)).then((ok) =>
+                ed.toast(ok ? 'The performance report was copied. Paste it into a message.' : 'Your browser did not allow copying. Open the Viewer and use the Copy performance report button there.', ok ? 'ok' : 'error'),
+              );
+            }}
+          />
+        )}
       </Group>
       <Group title="Safety">
         <Row icon="warn" label="Reload in safe mode (rendering paused)" onClick={() => reloadInSafeMode(app)} />

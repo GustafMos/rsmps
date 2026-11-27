@@ -63,6 +63,8 @@ export const DEFAULT_TUNING: ProxyTuning = {
  */
 export class ProxyController {
   private idx = 0;
+  /** Index of the finest level allowed (the viewer is small: finer than this would only be thrown away). */
+  private ceilIdx = 0;
   private times: number[] = [];
   private warm = 0;
   private over = 0;
@@ -78,9 +80,24 @@ export class ProxyController {
     return PROXY_LEVELS[this.idx];
   }
 
-  /** Back to full resolution (the user changed the proxy mode). */
+  /**
+   * The finest level worth rendering (see `playbackProxyCap`). Playback starts there instead of at full size, and the controller never
+   * climbs above it. Changing it restarts the measuring only when the current level has to change.
+   */
+  setCeiling(cap: number): void {
+    let i = PROXY_LEVELS.findIndex((l) => l <= cap + 1e-6);
+    if (i < 0) i = PROXY_LEVELS.length - 1;
+    if (i === this.ceilIdx) return;
+    this.ceilIdx = i;
+    if (this.idx < i) {
+      this.idx = i;
+      this.settle();
+    }
+  }
+
+  /** Back to the finest allowed level (the user changed the proxy mode). */
   reset(): void {
-    this.idx = 0;
+    this.idx = this.ceilIdx;
     this.abandonedUntil = PROXY_LEVELS.map(() => 0);
     this.warmup();
   }
@@ -130,7 +147,7 @@ export class ProxyController {
 
     this.over = 0;
     this.overSince = -1;
-    if (this.idx > 0 && median < budgetMs * this.t.underFactor) {
+    if (this.idx > this.ceilIdx && median < budgetMs * this.t.underFactor) {
       if (this.underSince < 0) this.underSince = now;
       const up = PROXY_LEVELS[this.idx - 1];
       const p = this.proxy;

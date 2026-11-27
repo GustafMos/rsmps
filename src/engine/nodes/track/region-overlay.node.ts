@@ -13,6 +13,59 @@ const STYLES = [
 
 const MAX_LABELS = 32;
 
+/** The HUD shapes of every region at pixel `px`, premultiplied. Used by the shapes pass (glow) and, without glow, directly by the compose pass. */
+const SHAPES_WGSL = /* wgsl */ `
+fn shapesAt(px: vec2f) -> vec4f {
+  var acc = vec4f(0.0);
+  let count = i32(u.n);
+  for (var i = 0; i < count; i++) {
+    let b = regBox(i) * vec4f(u.size, u.size);
+    let cc = regExtra(i, 0);
+    let col = cc.rgb;
+    let c = (b.xy + b.zw) * 0.5;
+    let hs = max((b.zw - b.xy) * 0.5, vec2f(1.0));
+    let p = px - c;
+    let lw = u.lw;
+    // Most pixels are nowhere near this box: skip the shape maths there (the margin covers the stroke, its anti-aliasing and the dot).
+    if (any(abs(p) > hs + vec2f(lw + 3.0 + u.dotR))) { continue; }
+    var line = 0.0;
+    var fill = 0.0;
+    if (u.style < 0.5) {
+      let d = sdBox(p, hs);
+      line = cov(abs(d) - lw * 0.5);
+      fill = cov(d);
+    } else if (u.style < 1.5) {
+      let d = sdRoundBox(p, hs, u.corner);
+      line = cov(abs(d) - lw * 0.5);
+      fill = cov(d);
+    } else if (u.style < 2.5) {
+      let L = min(hs.x, hs.y) * 2.0 * u.cornerLen;
+      let q = abs(p);
+      let d1 = sdBox(q - vec2f(hs.x - L * 0.5, hs.y), vec2f(L * 0.5 + lw * 0.5, lw * 0.5));
+      let d2 = sdBox(q - vec2f(hs.x, hs.y - L * 0.5), vec2f(lw * 0.5, L * 0.5 + lw * 0.5));
+      line = cov(min(d1, d2));
+      fill = cov(sdBox(p, hs));
+    } else if (u.style < 3.5) {
+      let d = sdEllipse(p, hs);
+      line = cov(abs(d) - lw * 0.5);
+      fill = cov(d);
+    } else {
+      let gap = min(hs.x, hs.y) * 0.25;
+      let dv = sdBox(p, vec2f(lw * 0.5, hs.y));
+      let dh = sdBox(p, vec2f(hs.x, lw * 0.5));
+      let hole = sdBox(p, vec2f(gap, gap));
+      line = cov(max(min(dv, dh), -hole));
+      fill = cov(sdBox(p, hs));
+    }
+    if (u.dot > 0.5) { line = max(line, cov(length(p) - u.dotR)); }
+    let strokeL = vec4f(col, 1.0) * (line * cc.a);
+    let fillL = vec4f(col, 1.0) * (fill * u.fillOp * cc.a);
+    acc = over(over(strokeL, fillL), acc);
+  }
+  return acc;
+}
+`;
+
 export default defineNode({
   id: 'region-overlay',
   title: 'Region Overlay',
@@ -97,86 +150,47 @@ export default defineNode({
     const regs = regionTable(ctx.gpu, items.map((r) => r.box), [colors, labelInfo]);
     const styleIndex = STYLES.findIndex((s) => s.value === p.style);
 
-    const shapes = ctx.gpu.pass({
-      label: 'region-overlay-shapes',
-      size: img,
-      textures: { regs },
-      uniforms: {
-        n,
-        style: styleIndex,
-        lw: p.lineWidth,
-        corner: p.cornerRadius,
-        cornerLen: p.cornerLength,
-        fillOp: p.fillOpacity,
-        dot: p.centerDot,
-        dotR: p.dotSize,
-      },
-      format: 'rgba8unorm',
-      wgsl: /* wgsl */ `
+    const withGlow = p.glowStrength > 0 && p.glowRadius > 0.05;
+    const shapeUniforms = {
+      n,
+      style: styleIndex,
+      lw: p.lineWidth,
+      corner: p.cornerRadius,
+      cornerLen: p.cornerLength,
+      fillOp: p.fillOpacity,
+      dot: p.centerDot,
+      dotR: p.dotSize,
+    };
+    // Glow blurs the shapes, so they need a picture of their own. Without glow they are drawn straight into the compose pass: one full-frame pass instead of two.
+    const shapes = withGlow
+      ? ctx.gpu.pass({
+          label: 'region-overlay-shapes',
+          size: img,
+          textures: { regs },
+          uniforms: shapeUniforms,
+          format: 'rgba8unorm',
+          wgsl: /* wgsl */ `
 ${REGION_WGSL}
+${SHAPES_WGSL}
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
-  var acc = vec4f(0.0);
-  let count = i32(u.n);
-  for (var i = 0; i < count; i++) {
-    let b = regBox(i) * vec4f(u.size, u.size);
-    let cc = regExtra(i, 0);
-    let col = cc.rgb;
-    let c = (b.xy + b.zw) * 0.5;
-    let hs = max((b.zw - b.xy) * 0.5, vec2f(1.0));
-    let p = px - c;
-    let lw = u.lw;
-    // Most pixels are nowhere near this box: skip the shape maths there (the margin covers the stroke, its anti-aliasing and the dot).
-    if (any(abs(p) > hs + vec2f(lw + 3.0 + u.dotR))) { continue; }
-    var line = 0.0;
-    var fill = 0.0;
-    if (u.style < 0.5) {
-      let d = sdBox(p, hs);
-      line = cov(abs(d) - lw * 0.5);
-      fill = cov(d);
-    } else if (u.style < 1.5) {
-      let d = sdRoundBox(p, hs, u.corner);
-      line = cov(abs(d) - lw * 0.5);
-      fill = cov(d);
-    } else if (u.style < 2.5) {
-      let L = min(hs.x, hs.y) * 2.0 * u.cornerLen;
-      let q = abs(p);
-      let d1 = sdBox(q - vec2f(hs.x - L * 0.5, hs.y), vec2f(L * 0.5 + lw * 0.5, lw * 0.5));
-      let d2 = sdBox(q - vec2f(hs.x, hs.y - L * 0.5), vec2f(lw * 0.5, L * 0.5 + lw * 0.5));
-      line = cov(min(d1, d2));
-      fill = cov(sdBox(p, hs));
-    } else if (u.style < 3.5) {
-      let d = sdEllipse(p, hs);
-      line = cov(abs(d) - lw * 0.5);
-      fill = cov(d);
-    } else {
-      let gap = min(hs.x, hs.y) * 0.25;
-      let dv = sdBox(p, vec2f(lw * 0.5, hs.y));
-      let dh = sdBox(p, vec2f(hs.x, lw * 0.5));
-      let hole = sdBox(p, vec2f(gap, gap));
-      line = cov(max(min(dv, dh), -hole));
-      fill = cov(sdBox(p, hs));
-    }
-    if (u.dot > 0.5) { line = max(line, cov(length(p) - u.dotR)); }
-    let strokeL = vec4f(col, 1.0) * (line * cc.a);
-    let fillL = vec4f(col, 1.0) * (fill * u.fillOp * cc.a);
-    acc = over(over(strokeL, fillL), acc);
-  }
-  return acc;
+  return shapesAt(px);
 }`,
-    });
+        })
+      : null;
 
-    const glow = p.glowStrength > 0 && p.glowRadius > 0.05 ? gaussianBlur(ctx.gpu, shapes, p.glowRadius) : null;
+    const glow = shapes ? gaussianBlur(ctx.gpu, shapes, p.glowRadius) : null;
     const hasLabels = atlas !== null;
 
     const image = ctx.gpu.pass({
       label: 'region-overlay-compose',
       size: img,
       textures: { base: img, shapes, glow, regs, atlas },
-      uniforms: { n, gk: p.glowStrength, only: p.overlayOnly, cellH, gap: Math.max(2, p.labelSize * 0.25) },
+      uniforms: { ...shapeUniforms, gk: p.glowStrength, only: p.overlayOnly, cellH, gap: Math.max(2, p.labelSize * 0.25) },
       wgsl: /* wgsl */ `
 ${REGION_WGSL}
+${shapes ? '' : SHAPES_WGSL}
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
-  var ov = textureSampleLevel(shapes, smpNearest, uv, 0.0);
+  var ov = ${shapes ? 'textureSampleLevel(shapes, smpNearest, uv, 0.0)' : 'shapesAt(px)'};
   ${glow ? 'ov = over(ov, min(textureSampleLevel(glow, smp, uv, 0.0) * u.gk, vec4f(1.0)));' : ''}
   ${
     hasLabels
