@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.50.0] - 2026-11-27
+
+### Added
+- **Convert to SDF Scene.** An SDF 3D node can be turned into an SDF Scene with one separate shape node per slot, from the "SDF Scene" section of its inspector or its right-click menu ("Convert a copy" keeps the original). Shapes, positions, rotations, sizes, colours, the combine order with its smoothness, mirror, shell, twist, bend, the camera, lights, shadows, spin and material carry over and render the same picture; wires are re-attached, and one undo brings the SDF 3D node back. Features an SDF Scene does not have are listed after converting instead of being dropped silently: endless repeat becomes a fixed number of copies, morph becomes two separate shapes, noise displace has a different pattern, and kaleidoscope, texture, displace map, taper, melt, explode and low-fi snap are not carried over.
+
 ## [0.49.0] - 2026-11-27
 
 ### Changed

@@ -40,6 +40,13 @@ export function NodeContextMenu() {
           { sep: true } as MenuItem,
         ]
       : []),
+    ...(node?.type === 'sdf-3d' && !multi
+      ? [
+          { label: 'Convert to SDF Scene', onClick: () => ed.convertToSdfScene(node.id) },
+          { label: 'Convert a copy to SDF Scene', onClick: () => ed.convertToSdfScene(node.id, true) },
+          { sep: true } as MenuItem,
+        ]
+      : []),
     ...(isGroup && !multi
       ? [
           { label: 'Open group', icon: 'stack' as const, onClick: () => ed.enterGroup(node!.id), shortcut: 'Tab' },

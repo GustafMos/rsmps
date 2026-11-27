@@ -118,7 +118,7 @@ export default defineNode({
   title: 'SDF 3D',
   category: 'generate',
   description:
-    'Build a 3D scene from up to 8 primitives (sphere, box, rounded box, torus, capsule, cylinder, cone, plane, octahedron, or an extruded picture or mask) combined with smooth blends, and render it by sphere tracing in one fast pass. Blobs, metaballs, morphing, endless repeated worlds, twist, bend and noise. The shader is generated for exactly the shapes you use.',
+    'Build a 3D scene from up to 8 primitives (sphere, box, rounded box, torus, capsule, cylinder, cone, plane, octahedron, or an extruded picture or mask) combined with smooth blends, and render it by sphere tracing in one fast pass. Blobs, metaballs, morphing, endless repeated worlds, twist, bend and noise. The shader is generated for exactly the shapes you use. For moving shapes separately, use an SDF Scene: the Convert to SDF Scene button in this node turns it into one.',
   keywords: ['signed distance', 'sdf', 'raymarch', 'blob', 'metaball', 'smooth union', 'morph', 'primitives', 'repeat', 'kaleidoscope', 'mirror', 'gooey', 'displace 3d', 'melt', 'wobble', 'logo', '3d'],
   inputs: {
     shape2d: { type: 'image', label: '2D shape' },

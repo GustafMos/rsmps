@@ -66,6 +66,7 @@ import {
   withoutProcessResults,
   type GroupKind,
 } from '../../engine/group';
+import { applySdfConversion, SDF_CONVERT_HINT } from '../../engine/lib/sdf-convert';
 import { inSdfScene, isSdfSceneNode, newSdfScene, sdfPlacementProblem, SDF_SCENE_TYPE } from '../../engine/sdf-scene-group';
 import { processParamsPatch } from '../../engine/process';
 import type { AnyNodeDef } from '../../engine/types';
@@ -1073,6 +1074,23 @@ export class Editor {
     const lost = describeDropped(res.dropped);
     if (lost) this.toast(`Converted to ${this.registry.get(newType)?.title ?? newType}: ${lost}.`, 'info');
     return true;
+  }
+
+  /**
+   * "Convert to SDF Scene" on an SDF 3D node: it becomes an SDF Scene with one shape per slot (same picture), in place, as ONE undo step.
+   * With `copy` the SDF 3D node stays and the scene is added beside it. What could not be carried over is listed in a dialog.
+   */
+  convertToSdfScene(id: string, copy = false): string | null {
+    const res = applySdfConversion(this.level, this.registry, id, copy);
+    if ('error' in res) {
+      this.toast(res.error, 'error');
+      return null;
+    }
+    this.commitLevel(res.graph);
+    this.patch({ selection: [res.id], selectedFrame: null });
+    if (res.notes.length) void this.ask({ title: 'Converted to an SDF Scene', text: `${SDF_CONVERT_HINT} Some things could not be carried over exactly:`, items: res.notes, ok: 'OK', cancel: 'Close' });
+    else this.toast(`Converted to an SDF Scene. ${SDF_CONVERT_HINT}`, 'ok');
+    return res.id;
   }
 
   /** Create a source node holding imported assets (all of one kind) at a position. */
