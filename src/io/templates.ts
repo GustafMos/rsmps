@@ -121,6 +121,26 @@ export const TEMPLATES: Template[] = [
 
   /* ------------------------------------------ Video art ------------------------------------------ */
   make({
+    id: 'regions-different-effects',
+    title: 'Different effects on tracked regions',
+    group: 'Video art',
+    description: 'Finds bright spots in your clip, follows them, and gives each one its own look: pixelated, inverted, and so on. Change Give effects to share them out another way.',
+    needs: 'clip',
+    graph: build(
+      'Different effects on tracked regions',
+      [
+        { id: 'src', type: 'media-in', label: 'Drop your clip here' },
+        { id: 'find', type: 'detect-blobs', params: { threshold: 0.6 } },
+        { id: 'follow', type: 'track' },
+        { id: 'pix', type: 'pixelate', params: { mode: 'fixed-height', value: 48 }, label: 'Effect A: pixelate' },
+        { id: 'inv', type: 'invert', label: 'Effect B: invert' },
+        { id: 'fx', type: 'region-fx', params: { give: 'cycle', shape: 'rounded', grow: 20, feather: 6 } },
+        OUT,
+      ],
+      ['src>find', 'find.regions>follow.regions', 'src>pix', 'src>inv', 'src>fx.image', 'follow.regions>fx.regions', 'pix>fx.fx1', 'inv>fx.fx2', 'fx>out'],
+    ),
+  }),
+  make({
     id: 'logo-zoom',
     title: 'Logo fall with Infinite Zoom',
     group: 'Video art',
