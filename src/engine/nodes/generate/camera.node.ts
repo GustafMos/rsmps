@@ -9,7 +9,7 @@ export default defineNode({
   title: '3D Camera',
   category: 'generate',
   description:
-    'A virtual 3D camera for 3D Object nodes (not the live webcam; see Webcam). Pick a lens (flat, perspective, fisheye, 360° panorama, cylinder), a viewpoint and optional looping camera motion. Wire it into any number of 3D objects, or give each object its own.',
+    'A virtual 3D camera for 3D Object nodes (not the live webcam; see Webcam). Pick a lens (flat, perspective, fisheye, 360° panorama, cylinder), a viewpoint and optional looping camera motion. Wire it into any number of 3D objects, or give each object its own: a camera only affects the objects wired to it, so you can use as many cameras as you like. It can also set the light of its objects.',
   keywords: ['lens', 'view', 'panorama', 'panoramic', 'fisheye', 'isometric', 'orthographic', 'perspective', 'orbit', 'dolly', '360', 'equirectangular', '3d', 'virtual camera', 'camera'],
   inputs: {},
   outputs: { camera: { type: 'camera', label: 'Camera' } },
@@ -88,6 +88,10 @@ export default defineNode({
     targetZ: { type: 'number', default: 0, min: -60, max: 60, step: 0.05, label: 'Look-at Z', group: 'Free viewpoint' },
     roll: { type: 'number', default: 0, min: -360, max: 360, step: 1, unit: 'deg', label: 'Roll', hint: 'Tilt the horizon.' },
     shiftX: { type: 'number', default: 0, min: -2, max: 2, step: 0.01, label: 'Lens shift X', hint: 'Slides the picture sideways without changing perspective (fraction of the shorter side).' },
+    lightOn: { type: 'bool', default: false, label: 'Light for objects', group: 'Light', hint: 'Sets the light of every 3D object wired to this camera (an object can opt out with its "Light from camera"). Several cameras can each light their own objects.' },
+    lightAzimuth: { type: 'number', default: -35, min: -180, max: 180, step: 1, unit: 'deg', label: 'Light azimuth', group: 'Light', hint: 'Where the light comes from, left to right.', visibleIf: (p) => p.lightOn === true },
+    lightElevation: { type: 'number', default: 40, min: -90, max: 90, step: 1, unit: 'deg', label: 'Light height', group: 'Light', visibleIf: (p) => p.lightOn === true },
+    lightAmbient: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Ambient light', group: 'Light', hint: 'How much of the light comes from everywhere.', visibleIf: (p) => p.lightOn === true },
     shiftY: { type: 'number', default: 0, min: -2, max: 2, step: 0.01, label: 'Lens shift Y', hint: 'Slides the picture up or down without changing perspective.' },
   },
   summary: (p) => `${p.projection} · ${p.rig}${p.motion !== 'none' ? ` · ${p.motion} ×${p.cycles}` : ''}`,
@@ -174,6 +178,7 @@ export default defineNode({
       target,
       roll,
       shift: [p.shiftX, p.shiftY],
+      ...(p.lightOn === true ? { light: { azimuth: p.lightAzimuth, elevation: p.lightElevation, ambient: p.lightAmbient, strength: 1 } } : {}),
     };
     return { camera };
   },

@@ -3,6 +3,9 @@ import type { NodeInstance } from '../../engine/types';
 import { isWorldTake, worldTakeDuration } from '../../engine/lib/world-take';
 import { fedByWorldAr } from '../../io/world-ar/engine-source';
 import { lightReadout, type WorldArSupport } from '../../io/world-ar/support';
+import { CameraObjects } from './CameraObjects';
+import { ArSwitch } from './ObjectAr';
+import { useWorldArSupport } from './useWorldArSupport';
 import { useApp, useEd } from '../store/context';
 import { useSelector } from '../store/createStore';
 import { getLive } from '../store/live';
@@ -13,21 +16,25 @@ import { openWorldAr } from '../store/worldAr';
 export const WORLD_AR_BETA = 'Experimental: this was built without an AR phone to test it on. It may not work on yours yet. Please report what you see.';
 
 /** Inspector section of World AR Camera: can this device do it, the button that opens the AR view, and the recorded take. */
+/** "Room light": what the camera sends to the objects wired to it, in plain words. */
+function RoomLight({ node }: { node: NodeInstance }) {
+  const { ed } = useApp();
+  const light = node.params.matchLight !== false;
+  return (
+    <div className="rs-insp__sec rs-objar" data-room-light>
+      <div className="rs-caps">Room light</div>
+      <ArSwitch id="matchLight" label="Match room light" on={light} onChange={(v) => ed.setParam(node.id, 'matchLight', v)} hint="Light the objects like the room (needs a phone that estimates light)." />
+      <p className="rs-insp__hint" role="status">{light ? "The room's light is sent to every object wired to this camera: nothing to wire." : 'Off: objects keep their own light.'}</p>
+    </div>
+  );
+}
+
 export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: string }) {
   const app = useApp();
   const { io, ed } = app;
-  const [support, setSupport] = useState<WorldArSupport>({ state: 'checking', message: 'Checking whether this device can do AR.' });
+  const support = useWorldArSupport();
   const viewed = useEd((s) => s.viewedNodeId);
   const graph = useEd((s) => s.graph);
-  useEffect(() => {
-    let live = true;
-    // asks the browser whether AR exists at all: no permission question, nothing shown
-    void io.worldAr?.support().then((s) => live && setSupport(s));
-    if (!io.worldAr) setSupport({ state: 'unsupported', message: 'The AR view is not available in this version of the app.' });
-    return () => {
-      live = false;
-    };
-  }, [io]);
   const take = isWorldTake(node.params.take) ? node.params.take : null;
   const target = viewed && viewed !== fullId ? viewed : null;
   const through = target ? fedByWorldAr(graph, target) : false;
@@ -43,6 +50,8 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
     <div className="rs-insp__sec">
       <div className="rs-caps">AR view</div>
       <p className="rs-insp__hint" role="note">{WORLD_AR_BETA}</p>
+      <CameraObjects node={node} title="Objects in AR" empty="No 3D objects yet. Select a 3D object and press Show in AR in its Camera section, or add one and tick it here." />
+      <RoomLight node={node} />
       <p className="rs-insp__hint" role="status">{support.message}</p>
       <div className="rs-insp__actions">
         <button
@@ -56,7 +65,7 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
       </div>
       <p className="rs-insp__hint">
         {!target
-          ? 'View the node you want in the room first: the eye on your 3D Object (wire this camera into its Camera input), or on any picture.'
+          ? 'View the node you want in the room first: the eye on your 3D Object, or on any picture. A 3D object looks through this camera once it is ticked in Objects in AR.'
           : through
             ? 'The viewed node looks through this camera: it will stand in the room as a 3D object, with every effect after it.'
             : 'The viewed node does not look through this camera: it will stand in the room as a flat picture (see Flat pictures below).'}
@@ -70,9 +79,6 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
       </p>
       <p className="rs-insp__hint">
         The Picture output is what the camera sees right now. Wire it into a Material's colour map, or into any effect, to use the room as a texture. In the AR view it is the AR camera picture; outside it, the back camera of this device. It only costs work while it is wired.
-      </p>
-      <p className="rs-insp__hint">
-        Light and shadow: with "Match room light" on, 3D objects that take this camera are lit like the room (where the main light comes from, and how much light is all around), so they sit in the scene. Switch on "Ground shadow" in the 3D object to add its shadow on the surface it stands on; over the camera picture it darkens the real floor. The Light outputs can also be wired by hand. This needs a phone that estimates the light: the AR view says "light: yes" or "light: no".
       </p>
       {active && <p className="rs-insp__hint" role="status">{lightReadout(active.state().light === true)}{active.state().light === true ? '' : ': the 3D objects use their own light.'}</p>}
       {active && !active.state().features.cameraAccess && <p className="rs-insp__hint" role="status">This phone does not hand over the camera picture in AR, so the Picture output is transparent while the AR view is open.</p>}

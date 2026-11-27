@@ -45,6 +45,9 @@ import { StopMotionPanel } from './StopMotionPanel';
 import { SdfConvertPanel } from './SdfConvertPanel';
 import { PhysicsPanel } from './PhysicsPanel';
 import { ObjectPhysics } from './ObjectPhysics';
+import { ObjectAr, RoomLightNote } from './ObjectAr';
+import { cameraSource, roomLightFor } from '../../engine/lib/ar-setup';
+import { CameraObjects } from './CameraObjects';
 import { isLivePictureType } from '../../engine/lib/live-source';
 import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
@@ -244,6 +247,7 @@ function NodePanel({ id }: { id: string }) {
       {node.type === GROUP_TYPE ? <GroupPanel node={node} /> : node.type === 'cache' ? <BakePanel node={node} /> : node.type === 'depth-ai' ? <DepthAiPanel node={node} /> : node.type === 'splat-train' ? <SplatTrainPanel node={node} /> : node.type === 'datamosh-real' ? <DatamoshPanel node={node} /> : node.type === 'stabilize' ? <StabilizePanel node={node} /> : node.type === 'style-transfer-ai' ? <StyleAiPanel node={node} /> : def.process ? <ProcessPanel node={node} /> : null}
       {hasSessionParam(def) && !missing.length && node.params.device !== 'this' && <PhonePanel node={node} />}
       {(node.type === 'phone-motion' || node.type === 'ar-camera') && !missing.length && <PhoneMotionPanel node={node} />}
+      {node.type === 'camera' && <CameraObjects node={node} title="Objects of this camera" empty="No 3D objects yet. Add a 3D Object and tick it here: a camera only affects the objects wired to it." />}
       {node.type === 'world-ar' && <WorldArPanel node={node} fullId={fullId} />}
       {node.type === 'scan-3d' && <ScanPanel node={node} />}
       {node.type === 'marker-camera' && <MarkerCameraPanel node={node} />}
@@ -274,6 +278,7 @@ function NodePanel({ id }: { id: string }) {
         </div>
       ))}
       <ObjectPhysics node={node} />
+      <ObjectAr node={node} />
       <TransformReset node={node} def={def} wired={wired} />
       <ParamGroups
         node={node}
@@ -335,6 +340,9 @@ function canResetParam(p: ParamDef): boolean {
   return p.type !== 'assets' && p.type !== 'json' && !(p.type === 'string' && (p.kind === 'code' || p.multiline));
 }
 
+/** The light settings the room light overrides while it is in control. */
+const OVERRIDDEN = ['lightAzimuth', 'lightElevation', 'ambient'];
+
 function ParamGroups({
   node,
   def,
@@ -353,6 +361,11 @@ function ParamGroups({
   onDisconnect: (port: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const { ed } = useApp();
+  const level = useEd((s) => s.level);
+  // the room light (from the AR camera) is in control of the light: the node's own light settings are overridden, said and greyed out
+  const room = roomLightFor(level, ed.registry, node.id) === 'on';
+  const roomAr = cameraSource(level, ed.registry, node.id).camera?.type === 'world-ar';
   const groups = useMemo(() => {
     const out: { name: string; items: [string, ParamDef][] }[] = [];
     const kindMap = hasKind(def) ? KIND_GROUPS[String(node.params.kind ?? 'auto')] : undefined;
@@ -403,14 +416,16 @@ function ParamGroups({
           )}
           {!isClosed(g.name) &&
             g.items.map(([key, p]) => {
+              if (room && key === 'lightFromCamera') return null; // the note above the light settings carries this switch
               // a bundle socket sits right above its first setting; a vector wire on it also drives the settings without a wire of their own
               const starts = bundles.find((b) => b.members[0] === key);
               const via = wired.has(key) ? undefined : bundles.find((b) => wired.has(b.port) && b.members.includes(key)) ?? (motion && wired.has(motion.port) && motion.members.includes(key) ? motion : undefined);
               return (
                 <Fragment key={key}>
+                  {room && g.name === 'Lighting' && key === g.items.find(([k]) => k !== 'lightFromCamera')?.[0] && <RoomLightNote node={node} ar={roomAr} />}
                   {motion && motion.members[0] === key && <BundleRow node={node} bundle={motion} kind="motion" isWired={wired.has(motion.port)} wiredFrom={label(motion.port)} onSelectSource={() => onSelectSource(motion.port)} onDisconnect={() => onDisconnect(motion.port)} />}
                   {starts && <BundleRow node={node} bundle={starts} isWired={wired.has(starts.port)} wiredFrom={label(starts.port)} onSelectSource={() => onSelectSource(starts.port)} onDisconnect={() => onDisconnect(starts.port)} />}
-                  <ParamControl node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} via={via} wiredFrom={label(via ? via.port : key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(via ? via.port : key)} onDisconnect={() => onDisconnect(key)} />
+                  {room && OVERRIDDEN.includes(key) ? <div className="rs-insp__overridden" aria-disabled="true" title="The room light is in control: switch it off above to use this."><ParamControl node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} via={via} wiredFrom={label(via ? via.port : key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(via ? via.port : key)} onDisconnect={() => onDisconnect(key)} /></div> : <ParamControl node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} via={via} wiredFrom={label(via ? via.port : key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(via ? via.port : key)} onDisconnect={() => onDisconnect(key)} />}
                 </Fragment>
               );
             })}

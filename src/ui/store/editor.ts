@@ -2,6 +2,7 @@
  * The editor store: one document, selection, view and UI prefs, with undo/redo as a stack of
  * GraphDoc references (the pure helpers in engine/graph share structure, so this is cheap).
  */
+import { setAllFor, setCameraFor, showInAr } from '../../engine/lib/ar-setup';
 import { driveWires } from '../../engine/lib/physics/wiring';
 import { addObjectTo, physicsOf, makePhysical, matchArFloor, wireArCamera, removeBodyAt, removeBodyOf, startHere, tidyWiring, updateBody } from '../../engine/lib/physics/objects';
 import type { BodySpec } from '../../engine/lib/physics/types';
@@ -1200,6 +1201,42 @@ export class Editor {
       this.toast(err instanceof Error ? err.message : 'Could not set up physics.', 'error');
     }
     return physId;
+  }
+
+  /**
+   * "Show in AR" on one or several 3D objects, ONE undo step: a World AR Camera when the level has none (or the one named), the objects
+   * wired to it with real Camera wires, their Ground shadow on, and the first object is the one the viewer shows (what the AR view puts
+   * in the room). Returns the camera's id.
+   */
+  showInAr(objIds: string | readonly string[], camId?: string | null): string | null {
+    const ids = typeof objIds === 'string' ? [objIds] : objIds;
+    let arId: string | null = null;
+    try {
+      this.editLevel((g) => {
+        const r = showInAr(g, this.registry, ids, camId);
+        arId = r.arId;
+        return r.graph;
+      });
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : 'Could not set up AR.', 'error');
+      return null;
+    }
+    this.setViewed(this.fullId(ids[0]));
+    return arId;
+  }
+
+  /** Give these nodes a camera (null: their built-in one): real Camera wires, replacing the old ones, ONE undo step. */
+  setCameraOf(objIds: readonly string[], camId: string | null): void {
+    try {
+      this.editLevel((g) => setCameraFor(g, this.registry, objIds, camId));
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : 'Could not wire that.', 'error');
+    }
+  }
+
+  /** The "All" / "None" buttons of a camera's list of objects. */
+  setCameraAll(camId: string, on: boolean): void {
+    this.editLevel((g) => setAllFor(g, this.registry, camId, on));
   }
 
   /**
