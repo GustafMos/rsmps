@@ -2,6 +2,7 @@
  * The editor store: one document, selection, view and UI prefs, with undo/redo as a stack of
  * GraphDoc references (the pure helpers in engine/graph share structure, so this is cheap).
  */
+import { driveWires } from '../../engine/lib/physics/wiring';
 import { createStore, type Store } from './createStore';
 import { withProcessResult } from '../../engine/process';
 import {
@@ -1130,6 +1131,16 @@ export class Editor {
     if (res.notes.length) void this.ask({ title: 'Converted to an SDF Scene', text: `${SDF_CONVERT_HINT} Some things could not be carried over exactly:`, items: res.notes, ok: 'OK', cancel: 'Close' });
     else this.toast(`Converted to an SDF Scene. ${SDF_CONVERT_HINT}`, 'ok');
     return res.id;
+  }
+
+  /** Physics node: wire body `index` to a 3D node (Position -> Move XYZ, Rotation -> Rotate XYZ) as ONE undo step. */
+  driveWithBody(physId: string, index: number, targetId: string): void {
+    try {
+      this.editLevel((g) => driveWires(g, this.registry, physId, index, targetId));
+      this.toast('Wired. The node now follows the body: press play.', 'ok');
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : 'Could not wire that.', 'error');
+    }
   }
 
   /** Create a source node holding imported assets (all of one kind) at a position. */

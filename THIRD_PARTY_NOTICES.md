@@ -12,6 +12,7 @@ PixelArtify Studio's own source is MIT licensed (see `LICENSE`). The project dep
 | fflate | ^0.8.2 | MIT | <https://github.com/101arrowz/fflate> |
 | sharp | ^0.35.5 | Apache-2.0 | <https://github.com/lovell/sharp> |
 | onnxruntime-web | 1.31.1 | MIT | <https://github.com/microsoft/onnxruntime> |
+| @dimforge/rapier3d-deterministic-compat | ^0.21.0 | Apache-2.0 | <https://github.com/dimforge/rapier.js> |
 
 `sharp` bundles libvips, which is LGPL-2.1-or-later. See the sharp and libvips distributions for their notices and source links.
 
