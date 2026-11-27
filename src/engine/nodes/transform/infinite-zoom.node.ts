@@ -1,6 +1,8 @@
 import { defineNode } from '../../define';
+import type { ImageValue } from '../../types';
 import { COPY_COMMON_WGSL, rad } from '../../lib/copy-wgsl';
 import { genPaletteTexture } from '../../lib/gen-common';
+import { pullSliceFrames, SLICE_GROUP } from '../../lib/time-slices';
 import { closeSequence, closingDrift, closingTurns, snapNote, stretchedStep, stretchedTurns, wholeCycles } from '../../lib/loop-snap';
 
 /**
@@ -17,8 +19,26 @@ import { closeSequence, closingDrift, closingTurns, snapNote, stretchedStep, str
  * the palette ("Snap travel"), or the palette is stretched so its period divides the travel ("Stretch palette"). The hue step closes the
  * same way. With Loop off nothing changes.
  * One fragment pass, a bounded loop over levels, front to back, stops when opaque.
+ *
+ * Scale up to 1: the layer map is computed without the fixed point so it stays finite when the copies are the same size. With
+ * eps = 1 - q, layer depth kd sits at p + G (p - c - q (p - h)), G = (q^-kd - 1) / eps (a complex number). G has the finite limit kd as q
+ * tends to 1 (a pure shift by (c - h) per level), and below |eps| = 0.002 a three-term series is used so there is no cancellation.
+ *
+ * Delay per level: copy kd shows the input as it was round(kd * delay) frames ago (the current picture for kd <= 0). The older pictures are
+ * pulled like Slit Scan does (one pull per distinct frame, none when the input is still), and since the shader has no texture arrays the
+ * layers are drawn in groups of SLICE_GROUP distinct frames, one pass per group, each group composited behind the previous one. Layers are
+ * ordered front to back by depth and a deeper layer is never newer, so the groups keep the order. Stored frames are capped (MAX_HISTORY).
  */
 const MAX_LEVELS = 64;
+/** Most frames of history a delayed zoom may reach back: levels x delay is cut down to this. */
+export const MAX_HISTORY = 64;
+
+/** Frames per level actually used: the typed delay, cut so that the deepest copy reaches back at most MAX_HISTORY frames. */
+export function effectiveDelay(delay: number, levels: number): number {
+  const d = Math.max(0, Math.round(delay));
+  if (d === 0) return 0;
+  return Math.max(1, Math.min(d, Math.floor(MAX_HISTORY / Math.max(1, levels + 1))));
+}
 
 export interface ZoomLoop {
   /** Levels travelled per loop (signed; a whole number with Loop on). */
@@ -76,21 +96,46 @@ export function zoomLoop(p: { speed: number; recolor: string; palette: unknown[]
   return { travel, idxStep, palDrift, hueTurns, hueDrift, notes, loop: true };
 }
 
-const wgsl = (hasInner: boolean, usePal: boolean) => /* wgsl */ `
+const SLOT_NEAREST = Array.from({ length: SLICE_GROUP }, (_, j) => {
+  const v = j < 4 ? `u.mv0.${'xyzw'[j]}` : `u.mv1.${'xyzw'[j - 4]}`;
+  return `  { let d = abs(${v} - m); if (d < bd) { bd = d; best = ${j}; } }`;
+}).join('\n');
+
+const wgsl = (hasInner: boolean, usePal: boolean, delayed: boolean, hasAcc: boolean) => /* wgsl */ `
 ${COPY_COMMON_WGSL}
 fn palAtK(i: i32) -> vec3f { ${usePal ? 'return textureLoad(pal, vec2i(pmodi(i, i32(u.palN + 0.5)), 0), 0).rgb;' : 'return vec3f(1.0);'} }
 fn palFlow(x: f32) -> vec3f {
   let i = i32(floor(x));
   return mix(palAtK(i), palAtK(i + 1), smoothstep(0.0, 1.0, fract(x)));
 }
+fn cmul(a: vec2f, b: vec2f) -> vec2f { return vec2f(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+fn cdiv(a: vec2f, b: vec2f) -> vec2f { return cmul(a, vec2f(b.x, -b.y)) / max(dot(b, b), 1e-20); }
+/** G(kd) = (q^-kd - 1) / (1 - q): finite for q = 1 (then kd). */
+fn gAt(kd: f32, sc: f32) -> vec2f {
+  if (length(u.eps) < 0.002) {
+    let e = u.eps;
+    return vec2f(kd, 0.0) + e * (kd * (kd + 1.0) * 0.5) + cmul(e, e) * (kd * (kd + 1.0) * (kd + 2.0) / 6.0);
+  }
+  let th = -u.rho * kd;
+  return cdiv(sc * vec2f(cos(th), sin(th)) - vec2f(1.0, 0.0), u.eps);
+}
+${delayed ? `fn sampleSlot(i: i32, uv: vec2f, tpp: f32) -> vec4f {
+  switch (i) {
+${Array.from({ length: SLICE_GROUP }, (_, k) => `    case ${k}: { return sampleCopy(s${k}, uv, tpp); }`).join('\n')}
+    default: { return sampleCopy(s0, uv, tpp); }
+  }
+}` : ''}
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
-  var w = px - u.fixedPt;
+  var pp = px;
   if (u.spiral != 0.0) {
+    var w = px - u.fixedPt;
     let ang = u.spiral * TAU * log(max(length(w), 0.001)) / u.lnS;
     let cs = cos(ang); let sn = sin(ang);
     w = vec2f(w.x * cs - w.y * sn, w.x * sn + w.y * cs);
+    pp = u.fixedPt + w;
   }
-  var acc = vec4f(0.0);
+  let bq = (pp - u.ctr) - cmul(u.qv, pp - u.hmid);
+  var acc = ${hasAcc ? 'textureSampleLevel(acc, smpNearest, uv, 0.0)' : 'vec4f(0.0)'};
   let lv = u.levels;
   let hS = u.srcSize * 0.5;
   // The visible layers are those with depth kd = k - t in (-1, levels + 1): k runs from floor(t) up to levels + 1 + t, so a rising (negative)
@@ -103,15 +148,16 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     if (kd < 0.0) { wt = wt * smoothstep(0.0, 1.0, saturate((kd + 1.0) / max(u.dissolve, 0.001))); }
     if (wt <= 0.0) { continue; }
     let sc = exp(-kd * u.lnS);
-    let th = -u.rho * kd;
-    let cs = cos(th); let sn = sin(th);
-    let ws = w * sc;
-    let pk = u.fixedPt + vec2f(ws.x * cs - ws.y * sn, ws.x * sn + ws.y * cs);
+    ${delayed ? `let m = floor(max(kd, 0.0) * u.delayF + 0.5);
+    if (m < u.mLo || m >= u.mHi) { continue; }
+    var best = 0; var bd = 1e9;
+${SLOT_NEAREST}` : ''}
+    let pk = pp + cmul(gAt(kd, sc), bq);
     let e = (hS - abs(pk - hS)) / sc;
     let cov = saturate(e.x + 0.5) * saturate(e.y + 0.5);
     if (cov <= 0.0) { continue; }
     let suv = pk / u.srcSize;
-    var t = unpremul(sampleCopy(src, suv, sc));
+    var t = unpremul(${delayed ? 'sampleSlot(best, suv, sc)' : 'sampleCopy(src, suv, sc)'});
     ${hasInner ? 'if (kd > 0.0) { let ti = unpremul(sampleCopy(inner, suv, sc)); t = mix(t, ti, saturate(kd)); }' : ''}
     let idx = select(kd, fk, u.attached > 0.5);
     var rgb = t.rgb;
@@ -136,13 +182,25 @@ export default defineNode({
   description:
     'The picture contains a smaller copy of itself, which contains a smaller copy, forever, and the camera falls in (the Droste effect). Put the center on a hole of your logo, set how small each copy is, and let it fall; every level can take the next color of a palette. Loops seamlessly when it travels a whole number of levels.',
   keywords: ['droste', 'tunnel', 'recursive', 'recursion', 'fall into', 'zoom loop', 'fractal', 'infinite', 'mise en abyme', 'zoom', 'logo', 'spiral', 'trippy', 'feedback'],
+  guide: {
+    does: 'Puts smaller copies of the picture inside the picture, over and over. With a delay, each copy shows an earlier moment, so a moving picture leaves a receding stack of its past: the sound waterfall of an old oscilloscope.',
+    steps: [
+      'Wire a picture in. For a sound waterfall use an Oscilloscope with a see-through background.',
+      'Set Copy scale a little under 1 and move Next center above the middle, so each copy sits further back and higher up.',
+      'Turn Delay per level up to 1 or 2 so each copy shows an earlier moment.',
+      'Raise Levels shown for a taller stack, and Fade per level to let the old lines sink into the dark.',
+    ],
+    needs: [{ input: 'image', hint: 'The picture to repeat. For the waterfall, an Oscilloscope with its background made see-through.' }],
+    seeAlso: ['oscilloscope', 'echo', 'feedback'],
+  },
   inputs: { image: { type: 'image', required: true, label: 'Image' }, inner: { type: 'image', label: 'Inner picture' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {
     centre: { type: 'vec2', default: [0.5, 0.5], unit: 'norm', min: -1, max: 2, step: 0.005, label: 'Next center', hint: 'Position of the nested copy’s middle, as a fraction of the picture. Put it on a hole or counter of your logo.' },
-    scale: { type: 'number', default: 0.35, min: 0.02, max: 0.95, step: 0.005, label: 'Copy scale', hint: 'Fraction of the one before. For a perfectly clean tunnel the copy should fit inside the hole it sits in.' },
+    scale: { type: 'number', default: 0.35, min: 0.02, max: 1, step: 0.005, label: 'Copy scale', hint: 'Fraction of the one before. A clean tunnel needs the copy to fit inside its hole. 1 = same size, only shifted: a flat stack. A little under 1 = the stack recedes in perspective.' },
     rotatePerLevel: { type: 'number', default: 0, min: -180, max: 180, step: 0.5, unit: 'deg', label: 'Turn per level', hint: 'Each nested copy is turned by this much (clockwise).' },
     levels: { type: 'number', default: 8, min: 0, max: MAX_LEVELS, softMax: 24, step: 1, integer: true, label: 'Levels shown', hint: 'How many nested copies are visible. More only costs time where the copies are still large and see-through.' },
+    delay: { type: 'number', default: 0, min: 0, max: 30, step: 1, integer: true, label: 'Delay per level', hint: 'Each copy shows the picture from this many frames earlier than the one in front, so a moving picture leaves a receding trail of its past. 0 = all copies show the same moment. At most 64 frames back in total, so a tall stack with a big delay is cut down.' },
     speed: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Levels per loop', hint: 'Whole levels traveled each loop; 0 = still. Positive falls in.' },
     spiral: { type: 'number', default: 0, min: -4, max: 4, step: 0.05, label: 'Spiral twist', hint: 'Twists the picture continuously with depth (log-polar). 1 = a full extra turn per level.' },
     dissolve: { type: 'number', default: 0.25, min: 0.02, max: 1, step: 0.01, label: 'Outer dissolve', hint: 'How much of a level’s travel the outermost copy takes to dissolve as it leaves the frame (keeps the loop clean for any picture).', group: 'Depth' },
@@ -188,59 +246,118 @@ export default defineNode({
   },
   summary: (p, _wired, clock) => {
     const z = zoomLoop(p, clock);
-    return `${p.levels} levels · ×${p.scale}${z.travel ? ` · ${z.travel > 0 ? 'falling' : 'rising'} ${Math.abs(z.travel)}/loop` : ''}${z.notes.length ? ` · ${z.notes.join(', ')}` : ''}`;
+    const dl = effectiveDelay(p.delay, p.levels);
+    return `${p.levels} levels · ×${p.scale}${dl ? ` · ${dl} frame${dl === 1 ? '' : 's'} older per level${dl < p.delay ? ' (cut to fit 64)' : ''}` : ''}${z.travel ? ` · ${z.travel > 0 ? 'falling' : 'rising'} ${Math.abs(z.travel)}/loop` : ''}${z.notes.length ? ` · ${z.notes.join(', ')}` : ''}`;
   },
-  render(ctx) {
+  async render(ctx) {
     const p = ctx.params;
     const src = ctx.in.image;
     const inner = ctx.in.inner;
     const S: [number, number] = [src.width, src.height];
-    const sigma = Math.min(0.97, Math.max(0.02, p.scale));
+    const sigma = Math.min(1, Math.max(0.02, p.scale));
     const rho = rad(p.rotatePerLevel);
     const q: [number, number] = [sigma * Math.cos(rho), sigma * Math.sin(rho)];
     const h: [number, number] = [S[0] / 2, S[1] / 2];
     const c: [number, number] = [p.centre[0] * S[0], p.centre[1] * S[1]];
-    // f = (c - q h) / (1 - q), complex
+    // eps = 1 - q. The fixed point f = (c - q h) / eps is only needed by the twist, which is ignored when the copies are nearly the same size.
+    const eps: [number, number] = [1 - q[0], -q[1]];
+    const dd = eps[0] * eps[0] + eps[1] * eps[1];
     const num: [number, number] = [c[0] - (q[0] * h[0] - q[1] * h[1]), c[1] - (q[0] * h[1] + q[1] * h[0])];
-    const den: [number, number] = [1 - q[0], -q[1]];
-    const dd = den[0] * den[0] + den[1] * den[1];
-    const fixedPt: [number, number] = [(num[0] * den[0] + num[1] * den[1]) / dd, (num[1] * den[0] - num[0] * den[1]) / dd];
+    const fixedPt: [number, number] = dd > 1e-12 ? [(num[0] * eps[0] + num[1] * eps[1]) / dd, (num[1] * eps[0] - num[0] * eps[1]) / dd] : [0, 0];
+    const lnS = Math.log(sigma);
+    const fade01 = (x: number) => {
+      const u = Math.min(1, Math.max(0, (x - 0.01) / 0.03));
+      return u * u * (3 - 2 * u);
+    };
+    const spiral = p.spiral * fade01(Math.abs(lnS));
     const usePal = p.recolor !== 'off';
     const pal = usePal ? genPaletteTexture(ctx.gpu, p.palette as [number, number, number][]) : null;
     const z = p.speed !== 0 ? zoomLoop(p, { loop: ctx.time.loop }) : zoomLoop(p, undefined);
     const phase = p.speed !== 0 ? ctx.time.phase : 0;
     const t = z.travel !== 0 ? z.travel * phase : 0;
-    const image = ctx.gpu.pass({
-      label: 'infinite-zoom',
-      size: src,
-      textures: { src, inner: inner ?? null, pal: pal ? pal.texture : null },
-      uniforms: {
-        srcSize: S,
-        fixedPt,
-        lnS: Math.log(sigma),
-        rho,
-        t,
-        // Loop on: draw every visible depth (also the deep end of a falling travel and the outer layers of a rising one), which is what lets
-        // the last frame be followed by the first. Loop off keeps the original range.
-        k0: z.loop ? Math.floor(t) - 1 : 0,
-        kEnd: z.loop ? p.levels + 1 + t : p.levels + 1,
-        levels: p.levels,
-        spiral: p.spiral,
-        dissolve: p.dissolve,
-        fade: p.fade,
-        recolor: p.recolor === 'fill' ? 2 : p.recolor === 'multiply' ? 1 : 0,
-        palN: pal ? pal.count : 1,
-        attached: p.attached,
-        hueStep: p.hueStep / 360,
-        hueTurns: z.hueTurns,
-        hueDrift: z.hueDrift,
-        idxStep: z.idxStep,
-        palDrift: z.palDrift,
-        ph: phase,
-        smoothTex: p.filter === 'smooth',
-      },
-      wgsl: wgsl(!!inner, usePal),
-    });
-    return { image };
+    const k0 = z.loop ? Math.floor(t) - 1 : 0;
+    const kEnd = z.loop ? p.levels + 1 + t : p.levels + 1;
+    const base = {
+      srcSize: S,
+      fixedPt,
+      lnS,
+      rho,
+      qv: q,
+      eps,
+      ctr: c,
+      hmid: h,
+      t,
+      // Loop on: draw every visible depth (also the deep end of a falling travel and the outer layers of a rising one), which is what lets
+      // the last frame be followed by the first. Loop off keeps the original range.
+      k0,
+      kEnd,
+      levels: p.levels,
+      spiral,
+      dissolve: p.dissolve,
+      fade: p.fade,
+      recolor: p.recolor === 'fill' ? 2 : p.recolor === 'multiply' ? 1 : 0,
+      palN: pal ? pal.count : 1,
+      attached: p.attached,
+      hueStep: p.hueStep / 360,
+      hueTurns: z.hueTurns,
+      hueDrift: z.hueDrift,
+      idxStep: z.idxStep,
+      palDrift: z.palDrift,
+      ph: phase,
+      smoothTex: p.filter === 'smooth',
+    };
+    const delay = effectiveDelay(p.delay, p.levels);
+    if (delay === 0) {
+      const image = ctx.gpu.pass({
+        label: 'infinite-zoom',
+        size: src,
+        textures: { src, inner: inner ?? null, pal: pal ? pal.texture : null },
+        uniforms: base,
+        wgsl: wgsl(!!inner, usePal, false, false),
+      });
+      return { image };
+    }
+    // Which past frames are needed: the distinct m = round(depth * delay) over the layers that can be seen.
+    const need = new Set<number>([0]);
+    for (let n = 0; n < MAX_LEVELS + 4; n++) {
+      const fk = k0 + n;
+      if (fk > kEnd) break;
+      const kd = fk - t;
+      if (p.levels + 1 - kd <= 0 || kd <= -1) continue;
+      need.add(Math.floor(Math.max(kd, 0) * delay + 0.5));
+    }
+    const ms = [...need].sort((a, b) => a - b);
+    const frames = await pullSliceFrames(ctx as never, 'image', ms.map((m) => -m));
+    const groups = Math.ceil(ms.length / SLICE_GROUP);
+    let acc: ImageValue | null = null;
+    for (let g = 0; g < groups; g++) {
+      const cnt = Math.min(SLICE_GROUP, ms.length - g * SLICE_GROUP);
+      const textures: Parameters<typeof ctx.gpu.pass>[0]['textures'] = { acc, inner: inner ?? null, pal: pal ? pal.texture : null };
+      const mv = new Array<number>(SLICE_GROUP).fill(1e6);
+      for (let j = 0; j < SLICE_GROUP; j++) {
+        const idx = g * SLICE_GROUP + Math.min(j, cnt - 1);
+        textures[`s${j}`] = frames[idx];
+        if (j < cnt) mv[j] = ms[idx];
+      }
+      const last = g === groups - 1;
+      const next: ImageValue = ctx.gpu.pass({
+        label: 'infinite-zoom',
+        size: src,
+        format: last ? undefined : 'rgba16float',
+        textures,
+        uniforms: {
+          ...base,
+          delayF: delay,
+          mLo: g === 0 ? -1e9 : ms[g * SLICE_GROUP],
+          mHi: last ? 1e9 : ms[(g + 1) * SLICE_GROUP],
+          mv0: mv.slice(0, 4),
+          mv1: mv.slice(4),
+        },
+        wgsl: wgsl(!!inner, usePal, true, !!acc),
+      });
+      if (acc) ctx.gpu.recycle(acc);
+      acc = next;
+    }
+    return { image: acc as ImageValue };
   },
 });

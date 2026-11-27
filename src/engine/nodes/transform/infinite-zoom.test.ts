@@ -1,7 +1,55 @@
 import { describe, expect, it } from 'vitest';
 import { seamRatio } from '../../lib/copy-testutil';
 import { LOOP_SEAM_OK, harness } from '../../testing';
-import zoom, { zoomLoop } from './infinite-zoom.node';
+import { defineNode } from '../../define';
+import { addNode, connect, createGraph } from '../../graph';
+import zoom, { effectiveDelay, zoomLoop } from './infinite-zoom.node';
+
+/** A full-height bar on a see-through background that moves 2 px per frame: frame f has its bar at x = 2f (mod 32). */
+const barSource = defineNode({
+  id: 'zoom-test-bar',
+  title: 'bar',
+  category: 'input',
+  description: 'test source',
+  inputs: {},
+  outputs: { image: { type: 'image' } },
+  params: {},
+  render(ctx) {
+    return {
+      image: ctx.gpu.pass({
+        size: { width: 32, height: 32, unit: 1 },
+        uniforms: { x: (ctx.time.frame * 2) % 32 },
+        wgsl: /* wgsl */ `
+fn fx(uv: vec2f, px: vec2f) -> vec4f {
+  return select(vec4f(0.0), vec4f(1.0), abs(px.x - (u.x + 0.5)) < 0.6);
+}`,
+      }),
+    };
+  },
+});
+
+async function barZoom(params: Record<string, unknown>, seconds = 1, loop = true) {
+  const t = await harness([barSource]);
+  let g = createGraph('zoom-delay');
+  g.project = { ...g.project, fps: 10, duration: 2, loop, width: 32, height: 32 };
+  const s = addNode(g, t.registry, 'zoom-test-bar');
+  const n = addNode(s.graph, t.registry, 'infinite-zoom', { x: 0, y: 0 }, params);
+  g = connect(n.graph, t.registry, { node: s.node.id, port: 'image' }, { node: n.node.id, port: 'image' });
+  return t.pixels((await t.evalGraph(g, n.node.id, { seconds })) as never);
+}
+/** x positions in row y with some opacity, as the bar centres (groups of adjacent pixels). */
+function barsInRow(px: { at(x: number, y: number): number[]; width: number }, y: number): number[] {
+  const out: number[] = [];
+  let run: number[] = [];
+  for (let x = 0; x <= px.width; x++) {
+    if (x < px.width && px.at(x, y)[3] > 100) run.push(x);
+    else if (run.length) {
+      out.push((run[0] + run[run.length - 1]) / 2);
+      run = [];
+    }
+  }
+  return out;
+}
 
 /** A ring logo: an opaque border 6 px wide around a transparent hole (the next copy fits inside). */
 const ring = (t: Awaited<ReturnType<typeof harness>>, size = 32, border = 6) =>
@@ -163,5 +211,76 @@ describe('infinite-zoom', () => {
     const s3 = t.gpu.stats().objects;
     expect(s3.submits - s2.submits).toBe(1);
     expect(s3.pipelinesCreated - s2.pipelinesCreated).toBe(0);
+  });
+
+  it('Delay per level: a deeper copy shows an older frame, and 0 changes nothing', async () => {
+    // frame 10: the bar is at x = 20. Scale 1, centre 8 px up: copy k sits 8 k px higher, so row 4 holds copies 0..3
+    const params = { scale: 1, centre: [0.5, 0.25], levels: 4, dissolve: 0.02 };
+    const still = barsInRow(await barZoom({ ...params, delay: 0 }), 4);
+    expect(still).toEqual([20]);
+    const px = await barZoom({ ...params, delay: 2 });
+    expect(barsInRow(px, 4)).toEqual([8, 12, 16, 20]); // frames 4, 6, 8, 10
+    // row 28 is only reached by the newest copy
+    expect(barsInRow(px, 28)).toEqual([20]);
+    // delay 1: one frame older per copy
+    expect(barsInRow(await barZoom({ ...params, delay: 1 }), 4)).toEqual([14, 16, 18, 20]);
+  });
+
+  it('with no history yet the oldest frame is used', async () => {
+    // at frame 1 (bar x = 2) copies reaching back past frame 0 show frame 0 (bar x = 0)
+    const px = await barZoom({ scale: 1, centre: [0.5, 0.25], levels: 4, delay: 2, dissolve: 0.02 }, 0.1, false);
+    expect(barsInRow(px, 4)).toEqual([0, 2]);
+  });
+
+  it('a still input gives the same picture at any delay, through every group of frames', async () => {
+    const t = await harness();
+    const src = ring(t);
+    const params = { scale: 0.8, centre: [0.5, 0.4], levels: 20, fade: 0.05, recolor: 'fill', palette: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], spiral: 0.3 };
+    const a = await t.pixels((await t.run('infinite-zoom', { ...params, delay: 0 }, { image: src })).image as never);
+    const b = await t.pixels((await t.run('infinite-zoom', { ...params, delay: 2 }, { image: src })).image as never);
+    let worst = 0;
+    for (let i = 0; i < a.data.length; i++) worst = Math.max(worst, Math.abs(a.data[i] - b.data[i]));
+    expect(worst).toBeLessThanOrEqual(2);
+  });
+
+  it('caps the history and says so in the summary', () => {
+    expect(effectiveDelay(0, 20)).toBe(0);
+    expect(effectiveDelay(2, 16)).toBe(2);
+    expect(effectiveDelay(30, 15)).toBe(4); // 16 x 4 = 64
+    expect(effectiveDelay(5, 100)).toBe(1);
+    const p = { ...Object.fromEntries(Object.entries(zoom.params).map(([k, d]) => [k, (d as { default: unknown }).default])), levels: 16, delay: 2 } as never;
+    expect(zoom.summary!(p)).toContain('2 frames older per level');
+    expect(zoom.summary!({ ...(p as object), delay: 0 } as never)).not.toContain('older');
+  });
+
+  it('copy scale 1 shifts each copy by Next center minus the middle, and stays finite around it', async () => {
+    const t = await harness();
+    const src = t.fromFn(32, 32, (x, y) => (x >= 14 && x < 18 && y >= 14 && y < 18 ? [255, 255, 255, 255] : [0, 0, 0, 0]));
+    const run = async (scale: number, extra: Record<string, unknown> = {}) =>
+      t.pixels((await t.run('infinite-zoom', { scale, centre: [0.5, 0.25], levels: 3, dissolve: 0.02, ...extra }, { image: src })).image as never);
+    const one = await run(1);
+    // the square sits at y 14..17; copies 1..3 are 8, 16, 24 px higher
+    expect(one.at(16, 15)[3]).toBe(255);
+    expect(one.at(16, 7)[3]).toBe(255);
+    expect(one.at(16, 23)[3]).toBe(0);
+    expect(one.at(10, 7)[3]).toBe(0);
+    for (const v of one.data) expect(Number.isFinite(v)).toBe(true);
+    // twist is ignored at 1 and nothing blows up
+    const twisted = await run(1, { spiral: 2, rotatePerLevel: 0 });
+    expect(Array.from(twisted.data)).toEqual(Array.from(one.data));
+    // the transition near 1 is smooth: just above and just below the series switch look alike, and both look like scale 1
+    const mean = (a: { data: ArrayLike<number> }, b: { data: ArrayLike<number> }) => {
+      let d = 0;
+      for (let i = 0; i < a.data.length; i++) d += Math.abs(a.data[i] - b.data[i]);
+      return d / a.data.length;
+    };
+    const lo = await run(0.9979);
+    const hi = await run(0.9981);
+    expect(mean(lo, hi)).toBeLessThan(1);
+    expect(mean(hi, one)).toBeLessThan(3);
+    expect(mean(await run(0.9995), one)).toBeLessThan(1);
+    // a turn at scale 1 is a pure rotation about a far point: still finite
+    const turned = await run(1, { rotatePerLevel: 10, spiral: 1 });
+    for (const v of turned.data) expect(Number.isFinite(v)).toBe(true);
   });
 });

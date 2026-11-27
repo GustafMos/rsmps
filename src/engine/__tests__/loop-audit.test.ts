@@ -229,6 +229,7 @@ export const ROWS: Row[] = [
   { id: 'feedback', note: 'memory 24 (does not divide)', params: { memory: 24, decay: 0.9, zoom: 1.03, rotate: 3 }, input: 'mov', exact: true },
   { id: 'feedback-trail', note: 'time echoes 8 spacing 3', params: { mode: 'time', echoes: 8, spacing: 3, decay: 0.8 }, input: 'mov', exact: true },
   { id: 'frame-blend', note: 'radius 3', params: { radius: 3 }, input: 'mov', exact: true },
+  { id: 'infinite-zoom', note: 'scale 1 waterfall, delay 2 on a moving picture', params: { scale: 1, centre: [0.5, 0.35], levels: 6, delay: 2 }, input: 'mov', exact: true },
   { id: 'rgb-delay', note: 'red -5 blue 7 frames', params: { redFrames: -5, greenFrames: 0, blueFrames: 7 }, input: 'mov', exact: true },
   { id: 'slit-scan', note: 'range 24 slices 7', params: { direction: 'columns', range: 24, slices: 7 }, input: 'mov', exact: true },
   { id: 'time-displace', note: 'range 1.3 s slices 7', params: { range: 1.3, slices: 7, direction: 'past' }, input: 'mov', exact: true, extra: (t) => ({ map: t.fromFn(SIZE, SIZE, (x) => [x * 8, x * 8, x * 8, 255]) }) },
