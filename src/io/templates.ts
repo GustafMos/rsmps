@@ -310,6 +310,25 @@ export const TEMPLATES: Template[] = [
     ),
   }),
 
+  make({
+    id: 'scope-waterfall',
+    title: 'Scope Waterfall',
+    group: 'Audio-reactive',
+    description: 'A glowing sound line with its past stacked behind it, like a ridge-line album cover. Swap the Tone Generator for your sound.',
+    graph: build(
+      'Scope Waterfall',
+      [
+        { id: 'tone', type: 'oscillator', params: { wave: 'triangle', frequency: 180 }, label: 'Replace with your sound' },
+        { id: 'scope', type: 'oscilloscope', params: { background: [0, 0, 0, 0], gain: -10, window: 30, thickness: 3, glow: 0.8 } },
+        { id: 'stack', type: 'infinite-zoom', params: { scale: 0.92, centre: [0.5, 0.465], levels: 16, delay: 2, fade: 0.05, hueStep: 4, dissolve: 0.05 } },
+        { id: 'bg', type: 'solid', params: { color: [0.01, 0.01, 0.03, 1] } },
+        { id: 'comp', type: 'merge', params: { mode: 'normal' } },
+        OUT,
+      ],
+      ['tone.audio>scope.audio', 'scope>stack', 'bg>comp.background', 'stack>comp.foreground', 'comp>out'],
+    ),
+  }),
+
   /* ------------------------------------------ Color ------------------------------------------ */
   make({
     id: 'teal-orange',

@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.63.0] - 2026-11-27
+
+### Added
+- **Infinite Zoom: Delay per level.** Each nested copy can show the picture a few frames older than the copy in front of it, so a moving picture leaves its history stacked behind it. With an Oscilloscope as the input this gives the "waterfall" of scope lines. Works with live sound and cameras. At most 64 frames back in total; the summary says when the delay was cut to fit.
+- **Scope Waterfall template** (Audio-reactive): Oscilloscope into Infinite Zoom, ready to play; replace the tone with your own sound.
+
+### Changed
+- **Infinite Zoom: Copy scale can reach 1.** At 1 the copies keep their size and are only shifted towards "Next center", which gives a flat stack; the spiral twist fades out close to 1.
+
 ## [0.62.1] - 2026-11-27
 
 ### Changed
