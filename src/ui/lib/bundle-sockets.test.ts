@@ -81,9 +81,9 @@ describe('bundle sockets on the node', () => {
   it('all rows shown, or a vector wire being placed: every bundle socket is on the node', () => {
     const { b, def } = setup();
     const all = layoutNode({ ...b }, def, undefined, false, {}, view({ expanded: true }));
-    expect(names(all.rows)).toEqual(['io', 'size', '[pos@xyz]', 'posX', 'posY', 'posZ', '[rot@xyz]', 'rotX', 'rotY', 'rotZ', 'center', 'extra', 'more']);
+    expect(names(all.rows)).toEqual(['io', 'size', '[xform@motion]', '[pos@xyz]', 'posX', 'posY', 'posZ', '[rot@xyz]', 'rotX', 'rotY', 'rotZ', 'center', 'extra', 'more']);
     const placing = layoutNode({ ...b }, def, undefined, false, {}, view({ bundles: true }));
-    expect(names(placing.rows)).toEqual(['io', 'size', '[pos@xyz]', 'posX', 'posY', 'posZ', '[rot@xyz]', 'rotX', 'rotY', 'more']);
+    expect(names(placing.rows)).toEqual(['io', 'size', '[xform@motion]', '[pos@xyz]', 'posX', 'posY', 'posZ', '[rot@xyz]', 'rotX', 'rotY', 'more']);
     expect((all.rows.find((r) => r.kind === 'param' && r.key === 'center') as Extract<Row, { kind: 'param' }>).socket).toBe('vector');
   });
 

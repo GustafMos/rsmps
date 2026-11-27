@@ -293,7 +293,7 @@ export function createGestures(app: AppCtx) {
     for (const s of sockets) if (errorFor(s) && !mergeTarget(s)) s.dataset.dim = '1';
     cls('is-wiring', true);
     // a vector wire being dragged: the nodes show their bundle sockets (one socket for an X / Y / Z group) so one can be hit
-    showBundleSockets(fixed.side === 'out' && fixed.type === 'vector');
+    showBundleSockets(fixed.side === 'out' && (fixed.type === 'vector' || fixed.type === 'motion'));
     const path = ctl.pending;
     path?.setAttribute('class', `rs-wire rs-wire--${fixed.type} is-pending`);
     let target: HTMLElement | null = null;

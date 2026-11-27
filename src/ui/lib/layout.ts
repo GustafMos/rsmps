@@ -3,7 +3,7 @@
  * computed (not measured): wires can be drawn and updated without touching the DOM.
  */
 import { layerRowIndex } from './layerRows';
-import { paramBundle, paramBundles, paramSocketPorts, paramSocketType, type ParamBundle } from '../../engine/define';
+import { paramBundle, paramBundles, paramMotion, paramSocketPorts, paramSocketType, type ParamBundle } from '../../engine/define';
 import { paletteInputPort } from './sockets';
 import { defOf } from '../../engine/group';
 import { nodeViewStore } from '../store/nodeView';
@@ -70,6 +70,10 @@ export interface BodyView {
   wired: string[];
   /** Show the bundle sockets even when they are not wired (a vector wire is being placed). */
   bundles?: boolean;
+  /** Ports (`in:name` / `out:name`) with a wire: sockets a node hides while unused (`visibleIf` on an input or output) stay shown while wired. */
+  wiredIo?: string[];
+  /** Replacement row labels by `in:name` / `out:name` (what a wire drives, "Body 2 · box"). Presentation only. */
+  labels?: Record<string, string>;
 }
 export interface KindRow {
   kind: 'kind';
@@ -129,8 +133,24 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
   const inputs: { port: string; label: string; type: SocketType; multi?: boolean; topFirst?: boolean; firstNote?: string; addLabel?: string }[] = [];
   const outputs: { port: string; label: string; type: SocketType }[] = [];
   if (def) {
-    for (const [port, d] of Object.entries(def.inputs as InputSchema)) inputs.push({ port, label: d.label ?? port, type: d.type, multi: !!d.multi, topFirst: d.order === 'top-first', firstNote: d.firstNote, addLabel: d.addLabel });
-    for (const [port, d] of Object.entries(def.outputs as OutputSchema)) outputs.push({ port, label: d.label ?? port, type: d.type });
+    const wiredIo = new Set(view.wiredIo ?? []);
+    const shown = (dir: 'in' | 'out', port: string, d: { visibleIf?: (p: Record<string, unknown>) => boolean }): boolean => {
+      if (!d.visibleIf || wiredIo.has(`${dir}:${port}`)) return true;
+      try {
+        return d.visibleIf(node.params);
+      } catch {
+        return true;
+      }
+    };
+    const labelOf = (dir: 'in' | 'out', port: string, d: { label?: string }): string => {
+      let own: string | null = null;
+      try {
+        own = def.portLabel?.(dir, port, node.params) ?? null;
+      } catch { /* a broken label must not break the node */ }
+      return view.labels?.[`${dir}:${port}`] ?? own ?? d.label ?? port;
+    };
+    for (const [port, d] of Object.entries(def.inputs as InputSchema)) if (shown('in', port, d)) inputs.push({ port, label: labelOf('in', port, d), type: d.type, multi: !!d.multi, topFirst: d.order === 'top-first', firstNote: d.firstNote, addLabel: d.addLabel });
+    for (const [port, d] of Object.entries(def.outputs as OutputSchema)) if (shown('out', port, d)) outputs.push({ port, label: labelOf('out', port, d), type: d.type });
   } else if (missing) {
     for (const port of missing.inputs) inputs.push({ port, label: port, type: 'image' });
     for (const port of missing.outputs) outputs.push({ port, label: port, type: 'image' });
@@ -176,13 +196,16 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
 
   if (def) {
     const params = visibleParams(def, node.params).filter(([k]) => !(kindRow && k === 'kind'));
-    const pinnedSet = new Set(view.pinned ?? params.slice(0, MAX_PARAM_ROWS).map(([k]) => k));
+    const pinnedSet = new Set(view.pinned ?? def.defaultPins ?? params.slice(0, MAX_PARAM_ROWS).map(([k]) => k));
     const wiredSet = new Set(view.wired);
     const shown = params.filter(([k]) => view.expanded || pinnedSet.has(k) || wiredSet.has(k));
     const hidden = params.filter(([k]) => !shown.some(([s]) => s === k));
     // Bundle sockets (one vector wire for an X / Y / Z group) take a row of their own right above their members, but only
     // while they are wired or every row is shown: an unused bundle costs the node nothing.
     const bundles = paramBundles(def);
+    // the Motion socket takes a slim row like a bundle, right above Move X (it drives Move and Rotate together)
+    const mo = paramMotion(def);
+    const motionB: ParamBundle | null = mo ? { port: mo.port, stem: '', label: mo.label, members: [...mo.pos, ...mo.rot] } : null;
     const bundleShown = (b: ParamBundle) => wiredSet.has(b.port) || view.expanded || !!view.bundles;
     const bundleRow = (b: ParamBundle) => {
       rows.push({ kind: 'bundle', y, bundle: b });
@@ -192,22 +215,26 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
     const placed = new Set<string>();
     for (const [key, p] of shown) {
       // above the first of its members that is on the node
+      if (motionB && !placed.has(motionB.port) && key === motionB.members[0] && bundleShown(motionB)) {
+        bundleRow(motionB);
+        placed.add(motionB.port);
+      }
       const starts = bundles.find((b) => !placed.has(b.port) && b.members.includes(key));
       if (starts && bundleShown(starts)) {
         bundleRow(starts);
         placed.add(starts.port);
       }
       const socket = paramSocketType(def, key);
-      const via = wiredSet.has(key) ? undefined : bundles.find((b) => wiredSet.has(b.port) && b.members.includes(key))?.port;
+      const via = wiredSet.has(key) ? undefined : [...bundles, ...(motionB ? [motionB] : [])].find((b) => wiredSet.has(b.port) && b.members.includes(key))?.port;
       rows.push({ kind: 'param', y, key, def: p, socket, ...(via ? { via } : {}) });
       if (socket) sockets[`in:${key}`] = { x: 0, y: y + ROW_H / 2 };
       y += ROW_H;
     }
     // a bundle whose first member is not on the node still shows while it is wired (or while a vector wire is being placed)
-    for (const b of bundles) if ((wiredSet.has(b.port) || view.bundles) && !placed.has(b.port)) bundleRow(b);
+    for (const b of [...bundles, ...(motionB ? [motionB] : [])]) if ((wiredSet.has(b.port) || view.bundles) && !placed.has(b.port)) bundleRow(b);
     // hidden params that can be wired get a socket at the expander row (wired ones are never hidden)
     for (const [key] of hidden) if (paramSocketType(def, key)) sockets[`in:${key}`] = { x: 0, y: y + ROW_H / 2 };
-    for (const b of bundles) if (!sockets[`in:${b.port}`]) sockets[`in:${b.port}`] = { x: 0, y: y + ROW_H / 2 };
+    for (const b of [...bundles, ...(motionB ? [motionB] : [])]) if (!sockets[`in:${b.port}`]) sockets[`in:${b.port}`] = { x: 0, y: y + ROW_H / 2 };
     const extras = params.filter(([k]) => !pinnedSet.has(k) && !wiredSet.has(k)).length;
     if (hidden.length > 0 || (view.expanded && extras > 0)) {
       rows.push({ kind: 'more', y, count: view.expanded ? extras : hidden.length, expanded: view.expanded });
@@ -303,19 +330,31 @@ export function parsePortSignature(sig: string): MissingPorts {
 }
 
 /** Is `port` a param socket of the definition (a wireable param or a bundle), as opposed to an input? */
-export const isParamPort = (def: AnyNodeDef, port: string): boolean => port in def.params || !!paramBundle(def, port);
+export const isParamPort = (def: AnyNodeDef, port: string): boolean => port in def.params || !!paramBundle(def, port) || (!!paramMotion(def) && port === paramMotion(def)!.port);
 
 /** Pins / expansion / wired params of a node, from the shared view store and the wires. */
 export function bodyViewFor(def: AnyNodeDef, nodeId: string, edges: Edge[]): BodyView {
   const st = nodeViewStore.get();
   const wired = [...new Set(edges.filter((e) => e.to.node === nodeId && isParamPort(def, e.to.port)).map((e) => e.to.port))];
-  return { pinned: st.pins[nodeId], expanded: !!st.expanded[nodeId], wired, bundles: st.bundles };
+  return { pinned: st.pins[nodeId], expanded: !!st.expanded[nodeId], wired, bundles: st.bundles, wiredIo: wiredIoOf(def, nodeId, edges) };
+}
+
+/** `in:port` / `out:port` of the wires on a node, but only when the node has sockets that hide while unused (otherwise empty, so layouts of other nodes stay as they were). */
+export function wiredIoOf(def: AnyNodeDef, nodeId: string, edges: Edge[]): string[] {
+  const hides = Object.values(def.inputs as InputSchema).some((d) => d.visibleIf) || Object.values(def.outputs as OutputSchema).some((d) => d.visibleIf);
+  if (!hides) return [];
+  const out = new Set<string>();
+  for (const e of edges) {
+    if (e.to.node === nodeId) out.add(`in:${e.to.port}`);
+    if (e.from.node === nodeId) out.add(`out:${e.from.port}`);
+  }
+  return [...out].sort();
 }
 
 /** Params currently pinned on the node body (explicit pins, else the default first rows). */
 export function effectivePins(def: AnyNodeDef, node: NodeInstance): string[] {
   const pins = nodeViewStore.get().pins[node.id];
-  return pins ?? visibleParams(def, node.params).slice(0, MAX_PARAM_ROWS).map(([k]) => k);
+  return pins ?? (def.defaultPins ? [...def.defaultPins] : visibleParams(def, node.params).slice(0, MAX_PARAM_ROWS).map(([k]) => k));
 }
 
 /** Wire count per multi input port. */

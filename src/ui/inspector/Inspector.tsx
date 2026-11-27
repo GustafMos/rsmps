@@ -6,7 +6,7 @@ import { NumberField } from '../components/NumberField';
 import { CheckField, ColorField, SelectField, TextField, Vec2Field } from '../components/fields';
 import { parseHex, toHex } from '../lib/colorMath';
 import { LayerList } from '../graph/LayerList';
-import { paramBundles, paramSocketType, type ParamBundle } from '../../engine/define';
+import { paramBundles, paramMotion, paramSocketType, type ParamBundle } from '../../engine/define';
 import { bundleAxes } from '../lib/compat';
 import { useSelector } from '../store/createStore';
 import { nodeViewStore, setPin } from '../store/nodeView';
@@ -44,6 +44,7 @@ import { RecorderPanel } from './RecorderPanel';
 import { StopMotionPanel } from './StopMotionPanel';
 import { SdfConvertPanel } from './SdfConvertPanel';
 import { PhysicsPanel } from './PhysicsPanel';
+import { ObjectPhysics } from './ObjectPhysics';
 import { isLivePictureType } from '../../engine/lib/live-source';
 import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
@@ -271,6 +272,7 @@ function NodePanel({ id }: { id: string }) {
           <LayerList nodeId={id} port={port} type={d.type} variant="inspector" topFirst={d.order === 'top-first'} firstNote={d.firstNote} addLabel={d.addLabel} />
         </div>
       ))}
+      <ObjectPhysics node={node} />
       <TransformReset node={node} def={def} wired={wired} />
       <ParamGroups
         node={node}
@@ -373,6 +375,11 @@ function ParamGroups({
   }, [def, node.params]);
 
   const bundles = useMemo(() => paramBundles(def), [def]);
+  // the Motion socket behaves like a bundle for the display: it drives Move and Rotate, and shows "from <node>" on each of them
+  const motion = useMemo<ParamBundle | null>(() => {
+    const m = paramMotion(def);
+    return m ? { port: m.port, stem: '', label: m.label, members: [...m.pos, ...m.rot] } : null;
+  }, [def]);
   if (!groups.length) return <div className="rs-insp__sec"><p className="rs-insp__hint">This node has no parameters.</p></div>;
   // A node with a very long inspector (SDF 3D has about a hundred settings) starts with its groups closed, except the shape slots that are switched on.
   const big = groups.reduce((n, g) => n + g.items.length, 0) > 60;
@@ -397,9 +404,10 @@ function ParamGroups({
             g.items.map(([key, p]) => {
               // a bundle socket sits right above its first setting; a vector wire on it also drives the settings without a wire of their own
               const starts = bundles.find((b) => b.members[0] === key);
-              const via = wired.has(key) ? undefined : bundles.find((b) => wired.has(b.port) && b.members.includes(key));
+              const via = wired.has(key) ? undefined : bundles.find((b) => wired.has(b.port) && b.members.includes(key)) ?? (motion && wired.has(motion.port) && motion.members.includes(key) ? motion : undefined);
               return (
                 <Fragment key={key}>
+                  {motion && motion.members[0] === key && <BundleRow node={node} bundle={motion} kind="motion" isWired={wired.has(motion.port)} wiredFrom={label(motion.port)} onSelectSource={() => onSelectSource(motion.port)} onDisconnect={() => onDisconnect(motion.port)} />}
                   {starts && <BundleRow node={node} bundle={starts} isWired={wired.has(starts.port)} wiredFrom={label(starts.port)} onSelectSource={() => onSelectSource(starts.port)} onDisconnect={() => onDisconnect(starts.port)} />}
                   <ParamControl node={node} def={def} keyName={key} p={p} isWired={wired.has(key)} via={via} wiredFrom={label(via ? via.port : key)} pinned={pinned.includes(key)} onPin={(on) => setPin(node.id, key, on, pinned)} onSelectSource={() => onSelectSource(via ? via.port : key)} onDisconnect={() => onDisconnect(key)} />
                 </Fragment>
@@ -412,14 +420,14 @@ function ParamGroups({
 }
 
 /** The socket of a bundle (one vector wire for an X / Y / Z group of settings): a slim row, a drop target like every wireable setting. */
-function BundleRow({ node, bundle, isWired, wiredFrom, onSelectSource, onDisconnect }: { node: NodeInstance; bundle: ParamBundle; isWired: boolean; wiredFrom: string; onSelectSource: () => void; onDisconnect: () => void }) {
-  const axes = bundleAxes(bundle);
-  const what = `${bundle.label} ${axes.split('').join(', ')}`;
+function BundleRow({ node, bundle, kind = 'vector', isWired, wiredFrom, onSelectSource, onDisconnect }: { node: NodeInstance; bundle: ParamBundle; kind?: 'vector' | 'motion'; isWired: boolean; wiredFrom: string; onSelectSource: () => void; onDisconnect: () => void }) {
+  const axes = kind === 'motion' ? '' : bundleAxes(bundle);
+  const what = kind === 'motion' ? 'Move and Rotate' : `${bundle.label} ${axes.split('').join(', ')}`;
   return (
-    <div className="rs-insp__row rs-insp__bundle" title={`One vector wire sets ${what} together. A number wired into one of them still wins for that one.`} data-bundle-port={bundle.port} data-insp-sock="" data-node={node.id} data-port={bundle.port} data-dir="in" data-type="vector">
+    <div className="rs-insp__row rs-insp__bundle" title={kind === 'motion' ? 'One Motion wire sets Move and Rotate together (the Physics node makes one for each object). A wire on a single setting or a vector wire still wins for that one.' : `One vector wire sets ${what} together. A number wired into one of them still wins for that one.`} data-bundle-port={bundle.port} data-insp-sock="" data-node={node.id} data-port={bundle.port} data-dir="in" data-type={kind}>
       <label className="rs-insp__label">
-        <span className="rs-insp__dot rs-sock--vector" />
-        <span className="rs-insp__lt">{bundle.label} <span className="rs-insp__axes">{axes}</span></span>
+        <span className={`rs-insp__dot rs-sock--${kind}`} />
+        <span className="rs-insp__lt">{kind === 'motion' ? 'Motion' : bundle.label} <span className="rs-insp__axes">{axes}</span></span>
       </label>
       <div className="rs-insp__ctl">
         {isWired ? (
@@ -429,7 +437,7 @@ function BundleRow({ node, bundle, isWired, wiredFrom, onSelectSource, onDisconn
             <button className="rs-btn rs-btn--icon rs-btn--ghost" onClick={onDisconnect} title="Disconnect and use the values below" aria-label="Disconnect"><Icon name="close" size={12} /></button>
           </div>
         ) : (
-          <div className="rs-insp__bundlehint">one vector wire for all {axes.length}</div>
+          <div className="rs-insp__bundlehint">{kind === 'motion' ? 'one wire for Move and Rotate' : `one vector wire for all ${axes.length}`}</div>
         )}
       </div>
     </div>
@@ -453,7 +461,7 @@ function ParamControl({ node, def, keyName, p, isWired, via, wiredFrom, pinned, 
     control = (
       <div className="rs-insp__wired" title="Driven by the vector wire of this group. Wire a number onto this row to set this one yourself.">
         <Icon name="plug" size={13} />
-        <button className="rs-insp__chip2" onClick={onSelectSource} title="Select the driving node">from {wiredFrom || 'a node'} <span className="rs-insp__via">{'XYZ'[via.members.indexOf(keyName)]}</span></button>
+        <button className="rs-insp__chip2" onClick={onSelectSource} title="Select the driving node">from {wiredFrom || 'a node'} <span className="rs-insp__via">{'XYZXYZ'[via.members.indexOf(keyName)]}</span></button>
       </div>
     );
   } else if (isWired) {

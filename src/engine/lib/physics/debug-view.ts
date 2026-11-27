@@ -25,6 +25,34 @@ export function defaultCamera(o: ViewOptions): CameraValue {
   return { kind: 'camera', projection: 'perspective', fov: 40, orthoSize: 8, position: orbitPosition([0, 0, 0], o.distance, o.turn, o.tilt), target: [0, 0, 0], roll: 0, shift: [0, 0] };
 }
 
+/**
+ * A camera that frames the start poses of the bodies and the floor under them, so the preview needs no setting. The same frame for every
+ * time (it looks at where things start, and the floor they land on), so the picture does not jump while things fall.
+ */
+export function fitCamera(bodies: BodySpec[], world: WorldSpec, o: { turn: number; tilt: number; aspect?: number }): CameraValue {
+  const lo: V3 = [Infinity, Infinity, Infinity];
+  const hi: V3 = [-Infinity, -Infinity, -Infinity];
+  const add = (p: V3, r: number) => {
+    for (let i = 0; i < 3; i++) {
+      lo[i] = Math.min(lo[i], p[i] - r);
+      hi[i] = Math.max(hi[i], p[i] + r);
+    }
+  };
+  for (const b of bodies) {
+    const r = Math.max(...b.size.slice(0, b.shape === 'box' ? 3 : 2)) * (b.shape === 'box' ? 0.9 : 1.2);
+    add([b.pos[0], b.pos[1], b.pos[2]], r);
+    if (world.floor) add([b.pos[0], world.floorHeight, b.pos[2]], 0.2);
+  }
+  if (world.floor && !bodies.length) add([0, world.floorHeight, 0], 2);
+  if (!bodies.length) add([0, 0, 0], 2);
+  if (world.walls) add([0, world.floorHeight, 0], Math.max(world.roomWidth, world.roomDepth) / 2);
+  const c: V3 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  const radius = Math.max(1, Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2);
+  const fov = 40;
+  const distance = Math.min(400, ((radius / Math.sin((fov / 2) * (Math.PI / 180))) * 1.15) / Math.min(1, o.aspect ?? 1));
+  return { kind: 'camera', projection: 'perspective', fov, orthoSize: 8, position: orbitPosition(c, distance, o.turn, o.tilt), target: c, roll: 0, shift: [0, 0] };
+}
+
 type Seg = [V3, V3];
 
 const ring = (cx: number, cy: number, cz: number, r: number, axis: 'x' | 'y' | 'z', n = 20, from = 0, to = Math.PI * 2): Seg[] => {

@@ -49,6 +49,12 @@ export function compatibleSockets(graph: GraphDoc, registry: Registry, nodeId: s
       out.push({ port: s.port, label: `${s.bundle.label} ${bundleAxes(s.bundle)}`, group: first.group ?? 'Parameters', type: s.type, kind: 'param', current, wired: wiredPorts.has(s.port) });
       continue;
     }
+    if (s.type === 'motion') {
+      // the Motion socket: one wire for Move and Rotate together
+      const first = params.posX;
+      out.push({ port: s.port, label: 'Motion (move and rotate)', group: first?.group ?? 'Parameters', type: s.type, kind: 'param', current: 'where it is and how it is turned', wired: wiredPorts.has(s.port) });
+      continue;
+    }
     const p = params[s.port];
     out.push({ port: s.port, label: p.label ?? s.port, group: p.group ?? 'Parameters', type: s.type, kind: 'param', current: describeValue(p, node.params[s.port]), wired: wiredPorts.has(s.port) });
   }

@@ -114,7 +114,7 @@ export const REPEAT_BLENDS = [
   { value: 'difference', label: 'Difference' },
 ] as const;
 
-const SOCKETS: readonly SocketType[] = ['image', 'mask', 'palette', 'number', 'color', 'vector', 'regions', 'camera', 'material', 'sdf', 'audio', 'midi'];
+const SOCKETS: readonly SocketType[] = ['image', 'mask', 'palette', 'number', 'color', 'vector', 'motion', 'regions', 'camera', 'material', 'sdf', 'audio', 'midi'];
 
 export const isGroupNode = (n: { type: string } | undefined | null): boolean => !!n && n.type === GROUP_TYPE;
 export const isBoundaryNode = (n: { type: string } | undefined | null): boolean => !!n && (n.type === GROUP_INPUT_TYPE || n.type === GROUP_OUTPUT_TYPE);

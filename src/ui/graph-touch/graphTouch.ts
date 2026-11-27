@@ -80,7 +80,7 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
   const setPending = (p: PendingWire | null) => {
     wireStore.set({ pending: p });
     // a vector wire looking for an input: the nodes show their bundle sockets (one socket for an X / Y / Z group) so one can be tapped
-    showBundleSockets(!!p && p.side === 'out' && p.type === 'vector');
+    showBundleSockets(!!p && p.side === 'out' && (p.type === 'vector' || p.type === 'motion'));
     if (p) {
       mark(p);
       // sockets that only just appeared (the bundle sockets) are marked once they are in the page
