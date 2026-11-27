@@ -1,6 +1,6 @@
 import { defineNode } from '../../define';
 import { SPIN_AROUND_PARAM } from '../../lib/gen-common';
-import { modelFilesSummary, renderModel } from '../../lib/model-render';
+import { modelFilesSummary, modelNameSuffix, renderModel } from '../../lib/model-render';
 
 /**
  * 3D Model (legacy id, kept so saved graphs keep working). The same thing now lives in the 3D Object node: pick
@@ -83,6 +83,7 @@ export default defineNode({
     cel: { type: 'bool', default: false, label: 'Cel shading', group: 'Lighting', hint: 'Posterises the light into a few flat bands. Great for pixel art.' },
     celSteps: { type: 'number', default: 3, min: 2, max: 8, step: 1, integer: true, label: 'Shading bands', group: 'Lighting', visibleIf: (p) => p.cel === true },
   },
+  titleSuffix: (p, { assetName }) => modelNameSuffix(p.model, assetName),
   summary: (p) => `${modelFilesSummary(p)} · ${p.shading}${p.cel ? ` · ${p.celSteps}-band cel` : ''}`,
   async render(ctx) {
     const image = await renderModel(ctx, ctx.params, ctx.in.size ?? ctx.canvas, ctx.in.camera, ctx.in.texture);

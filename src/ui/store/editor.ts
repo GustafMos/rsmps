@@ -1003,15 +1003,15 @@ export class Editor {
 
   /**
    * Two outputs joined: the one you HELD goes on top, the one you dropped ONTO is the base (bottom).
-   * Images/masks make a Stack Layers node (base first wire, held second), audio makes a Mixer. Dropping onto the output of a
-   * Stack adds the held output as a new top layer of that Stack instead. One undo step. Returns false when the pair is not mergeable.
+   * Images/masks make a Stack Layers node (base first wire, held second), audio makes a Mixer, SDF shapes make an SDF Combine (same order; only inside an SDF Scene). Dropping onto the output of a
+   * Stack (or SDF Combine) adds the held output as a new top layer of that Stack instead. One undo step. Returns false when the pair is not mergeable.
    */
   mergeOutputs(held: Edge['from'], base: Edge['from']): boolean {
     const g0 = this.level;
     const ta = outputType(g0, this.registry, held.node, held.port);
     const tb = outputType(g0, this.registry, base.node, base.port);
     const visual = (t: SocketType | null) => t === 'image' || t === 'mask';
-    const kind = visual(ta) && visual(tb) ? 'stack' : ta === 'audio' && tb === 'audio' ? 'mixer' : null;
+    const kind = visual(ta) && visual(tb) ? 'stack' : ta === 'audio' && tb === 'audio' ? 'mixer' : ta === 'sdf' && tb === 'sdf' ? 'sdf-combine' : null;
     const def = kind ? this.registry.get(kind) : undefined;
     if (!kind || !def || held.node === base.node) {
       if (kind && !def) this.toast(`The "${kind}" node type is not available.`, 'error');
@@ -1019,9 +1019,18 @@ export class Editor {
     }
     const nodeA = g0.nodes.find((n) => n.id === held.node)!;
     const nodeB = g0.nodes.find((n) => n.id === base.node)!;
-    if (kind === 'stack' && nodeB.type === 'stack' && base.port === 'image') {
-      // dropped onto a Stack's output: the held output becomes a new top layer of that Stack (no second Stack nested inside it)
-      const to = { node: base.node, port: 'images' };
+    if (kind === 'sdf-combine') {
+      // SDF nodes only exist inside an SDF Scene: refuse to create a stray Combine anywhere else
+      const problem = sdfPlacementProblem(this.state.graph, this.state.path, [{ type: kind, params: {} }], this.registry);
+      if (problem) {
+        this.toast(problem, 'info');
+        return false;
+      }
+    }
+    const appendTo = kind === 'stack' && nodeB.type === 'stack' && base.port === 'image' ? 'images' : kind === 'sdf-combine' && nodeB.type === 'sdf-combine' && base.port === 'sdf' ? 'items' : null;
+    if (appendTo) {
+      // dropped onto a Stack's / SDF Combine's output: the held output becomes a new last input of it (no second node nested inside it)
+      const to = { node: base.node, port: appendTo };
       const err = connectError(g0, this.registry, held, to);
       if (err) {
         this.toast(err, 'error');

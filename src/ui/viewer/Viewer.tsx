@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { libraryAssetName, nodeDisplayName } from '../lib/nodeTitle';
 import { defOf, nodeAtPath } from '../../engine/group';
 import { useSelector } from '../store/createStore';
 import { watchStore } from '../watchdog';
@@ -276,7 +277,7 @@ export function Viewer() {
   const reqErr = (rawErr && viewedId ? reqFor(viewedId) : undefined) ?? (rawOther ? reqFor(rawOther[0]) : undefined);
   const err = rawErr && reqErr && viewedId && reqFor(viewedId) ? reqErr.explanation : rawErr;
   const otherErr = rawOther && reqErr && !rawErr ? ([rawOther[0], reqErr.explanation] as [string, string]) : rawOther;
-  const nodeTitle = viewedNode ? viewedNode.label || viewedDef?.title || viewedNode.type : null;
+  const nodeTitle = viewedNode ? nodeDisplayName(viewedNode, viewedDef, libraryAssetName(io.library)) : null;
   const catColor = viewedDef ? CATEGORIES[viewedDef.category]?.color : undefined;
   const paint = useEd((s) => (s.selection.length === 1 ? s.graph.nodes.find((n) => n.id === s.selection[0] && n.type === 'paint-mask') : undefined));
   // any selected node with a `points` json param and a `closed` bool gets the on-viewer path editor (detected by shape)

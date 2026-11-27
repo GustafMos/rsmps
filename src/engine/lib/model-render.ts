@@ -578,6 +578,13 @@ function deformFrame(deform: { p: DeformP; map: ImageValue | null } | null, p: M
   return [p.posX, p.posY, p.posZ, p.objectScale, c[0], c[1], c[2], fit, ...du.dfA, ...du.dfB, ...dfC, geo, 0, 0, 0];
 }
 
+/** First 7 characters of the first chosen model's file name without extension ("spaceship.glb" -> "Spacesh"); null when none or unknown. */
+export const modelNameSuffix = (model: readonly string[] | undefined, assetName: (id: string) => string | undefined): string | null => {
+  const name = model?.length ? assetName(model[0]) : undefined;
+  const base = name?.replace(/\.[^.]*$/, '').trim().slice(0, 7);
+  return base ? base.charAt(0).toUpperCase() + base.slice(1) : null;
+};
+
 /** One-line description of the chosen model files, for node summaries. */
 export const modelFilesSummary = (p: { model: string[] }): string => (p.model.length === 0 ? 'no model chosen' : p.model.length === 1 ? '1 model' : `${p.model.length} models`);
 

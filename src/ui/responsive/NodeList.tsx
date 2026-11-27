@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { libraryAssetName, nodeDisplayName } from '../lib/nodeTitle';
 import { CATEGORIES, type ParamDef } from '../../engine/types';
 import { GROUP_TYPE, defOf } from '../../engine/group';
 import { Icon } from '../components/Icon';
@@ -71,7 +72,7 @@ export function NodeList() {
                 <span className="rs-nlist__n rs-num">{i + 1}</span>
                 <span className="rs-nlist__chip" style={{ background: cat?.color }} />
                 <span className="rs-nlist__text">
-                  <span className="rs-nlist__title">{n.label || def?.title || n.type}</span>
+                  <span className="rs-nlist__title">{nodeDisplayName(n, def, libraryAssetName(io.library))}</span>
                   <span className="rs-nlist__sum">{err ? err : sum || cat?.title || ''}</span>
                 </span>
               </button>

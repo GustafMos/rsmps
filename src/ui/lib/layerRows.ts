@@ -18,14 +18,14 @@ export interface LayerRowInfo {
 
 /**
  * Rows in display order. Top-first: "Top", then "2", "3"... counted from the top, and "Bottom" (+ " · note") for the first wire.
- * A single wire is the bottom. Other inputs: plain numbers in wire order.
+ * A single wire is the bottom. Other inputs: plain numbers in wire order (the first gets " · note" when a note is given).
  */
 export function layerRows(n: number, topFirst: boolean, firstNote?: string): LayerRowInfo[] {
   const rows: LayerRowInfo[] = [];
   for (let r = 0; r < n; r++) {
     const k = layerRowIndex(r, n, topFirst); // the mapping is its own inverse
     if (!topFirst) {
-      rows.push({ k, label: String(k + 1), role: 'plain' });
+      rows.push({ k, label: k === 0 && firstNote ? `1 · ${firstNote}` : String(k + 1), role: 'plain' });
     } else if (k === 0) {
       rows.push({ k, label: firstNote ? `Bottom · ${firstNote}` : 'Bottom', role: 'bottom' });
     } else if (r === 0) {

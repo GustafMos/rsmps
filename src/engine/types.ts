@@ -225,7 +225,7 @@ export interface InputDef {
    * and the first wire (the bottom) last, with "Top" / "Bottom" labels. Presentation only: the wire order stays as it is.
    */
   order?: 'top-first';
-  /** With `order: 'top-first'`: what the bottom (first) wire does, shown after "Bottom", e.g. "sets size". */
+  /** What the first wire does, shown after its row label: "Bottom · note" with `order: 'top-first'`, else "1 · note". E.g. "sets size". */
   firstNote?: string;
   /**
    * Do not evaluate this input automatically: `ctx.in` holds null and the node fetches it with `ctx.pull`.
@@ -985,6 +985,11 @@ export interface NodeDef<
   /** One line shown on the node body, e.g. "Bayer 8×8 · 16 colours". */
   /** `wired` = names of this node's inputs and param sockets that currently have a wire (when the caller knows). `clock` = the project's loop switch, length and frame rate (when the caller knows). */
   summary?: (params: ParamsOf<P>, wired?: ReadonlySet<string>, clock?: LoopClockInfo) => string;
+  /**
+   * Display only: a short word appended to the title where the node's name is shown ("SDF Shape" + "Torus"). Never used for ids, search or
+   * lookups. `assetName` resolves a Media library asset id to its file name (undefined when it is not there). Null/empty = no suffix.
+   */
+  titleSuffix?: (params: ParamsOf<P>, lookup: { assetName: (id: string) => string | undefined }) => string | null;
   /**
    * The node accepts notes played by the user. While it is selected, the UI maps the computer keyboard
    * (and an on-screen piano) to MIDI notes and sends them to it.

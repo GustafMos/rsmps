@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { libraryAssetName, nodeDisplayName } from '../lib/nodeTitle';
 import { CATEGORIES } from '../../engine/types';
 import { defOf, GROUP_INPUT_TYPE, GROUP_TYPE, isBoundaryNode, NEW_PORT, PATH_SEP } from '../../engine/group';
 import type { AnyNodeDef, InputSchema, NodeInstance, OutputSchema, ParamDef, SocketType } from '../../engine/types';
@@ -107,12 +108,12 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   }, [def, node.params, wired, clockKey]);
 
   const frameTxt = useEd((s) => (hasFrameParams(def) ? (() => { const z = frameSize(s.level.project, node); return `${z.width}×${z.height}`; })() : ''));
-  const title = node.label || def?.title || node.type;
   const missing = !def;
   const hasAudioOut = !!def && Object.values(def.outputs as OutputSchema).some((o) => o.type === 'audio');
   // Cache / Bake: a small grey badge (baked / stale / baking N%), and a dimmed look for everything a bake has made unnecessary.
   const app = useApp();
-  const isCache = node.type === 'cache';
+  const title = nodeDisplayName(node, def, libraryAssetName(app.io.library));
+  const isCache =node.type === 'cache';
   const hasProcess = !!def?.process;
   const activeProject = useEd((s) => s.activeProject) ?? 'project';
   // Process mode: the scheduler's job for this node (null for nodes without a process: no work at all for them).

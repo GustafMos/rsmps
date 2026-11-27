@@ -12,14 +12,14 @@ export default defineNode({
   category: 'sdf',
   description: 'Joins shapes: Union adds them, Subtract cuts every later shape out of the first one, Intersect keeps only the overlap. Smoothness rounds the join and blends the colors.',
   keywords: ['sdf', 'union', 'subtract', 'intersect', 'boolean', 'smooth union', 'merge', 'cut', 'blend', 'metaball', 'model'],
-  inputs: { items: { type: 'sdf', multi: true, label: 'Shapes' } },
+  inputs: { items: { type: 'sdf', multi: true, label: 'Shapes', firstNote: 'base' } },
   outputs: { sdf: { type: 'sdf', label: 'Combined' } },
   params: {
     operation: {
       type: 'enum',
       default: 'union',
       label: 'Operation',
-      hint: 'Subtract removes every later input from the first one.',
+      hint: 'Subtract cuts shapes 2 and up out of shape 1 (the base). Union and Intersect ignore the order.',
       options: [
         { value: 'union', label: 'Union' },
         { value: 'subtract', label: 'Subtract' },
@@ -28,6 +28,7 @@ export default defineNode({
     },
     smoothness: { type: 'number', default: 0, min: 0, max: 3, step: 0.01, label: 'Smoothness', hint: 'Blend radius of the join. 0 = hard edge. Colors blend too.' },
   },
+  titleSuffix: (p) => (p.operation === 'subtract' ? 'Subtract' : p.operation === 'intersect' ? 'Intersect' : 'Union'),
   summary: (p) => `${p.operation}${p.smoothness > 0 ? ` · smooth ${p.smoothness}` : ''}`,
   render(ctx) {
     const { roots, picture } = sdfJoin(ctx.in.items ?? []);
