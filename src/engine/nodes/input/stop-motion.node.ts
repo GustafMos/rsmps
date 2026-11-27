@@ -22,6 +22,18 @@ export default defineNode({
   description:
     'Make stop motion or a time-lapse: wire in a Webcam, press Take picture for each frame (or Auto shoot for a time-lapse), and the shots play back as a looping animation. Shows the previous shot faintly over the live picture so you can line up the next one. For a smooth hyperlapse put a Stabilize node after it.',
   keywords: ['stop motion', 'stopmotion', 'animation', 'frame by frame', 'onion skin', 'time lapse', 'timelapse', 'hyperlapse', 'interval', 'shoot', 'capture', 'photo', 'camera'],
+  guide: {
+    does: 'Builds a stop motion or time-lapse animation from single shots taken with a camera.',
+    steps: [
+      'Wire a Webcam (or any live picture) into Picture.',
+      'Open its settings and press Take picture for each frame, or Auto shoot for a time-lapse.',
+      'The shots play back as a looping animation. The previous shot shows faintly so you can line up the next.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The live camera picture to take shots from.' },
+    ],
+    seeAlso: ['camera-in', 'stabilize'],
+  },
   inputs: { image: { type: 'image', lazy: true, label: 'Picture' } },
   outputs: {
     image: { type: 'image', label: 'Image' },

@@ -70,6 +70,8 @@ import {
   type GroupKind,
 } from '../../engine/group';
 import { applySdfConversion, SDF_CONVERT_HINT } from '../../engine/lib/sdf-convert';
+import { buildRegionsSetup, type RegionsSetupId } from '../lib/regions-setup';
+import { applyGuideFix, type GuideFix } from '../lib/guide';
 import { inSdfScene, isSdfSceneNode, newSdfScene, sdfPlacementProblem, SDF_SCENE_TYPE } from '../../engine/sdf-scene-group';
 import { processParamsPatch } from '../../engine/process';
 import type { AnyNodeDef } from '../../engine/types';
@@ -1133,6 +1135,41 @@ export class Editor {
     if (res.notes.length) void this.ask({ title: 'Converted to an SDF Scene', text: `${SDF_CONVERT_HINT} Some things could not be carried over exactly:`, items: res.notes, ok: 'OK', cancel: 'Close' });
     else this.toast(`Converted to an SDF Scene. ${SDF_CONVERT_HINT}`, 'ok');
     return res.id;
+  }
+
+  /**
+   * "Regions" setups: from the picture node `srcId`, add a detector, Track and Effects On Regions (or Region Overlay), wire them, splice the chain in
+   * ahead of whatever the picture node fed, select the main node and view it. ONE undo step. Returns the main node's id (null when not possible).
+   */
+  addRegionsSetup(srcId: string, kind: RegionsSetupId): string | null {
+    const res = buildRegionsSetup(this.level, this.registry, srcId, kind);
+    if (!res) return null;
+    const graph = this.takeOver(res.graph, res.from, res.main, res.downstream, res.place).graph;
+    this.commitLevel(graph);
+    this.patch({ selection: [res.main], selectedFrame: null });
+    this.setViewed(this.fullId(res.main));
+    return res.main;
+  }
+
+  /**
+   * A "How to use" fix: add the node / wire the picture that fills an empty input of `nodeId`, as ONE undo step. The 'menu' kind opens the
+   * Add menu with only the nodes that can fill the input (near `at`, in screen coordinates). Returns true when something was done.
+   */
+  fixInput(nodeId: string, input: string, fix: GuideFix, at?: { clientX: number; clientY: number }): boolean {
+    if (fix.kind === 'menu') {
+      const n = this.level.nodes.find((x) => x.id === nodeId);
+      const type = n && this.registry.get(n.type)?.inputs[input]?.type;
+      if (!n || !type) return false;
+      this.openAddMenu({ clientX: at?.clientX ?? 200, clientY: at?.clientY ?? 200, world: { x: n.x - 300, y: n.y }, link: { side: 'in', node: nodeId, port: input, type } });
+      return true;
+    }
+    const res = applyGuideFix(this.level, this.registry, nodeId, input, fix);
+    if (!res) {
+      this.toast('That could not be wired automatically. Drag a wire into the socket instead.', 'info');
+      return false;
+    }
+    this.commitLevel(res.graph);
+    return true;
   }
 
   /** Physics node: wire body `index` to a 3D node (Position -> Move XYZ, Rotation -> Rotate XYZ) as ONE undo step. */

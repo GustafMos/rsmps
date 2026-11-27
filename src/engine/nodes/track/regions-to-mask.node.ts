@@ -15,9 +15,22 @@ export default defineNode({
   description:
     'Draws the regions as a mask (white inside). Plug the mask into the Mask socket of ANY effect node to apply that effect only to the tracked parts of the image.',
   keywords: ['mask', 'regions', 'apply', 'effect', 'only', 'tracked', 'rasterise', 'rasterize', 'shape', 'matte'],
+  guide: {
+    does: 'Makes a black and white mask that is white inside the regions, so any effect can be limited to them.',
+    steps: [
+      'Wire your picture into Picture (size only): only its size is used.',
+      'Wire regions into Regions (boxes).',
+      'Wire the Mask output into the Mask socket of any effect node.',
+    ],
+    needs: [
+      { input: 'image', hint: 'Only its size is used, so the mask fits the picture.' },
+      { input: 'regions', hint: 'The boxes that become white in the mask.' },
+    ],
+    seeAlso: ['region-fx', 'detect-motion', 'track'],
+  },
   inputs: {
-    image: { type: 'image', required: true, label: 'Size from' },
-    regions: { type: 'regions', required: true, label: 'Regions' },
+    image: { type: 'image', required: true, label: 'Picture (size only)' },
+    regions: { type: 'regions', required: true, label: 'Regions (boxes)' },
   },
   outputs: { mask: { type: 'mask', label: 'Mask' } },
   params: {

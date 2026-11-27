@@ -109,6 +109,18 @@ export default defineNode({
   description:
     'Steadies shaky handheld video and smooths a hyperlapse. Press Analyse once: the camera motion of the whole clip is measured (no AI, nothing leaves your device) and saved. After that the picture is moved against the shake, either keeping the slow pans and walks (Smooth camera) or holding the first framing like a tripod (Locked off). Until it is analysed the picture passes through unchanged.',
   keywords: ['stabilize', 'stabilise', 'stabilization', 'stabilisation', 'steady', 'shake', 'handheld', 'hyperlapse', 'time lapse', 'timelapse', 'smooth camera', 'tripod', 'deshake', 'warp stabilizer', 'gimbal', 'jitter', 'video'],
+  guide: {
+    does: 'Steadies shaky handheld video by moving the picture against the shake.',
+    steps: [
+      'Wire the video into Image.',
+      'Press Analyse once in its settings: the camera motion of the whole clip is measured and saved.',
+      'Choose Smooth camera to keep slow pans, or hold the first frame still.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The shaky video.' },
+    ],
+    seeAlso: ['stop-motion', 'fake-360'],
+  },
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {

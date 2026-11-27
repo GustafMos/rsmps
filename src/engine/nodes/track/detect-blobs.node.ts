@@ -17,7 +17,19 @@ export default defineNode({
     'Finds bright, dark or vividly colored spots (stars, lights, highlights, shadows) and outputs them as regions. Wire the regions into Region Overlay to draw boxes on them, or Regions To Mask to apply any effect only there.',
   keywords: ['detect', 'stars', 'lights', 'highlights', 'spots', 'bright', 'threshold', 'find', 'objects'],
   cpu: true,
-  inputs: { image: { type: 'image', required: true, label: 'Image' } },
+  guide: {
+    does: 'Finds bright, dark or very colorful spots in the picture and gives you their boxes (regions).',
+    steps: [
+      'Wire a picture into Picture to search.',
+      'Set Look for and Threshold until the spots you want are found (look at the Detected pixels output).',
+      'Wire Regions into Track, then into Effects On Regions or Region Overlay.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The picture to search for spots.' },
+    ],
+    seeAlso: ['track', 'region-fx', 'region-overlay', 'detect-color'],
+  },
+  inputs: { image: { type: 'image', required: true, label: 'Picture to search' } },
   outputs: { regions: { type: 'regions', label: 'Regions' }, mask: { type: 'mask', label: 'Detected pixels' } },
   params: {
     mode: { type: 'enum', default: 'bright', options: MODES, label: 'Look for' },

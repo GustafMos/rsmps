@@ -8,7 +8,19 @@ export default defineNode({
   description:
     'Reads numbers from one region: center position, size, score, id and how many regions there are. Wire them into any number setting (every number setting has a socket) so tracked positions can drive any effect.',
   keywords: ['position', 'x', 'y', 'size', 'number', 'drive', 'value', 'centre', 'center', 'info', 'count'],
-  inputs: { regions: { type: 'regions', required: true, label: 'Regions' } },
+  guide: {
+    does: 'Reads numbers (position, size, id, count) from one region, so they can drive any setting.',
+    steps: [
+      'Wire regions into Regions to read.',
+      'Choose which region: by number, or by id.',
+      'Wire an output such as Center X into any number setting of another node.',
+    ],
+    needs: [
+      { input: 'regions', hint: 'The regions to read numbers from.' },
+    ],
+    seeAlso: ['track', 'detect-blobs'],
+  },
+  inputs: { regions: { type: 'regions', required: true, label: 'Regions to read' } },
   outputs: {
     x: { type: 'number', label: 'Center X' },
     y: { type: 'number', label: 'Center Y' },

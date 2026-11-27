@@ -12,6 +12,18 @@ export default defineNode({
   category: 'sdf',
   description: 'Joins shapes: Union adds them, Subtract cuts every later shape out of the first one, Intersect keeps only the overlap. Smoothness rounds the join and blends the colors.',
   keywords: ['sdf', 'union', 'subtract', 'intersect', 'boolean', 'smooth union', 'merge', 'cut', 'blend', 'metaball', 'model'],
+  guide: {
+    does: 'Joins 3D shapes into one: add them together, cut one out of another, or keep only where they overlap.',
+    steps: [
+      'Wire two or more shapes into Shapes. The first one is the base.',
+      'Choose Union, Subtract or Intersect, and raise Smoothness to round the join.',
+      'Wire Combined into the next node, for example another Combine or a Transform.',
+    ],
+    needs: [
+      { input: 'items', hint: 'The shapes to join: at least two.' },
+    ],
+    seeAlso: ['sdf-scene'],
+  },
   inputs: { items: { type: 'sdf', multi: true, label: 'Shapes', firstNote: 'base', addLabel: '+ add shape' } },
   outputs: { sdf: { type: 'sdf', label: 'Combined' } },
   params: {

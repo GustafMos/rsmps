@@ -59,6 +59,7 @@ import { StyleAiPanel } from './StyleAiPanel';
 import { GroupPanel } from './GroupPanel';
 import { defOf, GROUP_TYPE } from '../../engine/group';
 import { drivenParams, patchIsNoop, resetPatch, transformOf, type ResetKind, type Transform3d } from '../lib/xform3d';
+import { GuidePanel } from './GuidePanel';
 import './inspector.css';
 
 /** Messages that only say what to set up first (nothing is broken): shown as a note, not as an error. */
@@ -192,7 +193,7 @@ function NodePanel({ id }: { id: string }) {
         )}
         <FamilySelect node={node} large />
         <TextField large value={node.label ?? ''} placeholder={nodeDisplayName({ ...node, label: undefined }, def, libraryAssetName(io.library))} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
-        <Description key={id} text={def.description} />
+        {def.guide ? <GuidePanel key={`g${id}`} nodeId={id} description={def.description} /> : <Description key={id} text={def.description} />}
         <div className="rs-insp__actions">
           <button className={`rs-btn${viewed ? ' is-on' : ''}`} onClick={() => ed.setViewed(fullId)} title="Show this node in the viewer">
             <Icon name={viewed ? 'eye' : 'eyeOff'} /> View
@@ -527,6 +528,7 @@ function ParamControl({ node, def, keyName, p, isWired, via, wiredFrom, pinned, 
       </label>
       <div className="rs-insp__ctl">{control}</div>
       {p.hint && !isCode && <div className="rs-insp__phint">{p.hint}</div>}
+      {p.type === 'enum' && p.optionHints?.[String(value)] && <div className="rs-insp__phint rs-insp__ohint">{p.optionHints[String(value)]}</div>}
     </div>
   );
 }

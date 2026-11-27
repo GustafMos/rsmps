@@ -20,6 +20,18 @@ export default defineNode({
   category: 'time',
   description: 'A small video editor: arrange the clips wired into it on tracks (trim, move, fade, cross-dissolve) and get one picture and one sound out. Can set the length of the whole project.',
   keywords: ['edit', 'editor', 'sequence', 'cut', 'trim', 'clips', 'video editor', 'montage', 'concatenate', 'join', 'cross dissolve', 'timeline', 'nle'],
+  guide: {
+    does: 'A small video editor: arranges the clips you wire into it on tracks and gives you one picture and one sound.',
+    steps: [
+      'Wire your video clips into Clips and your sounds into Sounds. Each new wire goes on the end.',
+      'Arrange, trim, fade and layer them in the strip under the graph.',
+      'Wire Image and Sound into your output.',
+    ],
+    needs: [
+      { input: 'clips', hint: 'The video clips to arrange.' },
+    ],
+    seeAlso: ['media-in', 'image-out'],
+  },
   inputs: {
     clips: { type: 'image', multi: true, lazy: true, label: 'Clips' },
     sounds: { type: 'audio', multi: true, label: 'Sounds' },

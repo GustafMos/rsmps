@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { CATEGORIES, type AnyNodeDef, type Category } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NODE_W } from '../lib/layout';
+import { REGIONS_SETUPS, regionsSetupAvailable } from '../lib/regions-setup';
 import { missingCapabilities } from '../lib/requirements';
 import { inputsAccepting, outputsFeeding } from '../lib/sockets';
 import { getRecent } from '../store/editor';
@@ -138,6 +139,8 @@ function AddMenuInner() {
   const selId = !link && ed.state.selection.length === 1 ? ed.state.selection[0] : null;
   const selNode = selId ? ed.state.level.nodes.find((n) => n.id === selId) : undefined;
   const selTitle = selNode ? selNode.label || ed.registry.get(selNode.type)?.title || selNode.type : '';
+  // "Regions: do it for me": ready-made chains after the selected picture node
+  const showSetups = !!selId && regionsSetupAvailable(ed.level, ed.registry, selId) && (!searching || /region|motion|track|detect|pixel|blur|moving|box|label|censor/i.test(query));
   const canDrive = (def: AnyNodeDef) => !isPreset(def) && !!selNode && (Object.values(def.outputs as Record<string, { type: string }>)[0]?.type === 'number');
   /** Add a number-producing node and open the socket picker on the selected node to choose which parameter it drives. */
   const drive = (def: AnyNodeDef) => {
@@ -238,6 +241,16 @@ function AddMenuInner() {
         <button className="rs-btn rs-btn--icon rs-btn--ghost rs-add__x" onClick={() => ed.openAddMenu(null)} aria-label="Close" title="Close"><Icon name="close" size={18} /></button>
       </div>
       {label && <div className="rs-add__filter rs-caps">{label}</div>}
+      {showSetups && (
+        <div className="rs-add__setups" data-testid="regions-setups">
+          <div className="rs-add__filter rs-caps">Regions: set up in one step, after {selTitle}</div>
+          <div className="rs-add__setuprow">
+            {REGIONS_SETUPS.map((s) => (
+              <button key={s.id} className="rs-btn rs-add__setup" title={s.hint} data-setup={s.id} onClick={() => { ed.openAddMenu(null); if (selId) ed.addRegionsSetup(selId, s.id); }}>{s.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="rs-add__body">
         {!searching && (
           <div className="rs-add__cats">

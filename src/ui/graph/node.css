@@ -48,6 +48,7 @@
 .rs-row { position: absolute; left: 0; right: 0; display: flex; align-items: center; padding: 0 var(--s-3); min-width: 0; }
 .rs-row--io { justify-content: space-between; gap: var(--s-2); pointer-events: none; }
 .rs-row__label { color: var(--text-dim); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rs-row__need { flex: none; margin-left: 6px; padding: 0 5px; border-radius: 8px; font-size: 10px; line-height: 14px; color: var(--yellow, #e8b84a); border: 1px solid currentColor; white-space: nowrap; }
 .rs-row__label--out { margin-left: auto; text-align: right; }
 .rs-row--param { padding: 0 var(--s-2); }
 .rs-row--param > .rs-nf, .rs-row--param > .rs-check, .rs-row--param > .rs-color { height: 24px; }
