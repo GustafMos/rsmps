@@ -301,3 +301,9 @@ export function materialRasterGroup(device: GPUDevice, layout: GPUBindGroupLayou
   }
   return device.createBindGroup({ layout, entries });
 }
+
+/**
+ * How much of a ground shadow a material casts: its opacity, and half of it for the hologram (whose pixels average about half
+ * transparent). A solid material casts the full shadow.
+ */
+export const materialShadowFactor = (m: MaterialValue | null | undefined): number => (m ? Math.min(1, Math.max(0, m.a[3] * (m.model === 'hologram' ? 0.5 : 1))) : 1);

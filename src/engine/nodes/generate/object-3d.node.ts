@@ -1,11 +1,34 @@
 import { defineNode } from '../../define';
 import { cameraBasis, PROJECTION_ID, simpleCamera } from '../../lib/gen-camera';
-import { RAY_WGSL } from '../../lib/gen-3d';
-import { materialKey, materialTextures, materialUniforms, materialWgsl } from '../../lib/gen-material';
+import { applyCameraLight, GROUND_PARAMS, GROUND_WGSL, groundOn, groundUniforms, LIGHT_FROM_CAMERA_PARAM, RAY_WGSL } from '../../lib/gen-3d';
+import { materialKey, materialShadowFactor, materialTextures, materialUniforms, materialWgsl } from '../../lib/gen-material';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformUniforms, deformWgsl, deformStepScale, deformAny, type DeformP } from '../../lib/gen-deform';
 import { SPIN_AROUND_PARAM, spunRotation, rgba, rotationZYX } from '../../lib/gen-common';
 import { modelFilesSummary, modelNameSuffix, renderModel } from '../../lib/model-render';
 import type { CameraValue } from '../../types';
+
+/**
+ * Support function of each primitive in its own frame (the furthest it reaches along a direction), for the lowest point of the rotated
+ * object: where the ground shadow's floor sits. Bevel only rounds the corners a little, so it is ignored (the floor ends up at most a
+ * hair under the object).
+ */
+function supportOf(shape: string, d: readonly number[], bevel: number): number {
+  const [x, y, z] = [Math.abs(d[0]), Math.abs(d[1]), Math.abs(d[2])];
+  const h = Math.hypot(d[0], d[2]);
+  switch (shape) {
+    case 'cube': {
+      const r = Math.min(bevel, 0.55);
+      return (0.55 - r) * (x + y + z) + r;
+    }
+    case 'sphere': return 0.95;
+    case 'cylinder': return 0.7 * h + 0.7 * y;
+    case 'cone': return Math.max(0.8 * d[1], -0.8 * d[1] + 0.8 * h);
+    case 'torus': return 0.68 * h + 0.28;
+    case 'pyramid': return Math.max(0.65 * d[1], -0.55 * d[1] + 0.6 * (x + z));
+    case 'capsule': return 0.45 * y + 0.5;
+    default: return Math.max(x, y, z);
+  }
+}
 
 const SHAPES = { cube: 0, sphere: 1, cylinder: 2, cone: 3, torus: 4, pyramid: 5, capsule: 6, octahedron: 7 } as const;
 
@@ -107,12 +130,14 @@ export default defineNode({
     gloss: { type: 'number', default: 32, min: 2, max: 256, step: 1, label: 'Highlight focus', group: 'Lighting' },
     cel: { type: 'bool', default: false, label: 'Cel shading', group: 'Lighting', hint: 'Posterises the light into a few flat bands. Great for pixel art.' },
     celSteps: { type: 'number', default: 3, min: 2, max: 8, step: 1, integer: true, label: 'Shading bands', group: 'Lighting', visibleIf: (p) => p.cel === true },
+    ...LIGHT_FROM_CAMERA_PARAM,
+    ...GROUND_PARAMS,
     ...DEFORM_PARAMS,
   },
   titleSuffix: (p, { assetName }) => (p.shape === 'custom' ? modelNameSuffix(p.model, assetName) : String(p.shape).replace(/^./, (c) => c.toUpperCase())),
   summary: (p) => `${p.shape === 'custom' ? modelFilesSummary(p) : p.shape} · ${p.cameraType}${p.cel ? ` · ${p.celSteps}-band cel` : ''}${p.spinX || p.spinY || p.spinZ ? ' · spinning' : ''}`,
   async render(ctx) {
-    const p = ctx.params;
+    const p = applyCameraLight(ctx.params, ctx.in.camera);
     const size = ctx.in.size ?? ctx.canvas;
     const mat = ctx.in.material;
     const dp = p as unknown as DeformP;
@@ -135,7 +160,11 @@ export default defineNode({
     let cam: CameraValue | null = ctx.in.camera;
     if (!cam) cam = simpleCamera({ ortho: p.cameraType === 'orthographic', fovDeg: p.fov, frameSize: p.scale, x: p.x, y: p.y, width: size.width, height: size.height });
     const basis = cameraBasis(cam);
+    const ground = groundOn(p);
+    // the lowest point of the rotated object: world y of its local point furthest along -y
+    const lowest = ground ? p.posY - Math.max(0.001, p.objectScale) * supportOf(p.shape, [-R[3], -R[4], -R[5]], p.bevel * 0.55) : 0;
     const uniforms = {
+      ...(ground ? groundUniforms(p, cam, { bottom: lowest, center: [p.posX, p.posY, p.posZ], radius: Math.max(0.001, p.objectScale) * (hasDf ? 1.2 + deformGrow(dp) : 1), opacity: materialShadowFactor(mat) }) : {}),
       ...(mat ? materialUniforms(mat) : {}),
       ...(hasDf ? { ...deformUniforms(dp, phase), dfGrow: deformGrow(dp), dfStepK: (deformStepScale(dp) * 0.8) / 0.9 } : {}),
         shape: SHAPES[p.shape as keyof typeof SHAPES] ?? 0,
@@ -260,12 +289,14 @@ fn trace(ro: vec3f, rd: vec3f) -> f32 {
   return t;
 }
 
+${ground ? GROUND_WGSL + '\nvar<private> gGnd: f32;\n' : ''}
 fn shade(uf: vec2f, ff: vec2f) -> vec4f {
   var ro = vec3f(0.0);
   var rd = vec3f(0.0, 0.0, 1.0);
+  ${ground ? 'gGnd = 0.0;' : ''}
   if (!makeRay(uf, ff, &ro, &rd)) { return vec4f(0.0); }
   let t = trace(ro, rd);
-  if (t < 0.0) { return vec4f(0.0); }
+  if (t < 0.0) { ${ground ? 'gGnd = groundAlpha(ro, rd); ' : ''}return vec4f(0.0); }
   let pos = ro + rd * t;
   let n = calcNormal(pos);
   let L = normalize(u.light); // world space: the light does not follow the camera
@@ -303,15 +334,20 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   // 4 rotated-grid samples per pixel: antialiased silhouette
   ${mat ? 'gScr = px / u.size; gA = 1.0;' : ''}
   let s0 = sampleAt(px + vec2f(-0.375, -0.125));
+  ${ground ? 'let g0 = gGnd;' : ''}
   ${mat ? 'let a0 = gA;' : ''}
   let s1 = sampleAt(px + vec2f(0.125, -0.375));
+  ${ground ? 'let g1 = gGnd;' : ''}
   ${mat ? 'let a1 = gA;' : ''}
   let s2 = sampleAt(px + vec2f(0.375, 0.125));
+  ${ground ? 'let g2 = gGnd;' : ''}
   ${mat ? 'let a2 = gA;' : ''}
   let s3 = sampleAt(px + vec2f(-0.125, 0.375));
+  ${ground ? 'let g3 = gGnd;' : ''}
   ${mat ? 'let a3 = gA;' : ''}
   let sum = s0 + s1 + s2 + s3;
-  if (sum.a < 0.5) { return vec4f(0.0); }
+  ${ground ? 'let gnd = (g0 + g1 + g2 + g3) * 0.25;' : ''}
+  if (sum.a < 0.5) { return ${ground ? 'vec4f(0.0, 0.0, 0.0, gnd)' : 'vec4f(0.0)'}; }
   let cov = sum.a * 0.25;
   var col = sum.rgb / sum.a;
   if (u.cel > 0.5) {
@@ -319,7 +355,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     col = select(select(select(s3.rgb, s2.rgb, s2.a > 0.5), s1.rgb, s1.a > 0.5), s0.rgb, s0.a > 0.5);
   }
   ${mat ? 'let a = cov * u.base.a * (a0 * s0.a + a1 * s1.a + a2 * s2.a + a3 * s3.a) / sum.a;' : 'let a = cov * u.base.a;'}
-  return vec4f(col * a, a);
+  return vec4f(col * a, ${ground ? 'min(a + gnd, 1.0)' : 'a'});
 }`;
     const depthFx = /* wgsl */ `
 fn fx(uv: vec2f, px: vec2f) -> vec4f {

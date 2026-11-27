@@ -9,12 +9,15 @@
  */
 import type { Quat, Vec3 } from '../../engine/lib/motion-math';
 import { projectionMatrix, type Lens, type XrPose } from '../../engine/lib/xr-math';
-import type { XrAnchorLike, XrCpuDepthLike, XrFrameCallback, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrRigidTransform, XrSessionInit, XrSessionLike, XrSystemLike, XrViewLike } from './xr-api';
+import type { XrLightEstimateLike } from '../../engine/lib/xr-light';
+import type { XrAnchorLike, XrCpuDepthLike, XrFrameCallback, XrFrameLike, XrHitTestResultLike, XrLayerLike, XrLightProbeLike, XrRigidTransform, XrSessionInit, XrSessionLike, XrSystemLike, XrViewLike } from './xr-api';
 
 const transformOf = (pose: XrPose): XrRigidTransform => ({
   position: { x: pose.p[0], y: pose.p[1], z: pose.p[2], w: 1 },
   orientation: { x: pose.q[0], y: pose.q[1], z: pose.q[2], w: pose.q[3] },
 });
+
+const DEFAULT_FAKE_FEATURES = ['hit-test', 'anchors', 'dom-overlay', 'camera-access', 'light-estimation'];
 
 export interface FakeAnchor extends XrAnchorLike {
   pose: XrPose;
@@ -24,7 +27,7 @@ export interface FakeAnchor extends XrAnchorLike {
 }
 
 export interface FakeSessionOptions {
-  /** Features the "browser" grants. Default: all four. */
+  /** Features the "browser" grants. Default: the four of the usual AR view plus light estimation. */
   features?: string[];
   /** Report the granted features through `enabledFeatures` (newer Chrome) or not at all (older). */
   reportFeatures?: boolean;
@@ -54,6 +57,13 @@ export class FakeXrSession implements XrSessionLike {
   camera: { width: number; height: number } | null = null;
   /** The depth picture handed out with `depth-sensing`, or null for none this frame. */
   depth: { width: number; height: number; metres: number } | null = { width: 8, height: 6, metres: 1.2 };
+  /**
+   * The estimate the "device" hands out when `light-estimation` is granted (null = it has none yet). Direction points TOWARD the light, in
+   * the AR reference space; `sh` = the 27 spherical harmonics numbers (default: a uniform sky of `ambient`).
+   */
+  light: { direction: [number, number, number]; intensity: [number, number, number]; ambient?: number; sh?: number[] } | null = { direction: [0, 1, 0], intensity: [1, 1, 1], ambient: 0.3 };
+  /** Light probes handed out, and estimates read. */
+  probes = 0;
   readonly anchors: FakeAnchor[] = [];
   /** Make the next anchor requests fail (a device that grants anchors and then cannot make one). */
   failAnchors = false;
@@ -70,7 +80,7 @@ export class FakeXrSession implements XrSessionLike {
   private listeners = new Map<string, Set<(ev: unknown) => void>>();
 
   constructor(o: FakeSessionOptions = {}) {
-    this.granted = o.features ?? ['hit-test', 'anchors', 'dom-overlay', 'camera-access'];
+    this.granted = o.features ?? DEFAULT_FAKE_FEATURES;
     if (o.reportFeatures !== false) this.enabledFeatures = ['viewer', 'local', ...this.granted];
     this.lens = o.lens ?? [1.9, 1.07, 0, 0];
     const width = o.width ?? 1080;
@@ -83,6 +93,7 @@ export class FakeXrSession implements XrSessionLike {
     }
     if (this.granted.includes('dom-overlay')) this.domOverlayState = { type: 'screen' };
     if (!this.granted.includes('hit-test')) this.requestHitTestSource = undefined;
+    if (!this.granted.includes('light-estimation')) this.requestLightProbe = undefined as never;
   }
 
   requestReferenceSpace(type: string): Promise<unknown> {
@@ -100,6 +111,10 @@ export class FakeXrSession implements XrSessionLike {
     this.baseLayer = state.baseLayer ?? null;
   }
   requestHitTestSource?: (options: { space: unknown }) => Promise<{ cancel(): void }> = () => Promise.resolve({ cancel: () => undefined });
+  requestLightProbe = (): Promise<XrLightProbeLike> => {
+    this.probes++;
+    return Promise.resolve({ probeSpace: 'probe' });
+  };
   addEventListener(type: string, cb: (ev: unknown) => void): void {
     let set = this.listeners.get(type);
     if (!set) this.listeners.set(type, (set = new Set()));
@@ -162,6 +177,22 @@ export class FakeXrSession implements XrSessionLike {
         return { transform: transformOf(a.pose) };
       },
       getHitTestResults: () => (hitResult ? [hitResult] : []),
+      ...(this.granted.includes('light-estimation')
+        ? {
+            getLightEstimate: (): XrLightEstimateLike | null => {
+              const l = this.light;
+              if (!l) return null;
+              const amb = l.ambient ?? 0.3;
+              // a uniform sky of brightness `amb`: its first coefficient is amb / 0.282 / pi so that the reader gets `amb` back
+              const sh = l.sh ?? [amb / (Math.PI * 0.282095), amb / (Math.PI * 0.282095), amb / (Math.PI * 0.282095), ...new Array(24).fill(0)];
+              return {
+                primaryLightDirection: { x: l.direction[0], y: l.direction[1], z: l.direction[2] },
+                primaryLightIntensity: { x: l.intensity[0], y: l.intensity[1], z: l.intensity[2] },
+                sphericalHarmonicsCoefficients: Float32Array.from(sh),
+              };
+            },
+          }
+        : {}),
       ...(this.granted.includes('depth-sensing')
         ? {
             getDepthInformation: (): XrCpuDepthLike | null => {
@@ -219,7 +250,7 @@ export class FakeXrSystem implements XrSystemLike {
     if (this.failWith) return Promise.reject(this.failWith);
     // the browser grants what was asked for AND what it has
     const wanted = init?.optionalFeatures ?? [];
-    const has = this.options.features ?? ['hit-test', 'anchors', 'dom-overlay', 'camera-access'];
+    const has = this.options.features ?? DEFAULT_FAKE_FEATURES;
     this.session = new FakeXrSession({ ...this.options, features: has.filter((f) => wanted.includes(f) && (f !== 'dom-overlay' || !!init?.domOverlay)) });
     this.onSession?.(this.session);
     return Promise.resolve(this.session);

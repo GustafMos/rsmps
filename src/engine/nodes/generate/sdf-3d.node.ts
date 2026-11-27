@@ -1,9 +1,9 @@
 import { defineNode } from '../../define';
 import { spunRotation, rotationZYX } from '../../lib/gen-common';
-import { aaPlan, AA_PARAM, BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, isSpinning, LIGHT_PARAMS, lightVector, marchUniforms, QUALITY_PARAM, resolveCamera, run3d, SHADE_PARAMS, XFORM_PARAMS, type LightP, type XformP } from '../../lib/gen-3d';
+import { applyCameraLight, aaPlan, AA_PARAM, BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, GROUND_PARAMS, groundOn, groundUniforms, isSpinning, LIGHT_FROM_CAMERA_PARAM, LIGHT_PARAMS, lightVector, marchUniforms, QUALITY_PARAM, resolveCamera, run3d, SHADE_PARAMS, XFORM_PARAMS, type GroundP, type LightP, type XformP } from '../../lib/gen-3d';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformKey, deformStepScale, deformUniforms, deformWgsl, type DeformP } from '../../lib/gen-deform';
 import { SDF2D_WGSL } from '../../lib/gen-sdf2d';
-import { materialKey, materialTextures, materialUniforms } from '../../lib/gen-material';
+import { materialKey, materialShadowFactor, materialTextures, materialUniforms } from '../../lib/gen-material';
 import { materialShadeWgsl, preparePicture, SD_CALL, SD_FUNCS, SD_OPS_WGSL, shapeExtent, TO_LOCAL_WGSL } from '../../lib/sdf-prims';
 import type { ColorValue, ImageValue, ParamSchema } from '../../types';
 
@@ -87,7 +87,7 @@ interface Slot {
   color: ColorValue;
 }
 
-interface P extends XformP, LightP, DeformP {
+interface P extends XformP, LightP, DeformP, GroundP {
   gooey: number;
   morph: boolean;
   morphAmount: number;
@@ -161,6 +161,8 @@ export default defineNode({
     textureMix: { type: 'number', default: 1, min: 0, max: 1, step: 0.01, label: 'Texture amount', group: 'Texture' },
     ...XFORM_PARAMS,
     ...LIGHT_PARAMS,
+    ...LIGHT_FROM_CAMERA_PARAM,
+    ...GROUND_PARAMS,
     ...SHADE_PARAMS,
     ...QUALITY_PARAM,
     ...AA_PARAM,
@@ -171,7 +173,7 @@ export default defineNode({
     return `${n} shape${n === 1 ? '' : 's'}${p.cel ? ' · cel' : ''}`;
   },
   render(ctx) {
-    const p = ctx.params as unknown as P;
+    const p = applyCameraLight(ctx.params as unknown as P, ctx.in.camera);
     const size = ctx.in.size ?? ctx.canvas;
     checkFrame(ctx.gpu, size.width, size.height);
     const pic = ctx.in.shape2d;
@@ -227,6 +229,7 @@ export default defineNode({
 
     const code = build3dShader({
       shadows: p.shadows,
+      ground: groundOn(p),
       shade: mat ? materialShadeWgsl(mat) : undefined,
       map: /* wgsl */ `
 ${SD_OPS_WGSL}
@@ -311,6 +314,12 @@ fn surf(pw: vec3f, nw: vec3f, rd: vec3f) -> vec3f {
     uniforms.bsW = [p.posX + (R[0] * cx + R[1] * cy + R[2] * cz) * objScale, p.posY + (R[3] * cx + R[4] * cy + R[5] * cz) * objScale, p.posZ + (R[6] * cx + R[7] * cy + R[8] * cz) * objScale];
     uniforms.bsR = bound;
     uniforms.farT = 80;
+    if (groundOn(p)) {
+      // the floor is at the bottom of the bounding sphere (a scene that repeats forever: one unit under the object)
+      const rW = Number.isFinite(bound) && bound > 0 ? bound * objScale : 1.5 * objScale;
+      const cW = uniforms.bsW as number[];
+      Object.assign(uniforms, groundUniforms(p, cam, { bottom: Number.isFinite(bound) && bound > 0 ? cW[1] - rW : p.posY - objScale, center: cW, radius: rW, opacity: materialShadowFactor(mat) }));
+    }
     slots.forEach((s, j) => {
       const Rs = rotationZYX(s.rot[0], s.rot[1], s.rot[2]);
       uniforms[`a${j}`] = [s.pos[0], s.pos[1], s.pos[2], Math.max(1e-4, s.smooth * p.gooey)];
@@ -335,7 +344,7 @@ fn surf(pw: vec3f, nw: vec3f, rd: vec3f) -> vec3f {
     const stepScale = Math.min(deformStepScale(p), 0.9) * (reps ? 0.8 : 1) * (usesPic ? 0.9 : 1) * (fold ? 0.8 : 1);
     Object.assign(uniforms, marchUniforms({ light: lightVector(p), p, quality: p.quality, stepScale, nEps: usesPic ? 0.01 : 0, aaPlan: aaPlan(p.antiAlias, p.quality, ctx.quality === 'final' && ctx.proxy >= 1) }));
 
-    const key = `sdf-3d ${slots.map((s) => s.type[0] + s.type[1] + s.op[0]).join('')}${morph ? ' morph' : ''} r${repeat.map(Number).join('')} m${mirror.map(Number).join('')}${fold ? ' fold' : ''}${shell ? ' shell' : ''}${textured ? ' tex' : ''} ${deformKey(feat)} ${materialKey(mat)}`;
+    const key = `sdf-3d${groundOn(p) ? ' ground' : ''} ${slots.map((s) => s.type[0] + s.type[1] + s.op[0]).join('')}${morph ? ' morph' : ''} r${repeat.map(Number).join('')} m${mirror.map(Number).join('')}${fold ? ' fold' : ''}${shell ? ' shell' : ''}${textured ? ' tex' : ''} ${deformKey(feat)} ${materialKey(mat)}`;
     if (mat) Object.assign(uniforms, materialUniforms(mat));
     const out = run3d(ctx.gpu, {
       label: key,

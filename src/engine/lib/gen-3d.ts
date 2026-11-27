@@ -84,6 +84,120 @@ export function aaPlan(mode: string | undefined, quality: string, fullQuality: b
   }
 }
 
+/**
+ * GROUND SHADOW ("shadow catcher"). An invisible, endless floor under the object that only shows the object's shadow: where the floor
+ * is in shadow the node outputs black with alpha = strength x how dark it is, everywhere else on the floor alpha 0, so laid over a
+ * photo or the AR camera it darkens the real floor. The shadow has NO depth: the depth output never includes the floor.
+ * Off by default (old projects are unchanged). The floor is the plane y = ground height (scene units, y up); the shadow fades out with
+ * distance from the object, so there is no horizon.
+ */
+export const GROUND_PARAMS = {
+  groundShadow: { type: 'bool', default: false, label: 'Ground shadow', group: 'Ground shadow', hint: 'The object casts a shadow on an invisible floor under it. Over a photo or the AR camera it darkens the real floor.' },
+  groundStrength: { type: 'number', default: 0.6, min: 0, max: 1, step: 0.01, label: 'Shadow strength', group: 'Ground shadow', hint: '0 = no shadow, 1 = fully black.', visibleIf: (p: Record<string, unknown>) => p.groundShadow === true },
+  groundSoftness: { type: 'number', default: 0.35, min: 0, max: 1, step: 0.01, label: 'Shadow softness', group: 'Ground shadow', hint: 'Sharp to very soft edge.', visibleIf: (p: Record<string, unknown>) => p.groundShadow === true },
+  groundHeight: {
+    type: 'number',
+    default: 0,
+    min: -10,
+    max: 10,
+    step: 0.01,
+    scrubSpan: 4,
+    label: 'Ground height',
+    group: 'Ground shadow',
+    hint: '0 puts the floor at the lowest point of the object (in AR: on the surface you placed it on). Positive raises it, negative lowers it.',
+    visibleIf: (p: Record<string, unknown>) => p.groundShadow === true,
+  },
+} satisfies ParamSchema;
+
+/** "Light from camera": a camera that knows the real light of a room (World AR Camera) can drive the light of the 3D node. */
+export const LIGHT_FROM_CAMERA_PARAM = {
+  lightFromCamera: { type: 'bool', default: true, label: 'Light from camera', group: 'Lighting', hint: 'When the wired camera knows the light of the room (the World AR Camera with "Match the room\'s light"), use it instead of the light below. No effect with other cameras.' },
+} satisfies ParamSchema;
+
+export interface GroundP {
+  groundShadow?: boolean;
+  groundStrength?: number;
+  groundSoftness?: number;
+  groundHeight?: number;
+  lightFromCamera?: boolean;
+}
+
+/** The node's params with the light of the wired camera in place of its own light (when it has one and "Light from camera" is not off). */
+export function applyCameraLight<T extends { lightAzimuth: number; lightElevation: number; ambient: number }>(p: T & GroundP, cam: CameraValue | null): T {
+  const l = cam?.light;
+  if (!l || p.lightFromCamera === false) return p;
+  return { ...p, lightAzimuth: l.azimuth, lightElevation: l.elevation, ambient: Math.min(1, Math.max(0, l.ambient)) };
+}
+
+/** Does this node draw the ground shadow? */
+export const groundOn = (p: GroundP): boolean => p.groundShadow === true;
+
+/**
+ * Uniforms of the ground shadow (see GROUND_WGSL). `bottom` = the lowest world y of the object, `center` / `radius` = a world sphere around
+ * it. A camera that knows where the real surface is (`cam.ground`, scene y) wins over `bottom`; the node's Ground height is added on top.
+ */
+export function groundUniforms(p: GroundP, cam: CameraValue | null, o: { bottom: number; center: readonly number[]; radius: number; opacity?: number }): Record<string, UniformValue> {
+  const base = cam && typeof cam.ground === 'number' && Number.isFinite(cam.ground) ? cam.ground : o.bottom;
+  return {
+    gY: base + (p.groundHeight ?? 0),
+    gStr: Math.min(1, Math.max(0, p.groundStrength ?? 0.6)) * (o.opacity ?? 1),
+    gSoft: Math.min(1, Math.max(0, p.groundSoftness ?? 0.35)),
+    gR: Math.max(0.05, o.radius),
+    gC: [o.center[0], o.center[1], o.center[2]],
+  };
+}
+
+/**
+ * WGSL of the ground shadow for a shader that has `fn map(p: vec3f) -> f32` (a lower bound of the distance) and the uniforms of
+ * `groundUniforms` plus `u.light`. `groundAlpha(ro, rd)` = shadow amount 0..1 of the floor point a camera ray meets (0 when it meets no
+ * floor). The shadow ray is marched through `map` like the soft shadows of the SDF renderers; contact darkening is the same distance
+ * based occlusion as `calcAO`, taken straight up from the floor.
+ */
+export const GROUND_WGSL = /* wgsl */ `
+fn gVis(p: vec3f, L: vec3f) -> f32 {
+  let R = max(u.gR, 0.05);
+  let k = 64.0 * pow(0.047, u.gSoft);
+  let tmax = min(2.5 * R / max(L.y, 0.05) + R, 24.0 * R);
+  var res = 1.0;
+  var t = 0.03 * R;
+  for (var i = 0; i < 64; i++) {
+    let h = map(p + L * t);
+    res = min(res, k * h / t);
+    t += clamp(h, 0.02 * R, 0.3 * R);
+    if (res < 0.003 || t > tmax) { break; }
+  }
+  res = clamp(res, 0.0, 1.0);
+  return res * res * (3.0 - 2.0 * res);
+}
+fn gAO(p: vec3f) -> f32 {
+  let R = max(u.gR, 0.05);
+  var occ = 0.0;
+  var sca = 1.0;
+  for (var i = 0; i < 5; i++) {
+    let h = R * (0.03 + 0.2 * f32(i) / 4.0);
+    occ += (h - map(p + vec3f(0.0, h, 0.0))) * sca;
+    sca *= 0.8;
+  }
+  return clamp(1.0 - 1.5 * occ / (0.23 * R), 0.0, 1.0);
+}
+fn groundAlpha(ro: vec3f, rd: vec3f) -> f32 {
+  if (ro.y <= u.gY + 1e-5 || rd.y > -1e-5) { return 0.0; }
+  let t = (u.gY - ro.y) / rd.y;
+  let p = vec3f(ro.x + rd.x * t, u.gY, ro.z + rd.z * t);
+  let L = normalize(u.light);
+  let R = max(u.gR, 0.05);
+  let reach = 2.0 * R / max(L.y, 0.2);
+  let dc = length(p.xz - u.gC.xz);
+  let fade = 1.0 - smoothstep(1.5 * R + 0.6 * reach, 4.0 * R + 1.4 * reach, dc);
+  if (fade <= 0.0 || u.gStr <= 0.0) { return 0.0; }
+  let lit = smoothstep(0.0, 0.12, L.y);
+  var vis = 1.0;
+  if (lit > 0.0) { vis = mix(1.0, gVis(p, L), lit); }
+  let dark = 1.0 - vis * mix(1.0, gAO(p), 0.8);
+  return clamp(u.gStr * dark * fade, 0.0, 1.0);
+}
+`;
+
 /** Move / scale / rotate / spin of the object plus the simple built-in camera: the same params and defaults as 3D Object. */
 export const XFORM_PARAMS = {
   posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
@@ -206,7 +320,7 @@ fn makeRay(uf: vec2f, ff: vec2f, ro: ptr<function, vec3f>, rd: ptr<function, vec
 `;
 
 /** Frame coordinates for an output texel centre -> ray (used by the raymarched members). */
-const FRAME_WGSL = /* wgsl */ `
+export const FRAME_WGSL = /* wgsl */ `
 fn rayAt(px: vec2f, ro: ptr<function, vec3f>, rd: ptr<function, vec3f>) -> bool {
   let short = min(u.size.x, u.size.y);
   let c = u.size * 0.5;
@@ -227,6 +341,8 @@ export interface Shader3dParts {
   bounds: string;
   /** Soft shadows compiled in (structure). */
   shadows: boolean;
+  /** The ground shadow is compiled in (structure; needs `groundUniforms`). */
+  ground?: boolean;
   /** Replaces the default lighting: defines `fn shadeSurf(base, n, rd, ao, sh, p in world space) -> vec4f` (rgb + alpha). `gScr` = screen uv of the ray. */
   shade?: string;
 }
@@ -309,6 +425,8 @@ fn calcAO(p: vec3f, n: vec3f, scl: f32) -> f32 {
   return clamp(1.0 - 2.0 * occ / scl, 0.0, 1.0);
 }
 
+${parts.ground ? GROUND_WGSL : ''}
+
 ${
   parts.shadows
     ? `fn softShadow(ro: vec3f, rd: vec3f, tmax: f32, scl: f32) -> f32 {
@@ -371,8 +489,9 @@ fn sampleAt(px: vec2f, tOut: ptr<function, f32>) -> vec4f {
   *tOut = 0.0;
   gScr = px / u.size;
   if (!rayAt(px, &ro, &rd)) { return vec4f(0.0); }
+  ${parts.ground ? 'var gnd = 0.0;\n  if (u.depthMode < 0.5) { gnd = groundAlpha(ro, rd); }' : ''}
   let b = bounds(ro, rd);
-  if (b.y < b.x || b.y < 0.0) { return vec4f(0.0); }
+  if (b.y < b.x || b.y < 0.0) { return ${parts.ground ? 'vec4f(0.0, 0.0, 0.0, gnd)' : 'vec4f(0.0)'}; }
   let m = march(ro, rd, max(b.x, 0.0), b.y);
   if (m.hit > 0.5) {
     *tOut = m.t;
@@ -382,9 +501,20 @@ fn sampleAt(px: vec2f, tOut: ptr<function, f32>) -> vec4f {
   }
   // near miss: partial coverage, coloured from the closest approach
   let cov = clamp(0.5 - m.cone, 0.0, 0.5);
-  if (cov < 0.02 || u.depthMode > 0.5 || u.edgeAA < 0.5) { return vec4f(0.0); }
+  if (cov < 0.02 || u.depthMode > 0.5 || u.edgeAA < 0.5) { return ${parts.ground ? 'vec4f(0.0, 0.0, 0.0, gnd)' : 'vec4f(0.0)'}; }
   let c = colourAt(ro, rd, m.tc);
-  return vec4f(c.rgb, cov * c.a);
+  ${
+    parts.ground
+      ? `let oa = cov * c.a;
+  let ta = oa + gnd * (1.0 - oa);
+  return vec4f(c.rgb * oa / max(ta, 1e-5), ta);`
+      : 'return vec4f(c.rgb, cov * c.a);'
+  }
+}
+
+// a sample that shows the object (a ground shadow sample is black, so it never lends its colour to a toon edge)
+fn solid(s: vec4f) -> bool {
+  return s.a > 0.5${parts.ground ? ' && (s.r + s.g + s.b) > 0.0' : ''};
 }
 
 fn fx(uv: vec2f, px: vec2f) -> vec4f {
@@ -405,7 +535,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     let sum2 = r0.a + r1.a;
     if (sum2 < 0.01) { return vec4f(0.0); }
     var col2 = (r0.rgb * r0.a + r1.rgb * r1.a) / sum2;
-    if (u.cel > 0.5) { col2 = select(r1.rgb, r0.rgb, r0.a > 0.5); }
+    if (u.cel > 0.5) { col2 = select(r1.rgb, r0.rgb, solid(r0)); }
     let a2 = min(sum2 * 0.5, 1.0) * u.alpha;
     return vec4f(col2 * a2, a2);
   }
@@ -416,7 +546,7 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
   let sum = s0.a + s1.a + s2.a + s3.a;
   if (sum < 0.01) { return vec4f(0.0); }
   var col = (s0.rgb * s0.a + s1.rgb * s1.a + s2.rgb * s2.a + s3.rgb * s3.a) / sum;
-  if (u.cel > 0.5) { col = select(select(select(s3.rgb, s2.rgb, s2.a > 0.5), s1.rgb, s1.a > 0.5), s0.rgb, s0.a > 0.5); }
+  if (u.cel > 0.5) { col = select(select(select(s3.rgb, s2.rgb, solid(s2)), s1.rgb, solid(s1)), s0.rgb, solid(s0)); }
   let a = min(sum * 0.25, 1.0) * u.alpha;
   return vec4f(col * a, a);
 }

@@ -12,7 +12,7 @@
  * Contract: docs/ENGINE.md, Pending rules ("Group nodes", "Repeat groups", "Bake a group").
  */
 import { isInputPort, type Registry } from './define';
-import { SDF_SCENE_PARAMS } from './lib/sdf-scene-params';
+import { SDF_RENDER_ID, SDF_SCENE_PARAMS } from './lib/sdf-scene-params';
 import { stableStringify } from './lib/stable-json';
 import {
   CATEGORIES,
@@ -124,6 +124,32 @@ export const isPathId = (id: string): boolean => id.includes(PATH_SEP);
 
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
+/**
+ * An SDF Scene shows every render setting the CURRENT Scene Output definition has (SDF_SCENE_PARAMS), not only the ones listed when the
+ * group was saved: settings added later (Ground shadow, ...) appear on old scenes without touching the saved document. Missing ones are
+ * derived here at read time, in the definition's order; their values stay unset until the user changes them, so the Scene Output's own
+ * defaults apply and opening a project changes nothing.
+ */
+function withSceneParams(listed: GroupExposed[], nodes: NodeInstance[]): GroupExposed[] {
+  if (!nodes.some((n) => n.id === SDF_RENDER_ID)) return listed;
+  const keys = Object.keys(SDF_SCENE_PARAMS);
+  const have = new Set(listed.filter((x) => x.node === SDF_RENDER_ID && x.param === x.id).map((x) => x.id));
+  const taken = new Set(listed.map((x) => x.id));
+  const missing = keys.filter((k) => !have.has(k) && !taken.has(k));
+  if (!missing.length) return listed;
+  const out = [...listed];
+  const rank = (x: GroupExposed): number => (x.node === SDF_RENDER_ID && x.param === x.id ? keys.indexOf(x.id) : -1);
+  for (const k of missing) {
+    const def = (SDF_SCENE_PARAMS as Record<string, ParamDef>)[k];
+    const entry: GroupExposed = { id: k, label: def.label ?? k, node: SDF_RENDER_ID, param: k, def: snapshotParamDef(def) };
+    const i = keys.indexOf(k);
+    const at = out.findIndex((x) => rank(x) > i);
+    if (at < 0) out.push(entry);
+    else out.splice(at, 0, entry);
+  }
+  return out;
+}
+
 /** The group record of a group node, with missing fields defaulted (never throws). */
 export function groupData(node: Pick<NodeInstance, 'params'>): GroupData {
   const p = node.params ?? {};
@@ -138,7 +164,7 @@ export function groupData(node: Pick<NodeInstance, 'params'>): GroupData {
     edges: arr<Edge>(p.edges),
     inputs: arr<GroupPort>(p.inputs),
     outputs: arr<GroupPort>(p.outputs),
-    exposed: arr<GroupExposed>(p.exposed),
+    exposed: p.sdfScene === true ? withSceneParams(arr<GroupExposed>(p.exposed), arr<NodeInstance>(p.nodes)) : arr<GroupExposed>(p.exposed),
     sdfScene: p.sdfScene === true ? true : undefined,
     count: typeof p.count === 'number' ? p.count : undefined,
     mode: p.mode === 'accumulate' ? 'accumulate' : p.mode === 'chain' ? 'chain' : undefined,

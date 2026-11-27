@@ -19,6 +19,7 @@
 import type { Quat, Vec3 } from '../../engine/lib/motion-math';
 import { FEED_MAX_SIDE } from './camera-feed';
 import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
+import { readLightEstimate, smoothLight, type WorldLight } from '../../engine/lib/xr-light';
 import { cardCorners, clampZoom, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, viewMatrix, viewRay, zoomLens, zoomProjection, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
 import { rotate } from '../../engine/lib/motion-math';
 import { hintFor, initialPlaceState, liftedPlacement, placeStep, type Gesture, type PlaceState } from './placement';
@@ -102,6 +103,8 @@ export interface ArLoopState {
   recordFps: number;
   askedFps: number;
   cameraFps: number;
+  /** The phone gives an estimate of the room's light (the 3D nodes can match it). */
+  light: boolean;
   error: string | null;
   ended: boolean;
   /** The scan view's numbers (only in the scan view). */
@@ -115,6 +118,8 @@ export interface ArLoopDeps {
   referenceSpace: unknown;
   /** The `viewer` space for the hit test in the middle of the screen; null when hit testing is not available. */
   hitTestSource: unknown | null;
+  /** The light probe of the session, when light estimation was granted (World AR view only). */
+  lightProbe?: unknown | null;
   layer: XrLayerLike;
   features: GrantedFeatures;
   painter: ArPainter;
@@ -211,6 +216,9 @@ export class ArLoop {
   private reanchor = false;
   private drag: { h0: Vec3; p0: Vec3 } | null = null;
   private lastView: { pose: XrPose; lens: Lens } | null = null;
+  /** The room's light, smoothed over time; holds its last value while the phone has no estimate. */
+  private light: WorldLight | null = null;
+  private lightAt = -1;
   /** The zoom the user chose; and the zoom actually on the screen in the last frame (1 when the camera picture was not there to zoom). */
   private zoom = 1;
   private zoomShown = 1;
@@ -371,6 +379,18 @@ export class ArLoop {
     this.lastView = { pose, lens };
     const tracking = vp.emulatedPosition !== true;
 
+    // 1b. the room's light (jitters from frame to frame: smoothed over about a third of a second)
+    if (d.lightProbe && frame.getLightEstimate) {
+      let est: WorldLight | null = null;
+      try {
+        est = readLightEstimate(frame.getLightEstimate(d.lightProbe as never));
+      } catch {
+        est = null; // the estimate is optional: a frame that fails to give one keeps the last
+      }
+      this.light = smoothLight(this.light, est, this.lightAt < 0 ? 0 : (now - this.lightAt) / 1000);
+      this.lightAt = now;
+    }
+
     // 2. the surface in the middle of the screen, and the anchor
     let hit: XrPose | null = null;
     this.lastHit = null;
@@ -411,7 +431,7 @@ export class ArLoop {
     }
     // the lens of the zoomed picture: the engine renders the object through it, so it stays locked to the room while the camera is zoomed
     const zlens = zoomLens(lens, zoom);
-    const moment: WorldMoment = { view: pose, lens: zlens, ...(zoom !== 1 ? { zoom } : {}), object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale } : null };
+    const moment: WorldMoment = { view: pose, lens: zlens, ...(zoom !== 1 ? { zoom } : {}), object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale, ...(base?.h ? { h: base.h } : {}) } : null, ...(this.light ? { light: this.light } : {}) };
     const pic = d.source.latest();
     if (pic && pic.seq !== this.lastSeq) {
       this.lastSeq = pic.seq;
@@ -667,6 +687,7 @@ export class ArLoop {
       recordFps: r && this.rateUsed ? this.rateUsed.fps : this.recordRateFor(this.projectFps).fps,
       askedFps: r && this.rateUsed ? this.rateUsed.asked : this.recordRateFor(this.projectFps).asked,
       cameraFps: this.cameraFps,
+      light: !!this.light,
       error: this.error,
       ended: this.ended,
     };

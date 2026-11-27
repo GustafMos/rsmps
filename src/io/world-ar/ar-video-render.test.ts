@@ -51,7 +51,7 @@ class Source implements ArPictureSource {
 }
 
 /** Drive the real loop: place away from the origin, walk, pinch and twist while recording. */
-function record(lens: Lens, camera: { width: number; height: number }, zooms: Record<number, number> = {}) {
+function record(lens: Lens, camera: { width: number; height: number }, zooms: Record<number, number> = {}, onFrame?: (i: number, session: FakeXrSession) => void) {
   const session = new FakeXrSession({ lens, width: camera.width, height: camera.height });
   session.camera = camera;
   session.viewer = { p: [0, 1.4, 0], q: qAxisAngle('x', -25) };
@@ -61,6 +61,7 @@ function record(lens: Lens, camera: { width: number; height: number }, zooms: Re
     session,
     referenceSpace: { space: 'local' },
     hitTestSource: { source: 'viewer' },
+    lightProbe: { probe: true },
     layer: session.layer,
     features: featuresOf(session),
     painter: new Painter(),
@@ -95,6 +96,7 @@ function record(lens: Lens, camera: { width: number; height: number }, zooms: Re
       loop.gesture({ type: 'pinch', factor: 1.4 });
       loop.gesture({ type: 'twist', deg: 35 });
     }
+    onFrame?.(i, session);
     if (zooms[i]) loop.gesture(zooms[i] === -1 ? { type: 'zoom-reset' } : { type: 'zoom', dy: zooms[i] });
     if (i === 22) loop.gesture({ type: 'lift', dy: 60 }); // raised off the floor: the video must show it as high as live did
     step();
@@ -143,10 +145,10 @@ async function centroid(img: ImageValue | null, isObject: (p: [number, number, n
   return { cover: n / (px.width * px.height), x: n ? sx / n / px.width : NaN, y: n ? sy / n / px.height : NaN };
 }
 
-function project(): { graph: GraphDoc; ar: string; obj: string; merge: string; cam: string } {
+function project(objParams: Record<string, unknown> = {}): { graph: GraphDoc; ar: string; obj: string; merge: string; cam: string } {
   let g = createGraph('ar');
   const ar = addNode(g, h.registry, 'world-ar', { x: 0, y: 0 }, { size: 0.5 });
-  const obj = addNode(ar.graph, h.registry, 'object-3d', { x: 200, y: 0 });
+  const obj = addNode(ar.graph, h.registry, 'object-3d', { x: 200, y: 0 }, objParams);
   const cam = addNode(obj.graph, h.registry, 'camera-in', { x: 0, y: 200 });
   const merge = addNode(cam.graph, h.registry, 'merge', { x: 400, y: 0 });
   g = connect(merge.graph, h.registry, { node: ar.node.id, port: 'camera' }, { node: obj.node.id, port: 'camera' });
@@ -257,5 +259,61 @@ describe('a zoom change during the recording reaches the finished video', () => 
       compared++;
     }
     expect(compared).toBeGreaterThan(3);
+  }, 120000);
+});
+
+describe('a light change during the recording reaches the finished video', () => {
+  /** How far the bright side of the object is from its middle, in picture widths (negative = lit from the left of the picture). */
+  async function skew(img: ImageValue | null): Promise<number> {
+    const px = await h.pixels(img);
+    let n = 0;
+    let sx = 0;
+    let bw = 0;
+    let bx = 0;
+    for (let y = 0; y < px.height; y++)
+      for (let x = 0; x < px.width; x++) {
+        const q = px.at(x, y);
+        if (q[3] < 200) continue;
+        n++;
+        sx += x;
+        const b = q[0] + q[1] + q[2];
+        bw += b;
+        bx += b * x;
+      }
+    return n ? (bx / bw - sx / n) / px.width : NaN;
+  }
+
+  it('the take records the light, the video plays it back, and the shading and shadow side match what live showed', async () => {
+    const shape = SHAPES[0];
+    // light from one side, then from the other, half way through
+    const samples = record(shape.lens, shape.camera, {}, (i, s) => {
+      s.light = { direction: i < 20 ? [-0.7, 0.6, 0.35] : [0.7, 0.6, 0.35], intensity: [1, 1, 1], ambient: 0.2 };
+    });
+    expect(samples.every((s) => !!s.light)).toBe(true);
+    const take = buildWorldTake(samples, { fps: FPS })!;
+    expect(take.tracks.lx).toBeTruthy();
+    expect(take.tracks.lo).toBeTruthy();
+    expect(sampleWorldTake(take, 0).light).toBeTruthy();
+    const objParams = { shape: 'sphere', baseColor: [0.9, 0.9, 0.9, 1], specular: 0, groundShadow: true, groundStrength: 1 };
+    const p = project(objParams);
+    const size = arVideoSize(shape.clip, { width: 100, height: 100 }, 1280);
+    clipColour = h.solid(size.width, size.height, [CLIP_RGB[0], CLIP_RGB[1], CLIP_RGB[2], 255]);
+    const built = buildWorldArVideoGraph(p.graph, { arId: p.ar, viewedId: p.merge, viewedPort: 'image', take, clipAsset: 'clip', width: size.width, height: size.height, output: {} })!;
+    const live = pictureSize(shape.lens, 960);
+    const skews: { live: number; video: number }[] = [];
+    for (const i of [8, 40]) {
+      const s = samples[Math.min(i, samples.length - 1)];
+      const moment: WorldMoment = { view: s.view, lens: s.lens, zoom: s.zoom, object: s.object, light: s.light };
+      const stamped = stampWorldAr(p.graph, worldArNodeIds(p.graph), moment);
+      const liveRes = await h.engine.evaluate({ graph: stamped, node: p.obj, canvas: live, proxy: 1, quality: 'preview' });
+      expect(liveRes.errors.size, [...liveRes.errors.values()].join(';')).toBe(0);
+      const res = await h.engine.evaluate({ graph: built.graph, node: p.obj, seconds: (s.frame ?? 0) / FPS });
+      expect(res.errors.size, [...res.errors.values()].join(';')).toBe(0);
+      skews.push({ live: await skew(liveRes.value as ImageValue), video: await skew(res.value as ImageValue) });
+    }
+    // the video shades like live (same side bright) ...
+    for (const k of skews) expect(Math.abs(k.live - k.video), JSON.stringify(skews)).toBeLessThan(0.02);
+    // ... and the light really moved the shading between the two moments
+    expect(Math.abs(skews[0].live - skews[1].live), JSON.stringify(skews)).toBeGreaterThan(0.01);
   }, 120000);
 });

@@ -84,6 +84,17 @@ export interface CameraValue {
   roll: number;
   /** Lens shift in normalised frame units (moves the picture without changing perspective). */
   shift: [number, number];
+  /**
+   * Where the real floor is, as a y in scene units (y up), when the camera knows (World AR Camera: the surface the object was placed
+   * on, lift and height included). 3D nodes with Ground shadow put their floor here instead of at the object's lowest point.
+   */
+  ground?: number;
+  /**
+   * The light of the room, when the camera knows it (World AR Camera with light estimation). Angles are those of the 3D nodes'
+   * Light azimuth / Light height; `ambient` 0..1 is the share of the light that comes from everywhere; `strength` is the brightness of
+   * the main light (1 = as bright as the lamp the nodes assume). 3D nodes use it unless their "Light from camera" is off.
+   */
+  light?: { azimuth: number; elevation: number; ambient: number; strength: number };
 }
 
 /**

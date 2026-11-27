@@ -15,13 +15,16 @@
 import { qAlign, qNorm, qSlerp, type Quat, type Vec3 } from './motion-math';
 import { rdp } from './motion-take';
 import type { Lens, XrPose } from './xr-math';
+import type { WorldLight } from './xr-light';
 
 /** One moment of a session: the viewer, the lens, and the placed object (null before anything is placed). */
 export interface WorldMoment {
   view: XrPose;
   lens: Lens;
   /** The placed object: its point on the surface, its full orientation (surface frame and twist together) and its size multiplier. */
-  object: { p: Vec3; q: Quat; scale: number } | null;
+  object: { p: Vec3; q: Quat; scale: number; /** Metres the object is raised above its surface (absent = 0): already part of `p`. */ h?: number } | null;
+  /** The room's light as the browser estimated it (absent = not known). Recorded as optional tracks: an older take simply has none. */
+  light?: WorldLight;
   /**
    * The AR view's digital zoom for this frame (absent = 1). `lens` is the lens of the ZOOMED picture (what the engine camera uses);
    * the take stores the un-zoomed lens and this factor apart, because the recorded camera clip is the un-zoomed picture.
@@ -63,6 +66,8 @@ const LENS: Spec = { step: 1e-5, tol: 5e-5 };
 const SCALE: Spec = { step: 1e-4, tol: 5e-4 };
 const FLAG: Spec = { step: 1, tol: 0.25 };
 const ZOOM: Spec = { step: 1e-3, tol: 2e-3 };
+const LIGHT: Spec = { step: 1e-3, tol: 4e-3 };
+const LIGHT_CHANNELS = ['lx', 'ly', 'lz', 'ls', 'la', 'lr', 'lg', 'lb', 'lo'];
 
 const CHANNELS: Record<string, Spec> = {
   cx: POS, cy: POS, cz: POS,
@@ -73,6 +78,9 @@ const CHANNELS: Record<string, Spec> = {
   on: FLAG,
   l0: LENS, l5: LENS, l8: LENS, l9: LENS,
   zm: ZOOM,
+  // optional channels: only in a take that had a light estimate / a raised object
+  lx: LIGHT, ly: LIGHT, lz: LIGHT, ls: LIGHT, la: LIGHT, lr: LIGHT, lg: LIGHT, lb: LIGHT, lo: FLAG,
+  oh: POS,
 };
 export const WORLD_CHANNELS = Object.keys(CHANNELS);
 const QUATS: [string, string, string, string][] = [
@@ -104,6 +112,17 @@ function rowOf(m: WorldMoment, last: Row | null): Row {
     on: o ? 1 : 0,
     l0: m.lens[0] / z, l5: m.lens[1] / z, l8: m.lens[2] / z, l9: m.lens[3] / z,
     zm: z,
+    // the light holds its last value where the estimate is missing; before the first one it carries neutral values (filled in below)
+    lx: m.light ? m.light.dir[0] : (last?.lx ?? 0),
+    ly: m.light ? m.light.dir[1] : (last?.ly ?? 1),
+    lz: m.light ? m.light.dir[2] : (last?.lz ?? 0),
+    ls: m.light ? m.light.strength : (last?.ls ?? 1),
+    la: m.light ? m.light.ambient : (last?.la ?? 0.35),
+    lr: m.light ? m.light.ambientColor[0] : (last?.lr ?? 1),
+    lg: m.light ? m.light.ambientColor[1] : (last?.lg ?? 1),
+    lb: m.light ? m.light.ambientColor[2] : (last?.lb ?? 1),
+    lo: m.light || last?.lo === 1 ? 1 : 0,
+    oh: o ? (o.h ?? 0) : (last?.oh ?? 0),
   };
 }
 
@@ -133,6 +152,12 @@ export function buildWorldTake(samples: WorldSample[], opts: { fps: number }): W
   if (firstOn) for (const r of rows) {
     if (r.on === 1) break;
     for (const n of ['ox', 'oy', 'oz', 'oqx', 'oqy', 'oqz', 'oqw', 'os']) r[n] = firstOn[n];
+  }
+  // the first light reading fills the light channels of everything before it
+  const firstLit = rows.find((r) => r.lo === 1);
+  if (firstLit) for (const r of rows) {
+    if (r.lo === 1) break;
+    for (const n of LIGHT_CHANNELS) if (n !== 'lo') r[n] = firstLit[n];
   }
   let frames: number;
   const dense: Row[] = [];
@@ -184,12 +209,15 @@ export function buildWorldTake(samples: WorldSample[], opts: { fps: number }): W
     for (const i of rdp(q, spec.tol)) flat.push(i, q[i]);
     // a take that never zoomed has no zoom track, exactly like a take recorded before zoom existed
     if (n === 'zm' && ch.zm.every((v) => Math.abs(v - 1) < 1e-9)) continue;
+    // a take without a light estimate or a raised object has none of those tracks, exactly like a take recorded before they existed
+    if (LIGHT_CHANNELS.includes(n) && !ch.lo.some((v) => v >= 0.5)) continue;
+    if (n === 'oh' && ch.oh.every((v) => Math.abs(v) < 1e-9)) continue;
     tracks[n] = flat;
   }
   return { v: 1, kind: 'world-ar', fps, frames, tracks, clip: byFrame, ...(byFrame && first > 0 ? { clipFirst: first } : {}) };
 }
 
-const NEUTRAL: Row = { cx: 0, cy: 0, cz: 0, cqx: 0, cqy: 0, cqz: 0, cqw: 1, ox: 0, oy: 0, oz: 0, oqx: 0, oqy: 0, oqz: 0, oqw: 1, os: 1, on: 0, l0: 1, l5: 1, l8: 0, l9: 0, zm: 1 };
+const NEUTRAL: Row = { cx: 0, cy: 0, cz: 0, cqx: 0, cqy: 0, cqz: 0, cqw: 1, ox: 0, oy: 0, oz: 0, oqx: 0, oqy: 0, oqz: 0, oqw: 1, os: 1, on: 0, l0: 1, l5: 1, l8: 0, l9: 0, zm: 1, lx: 0, ly: 1, lz: 0, ls: 1, la: 0.35, lr: 1, lg: 1, lb: 1, lo: 0, oh: 0 };
 
 function expand(take: WorldTake): Record<string, Float64Array> {
   const ch: Record<string, Float64Array> = {};
@@ -215,6 +243,11 @@ function expand(take: WorldTake): Record<string, Float64Array> {
 
 const cache = new WeakMap<object, Record<string, Float64Array>>();
 
+const unitVec = (x: number, y: number, z: number): Vec3 => {
+  const l = Math.hypot(x, y, z) || 1;
+  return [x / l, y / l, z / l];
+};
+
 /** The moment at `seconds`. Holds the ends, or repeats when `loop`. Between two frames positions are blended and orientations slerped. */
 export function sampleWorldTake(take: WorldTake, seconds: number, loop = false): WorldMoment {
   let ch = cache.get(take);
@@ -233,10 +266,12 @@ export function sampleWorldTake(take: WorldTake, seconds: number, loop = false):
   const quat = (g: [string, string, string, string]): Quat => qNorm(qSlerp([c[g[0]][i0], c[g[1]][i0], c[g[2]][i0], c[g[3]][i0]], [c[g[0]][i1], c[g[1]][i1], c[g[2]][i1], c[g[3]][i1]], u));
   const on = (u < 0.5 ? c.on[i0] : c.on[i1]) >= 0.5;
   const zoom = num('zm');
+  const hasLight = (u < 0.5 ? c.lo[i0] : c.lo[i1]) >= 0.5;
   return {
     view: { p: [num('cx'), num('cy'), num('cz')], q: quat(QUATS[0]) },
     lens: [num('l0') * zoom, num('l5') * zoom, num('l8') * zoom, num('l9') * zoom],
     ...(zoom !== 1 ? { zoom } : {}),
-    object: on ? { p: [num('ox'), num('oy'), num('oz')], q: quat(QUATS[1]), scale: num('os') } : null,
+    object: on ? { p: [num('ox'), num('oy'), num('oz')], q: quat(QUATS[1]), scale: num('os'), ...(c.oh.some((v) => v !== 0) ? { h: num('oh') } : {}) } : null,
+    ...(hasLight ? { light: { dir: unitVec(num('lx'), num('ly'), num('lz')), strength: num('ls'), ambient: num('la'), ambientColor: [num('lr'), num('lg'), num('lb')] as [number, number, number] } } : {}),
   };
 }

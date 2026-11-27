@@ -13,8 +13,8 @@ import { fedByWorldAr, stampWorldAr, worldArNodeIds, type PictureTarget } from '
 import { FakeXrSession, FakeXrSystem, fakeTransform } from './fake-xr';
 import { ArLoop, MAX_FRAME_ERRORS, effectiveRecordRate, pictureSize, renderFailHint, type ArLoopState, type ArPainter, type ArPicture, type ArPictureSource } from './loop';
 import { GestureReader, MAX_SCALE, MIN_SCALE, TAP_MS, hintFor, initialPlaceState, placeStep, type Gesture, type PlaceState } from './placement';
-import { checkWorldAr, startErrorMessage, unsupportedMessage } from './support';
-import { OPTIONAL_FEATURES, featuresOf } from './xr-api';
+import { checkWorldAr, lightReadout, startErrorMessage, unsupportedMessage } from './support';
+import { OPTIONAL_FEATURES, SCAN_FEATURES, featuresOf } from './xr-api';
 
 const close = (a: ArrayLike<number>, b: ArrayLike<number>, digits = 5) => {
   for (let i = 0; i < b.length; i++) expect(a[i]).toBeCloseTo(b[i], digits);
@@ -62,9 +62,9 @@ describe('is World AR possible here, and what to say', () => {
   });
   it('granted features: the browser\'s own list where it has one, else by what is there', () => {
     const all = new FakeXrSession();
-    expect(featuresOf(all)).toEqual({ hitTest: true, anchors: true, domOverlay: true, cameraAccess: true });
+    expect(featuresOf(all)).toEqual({ hitTest: true, anchors: true, domOverlay: true, cameraAccess: true, lightEstimation: true });
     const bare = new FakeXrSession({ features: [] });
-    expect(featuresOf(bare)).toEqual({ hitTest: false, anchors: false, domOverlay: false, cameraAccess: false });
+    expect(featuresOf(bare)).toEqual({ hitTest: false, anchors: false, domOverlay: false, cameraAccess: false, lightEstimation: false });
     const old = new FakeXrSession({ features: ['hit-test'], reportFeatures: false });
     expect(featuresOf(old).hitTest).toBe(true);
     expect(featuresOf(old).domOverlay).toBe(false); // no overlay state: no overlay
@@ -767,7 +767,7 @@ describe('opening the AR view (fake browser)', () => {
     const xr = new FakeXrSystem({ features: [] });
     const t = controller(xr);
     const h = await t.open();
-    expect(h.state().features).toEqual({ hitTest: false, anchors: false, domOverlay: false, cameraAccess: false });
+    expect(h.state().features).toEqual({ hitTest: false, anchors: false, domOverlay: false, cameraAccess: false, lightEstimation: false });
     t.frames(2);
     expect(t.states.at(-1)!.hint).toMatch(/does not tell the page where surfaces are/);
     await h.close();
@@ -1282,5 +1282,47 @@ describe('the recording rate through the controller', () => {
     const { take } = await recordAt(60, 16, 24);
     expect(take.take!.fps).toBe(60);
     expect(take.rate!.clamped).toBe(false);
+  });
+});
+
+describe('light estimation (fake browser)', () => {
+  it('is asked for as an optional feature; granted: the view reads the room light and says "light: yes"; the scan does not ask', async () => {
+    const xr = new FakeXrSystem();
+    const t = controller(xr);
+    const h = await t.open();
+    expect(xr.lastInit!.optionalFeatures).toContain('light-estimation');
+    expect(xr.lastInit!.requiredFeatures).toBeUndefined();
+    expect(h.state().features.lightEstimation).toBe(true);
+    expect(xr.session!.probes).toBe(1);
+    t.frames(10);
+    expect(t.states.at(-1)!.light).toBe(true);
+    expect(SCAN_FEATURES).not.toContain('light-estimation');
+    expect(lightReadout(true)).toBe('light: yes');
+    expect(lightReadout(false)).toBe('light: no');
+  });
+
+  it('denied: no probe is asked for, "light: no", and the view works as before', async () => {
+    const xr = new FakeXrSystem({ features: ['hit-test', 'anchors', 'dom-overlay', 'camera-access'] });
+    const t = controller(xr);
+    const h = await t.open();
+    expect(h.state().features.lightEstimation).toBe(false);
+    t.frames(10);
+    expect(xr.session!.probes).toBe(0);
+    expect(t.states.at(-1)!.light).toBe(false);
+  });
+
+  it('granted but the device has no estimate yet: "light: no" until it has one, then it holds the last value', async () => {
+    const xr = new FakeXrSystem();
+    xr.onSession = (s) => (s.light = null);
+    const t = controller(xr);
+    await t.open();
+    t.frames(10);
+    expect(t.states.at(-1)!.light).toBe(false);
+    xr.session!.light = { direction: [0, 1, 0], intensity: [1, 1, 1] };
+    t.frames(10);
+    expect(t.states.at(-1)!.light).toBe(true);
+    xr.session!.light = null;
+    t.frames(10);
+    expect(t.states.at(-1)!.light).toBe(true);
   });
 });
