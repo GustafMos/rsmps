@@ -53,6 +53,18 @@ function setup() {
   return { ov, gestures, modes, strip, stats, all, byText };
 }
 
+describe('the numbers of the AR overlay', () => {
+  it('say whether steadying is on, next to the frame rate and the object pictures per second', () => {
+    for (const steadying of ['auto', 'off', 'predict'] as const) {
+      const t = setup();
+      t.ov.update(state({ steadying, pictureBehindMs: 140 }));
+      const text = t.stats().textContent;
+      expect(text.split('\n')[0]).toBe(`30 fps · object 20/s · steadying ${steadying}`);
+      expect(text).toContain('object picture is 140 ms behind');
+    }
+  });
+});
+
 describe('the Zoom strip of the AR overlay', () => {
   it('is a second strip on the left edge, next to the Height strip on the right', () => {
     const t = setup();

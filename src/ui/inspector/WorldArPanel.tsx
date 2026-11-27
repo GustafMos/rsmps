@@ -11,6 +11,7 @@ import { useSelector } from '../store/createStore';
 import { getLive } from '../store/live';
 import { formatRemaining } from '../store/recorder';
 import { openWorldAr } from '../store/worldAr';
+import { copyText } from '../viewer/PerfOverlay';
 
 /** The notice shown wherever World AR appears: it shipped without an AR phone to test on. */
 export const WORLD_AR_BETA = 'Experimental: this was built without an AR phone to test it on. It may not work on yours yet. Please report what you see.';
@@ -84,6 +85,18 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
         The Picture output is what the camera sees right now. Wire it into a Material's colour map, or into any effect, to use the room as a texture. In the AR view it is the AR camera picture; outside it, the back camera of this device. It only costs work while it is wired.
       </p>
       {active && <p className="rs-insp__hint" role="status">{lightReadout(active.state().light === true)}{active.state().light === true ? '' : ': the 3D objects use their own light.'}</p>}
+      {!active && io.worldAr?.report() && (
+        <div className="rs-insp__actions">
+          <button
+            className="rs-btn"
+            data-ar-report
+            title="Copies the numbers of the last AR view (speed, how late the object picture was, what the phone gave) as text. Paste it into a message. Nothing personal is in it."
+            onClick={() => void copyText(io.worldAr?.report() ?? '').then((ok) => ed.toast(ok ? 'The AR report was copied. Paste it into a message.' : 'Your browser did not allow copying.', ok ? 'ok' : 'error'))}
+          >
+            Copy AR report
+          </button>
+        </div>
+      )}
       {active && !active.state().features.cameraAccess && <p className="rs-insp__hint" role="status">This phone does not hand over the camera picture in AR, so the Picture output is transparent while the AR view is open.</p>}
       {take && (
         <>

@@ -377,7 +377,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
       const f = s.features;
       const rate = s.recordFps !== s.askedFps ? `${s.recording ? 'recording' : 'will record'} at ${s.recordFps} per second: the phone's AR camera gives ${s.cameraFps}, ${s.askedFps} was asked` : s.recording ? `recording at ${s.recordFps} per second` : '';
       stats.textContent = [
-        `${s.fps} fps${zoom !== 1 ? ` · zoom ${zoom.toFixed(1)}x` : ''} · object ${s.pictureFps}/s`,
+        `${s.fps} fps${zoom !== 1 ? ` · zoom ${zoom.toFixed(1)}x` : ''} · object ${s.pictureFps}/s · steadying ${s.steadying}`,
         ...(rate ? [rate] : []),
         ...(f.cameraAccess ? [] : ['no zoom: this phone does not hand over the camera picture']),
         `render ${s.renderMs} ms · copy ${s.copyMs} ms (${s.route})`,

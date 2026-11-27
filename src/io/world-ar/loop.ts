@@ -20,7 +20,7 @@ import { qConj, qExp, qLog, qMul, qNorm, type Quat, type Vec3 } from '../../engi
 import { FEED_MAX_SIDE } from './camera-feed';
 import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
 import { readLightEstimate, smoothLight, type WorldLight } from '../../engine/lib/xr-light';
-import { cardCorners, clampZoom, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, sceneToWorld, viewMatrix, viewRay, zoomLens, zoomProjection, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
+import { cardCorners, clampZoom, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, project, rayPlane, reticleCorners, sceneToWorld, viewMatrix, viewRay, zoomLens, zoomProjection, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
 import { rotate } from '../../engine/lib/motion-math';
 import { metresPerUnit, worldDeltaToScene, worldRayToScene } from '../../engine/lib/ar-pick';
 import type { ArEditHost, ArSelected } from './edit-host';
@@ -94,6 +94,8 @@ export interface ArLoopState {
   pictureFps: number;
   /** How old the pose of the object's picture is when it is drawn, in milliseconds (averaged). 0 = no picture yet. */
   pictureBehindMs: number;
+  /** How the object's picture is aimed (see `Steadying`). */
+  steadying: Steadying;
   /** How far the object is raised above its surface, metres (0 = on it). */
   height: number;
   /** The object is held by a browser anchor (false = a fixed pose in the room). */
@@ -160,7 +162,14 @@ export interface ArLoopDeps {
    * walk and never starts over at the project's loop. The clock is part of the take.
    */
   physics?: boolean;
-  /** Render the object's picture for where the phone will be when it arrives (default true). False only to measure what that gains. */
+  /**
+   * Steadying: how the object's picture is aimed when it will arrive late.
+   *  - off: for where the phone is now (as the earlier releases did).
+   *  - auto: for where the phone will be, but only while it moves clearly faster than a hand shakes, with a short lead and a smoothed speed.
+   *  - predict: for where the phone will be, from its speed right now, whenever it moves.
+   * Default off. The older `predictPose` (true = predict, false = off) is read when this is absent.
+   */
+  steadying?: Steadying;
   predictPose?: boolean;
   now(): number;
   /** Moves one object at a time ("Move: One object"). Absent = the switch does not exist. */
@@ -171,6 +180,24 @@ export interface ArLoopDeps {
   screen(): { width: number; height: number };
   onState(state: ArLoopState): void;
 }
+
+export type Steadying = 'off' | 'auto' | 'predict';
+
+/** 0 below `lo`, 1 above `hi`, smooth between. */
+const smooth = (x: number, lo: number, hi: number): number => {
+  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
+};
+/** Auto steadying: the speed is smoothed over about this long (a hand shake at 5 Hz and more is smoothed away). */
+const STEADY_TAU = 0.2;
+/** Auto steadying: nothing below this speed (a hand holding still reads up to about 0.1 m/s and 5 degrees per second), all of it above. */
+const STEADY_V = [0.15, 0.35] as const;
+const STEADY_W = [(10 * Math.PI) / 180, (30 * Math.PI) / 180] as const;
+/** Auto steadying: no lead for a picture younger than this, full lead from the second; never more than the cap. */
+const STEADY_AGE = [0.05, 0.08] as const;
+const STEADY_LEAD_MAX = 0.12;
+/** Fewest milliseconds between two reads of the light estimate. */
+const LIGHT_EVERY_MS = 90;
 
 const pt = (v: { x: number; y: number; z: number }): Vec3 => [v.x, v.y, v.z];
 /** The depth API's CPU depth picture as 16-bit values: luminance-alpha is that already, float32 (metres) becomes millimetres. */
@@ -275,7 +302,7 @@ export class ArLoop {
   private lastSeq = -1;
   /** When each picture's moment was asked for, how fast the phone is moving, and how old pictures are when drawn (averaged). */
   private requestedAt = new WeakMap<WorldMoment, number>();
-  private motion: { t: number; pose: XrPose; v: Vec3; w: Vec3 } | null = null;
+  private motion: { t: number; pose: XrPose; v: Vec3; w: Vec3; vs: Vec3; ws: Vec3 } | null = null;
   private behindMs = 0;
   private lastStateAt = -1e9;
   private readonly onEnd = () => this.finish(null);
@@ -451,7 +478,8 @@ export class ArLoop {
     const tracking = vp.emulatedPosition !== true;
 
     // 1b. the room's light (jitters from frame to frame: smoothed over about a third of a second)
-    if (d.lightProbe && frame.getLightEstimate) {
+    // read about ten times a second: the estimate changes slowly, and each read is work the phone does inside the camera frame
+    if (d.lightProbe && frame.getLightEstimate && (this.lightAt < 0 || now - this.lightAt >= LIGHT_EVERY_MS)) {
       let est: WorldLight | null = null;
       try {
         est = readLightEstimate(frame.getLightEstimate(d.lightProbe as never));
@@ -551,7 +579,7 @@ export class ArLoop {
       const depth = pl ? Math.max(0.05, depthOf(pose, pl.p)) : 1;
       // The picture arrives about `behindMs` late, so it is rendered for where the phone (and the falling objects) will be by then:
       // the phone's speed carried on for that long. What is drawn then needs hardly any correction, whatever the depth of the content.
-      const ahead = this.predict(pose, d.predictPose === false ? 0 : this.behindMs);
+      const ahead = this.predict(pose, this.behindMs, this.steadyMode(), zlens, pl?.p ?? null);
       const asked: WorldMoment = { ...moment, view: ahead.pose, ...(physics !== undefined ? { physics: holding ? physics : physics + ahead.seconds } : {}) };
       if (d.source.request({ moment: asked, depth: pl ? Math.max(0.05, depthOf(ahead.pose, pl.p)) : depth, size: pictureSize(zlens, d.maxSide), seconds: d.seconds() })) this.requestedAt.set(asked, now);
     }
@@ -904,29 +932,50 @@ export class ArLoop {
     const m = this.motion;
     const dt = m ? (now - m.t) / 1000 : 0;
     if (!m || dt < 0.002 || dt > 0.3) {
-      this.motion = { t: now, pose, v: [0, 0, 0], w: [0, 0, 0] };
+      this.motion = { t: now, pose, v: [0, 0, 0], w: [0, 0, 0], vs: [0, 0, 0], ws: [0, 0, 0] };
       return;
     }
     const k = 0.5;
+    const ks = dt / (STEADY_TAU + dt);
     const turn = qLog(qNorm(qMul(qNorm(pose.q), qConj(qNorm(m.pose.q)))));
     const v = [0, 1, 2].map((i) => m.v[i] * (1 - k) + ((pose.p[i] - m.pose.p[i]) / dt) * k) as Vec3;
     const w = [0, 1, 2].map((i) => m.w[i] * (1 - k) + ((2 * turn[i]) / dt) * k) as Vec3;
-    this.motion = { t: now, pose, v, w };
+    const vs = [0, 1, 2].map((i) => m.vs[i] * (1 - ks) + ((pose.p[i] - m.pose.p[i]) / dt) * ks) as Vec3;
+    const ws = [0, 1, 2].map((i) => m.ws[i] * (1 - ks) + ((2 * turn[i]) / dt) * ks) as Vec3;
+    this.motion = { t: now, pose, v, w, vs, ws };
   }
 
-  /** The pose `ms` milliseconds on at the current speed; the step is limited (half a metre, 40 degrees, a quarter second) so a jolt cannot fling it. */
-  private predict(pose: XrPose, ms: number): { pose: XrPose; seconds: number } {
+  private steadyMode(): Steadying {
+    return this.d.steadying ?? (this.d.predictPose === true ? 'predict' : 'off');
+  }
+
+  /**
+   * The pose the next picture is rendered for, and the seconds its physics clock runs on. The clock only needs the time (no guess
+   * about the hand), so it runs on by the picture's age in every mode but off. The pose depends on `mode` (see `Steadying`).
+   * Auto: the lead is the picture's age (at most 0.12 s, none under 0.05 s) times how clearly the phone moves faster than a hand
+   * shakes, on the SMOOTHED speed, and it is shortened until the placed spot is still well inside the picture.
+   */
+  private predict(pose: XrPose, ms: number, mode: Steadying, lens: Lens, spot: Vec3 | null): { pose: XrPose; seconds: number } {
     const m = this.motion;
-    const s = Math.min(0.25, Math.max(0, ms / 1000));
-    if (!m || s < 0.005) return { pose, seconds: s };
-    const step = (v: Vec3, max: number): Vec3 => {
-      const d = [v[0] * s, v[1] * s, v[2] * s] as Vec3;
+    const s = mode === 'off' ? 0 : Math.min(0.25, Math.max(0, ms / 1000));
+    if (mode === 'off' || !m || s < 0.005) return { pose, seconds: s };
+    const limit = (v: Vec3, k: number, max: number): Vec3 => {
+      const d = [v[0] * k, v[1] * k, v[2] * k] as Vec3;
       const n = Math.hypot(d[0], d[1], d[2]);
       return n > max ? ([d[0] * (max / n), d[1] * (max / n), d[2] * (max / n)] as Vec3) : d;
     };
-    const dp = step(m.v, 0.5);
-    const dw = step(m.w, (40 * Math.PI) / 180);
-    return { pose: { p: [pose.p[0] + dp[0], pose.p[1] + dp[1], pose.p[2] + dp[2]], q: qNorm(qMul(qExp([dw[0] / 2, dw[1] / 2, dw[2] / 2]), qNorm(pose.q))) }, seconds: s };
+    const aim = (dp: Vec3, dw: Vec3): XrPose => ({ p: [pose.p[0] + dp[0], pose.p[1] + dp[1], pose.p[2] + dp[2]], q: qNorm(qMul(qExp([dw[0] / 2, dw[1] / 2, dw[2] / 2]), qNorm(pose.q))) });
+    if (mode === 'predict') return { pose: aim(limit(m.v, s, 0.5), limit(m.w, s, (40 * Math.PI) / 180)), seconds: s };
+    const lead = Math.min(s, STEADY_LEAD_MAX) * smooth(s, STEADY_AGE[0], STEADY_AGE[1]);
+    const gv = smooth(Math.hypot(...m.vs), STEADY_V[0], STEADY_V[1]);
+    const gw = smooth(Math.hypot(...m.ws), STEADY_W[0], STEADY_W[1]);
+    if (lead <= 0 || (gv <= 0 && gw <= 0)) return { pose, seconds: s };
+    for (const shrink of [1, 0.5, 0.25, 0]) {
+      const ahead = aim(limit(m.vs, lead * gv * shrink, 0.1), limit(m.ws, lead * gw * shrink, (10 * Math.PI) / 180));
+      const n = shrink === 0 || !spot ? [0, 0] : project(ahead, lens, spot);
+      if (shrink === 0 || (n && Math.abs(n[0]) < 0.85 && Math.abs(n[1]) < 0.85)) return { pose: ahead, seconds: s };
+    }
+    return { pose, seconds: s };
   }
 
   private rate(times: number[]): number {
@@ -948,6 +997,7 @@ export class ArLoop {
       fps: this.rate(this.frameTimes),
       pictureFps: this.rate(this.pictureTimes),
       pictureBehindMs: Math.round(this.behindMs),
+      steadying: this.steadyMode(),
       height: this.place.placement?.h ?? 0,
       anchored: !!this.anchor,
       clip: r?.withClip === true,
