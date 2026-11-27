@@ -615,6 +615,12 @@ export class Editor {
     if (!g.nodes.some((n) => n.id === nodeId)) return;
     this.commitLevel({ ...g, nodes: g.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, ...patch } } : n)) }, key ?? `ps:${nodeId}:${keys.join(',')}`);
   }
+  /** `setParams` for a node of another level (a shape inside an SDF Scene, say) without opening it. Coalesces like `setParams` inside a hold. */
+  setParamsAt(path: readonly string[], nodeId: string, patch: Record<string, unknown>, key?: string): void {
+    const here = this.state.path;
+    if (path.length === here.length && path.every((p, i) => p === here[i])) return this.setParams(nodeId, patch, key);
+    this.editAt(path, (g) => (g.nodes.some((n) => n.id === nodeId) ? { ...g, nodes: g.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, ...patch } } : n)) } : g), key);
+  }
   /** Remember the in-flight edit so a reload after a render that never finished can offer to revert it. */
   private rememberPending(nodeId: string, key: string, value: unknown): void {
     try {

@@ -72,6 +72,9 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
       </p>
       <p className="rs-insp__hint">In the AR view: move the phone slowly until a ring appears on the floor or a table, tap to place, drag to move, two fingers to turn and resize. Record saves the movement here as a take, with the camera picture as a clip where the browser hands it over.</p>
       <p className="rs-insp__hint">
+        Move: Everything / One object (under the hint in the AR view, shown when this camera has more than one thing to move). Everything moves the whole frame together. One object: tap an object, then drag it, raise it with the Height strip, turn it with two fingers, or resize it. Only that one changes, and an object a Physics node drops is put where you let go and falls from there. Undo works as usual. It is off while recording, so the saved video matches what you saw.
+      </p>
+      <p className="rs-insp__hint">
         Zoom (1x to 4x) is the strip on the left edge of the AR view: drag up to zoom in, double tap for 1x. It is digital, the phone's AR camera cannot change its real zoom, and it needs the camera picture. The recording keeps the full camera picture and notes the zoom, so the saved video zooms the same way.
       </p>
       <p className="rs-insp__hint">

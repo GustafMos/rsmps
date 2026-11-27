@@ -5,6 +5,7 @@
 import type { CardMode } from '../../engine/lib/xr-math';
 import type { WorldArTake } from '../../io/world-ar/controller';
 import { createArOverlay } from '../worldAr/overlay';
+import { createArEditHost } from './arEdit';
 import type { AppCtx } from './context';
 import { getLive } from './live';
 
@@ -57,6 +58,7 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
     recordRate: params.recordRate && params.recordRate !== 'project' ? Number(params.recordRate) || null : null,
     card: { mode: (params.cardMode as CardMode) ?? 'upright', width: Number(params.cardWidth ?? 0.5) || 0.5 },
     overlay: overlay.root,
+    edit: createArEditHost(app, nodeId),
     onState: (s) => overlay.update(s),
     onTake: saveTake,
   }).then(
