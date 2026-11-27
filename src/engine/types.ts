@@ -136,6 +136,11 @@ export interface MotionValue {
   pos: [number, number, number];
   rot: [number, number, number];
   scale?: number;
+  /**
+   * The camera a Physics node received on its Camera input, passed on unchanged. A node driven by this motion that has a Camera input of
+   * its own which is not wired renders with it, as if the camera were wired into it (the World AR camera's real floor and light included).
+   */
+  camera?: CameraValue;
 }
 
 /**
@@ -290,6 +295,8 @@ interface ParamBase {
    * param's default would change what such old nodes do (a new look that is on by default): old projects then stay as they were.
    */
   absent?: unknown;
+  /** Turns a value stored by an older form of this setting into one of the current values (an on/off switch that became a choice). */
+  legacy?: (raw: unknown) => unknown;
 }
 export interface NumberParam extends ParamBase {
   type: 'number';

@@ -163,7 +163,6 @@ describe('How to use (guide)', () => {
       expect(g.steps.length, d.id).toBeGreaterThanOrEqual(2);
       expect(g.steps.length, d.id).toBeLessThanOrEqual(4);
       expect(g.does.length, d.id).toBeLessThan(200);
-      expect(d.id, 'physics has its own').not.toBe('physics');
     }
     const ids = withGuide.map((d) => d.id);
     for (const id of ['region-fx', 'detect-blobs', 'detect-color', 'detect-motion', 'regions-from-mask', 'track', 'region-filter', 'region-transform', 'region-info', 'regions-to-mask', 'region-overlay', 'region-trails', 'region-stamp', 'region-crop']) expect(ids).toContain(id);

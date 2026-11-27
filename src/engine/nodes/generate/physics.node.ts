@@ -53,7 +53,7 @@ for (const i of slot(MAX_BODIES)) inputs[motionIn(i)] = { type: 'motion', label:
 inputs.gravityVec = { type: 'vector', label: 'Gravity XYZ', visibleIf: advIn };
 inputs.push = { type: 'vector', label: 'Push', visibleIf: advIn };
 inputs.pushNow = { type: 'number', label: 'Push now', visibleIf: advIn };
-inputs.camera = { type: 'camera', label: 'Camera', visibleIf: advIn };
+inputs.camera = { type: 'camera', label: 'AR camera' };
 for (const i of slot(KIN_SLOTS)) {
   inputs[`move${i}`] = { type: 'vector', label: `Move body ${i}`, visibleIf: advIn };
   inputs[`turn${i}`] = { type: 'vector', label: `Turn body ${i}`, visibleIf: advIn };
@@ -70,6 +70,15 @@ export default defineNode({
   description:
     'Makes objects fall, bounce and pile up on a floor. The easy way: select a 3D object or an SDF shape and choose Falls under Physics in its settings. Each object gets one wire from this node. It starts again from the start pose every loop and gives the same result every time you scrub or export.',
   keywords: ['physics', 'gravity', 'fall', 'bounce', 'collide', 'collision', 'rigid body', 'simulation', 'drop', 'ragdoll', 'jolt', 'rapier', 'floor', 'ar', 'pile', 'rolling'],
+  guide: {
+    does: 'Makes objects fall and bounce. Wire the World AR Camera into this node and they land on the real floor.',
+    steps: [
+      'Select a 3D object or SDF shape and choose Falls under Physics in its settings. That adds this node and wires it for you.',
+      'In the AR view, wire the World AR Camera into the AR camera socket: the objects use the real floor and stand where you placed them.',
+      'Press play. It starts again from the start pose every loop.',
+    ],
+    seeAlso: ['world-ar', 'object-3d'],
+  },
   inputs,
   outputs,
   optionalOutputs: ['image'],
@@ -103,8 +112,21 @@ export default defineNode({
       ],
     },
     drag: { type: 'number', default: 0, min: 0, max: 20, softMax: 3, step: 0.05, label: 'Air drag', group: 'World', hint: 'Slows moving and spinning bodies, like air and rolling resistance. 0 lets a ball roll for ever.' },
-    floor: { type: 'bool', default: true, label: 'Floor', group: 'World', hint: 'A flat floor that bodies land on. In the AR view the real floor or table is at height minus Lift of the World AR Camera (default 1 gives -1), so set Floor height to that and things land on it.' },
-    floorHeight: { type: 'number', default: -1, min: -50, max: 50, step: 0.01, scrubSpan: 8, label: 'Floor height', group: 'World', hint: 'Up is positive. The default -1 is the bottom of a default 3D Object (2 units tall) and the surface the World AR Camera stands objects on.' },
+    floor: {
+      type: 'enum',
+      default: 'auto',
+      absent: 'custom',
+      legacy: (v) => (v === true ? 'custom' : v === false ? 'off' : v),
+      label: 'Floor',
+      group: 'World',
+      hint: 'Automatic uses the floor of the connected camera (the AR camera knows where the real floor is), or -1 when there is none. Custom height uses the number below. Off lets things fall for ever. Things fall toward the real down of the placed object. If the real floor moves by more than 1 mm, the fall starts over.',
+      options: [
+        { value: 'auto', label: 'Automatic' },
+        { value: 'custom', label: 'Custom height' },
+        { value: 'off', label: 'Off' },
+      ],
+    },
+    floorHeight: { type: 'number', default: -1, min: -50, max: 50, step: 0.01, scrubSpan: 8, label: 'Floor height', group: 'World', visibleIf: (p) => p.floor === 'custom', hint: 'Up is positive. The default -1 is the bottom of a default 3D Object (2 units tall) and the surface the World AR Camera stands objects on.' },
     floorBounce: { type: 'number', default: 0.3, min: 0, max: 1.5, step: 0.01, label: 'Floor bounce', group: 'World', hint: 'How much the floor and walls bounce things back. It is averaged with each body\'s own Bounciness.' },
     floorGrip: { type: 'number', default: 0.6, min: 0, max: 5, step: 0.01, label: 'Floor grip', group: 'World', hint: 'Friction of the floor and walls. 0 is ice.' },
     walls: { type: 'bool', default: false, label: 'Walls', group: 'World', hint: 'Four walls around the floor so things stay in a box.' },
@@ -130,23 +152,27 @@ export default defineNode({
     viewTurn: { type: 'number', default: 25, min: -180, max: 180, step: 1, unit: 'deg', label: 'View turn', group: 'Preview', hint: 'Where the preview looks from (used when no Camera is wired).' },
     viewTilt: { type: 'number', default: 20, min: -80, max: 80, step: 1, unit: 'deg', label: 'View tilt', group: 'Preview' },
     viewDistance: { type: 'number', default: 9, min: 1, max: 100, softMax: 30, step: 0.1, label: 'View distance', group: 'Preview', visibleIf: () => false, hint: 'Not used any more: the preview frames the bodies by itself.' },
-    advIn: { type: 'bool', default: false, label: 'Advanced inputs', group: 'Advanced', hint: 'Shows the Gravity, Push, Camera and old Move / Turn sockets on the node.' },
+    advIn: { type: 'bool', default: false, label: 'Advanced inputs', group: 'Advanced', hint: 'Shows the Gravity, Push and old Move / Turn sockets on the node.' },
     advOut: { type: 'bool', default: false, label: 'Advanced outputs', group: 'Advanced', hint: 'Shows Preview, Moving, Hits and the plain Position / Rotation numbers on the node.' },
   },
   summary: (p) => {
     const n = normalizeBodies(p.bodies).length;
-    return `${n} ${n === 1 ? 'object' : 'objects'}${p.floor ? ' · floor on' : ' · no floor'}`;
+    return `${n} ${n === 1 ? 'object' : 'objects'}${p.floor === 'off' ? ' · no floor' : p.floor === 'auto' ? ' · automatic floor' : ' · floor on'}`;
   },
   async render(ctx) {
     const p = ctx.params;
     const bodies = normalizeBodies(p.bodies);
     const fps = ctx.time.fps;
     const dir = DOWN[p.gravDir as string] ?? DOWN.down;
+    // The floor: Automatic takes the real floor of the wired camera (the World AR Camera's `ground`), else the old default -1. It is rounded
+    // to 1 mm so that noise in the value does not start the run over every frame; a change beyond that is a different run (see runSignature).
+    const cam = (ctx.in.camera as CameraValue | null) ?? null;
+    const floorAt = p.floor === 'auto' ? (typeof cam?.ground === 'number' && Number.isFinite(cam.ground) ? Math.round(cam.ground * 1000) / 1000 : -1) : p.floorHeight;
     const world: WorldSpec = {
       gravity: [dir[0] * p.gravity, dir[1] * p.gravity, dir[2] * p.gravity],
       damping: p.drag,
-      floor: p.floor,
-      floorHeight: p.floorHeight,
+      floor: p.floor !== 'off',
+      floorHeight: floorAt,
       floorBounce: p.floorBounce,
       floorFriction: p.floorGrip,
       walls: p.walls,
@@ -200,7 +226,7 @@ export default defineNode({
     const out: Record<string, unknown> = {};
     for (const i of slot(MAX_BODIES)) {
       const b = i <= bodies.length ? run.body(at, i - 1) : null;
-      out[motionOut(i)] = b ? ({ kind: 'motion', pos: b.pos, rot: b.rot } satisfies MotionValue) : null;
+      out[motionOut(i)] = b ? ({ kind: 'motion', pos: b.pos, rot: b.rot, ...(cam ? { camera: cam } : {}) } satisfies MotionValue) : null;
     }
     for (const i of slot(PHYSICS_SLOTS)) {
       const b = run.body(at, i - 1);
@@ -218,12 +244,12 @@ export default defineNode({
       const scale = Math.min(1, 1024 / Math.max(ctx.canvas.width, ctx.canvas.height));
       const w = Math.max(16, Math.round(ctx.canvas.width * scale));
       const h = Math.max(16, Math.round(ctx.canvas.height * scale));
-      const cam = (ctx.in.camera as CameraValue | null) ?? fitCamera(bodies, world, { turn: p.viewTurn, tilt: p.viewTilt, aspect: w / h });
+      const view = cam ?? fitCamera(bodies, world, { turn: p.viewTurn, tilt: p.viewTilt, aspect: w / h });
       const draw = bodies.map((spec, i) => {
         const b = run.body(at, i)!;
         return { spec, pos: b.pos, rot: b.rot, asleep: b.asleep };
       });
-      const px = drawPhysics(draw, world, cam, w, h);
+      const px = drawPhysics(draw, world, view, w, h);
       out.image = ctx.gpu.upload(px, w, h, ctx.unitFor(w, h), false);
     }
     return out as never;

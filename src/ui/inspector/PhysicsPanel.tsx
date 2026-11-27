@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_BODY, normalizeBodies } from '../../engine/lib/physics/sim';
 import { MAX_BODIES, type BodyKind, type BodyShape, type BodySpec } from '../../engine/lib/physics/types';
 import { scatterBodies } from '../../engine/lib/physics/wiring';
-import { addableObjects, bodyLinks, findWorldAr, tidyableCount } from '../../engine/lib/physics/objects';
+import { addableObjects, arCameraTodo, findWorldAr as findArHere, bodyLinks, tidyableCount } from '../../engine/lib/physics/objects';
 import type { NodeInstance } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { libraryAssetName, nodeDisplayName } from '../lib/nodeTitle';
@@ -128,7 +128,10 @@ export function PhysicsPanel({ node }: { node: NodeInstance }) {
   const save = (next: BodySpec[]) => ed.setParam(node.id, 'bodies', next);
   const addable = addableObjects(level, ed.registry);
   const old = tidyableCount(level, ed.registry, node.id);
-  const ar = findWorldAr(level);
+  const todo = arCameraTodo(level, node.id);
+  const camEdge = level.edges.find((e) => e.to.node === node.id && e.to.port === 'camera');
+  const camFrom = camEdge ? level.nodes.find((x) => x.id === camEdge.from.node) : undefined;
+  const custom = node.params.floor === 'custom';
   const full = bodies.length >= MAX_BODIES;
   const nameOf = (i: number): string => {
     const t = links[i]?.target;
@@ -200,10 +203,23 @@ export function PhysicsPanel({ node }: { node: NodeInstance }) {
           </button>
         </div>
       )}
-      {ar && (
+      {todo && (
+        <div className="rs-phys__tidy" data-ar-todo>
+          <p className="rs-insp__hint">To do: this graph has an AR camera that Physics does not use yet, so things fall to a made-up floor.</p>
+          <button className="rs-btn rs-btn--primary" data-use-ar onClick={() => ed.useArCameraForPhysics(node.id)} title="Wires the World AR Camera into this node. Things then land on the real floor and the objects are drawn with that camera.">
+            Use the AR camera
+          </button>
+        </div>
+      )}
+      {camEdge && node.params.floor === 'auto' && (
+        <p className="rs-insp__hint" data-ar-ok>
+          {camFrom?.type === 'world-ar' ? 'Using the real floor from the AR camera.' : 'Using the floor of the connected camera when it knows one (the AR camera does).'}
+        </p>
+      )}
+      {custom && todo === null && findArHere(level) && (
         <div className="rs-phys__tidy">
-          <p className="rs-insp__hint">The real floor in the AR view is at minus the World AR Camera's Lift.</p>
-          <button className="rs-btn" data-match-ar onClick={() => ed.matchPhysicsArFloor(node.id)} title="Sets Floor on and Floor height to minus the Lift of the World AR Camera, so things land on the real surface.">
+          <p className="rs-insp__hint">Floor is set by hand. The real floor in the AR view is at minus the World AR Camera's Lift.</p>
+          <button className="rs-btn" data-match-ar onClick={() => ed.matchPhysicsArFloor(node.id)} title="Sets Floor height to minus the Lift of the World AR Camera, so things land on the real surface.">
             Match AR floor
           </button>
         </div>

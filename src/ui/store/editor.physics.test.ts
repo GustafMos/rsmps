@@ -13,7 +13,7 @@ const { Registry, MOTION_PORT } = await import('../../engine/define');
 const { registerBuiltins } = await import('../../engine/nodes');
 const { createGraph, addNode, validateGraph, connect } = await import('../../engine/graph');
 const { normalizeBodies } = await import('../../engine/lib/physics/sim');
-const { canBePhysical, colliderFor, physicsOf, tidyWiring, bodyLinks, matchArFloor } = await import('../../engine/lib/physics/objects');
+const { canBePhysical, colliderFor, physicsOf, tidyWiring, bodyLinks, matchArFloor, arCameraTodo, objectArTodo } = await import('../../engine/lib/physics/objects');
 import type { Io } from '../../io/api';
 import type { NodeInstance } from '../../engine/types';
 
@@ -40,7 +40,7 @@ describe('Physics: Falls / Stays put on an object', () => {
     expect(phys).toBeTruthy();
     const p = physNodes(ed);
     expect(p).toHaveLength(1);
-    expect(p[0].params.floor).toBe(true);
+    expect(p[0].params.floor).toBe('auto');
     const bodies = normalizeBodies(p[0].params.bodies);
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toMatchObject({ shape: 'box', size: [2, 4, 6], pos: [0.5, 3, -1], rot: [0, 30, 0], kind: 'dynamic' });
@@ -184,7 +184,7 @@ describe('old 0.54 wiring, Tidy wiring and Match AR floor', () => {
     const m = matchArFloor(g, p.node.id)!;
     const n = m.nodes.find((x) => x.id === p.node.id)!;
     expect(n.params.floorHeight).toBeCloseTo(-0.4);
-    expect(n.params.floor).toBe(true);
+    expect(n.params.floor).toBe('custom');
   });
 
   it('the editor action converts and is one undo step', () => {
@@ -207,9 +207,9 @@ describe('the Physics node surface', () => {
     expect(shown(two, def.outputs as never)).toEqual(['motion1', 'motion2']);
     expect(shown({ bodies: [] }, def.outputs as never)).toEqual([]);
     expect(shown({ ...two, advOut: true }, def.outputs as never)).toEqual(expect.arrayContaining(['motion1', 'motion2', 'image', 'moving', 'hits', 'pos1', 'rot8', 'posExtra']));
-    // no inputs at rest, a Motion input only for a body moved by wires, the old sockets under Advanced inputs
-    expect(shown(two, def.inputs as never)).toEqual([]);
-    expect(shown({ bodies: [{ shape: 'box' }, { shape: 'box', kind: 'kinematic' }] }, def.inputs as never)).toEqual(['drive2']);
+    // only the Camera input at rest, a Motion input only for a body moved by wires, the old sockets under Advanced inputs
+    expect(shown(two, def.inputs as never)).toEqual(['camera']);
+    expect(shown({ bodies: [{ shape: 'box' }, { shape: 'box', kind: 'kinematic' }] }, def.inputs as never)).toEqual(['drive2', 'camera']);
     expect(shown({ ...two, advIn: true }, def.inputs as never)).toEqual(expect.arrayContaining(['gravityVec', 'push', 'pushNow', 'camera', 'move1', 'turn4']));
   });
 
@@ -233,3 +233,84 @@ describe('the layout shows hidden sockets while they are wired', () => {
   });
 });
 const def = () => registry.get('physics')!;
+
+describe('the camera comes along with the setup', () => {
+  const camOf = (ed: InstanceType<typeof Editor>, id: string) => ed.level.edges.find((e) => e.to.node === id && e.to.port === 'camera');
+
+  it('Falls on a 3D Object that has a camera wires the same camera into Physics too, in the same undo step', () => {
+    const ed = setup();
+    const ar = ed.addNodeAt('world-ar', { x: 0, y: 0 })!;
+    const obj = ed.addNodeAt('object-3d', { x: 300, y: 0 })!;
+    ed.connect({ node: ar, port: 'camera' }, { node: obj, port: 'camera' });
+    const phys = ed.setObjectPhysics(obj, 'falls')!;
+    expect(camOf(ed, phys)?.from).toEqual({ node: ar, port: 'camera' });
+    expect(camOf(ed, obj)?.from).toEqual({ node: ar, port: 'camera' }); // the object's own wire stays
+    ed.undo();
+    expect(ed.level.nodes.some((n) => n.type === 'physics')).toBe(false);
+  });
+
+  it('without any camera nothing extra is wired, and an existing Camera wire on Physics is kept', () => {
+    const ed = setup();
+    const obj = ed.addNodeAt('object-3d', { x: 300, y: 0 })!;
+    const phys = ed.setObjectPhysics(obj, 'falls')!;
+    expect(camOf(ed, phys)).toBeUndefined();
+    const ar = ed.addNodeAt('world-ar', { x: 0, y: 0 })!;
+    const ar2 = ed.addNodeAt('world-ar', { x: 0, y: 200 })!;
+    ed.connect({ node: ar, port: 'camera' }, { node: phys, port: 'camera' });
+    const obj2 = ed.addNodeAt('object-3d', { x: 300, y: 300 })!;
+    ed.connect({ node: ar2, port: 'camera' }, { node: obj2, port: 'camera' });
+    ed.addObjectToPhysics(phys, obj2);
+    expect(camOf(ed, phys)?.from.node).toBe(ar);
+  });
+
+  it("inside an SDF Scene the scene's camera input goes to the Physics node, so the floor is the real one", () => {
+    const ed = setup();
+    const scene = ed.addNodeAt('sdf-scene', { x: 0, y: 0 })!;
+    ed.enterGroup(scene);
+    const shape = ed.level.nodes.find((n) => n.type === 'sdf-shape')!;
+    const phys = ed.setObjectPhysics(shape.id, 'falls')!;
+    expect(camOf(ed, phys)?.from).toEqual({ node: '@in', port: 'camera' });
+  });
+
+  it('a start pose below the real floor starts just above it, at the same place', () => {
+    const ed = setup();
+    const ar = ed.addNodeAt('world-ar', { x: 0, y: 0 })!;
+    ed.setParams(ar, { lift: 0.3 });
+    const obj = ed.addNodeAt('object-3d', { x: 300, y: 0 })!;
+    ed.connect({ node: ar, port: 'camera' }, { node: obj, port: 'camera' });
+    ed.setParams(obj, { posX: 0.4, posY: -2, shape: 'sphere' });
+    const phys = ed.setObjectPhysics(obj, 'falls')!;
+    const b = normalizeBodies(ed.level.nodes.find((n) => n.id === phys)!.params.bodies)[0];
+    expect(b.pos[0]).toBeCloseTo(0.4);
+    expect(b.pos[1]).toBeGreaterThan(-0.3 + 0.95 - 1e-6); // floor -0.3 plus the ball's radius
+  });
+
+  it('the to-do: an AR camera that Physics does not use is offered, and "Use the AR camera" wires it (one undo step)', () => {
+    const ed = setup();
+    const ar = ed.addNodeAt('world-ar', { x: 0, y: 0 })!;
+    const obj = ed.addNodeAt('object-3d', { x: 300, y: 0 })!;
+    const phys = ed.setObjectPhysics(obj, 'falls')!;
+    // adding a 3D Object next to an AR camera already wires them, and the setup passes that camera on to Physics; undo both wires
+    for (const e of ed.level.edges.filter((x) => x.to.port === 'camera')) ed.disconnect(e.id);
+    expect(arCameraTodo(ed.level, phys)?.ar.id).toBe(ar);
+    expect(objectArTodo(ed.level, registry, obj)?.phys.id).toBe(phys);
+    expect(ed.useArCameraForPhysics(phys)).toBe(true);
+    expect(camOf(ed, phys)?.from).toEqual({ node: ar, port: 'camera' });
+    expect(arCameraTodo(ed.level, phys)).toBeNull();
+    expect(objectArTodo(ed.level, registry, obj)).toBeNull();
+    ed.undo();
+    expect(camOf(ed, phys)).toBeUndefined();
+  });
+
+  it('no AR camera, no to-do; an object with its own camera has none either', () => {
+    const ed = setup();
+    const obj = ed.addNodeAt('object-3d', { x: 300, y: 0 })!;
+    const phys = ed.setObjectPhysics(obj, 'falls')!;
+    expect(arCameraTodo(ed.level, phys)).toBeNull();
+    const ar = ed.addNodeAt('world-ar', { x: 0, y: 0 })!;
+    for (const e of ed.level.edges.filter((x) => x.to.port === 'camera')) ed.disconnect(e.id);
+    expect(objectArTodo(ed.level, registry, obj)?.ar.id).toBe(ar);
+    ed.connect({ node: ar, port: 'camera' }, { node: obj, port: 'camera' });
+    expect(objectArTodo(ed.level, registry, obj)).toBeNull();
+  });
+});
