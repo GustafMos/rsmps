@@ -29,7 +29,7 @@ export default defineNode({
     const size = ctx.in.size ?? ctx.canvas;
     const value = ctx.in.scene;
     const phase = isSpinning(p) ? ctx.time.phase : 0;
-    const out = renderSdf(ctx.gpu, { value, p, size, camera: ctx.in.camera, material: ctx.in.material, phase, wantDepth: ctx.wants('depth') });
+    const out = renderSdf(ctx.gpu, { value, p, size, camera: ctx.in.camera, material: ctx.in.material, phase, wantDepth: ctx.wants('depth'), fullQuality: ctx.quality === 'final' && ctx.proxy >= 1 });
     return { image: out.image, depth: out.depth, sdf: sceneMove(ctx.path, value, p, phase) ?? sdfValue(null) };
   },
 });

@@ -1,3 +1,5 @@
+import type { XrLightEstimateLike } from '../../engine/lib/xr-light';
+
 /**
  * The part of the WebXR Device API the World AR view uses, as plain structural types.
  *
@@ -51,6 +53,10 @@ export interface XrCpuDepthLike {
   rawValueToMeters: number;
   normDepthBufferFromNormView: { matrix: ArrayLike<number> };
 }
+/** Lighting Estimation module: what `session.requestLightProbe()` hands out. */
+export interface XrLightProbeLike {
+  probeSpace?: unknown;
+}
 export interface XrFrameLike {
   getViewerPose(referenceSpace: unknown): XrViewerPoseLike | null;
   getPose(space: unknown, baseSpace: unknown): XrPoseLike | null;
@@ -60,6 +66,8 @@ export interface XrFrameLike {
   createAnchor?: (pose: unknown, space: unknown) => Promise<XrAnchorLike>;
   /** Depth Sensing module: absent when the `depth-sensing` feature was not granted; null when this frame has no depth. */
   getDepthInformation?: (view: XrViewLike) => XrCpuDepthLike | null;
+  /** Lighting Estimation module: absent when `light-estimation` was not granted; null while the device has no estimate yet. */
+  getLightEstimate?: (probe: XrLightProbeLike) => XrLightEstimateLike | null;
 }
 export interface XrViewportLike {
   x: number;
@@ -88,6 +96,8 @@ export interface XrSessionLike {
   removeEventListener(type: string, cb: (ev: unknown) => void): void;
   /** Hit Test module. */
   requestHitTestSource?: (options: { space: unknown }) => Promise<{ cancel(): void }> | undefined;
+  /** Lighting Estimation module. */
+  requestLightProbe?: (options?: { reflectionFormat?: string }) => Promise<XrLightProbeLike>;
   /** The features the browser actually granted (Chrome 114+). Absent on older browsers: then each feature is probed by use. */
   enabledFeatures?: ArrayLike<string>;
   /** DOM Overlays module: set when the overlay is shown. */
@@ -115,10 +125,10 @@ export function depthGranted(session: XrSessionLike): boolean {
 }
 
 /** The features asked for. All optional: the session must still start on a device that has none of them (see `featuresOf`). */
-export const OPTIONAL_FEATURES = ['hit-test', 'anchors', 'dom-overlay', 'camera-access'] as const;
+export const OPTIONAL_FEATURES = ['hit-test', 'anchors', 'dom-overlay', 'camera-access', 'light-estimation'] as const;
 
 /** The scan view asks for depth on top of the usual extras, as an OPTIONAL feature: a phone without it still scans. */
-export const SCAN_FEATURES = [...OPTIONAL_FEATURES, 'depth-sensing'] as const;
+export const SCAN_FEATURES = [...OPTIONAL_FEATURES.filter((f) => f !== 'light-estimation'), 'depth-sensing'] as const;
 export const DEPTH_INIT = { usagePreference: ['cpu-optimized'], dataFormatPreference: ['luminance-alpha', 'float32'] };
 
 export interface GrantedFeatures {
@@ -126,6 +136,8 @@ export interface GrantedFeatures {
   anchors: boolean;
   domOverlay: boolean;
   cameraAccess: boolean;
+  /** The browser estimates the light of the room (World AR only; the scan does not ask). */
+  lightEstimation: boolean;
 }
 
 /**
@@ -141,5 +153,7 @@ export function featuresOf(session: XrSessionLike, askedFor: readonly string[] =
     anchors: has('anchors', true),
     domOverlay: asked('dom-overlay') && (list ? list.includes('dom-overlay') : true) && !!session.domOverlayState,
     cameraAccess: has('camera-access', true),
+    // the browser's own list is the only truth here: without it the feature is probed by use, and the loop copes with a refusal
+    lightEstimation: has('light-estimation', true),
   };
 }

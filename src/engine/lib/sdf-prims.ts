@@ -101,6 +101,7 @@ fn toLocal(pw: vec3f) -> vec3f {
 export const materialShadeWgsl = (mat: MaterialValue): string => `${materialWgsl(mat)}
 fn shadeSurf(base: vec3f, n: vec3f, rd: vec3f, ao: f32, sh: f32, p: vec3f) -> vec4f {
   let pl = toLocal(p);
+  gFoot = pixAt(length(p - u.camPos)) / u.objScale / max(1.0, sqrt(u.aa));
   let nl = vec3f(dot(u.t0, n), dot(u.t1, n), dot(u.t2, n));
   return matShade(base, n, rd, ao, sh, pl, nl, gScr);
 }`;

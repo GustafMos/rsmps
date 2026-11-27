@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { NodeInstance } from '../../engine/types';
 import { isWorldTake, worldTakeDuration } from '../../engine/lib/world-take';
 import { fedByWorldAr } from '../../io/world-ar/engine-source';
-import type { WorldArSupport } from '../../io/world-ar/support';
+import { lightReadout, type WorldArSupport } from '../../io/world-ar/support';
 import { useApp, useEd } from '../store/context';
 import { useSelector } from '../store/createStore';
 import { getLive } from '../store/live';
@@ -71,6 +71,10 @@ export function WorldArPanel({ node, fullId }: { node: NodeInstance; fullId: str
       <p className="rs-insp__hint">
         The Picture output is what the camera sees right now. Wire it into a Material's colour map, or into any effect, to use the room as a texture. In the AR view it is the AR camera picture; outside it, the back camera of this device. It only costs work while it is wired.
       </p>
+      <p className="rs-insp__hint">
+        Light and shadow: with "Match room light" on, 3D objects that take this camera are lit like the room (where the main light comes from, and how much light is all around), so they sit in the scene. Switch on "Ground shadow" in the 3D object to add its shadow on the surface it stands on; over the camera picture it darkens the real floor. The Light outputs can also be wired by hand. This needs a phone that estimates the light: the AR view says "light: yes" or "light: no".
+      </p>
+      {active && <p className="rs-insp__hint" role="status">{lightReadout(active.state().light === true)}{active.state().light === true ? '' : ': the 3D objects use their own light.'}</p>}
       {active && !active.state().features.cameraAccess && <p className="rs-insp__hint" role="status">This phone does not hand over the camera picture in AR, so the Picture output is transparent while the AR view is open.</p>}
       {take && (
         <>
