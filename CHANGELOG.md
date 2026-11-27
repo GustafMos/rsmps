@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.60.0] - 2026-11-27
+
+### Fixed
+- **World AR: physics no longer jumps back every few seconds.** In the AR view the simulation followed the project's loop, so every time the loop wrapped (every 4 seconds by default) the objects snapped back to their start and fell again, and they had already started falling before being placed. Physics in the AR view now runs on its own clock that starts when you place the object and never wraps; it starts again when you place again, raise or resize the object, or press the new **Restart physics** button. The clock is recorded, so Save as video shows the same fall.
+- **World AR: raising the object no longer raises the physics floor.** A Physics node made before the automatic floor kept a fixed floor that moved up with the Height strip. With an AR camera connected it now uses the real surface, so a raised object drops onto the real floor; a custom height you set yourself is kept, and the Physics panel offers **Use the real floor** in one tap.
+
+### Changed
+- In the AR view, Reset is now called **Place again** (placing on a table makes the table the physics floor), and a note says "Raised: the objects drop from here." while the object is raised.
+
 ## [0.59.0] - 2026-11-27
 
 ### Added

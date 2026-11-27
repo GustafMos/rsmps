@@ -95,6 +95,11 @@ export interface CameraValue {
    * the main light (1 = as bright as the lamp the nodes assume). 3D nodes use it unless their "Light from camera" is off.
    */
   light?: { azimuth: number; elevation: number; ambient: number; strength: number };
+  /**
+   * Live physics clock, in seconds since the objects were placed or restarted (World AR Camera, while the AR view is open or in a take
+   * recorded there). Physics nodes that get this camera follow it instead of the project's loop, so a fall carries on while you walk.
+   */
+  clock?: number;
 }
 
 /**

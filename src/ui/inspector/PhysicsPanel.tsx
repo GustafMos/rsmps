@@ -131,7 +131,8 @@ export function PhysicsPanel({ node }: { node: NodeInstance }) {
   const todo = arCameraTodo(level, node.id);
   const camEdge = level.edges.find((e) => e.to.node === node.id && e.to.port === 'camera');
   const camFrom = camEdge ? level.nodes.find((x) => x.id === camEdge.from.node) : undefined;
-  const custom = node.params.floor === 'custom';
+  const custom = node.params.floor === 'custom' || node.params.floor === 'old';
+  const arWired = camFrom?.type === 'world-ar';
   const full = bodies.length >= MAX_BODIES;
   const nameOf = (i: number): string => {
     const t = links[i]?.target;
@@ -216,7 +217,17 @@ export function PhysicsPanel({ node }: { node: NodeInstance }) {
           {camFrom?.type === 'world-ar' ? 'Using the real floor from the AR camera.' : 'Using the floor of the connected camera when it knows one (the AR camera does).'}
         </p>
       )}
-      {custom && todo === null && findArHere(level) && (
+      {arWired && node.params.floor !== 'auto' && (
+        <div className="rs-phys__tidy" data-floor-todo>
+          <p className="rs-insp__hint">
+            To do: the AR camera knows where the real floor is, but this node uses {node.params.floor === 'off' ? 'no floor' : 'a fixed height'}. Raising the object in the AR view would then move the floor with it.
+          </p>
+          <button className="rs-btn rs-btn--primary" data-use-real-floor onClick={() => ed.setParam(node.id, 'floor', 'auto')} title="Sets Floor to Automatic: things land on the real surface you placed the objects on, however high you raise them.">
+            Use the real floor
+          </button>
+        </div>
+      )}
+      {custom && !arWired && todo === null && findArHere(level) && (
         <div className="rs-phys__tidy">
           <p className="rs-insp__hint">Floor is set by hand. The real floor in the AR view is at minus the World AR Camera's Lift.</p>
           <button className="rs-btn" data-match-ar onClick={() => ed.matchPhysicsArFloor(node.id)} title="Sets Floor height to minus the Lift of the World AR Camera, so things land on the real surface.">

@@ -21,7 +21,7 @@ import type { CardMode } from '../../engine/lib/xr-math';
 import type { AssetInfo, GraphDoc } from '../../engine/types';
 import { LiveRecorder } from '../live-record';
 import type { ArCameraFeed } from './camera-feed';
-import { EnginePictureSource, fedByWorldAr, probeCanvasCopy, type CopyRoute, type PictureTarget } from './engine-source';
+import { EnginePictureSource, fedByWorldAr, hasPhysics, probeCanvasCopy, type CopyRoute, type PictureTarget } from './engine-source';
 import { ArLoop, type ArClipRecorder, type ArLoopState, type ArPainter } from './loop';
 import { GlPainter, makeBrowserXrPainter } from './painter';
 import type { Gesture } from './placement';
@@ -115,6 +115,8 @@ export interface WorldArHandle {
   scan?: ScanControls;
   place(): void;
   reset(): void;
+  /** Restart physics: the objects go back to where they start and fall again. */
+  restartPhysics(): void;
   gesture(g: Gesture): void;
   /** Start recording, or stop and save. */
   toggleRecord(): void;
@@ -337,6 +339,9 @@ export class WorldArController implements WorldArApi {
           const dur = Math.max(1 / fps, o.graph().project.duration);
           return ((env.now() - startedAt) / 1000) % dur;
         },
+        get physics() {
+          return !o.scan && hasPhysics(o.graph());
+        },
         now: env.now,
         makeTransform: env.makeTransform,
         screen: () => ({ width: o.overlay?.clientWidth || made.layer.framebufferWidth, height: o.overlay?.clientHeight || made.layer.framebufferHeight }),
@@ -431,6 +436,7 @@ export class WorldArController implements WorldArApi {
         ...(scanSession ? { scan: { begin: () => loop.scanBegin(), shutter: () => scanSession.shutter(), setAuto: (on: boolean) => scanSession.setAuto(on) } } : {}),
         place: () => loop.placeHere(),
         reset: () => loop.reset(),
+        restartPhysics: () => loop.restartPhysics(),
         gesture: (g) => loop.gesture(g),
         toggleRecord: () => {
           if (saving) return;

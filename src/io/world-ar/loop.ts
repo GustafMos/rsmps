@@ -109,6 +109,8 @@ export interface ArLoopState {
   ended: boolean;
   /** The scan view's numbers (only in the scan view). */
   scan?: ScanViewState;
+  /** Physics runs live in this view (the graph has a Physics node): the overlay offers Restart physics. */
+  physics: boolean;
 }
 
 export interface ArLoopDeps {
@@ -131,6 +133,12 @@ export interface ArLoopDeps {
   cameraFeed?: { readonly wanted: boolean; push(canvas: unknown): boolean };
   /** The project's clock for animated graphs, seconds. */
   seconds(): number;
+  /**
+   * The graph has a Physics node. The view then gives the World AR Camera a live physics clock: seconds since the object was placed,
+   * raised, resized or "Restart physics" was pressed. Physics that gets the camera follows it, so a fall runs on in real time while you
+   * walk and never starts over at the project's loop. The clock is part of the take.
+   */
+  physics?: boolean;
   now(): number;
   /** `new XRRigidTransform(position, orientation)`; absent in browsers without it (then a moved object is not re-anchored). */
   makeTransform?: (p: Vec3, q: Quat) => unknown;
@@ -215,6 +223,10 @@ export class ArLoop {
   private anchorGen = 0;
   private reanchor = false;
   private drag: { h0: Vec3; p0: Vec3 } | null = null;
+  /** When the live physics clock was last zeroed (null = no object placed), what it was zeroed for, and a restart that was asked for. */
+  private physT0: number | null = null;
+  private physKey = '';
+  private physRestart = false;
   private lastView: { pose: XrPose; lens: Lens } | null = null;
   /** The room's light, smoothed over time; holds its last value while the phone has no estimate. */
   private light: WorldLight | null = null;
@@ -255,6 +267,11 @@ export class ArLoop {
     s.addEventListener('select', this.onSelect);
     this.raf = s.requestAnimationFrame(this.frame);
     this.emit(true);
+  }
+
+  /** "Restart physics": the objects go back to where they start and fall again. */
+  restartPhysics(): void {
+    this.physRestart = true;
   }
 
   /** The Place button (or a tap while aiming). */
@@ -431,7 +448,22 @@ export class ArLoop {
     }
     // the lens of the zoomed picture: the engine renders the object through it, so it stays locked to the room while the camera is zoomed
     const zlens = zoomLens(lens, zoom);
-    const moment: WorldMoment = { view: pose, lens: zlens, ...(zoom !== 1 ? { zoom } : {}), object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale, ...(base?.h ? { h: base.h } : {}) } : null, ...(this.light ? { light: this.light } : {}) };
+    // the live physics clock: starts when the object is placed and starts over when it is raised or resized (the fall begins from there)
+    // or when the user asks. Without an object it does not run.
+    let physics: number | undefined;
+    if (d.physics && pl && base && !d.scan) {
+      const key = `${(base.h ?? 0).toFixed(4)}|${base.scale.toFixed(4)}`;
+      if (this.physT0 === null || key !== this.physKey || this.physRestart) {
+        this.physT0 = now;
+        this.physKey = key;
+        this.physRestart = false;
+      }
+      physics = Math.max(0, (now - this.physT0) / 1000);
+    } else {
+      this.physT0 = null;
+      this.physKey = '';
+    }
+    const moment: WorldMoment = { view: pose, lens: zlens, ...(physics !== undefined ? { physics } : {}), ...(zoom !== 1 ? { zoom } : {}), object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale, ...(base?.h ? { h: base.h } : {}) } : null, ...(this.light ? { light: this.light } : {}) };
     const pic = d.source.latest();
     if (pic && pic.seq !== this.lastSeq) {
       this.lastSeq = pic.seq;
@@ -688,6 +720,7 @@ export class ArLoop {
       askedFps: r && this.rateUsed ? this.rateUsed.asked : this.recordRateFor(this.projectFps).asked,
       cameraFps: this.cameraFps,
       light: !!this.light,
+      physics: !!this.d.physics && !this.d.scan,
       error: this.error,
       ended: this.ended,
     };

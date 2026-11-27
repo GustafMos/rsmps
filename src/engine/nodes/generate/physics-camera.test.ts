@@ -155,9 +155,12 @@ describe('Physics floor: Automatic', () => {
     expect(await rest({ floor: 'custom', floorHeight: -0.5 }, cam(-1.8))).toBeCloseTo(-0.5 + 0.95, 1);
     expect(await rest({ floor: 'off' }, cam(-1.8))).toBeLessThan(-3);
   });
-  it('old projects: Floor on with a number is Custom height, Floor off is Off', T, async () => {
+  it('old projects: Floor on with a number keeps its height without a real floor and follows the camera that knows one; Floor off is Off', T, async () => {
     clearRuns();
-    expect(await rest({ floor: true, floorHeight: -0.25 }, cam(-1.8))).toBeCloseTo(-0.25 + 0.95, 1);
+    expect(await rest({ floor: true, floorHeight: -0.25 })).toBeCloseTo(-0.25 + 0.95, 1);
+    expect(await rest({ floor: true, floorHeight: -0.25 }, cam())).toBeCloseTo(-0.25 + 0.95, 1);
+    expect(await rest({ floor: true, floorHeight: -0.25 }, cam(-1.8))).toBeCloseTo(-1.8 + 0.95, 1);
+    expect(await rest({ floorHeight: -0.25 }, cam(-1.8))).toBeCloseTo(-1.8 + 0.95, 1);
     expect(await rest({ floor: false }, cam(-1.8))).toBeLessThan(-3);
   });
   it('noise under 1 mm does not start the run again; a real change does', T, async () => {

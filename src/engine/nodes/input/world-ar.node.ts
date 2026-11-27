@@ -158,7 +158,7 @@ export default defineNode({
     else {
       camera = worldCamera(m.view, m.lens, { p: m.object.p, q: m.object.q, yaw: 0, scale: m.object.scale }, { unit: p.size / 2, lift: p.lift }, ctx.canvas);
       // the real surface in scene units: the object's origin floats `lift` above it (plus the height it was raised to, in scene units)
-      camera = { ...camera, ground: -p.lift - (m.object.h ?? 0) / Math.max(1e-6, m.object.scale * (p.size / 2)) };
+      camera = { ...camera, ground: -p.lift - (m.object.h ?? 0) / Math.max(1e-6, m.object.scale * (p.size / 2)), ...(typeof m.physics === 'number' && m.physics >= 0 ? { clock: m.physics } : {}) };
       if (sceneLight && p.matchLight) camera = { ...camera, light: { azimuth: sceneLight.azimuth, elevation: sceneLight.elevation, ambient: sceneLight.ambient, strength: sceneLight.strength } };
     }
     const lightOut = {
