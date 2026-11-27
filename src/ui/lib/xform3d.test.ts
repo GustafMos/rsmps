@@ -49,6 +49,10 @@ describe('which nodes place something in 3D', () => {
       'image-to-3d': 'object',
       'splat-3d': 'object',
       'splat-train': 'object',
+      // the SDF Scene's own nodes: placed inside the scene's space (handles in the viewer, Place in 3D in the inspector)
+      'sdf-render': 'object', // the hidden Scene Output: its settings are what the SDF Scene node shows and what the handles move from outside
+      'sdf-shape': 'object',
+      'sdf-transform': 'object',
       glass: 'pose',
       hypercube: 'pose',
     });

@@ -575,3 +575,12 @@ where cache nodes go to bake a whole group.
     that node (shown with their groups and conditions: `lib/sdf-scene-params.ts`), camera / material / size are ports, outputs are `image`, `depth` and `sdf`. A scene wired into another scene's inside
     through a group input of type `sdf` ("SDF In") is combined there. **Placement rule**: SDF nodes can only be added inside an SDF Scene; the editor refuses add, paste and ungroup elsewhere with a toast
     (`sdfPlacementProblem`), the add menu hides them outside, and the engine tolerates a stray one (it only makes an `sdf` value nobody draws).
+  - **Handles and picking in the viewer** (`ui/viewer/sdfView.ts`, `sdfHandles.ts`, `lib/sdf-eval.ts`, `ui/lib/sdf-view.ts`). The viewer shows the picture of the SDF Scene around the selected shape: `sdfPictureScene` finds it from the
+    viewed node (the scene, its Scene Output, an SDF node inside, or the one scene feeding the viewed node), and an SDF node that is VIEWED (the eye) draws its nearest scene's Scene Output instead of "no image"
+    (`sdfViewFallback`, applied where `Root.tsx` hands the view to the player). `loadSdfView` asks the engine for the Scene Output's `sdf` value of the current time (a small proxy: only the numbers are wanted) and the
+    camera (wired, else the scene's built-in one). For a selected SDF Shape / SDF Move, `chainOf` walks that evaluated tree down to the node and composes every `move` above it (the scene's own Move / Rotate / Size / Spin
+    included, nested scenes too) into one frame; the handle sits at `toWorld(frame, ownPos)`, a drag is turned back with `toLocal` and written to the node's OWN posX..Z, Turn takes the parent rotation off (`localEuler`), Size
+    is the ratio. Mirror, Repeat, Twist and Bend above the node are not undone (listed, a hint is shown): the handles belong to the original first copy. Tap to select: `lib/sdf-eval.ts` evaluates the same tree on the CPU
+    (distances mirror `lib/sdf-prims.ts`), `sdfRay` sphere-traces the camera ray and names the shape with the smallest |distance| in its own frame; `planTap` decides what the tap does (inside: select the shape; outside: first
+    tap selects the scene, a tap while it is selected goes in; a nested or wired-in scene selects its node instead of diving). Tests: `lib/sdf-eval.test.ts`, `ui/viewer/sdf-handles-gpu.test.ts` (handle vs rendered centroid,
+    drag vs rendered shift, CPU hit distance vs the GPU depth picture), `ui/viewer/sdf-select.test.ts`.

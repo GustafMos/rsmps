@@ -10,7 +10,8 @@ export type ResetKind = 'position' | 'rotation' | 'size' | 'all';
 
 export interface Transform3d {
   /**
-   * 'object' = the shared transform of the 3D family (3D Object, 3D Model, SDF 3D, Image to 3D, Gaussian Splat, Splat from Video):
+   * 'object' = the shared transform of the 3D family (3D Object, 3D Model, SDF 3D, Image to 3D, Gaussian Splat, Splat from Video, and
+   * the SDF Scene's own SDF Shape / SDF Move, which are placed inside the scene's space):
    * Move X/Y/Z, Rotate X/Y/Z, Object scale and the built-in or wired camera. Only these get the handles in the viewer.
    * 'pose' = a node with its own tilt / turn settings (Glass, Hypercube): Reset buttons only.
    */
@@ -37,6 +38,10 @@ export function transformOf(def: AnyNodeDef | undefined | null): Transform3d | n
       rotation: { rotX: 0, rotY: 0, rotZ: 0 },
       size: { objectScale: 1 },
     };
+  }
+  // the nodes of an SDF Scene that place something (SDF Shape, SDF Move): same names, no camera of their own (the scene's camera is used)
+  if ((def.id === 'sdf-shape' || def.id === 'sdf-transform') && [...OBJECT_KEYS.pos, ...OBJECT_KEYS.rot, OBJECT_KEYS.scale].every((k) => isNum(def, k))) {
+    return { kind: 'object', position: { posX: 0, posY: 0, posZ: 0 }, rotation: { rotX: 0, rotY: 0, rotZ: 0 }, size: { objectScale: 1 } };
   }
   if (def.id === 'glass' && isNum(def, 'tilt') && isNum(def, 'turn') && isNum(def, 'roll')) {
     return { kind: 'pose', position: { position: [0.5, 0.5] }, rotation: { tilt: 0, turn: 0, roll: 0 }, size: { size: dflt(def, 'size') } };
