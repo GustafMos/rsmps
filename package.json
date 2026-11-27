@@ -53,6 +53,7 @@
     "desktop:smoke:addons": "node desktop/scripts/smoke.mjs --smoke-addons"
   },
   "dependencies": {
+    "@dimforge/rapier3d-deterministic-compat": "^0.21.0",
     "fflate": "^0.8.2",
     "mediabunny": "^1.65.2",
     "onnxruntime-web": "1.31.1",

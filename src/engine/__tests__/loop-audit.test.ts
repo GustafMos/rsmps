@@ -262,6 +262,7 @@ export const ROWS: Row[] = [
 /** Nodes that animate or read the clock but cannot or need not auto-loop here. */
 export const OUT_OF_SCOPE: Record<string, string> = {
   'sdf-modify': 'its output is a scene description, not a picture, so loopCheck cannot measure it; Displace by noise turns a whole number of cycles per loop (wholeCycles x phase) and nodes/sdf/sdf-scene.test.ts renders frame 0, half a loop and frame N and compares them exactly',
+  physics: 'a stateful simulation: it cannot continue across the loop point and still be the same every time it is played, scrubbed or exported, so it starts again from the start pose at frame 0 of every loop (frame N is exactly frame 0: lib/physics/sim.test.ts and nodes/generate/physics.test.ts); its outputs are vectors and numbers, which loopCheck cannot measure as a picture',
   'phone-motion': 'live sensor input (and a recorded take with its own loop blend)',
   'phone-camera': 'live phone camera',
   'ar-camera': 'live sensor input: a camera that follows the phone (and a recorded take with its own loop blend)',
