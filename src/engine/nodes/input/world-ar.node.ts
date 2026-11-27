@@ -33,6 +33,10 @@ function isMoment(v: unknown): v is WorldMoment {
   return !!m && typeof m === 'object' && !!m.view && Array.isArray(m.view.p) && Array.isArray(m.view.q) && Array.isArray(m.lens) && m.lens.length === 4;
 }
 
+// The Picture and Zoom sockets and the five light sockets stay hidden until wired or until "Advanced outputs" is on: the room light reaches
+// the 3D objects through the Camera value itself, nothing needs wiring.
+const advOut = (p: Record<string, unknown>): boolean => p.advOut === true;
+
 export default defineNode({
   id: 'world-ar',
   title: 'World AR Camera',
@@ -44,12 +48,12 @@ export default defineNode({
   outputs: {
     camera: { type: 'camera', label: 'Camera' },
     picture: { type: 'image', label: 'Picture' },
-    lightAzimuth: { type: 'number', label: 'Light azimuth', hint: 'Where the room\'s main light comes from, left to right, as the Light azimuth of the 3D nodes. Their own value when the phone cannot estimate the light.' },
-    lightElevation: { type: 'number', label: 'Light height', hint: 'How high the room\'s main light is, as the Light height of the 3D nodes.' },
-    lightStrength: { type: 'number', label: 'Light strength', hint: 'How bright the main light is (1 = the lamp the 3D nodes assume).' },
-    ambient: { type: 'number', label: 'Ambient', hint: 'How much of the room\'s light comes from everywhere (0 to 1), as the Ambient light of the 3D nodes.' },
-    ambientColor: { type: 'color', label: 'Ambient colour', hint: 'The colour of the room\'s ambient light.' },
-    zoom: { type: 'number', label: 'Zoom', hint: 'The AR view\'s zoom at this moment of the take (1 = none). The saved video uses it to zoom the camera clip the same way.' },
+    lightAzimuth: { type: 'number', label: 'Light azimuth', hint: 'Where the room\'s main light comes from, left to right, as the Light azimuth of the 3D nodes. Their own value when the phone cannot estimate the light.', visibleIf: advOut },
+    lightElevation: { type: 'number', label: 'Light height', hint: 'How high the room\'s main light is, as the Light height of the 3D nodes.', visibleIf: advOut },
+    lightStrength: { type: 'number', label: 'Light strength', hint: 'How bright the main light is (1 = the lamp the 3D nodes assume).', visibleIf: advOut },
+    ambient: { type: 'number', label: 'Ambient', hint: 'How much of the room\'s light comes from everywhere (0 to 1), as the Ambient light of the 3D nodes.', visibleIf: advOut },
+    ambientColor: { type: 'color', label: 'Ambient colour', hint: 'The colour of the room\'s ambient light.', visibleIf: advOut },
+    zoom: { type: 'number', label: 'Zoom', visibleIf: advOut, hint: 'The AR view\'s zoom at this moment of the take (1 = none). The saved video uses it to zoom the camera clip the same way.' },
   },
   optionalOutputs: ['picture'],
   params: {
@@ -74,12 +78,14 @@ export default defineNode({
       label: 'Lift',
       hint: '1 stands a default 3D Object on the surface. 0 puts its middle on the surface (half of it is below).',
     },
+    advOut: { type: 'bool', default: false, label: 'Advanced outputs', hint: 'Shows the Zoom and the five Light sockets on the node. You never need them for the room light: it reaches the 3D objects through the camera.', group: 'Advanced' },
     matchLight: {
       type: 'bool',
       default: true,
       label: 'Match room light',
       hint: 'While the AR view is open (and in a take recorded with it), the 3D nodes that take this camera light their object like the room: the light\'s direction and how much is ambient. Needs a phone that estimates light; the AR view says "light: yes" or "light: no". A 3D node can opt out with its "Light from camera".',
       group: 'AR view',
+      visibleIf: () => false, // shown in the inspector's Room light block
     },
     cardMode: {
       type: 'enum',
@@ -128,6 +134,15 @@ export default defineNode({
       visibleIf: (p) => !!p.take,
     },
     loopTake: { type: 'bool', default: false, label: 'Repeat the take', hint: 'Play the take again from the start when it ends (otherwise it holds its last pose).', group: 'Recording', visibleIf: (p) => !!p.take },
+  },
+  guide: {
+    does: 'A camera that follows your phone through the room, so a 3D object stands on the real floor and is lit and shadowed like the room. It only affects the 3D objects wired to it.',
+    steps: [
+      'Select a 3D object and press Show in AR in its Camera section: this adds the camera and wires the object to it. You can also tick objects in the list "Objects in AR" below.',
+      'View the object (the eye on its node), then press Start AR (Android Chrome), move the phone until a ring shows on the floor and tap to place.',
+      'The room light and the real floor reach every wired object by themselves: there is nothing else to wire. You can use several cameras, each with its own objects.',
+    ],
+    seeAlso: ['object-3d', 'physics', 'camera'],
   },
   summary: (p) => (isWorldTake(p.take) ? `recorded take · ${worldTakeDuration(p.take).toFixed(1)} s` : 'no take yet'),
   async render(ctx) {

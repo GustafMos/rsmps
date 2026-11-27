@@ -41,3 +41,21 @@
 .rs-objphys__row select { background: var(--bg-1); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; min-height: 30px; }
 .rs-objphys__shape summary { cursor: pointer; font-size: var(--fs-xs); color: var(--text-dim); padding: var(--s-1) 0; }
 .rs-objphys__driven { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); font-size: var(--fs-xs); color: var(--text-dim); }
+
+/* AR section of a 3D object and the "Objects in AR" block of the World AR Camera */
+.rs-objar { display: flex; flex-direction: column; gap: var(--s-2); }
+.rs-objar .rs-btn { min-height: var(--touch, 44px); }
+.rs-objar__row { display: flex; align-items: center; gap: var(--s-2); min-height: var(--touch, 44px); cursor: pointer; font-size: var(--fs-sm, 13px); }
+.rs-objar__row input, .rs-objar__item input { width: 22px; height: 22px; flex: none; }
+.rs-objar__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rs-objar__head, .rs-objar__item { display: grid; grid-template-columns: 1fr 64px 64px; align-items: center; gap: var(--s-2); min-height: var(--touch, 44px); }
+.rs-objar__head { min-height: 0; font-size: var(--fs-xs); color: var(--text-dim); }
+.rs-objar__head span:not(:first-child), .rs-objar__item > :not(:first-child) { justify-self: center; }
+.rs-objar__item { border-top: 1px solid var(--line); }
+.rs-objar__name { background: none; border: 0; color: var(--text); text-align: left; padding: 0; cursor: pointer; font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: var(--touch, 44px); }
+.rs-objar__na { color: var(--text-dim); }
+.rs-insp__overridden { opacity: 0.45; pointer-events: none; }
+.rs-insp__roomlight { display: flex; flex-direction: column; gap: var(--s-1); padding: var(--s-2); border: 1px solid var(--line); border-radius: 6px; background: var(--bg-1); }
+.rs-objar__note { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--text-dim); text-align: left; justify-self: start !important; }
+.rs-objar__switch { background: none; border: 0; padding: 0 0 var(--s-1); cursor: pointer; text-decoration: underline; min-height: 28px; font: inherit; font-size: var(--fs-xs); color: var(--accent); }
+.rs-objar__pick { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm, 13px); } .rs-objar__pick select { flex: 1; min-height: var(--touch, 44px); background: var(--bg-1); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }

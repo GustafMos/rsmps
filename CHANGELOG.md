@@ -4,6 +4,16 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.59.0] - 2026-11-27
+
+### Added
+- **Cameras pick their objects, without dragging wires.** The World AR Camera's inspector has an "Objects in AR" list of the 3D objects in the graph: tick one and the real Camera wire is made, untick and it is removed, with All and None buttons. An object on another camera says so and asks before switching. The ordinary 3D Camera has the same list. A camera still only affects the objects wired to it, so several cameras with their own objects, field of view and light stay independent.
+- **A Camera section on every 3D object.** A dropdown lists Built-in and every camera in the graph and creates or moves the wire. **Show in AR** adds a World AR Camera if there is none, wires this object to it, turns its Ground shadow on and views it; a second object joins with one tap. Several selected objects can be put in AR together from the right-click menu.
+- **Light per camera.** The 3D Camera node has an optional "Light for objects" group (off by default) whose light applies to every object wired to that camera, the way the AR camera's room light does.
+
+### Changed
+- **The room light needs no wiring, and now says so.** The World AR Camera's five light outputs and Zoom are hidden unless wired or switched on under Advanced outputs. Its inspector says that the room's light reaches every object wired to the camera, and each row of the list has a Light tick. On an object lit by its camera, the light sliders are greyed with a note "Lit by the room (from this camera)" and a switch to take the light back.
+
 ## [0.58.0] - 2026-11-27
 
 ### Fixed
