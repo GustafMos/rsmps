@@ -64,6 +64,7 @@ export class FakeXrSession implements XrSessionLike {
   light: { direction: [number, number, number]; intensity: [number, number, number]; ambient?: number; sh?: number[] } | null = { direction: [0, 1, 0], intensity: [1, 1, 1], ambient: 0.3 };
   /** Light probes handed out, and estimates read. */
   probes = 0;
+  lightReads = 0;
   readonly anchors: FakeAnchor[] = [];
   /** Make the next anchor requests fail (a device that grants anchors and then cannot make one). */
   failAnchors = false;
@@ -180,6 +181,7 @@ export class FakeXrSession implements XrSessionLike {
       ...(this.granted.includes('light-estimation')
         ? {
             getLightEstimate: (): XrLightEstimateLike | null => {
+              this.lightReads++;
               const l = this.light;
               if (!l) return null;
               const amb = l.ambient ?? 0.3;

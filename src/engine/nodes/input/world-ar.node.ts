@@ -83,7 +83,7 @@ export default defineNode({
       type: 'bool',
       default: true,
       label: 'Match room light',
-      hint: 'While the AR view is open (and in a take recorded with it), the 3D nodes that take this camera light their object like the room: the light\'s direction and how much is ambient. Needs a phone that estimates light; the AR view says "light: yes" or "light: no". A 3D node can opt out with its "Light from camera".',
+      hint: 'While the AR view is open (and in a take recorded with it), the 3D nodes that take this camera light their object like the room: the light\'s direction and how much is ambient. Needs a phone that estimates light; the AR view says "light: yes" or "light: no". Switched off, the phone is not asked to estimate light at all, which saves it some work. A 3D node can opt out with its "Light from camera".',
       group: 'AR view',
       visibleIf: () => false, // shown in the inspector's Room light block
     },
@@ -112,6 +112,18 @@ export default defineNode({
         { value: '25', label: '25 per second' },
         { value: '30', label: '30 per second' },
         { value: '60', label: '60 per second' },
+      ],
+    },
+    steadying: {
+      type: 'enum',
+      default: 'auto',
+      label: 'Steadying',
+      hint: 'How steady the object stays when the phone moves. Automatic: the object is drawn a little ahead only while you clearly walk or swing the phone, and not at all while you hold still. Off: always for where the phone is now. Predict movement: always ahead, which helps on fast moves when the picture is late and can add wobble when holding still.',
+      group: 'AR view',
+      options: [
+        { value: 'auto', label: 'Automatic' },
+        { value: 'off', label: 'Off, as before' },
+        { value: 'predict', label: 'Predict movement' },
       ],
     },
     saveVideo: {

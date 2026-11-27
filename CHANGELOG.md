@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.62.1] - 2026-11-27
+
+### Changed
+- **World AR: steadying no longer acts while the phone is held still.** The movement prediction added in 0.61.0 roughly doubled the small wobble of raised or off-centre objects when standing still. A new **Steadying** setting on the World AR Camera has Automatic (the default: no prediction while the phone only trembles or moves slowly, prediction when you walk), "Off, as before" and "Predict movement". In a simulated hand-held test Automatic matches Off when still and halves the error when walking.
+- The phone is asked to estimate the room's light only when "Match room light" is on, and the estimate is read about ten times a second instead of every frame.
+
+### Added
+- **Copy AR report.** After an AR session the World AR Camera's inspector has a button that copies the session's numbers as text: frames per second, object pictures per second, render time and how far behind the object picture was (average and worst), plus which options were on. The AR readout also shows the steadying mode.
+
 ## [0.62.0] - 2026-11-27
 
 ### Added

@@ -44,6 +44,15 @@ export function hasPhysics(graph: GraphDoc): boolean {
   return walk(graph.nodes, 0);
 }
 
+/**
+ * Does any World AR Camera (also inside groups) have "Match room light" on? Only then does the AR view ask the phone to estimate the
+ * light: the estimate is work the phone does for every camera frame, so it is not asked for when nothing would use it.
+ */
+export function wantsRoomLight(graph: GraphDoc): boolean {
+  const walk = (nodes: GraphDoc['nodes'], depth: number): boolean => nodes.some((n) => (n.type === WORLD_AR_TYPE && n.params.matchLight !== false) || (n.type === GROUP_TYPE && depth < GROUP_MAX_DEPTH && walk(groupData(n).nodes, depth + 1)));
+  return walk(graph.nodes, 0);
+}
+
 /** A copy of the graph in which every World AR Camera carries `moment` (null takes it out again). Other nodes keep their identity. */
 export function stampWorldAr(graph: GraphDoc, ids: string[], moment: WorldMoment | null): GraphDoc {
   let g = graph;

@@ -2,6 +2,7 @@
  * The "Start AR" button of the World AR Camera node: opens `io.worldAr` on what the viewer shows, and puts a finished recording
  * into the graph (the take into the node, the camera clip into a new Media In node next to it).
  */
+import pkg from '../../../package.json';
 import type { CardMode } from '../../engine/lib/xr-math';
 import type { WorldArTake } from '../../io/world-ar/controller';
 import { createArOverlay } from '../worldAr/overlay';
@@ -55,6 +56,8 @@ export function openWorldAr(app: Ctx, nodeId: string, fullId: string): void {
   ar.open({
     graph: () => ed.state.graph,
     node: shown,
+    steadying: params.steadying === 'off' || params.steadying === 'predict' ? params.steadying : 'auto',
+    appVersion: pkg.version,
     recordRate: params.recordRate && params.recordRate !== 'project' ? Number(params.recordRate) || null : null,
     card: { mode: (params.cardMode as CardMode) ?? 'upright', width: Number(params.cardWidth ?? 0.5) || 0.5 },
     overlay: overlay.root,

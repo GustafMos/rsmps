@@ -22,8 +22,9 @@ import type { AssetInfo, GraphDoc } from '../../engine/types';
 import { LiveRecorder } from '../live-record';
 import type { ArCameraFeed } from './camera-feed';
 import type { ArEditHost } from './edit-host';
-import { EnginePictureSource, fedByWorldAr, hasPhysics, probeCanvasCopy, type CopyRoute, type PictureTarget } from './engine-source';
-import { ArLoop, type ArClipRecorder, type ArLoopState, type ArPainter } from './loop';
+import { ArSessionStats } from './ar-report';
+import { EnginePictureSource, fedByWorldAr, hasPhysics, probeCanvasCopy, wantsRoomLight, type CopyRoute, type PictureTarget } from './engine-source';
+import { ArLoop, type ArClipRecorder, type ArLoopState, type ArPainter, type Steadying } from './loop';
 import { GlPainter, makeBrowserXrPainter } from './painter';
 import type { Gesture } from './placement';
 import { browserSupportEnv, checkWorldAr, noCameraPictureMessage, startErrorMessage, type WorldArSupport } from './support';
@@ -48,6 +49,10 @@ export interface WorldArOpen {
   overlay: HTMLElement | null;
   /** Recording rate of the World AR Camera node: frames per second, or null / absent = the project's. */
   recordRate?: number | null;
+  /** How the object's picture is aimed when it arrives late (the camera node's Steadying). Default: automatic. */
+  steadying?: Steadying;
+  /** The app's version, for "Copy AR report". */
+  appVersion?: string;
   onState(state: WorldArViewState): void;
   /** A recording was saved: the take, and the camera clip when the session handed the camera picture over. */
   onTake(take: WorldArTake): void;
@@ -138,6 +143,8 @@ export interface WorldArApi {
   /** Open the view. Call straight from the button press. Rejects with a sentence for the user. */
   open(o: WorldArOpen): Promise<WorldArHandle>;
   readonly active: WorldArHandle | null;
+  /** The numbers of the open session, or of the last one when none is open (plain text, for "Copy AR report"); null before any. */
+  report(): string | null;
 }
 
 export interface WorldArDeps {
@@ -223,6 +230,11 @@ export function browserWorldArEnv(): WorldArEnv {
 
 export class WorldArController implements WorldArApi {
   private current: WorldArHandle | null = null;
+  private currentReport: (() => string) | null = null;
+  private lastReport: string | null = null;
+  report(): string | null {
+    return this.currentReport ? this.currentReport() : this.lastReport;
+  }
 
   constructor(
     private d: WorldArDeps,
@@ -251,7 +263,8 @@ export class WorldArController implements WorldArApi {
     const cams = this.d.suspendCameras?.bind(this.d);
     cams?.(true);
     let session: XrSessionLike;
-    const asked = (o.scan ? SCAN_FEATURES : OPTIONAL_FEATURES).filter((f) => f !== 'dom-overlay' || !!o.overlay);
+    const room = !o.scan && wantsRoomLight(o.graph());
+    const asked = (o.scan ? SCAN_FEATURES : OPTIONAL_FEATURES).filter((f) => (f !== 'dom-overlay' || !!o.overlay) && (f !== 'light-estimation' || room));
     try {
       session = await env.xr.requestSession('immersive-ar', { optionalFeatures: [...asked], ...(o.overlay ? { domOverlay: { root: o.overlay } } : {}), ...(o.scan ? { depthSensing: DEPTH_INIT } : {}) });
     } catch (err) {
@@ -327,7 +340,32 @@ export class WorldArController implements WorldArApi {
         if (lastLoop) o.onState(view(lastLoop));
       };
       const scanSession = o.scan ? new ScanSession({ env: env.makeScanEnv?.() ?? browserScanEnv(), depth: depthGranted(session), auto: o.scan.auto }) : undefined;
+      const stats = new ArSessionStats();
+      const steadying: Steadying = o.steadying ?? 'auto';
+      const opened = env.now();
+      let lightSeen = false;
+      const makeReport = (): string => {
+        const g = o.graph();
+        const node = g.nodes.find((n) => n.id === o.node);
+        const p = (node?.params ?? {}) as Record<string, unknown>;
+        const s = lastLoop;
+        return stats.report({
+          appVersion: o.appVersion ?? 'unknown',
+          steadying,
+          granted: session.enabledFeatures ? Array.from(session.enabledFeatures) : (Object.entries(features) as [string, boolean][]).filter(([, on]) => on).map(([k]) => k),
+          route: source.route,
+          picture: source.latest() ? { width: source.latest()!.width, height: source.latest()!.height } : null,
+          groundShadow: typeof p.groundShadow === 'boolean' ? p.groundShadow : null,
+          antiAlias: typeof p.antiAlias === 'string' ? p.antiAlias : null,
+          roomLight: room,
+          roomLightSeen: lightSeen || s?.light === true,
+          physics: !!s?.physics,
+          seconds: (env.now() - opened) / 1000,
+        });
+      };
+      this.currentReport = makeReport;
       const loop = new ArLoop({
+        steadying,
         scan: scanSession,
         edit: o.scan ? undefined : o.edit,
         session,
@@ -354,6 +392,8 @@ export class WorldArController implements WorldArApi {
         onState: (s) => {
           const was = lastLoop;
           lastLoop = s;
+          if (s.light) lightSeen = true;
+          if (!o.scan) stats.add({ fps: s.fps, pictureFps: s.pictureFps, renderMs: source.timing.render, copyMs: source.timing.copy, pictureBehindMs: s.pictureBehindMs, zoom: s.zoom });
           o.onState(view(s));
           if (s.ended && !was?.ended) void ended(s.error);
         },
@@ -435,6 +475,8 @@ export class WorldArController implements WorldArApi {
         release?.();
         cams?.(false);
         this.current = null;
+        if (!o.scan) this.lastReport = makeReport();
+        this.currentReport = null;
         resolveClosed({ error });
       };
 

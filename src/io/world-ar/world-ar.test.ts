@@ -690,7 +690,7 @@ function fakeEnv(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
   return { env, painters, pushes, recorder, advance: (ms: number) => (clock += ms) };
 }
 
-function controller(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
+function controller(xr: FakeXrSystem, o: { recorder?: boolean; matchLight?: boolean } = {}) {
   const f = fakeEnv(xr, o);
   const evals: unknown[] = [];
   let holds = 0;
@@ -721,7 +721,8 @@ function controller(xr: FakeXrSystem, o: { recorder?: boolean } = {}) {
   );
   const states: WorldArViewState[] = [];
   const takes: WorldArTake[] = [];
-  const graph = createGraph('p');
+  // a World AR Camera with Match room light on (the default): that is what makes the AR view ask for light estimation
+  const graph: GraphDoc = { ...createGraph('p'), nodes: [{ id: 'cam', type: 'world-ar', x: 0, y: 0, params: o.matchLight === false ? { matchLight: false } : {} }] };
   const openWith = (extra: { recordRate?: number | null; fps?: number } = {}) =>
     c.open({
       graph: () => (extra.fps ? { ...graph, project: { ...graph.project, fps: extra.fps } } : graph),
@@ -1287,6 +1288,26 @@ describe('the recording rate through the controller', () => {
 });
 
 describe('light estimation (fake browser)', () => {
+  it('is not asked for when no World AR Camera has Match room light on (the phone then does less work)', async () => {
+    const xr = new FakeXrSystem();
+    const t = controller(xr, { matchLight: false });
+    const h = await t.open();
+    expect(xr.lastInit!.optionalFeatures).not.toContain('light-estimation');
+    expect(h.state().features.lightEstimation).toBe(false);
+    expect(xr.session!.probes).toBe(0);
+    t.frames(10);
+    expect(t.states.at(-1)!.light).toBe(false);
+  });
+
+  it('is read about ten times a second, not every camera frame', async () => {
+    const xr = new FakeXrSystem();
+    const t = controller(xr);
+    await t.open();
+    t.frames(30); // 30 frames of 33 ms: one second
+    expect(xr.session!.lightReads).toBeLessThan(15);
+    expect(xr.session!.lightReads).toBeGreaterThan(5);
+  });
+
   it('is asked for as an optional feature; granted: the view reads the room light and says "light: yes"; the scan does not ask', async () => {
     const xr = new FakeXrSystem();
     const t = controller(xr);
