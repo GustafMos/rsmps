@@ -44,6 +44,46 @@ export const QUALITY_PARAM = {
   },
 } satisfies ParamSchema;
 
+/**
+ * Anti-aliasing of the raymarched SDF nodes. `edges` is the cheap analytic edge estimate every node always had (4 rays at Quality High);
+ * `off` switches it off; `x2` / `x4` shade 2 / 4 rays per pixel and average them; `best` is 4 rays for a paused full-size frame and for exports and
+ * `edges` while playing (the engine tells a node ctx.quality 'final' and ctx.proxy 1 then).
+ */
+export const AA_PARAM = {
+  antiAlias: {
+    type: 'enum',
+    default: 'edges',
+    absent: 'edges',
+    label: 'Anti-aliasing',
+    group: 'Quality',
+    hint: 'Smooths jagged edges and shimmering surface detail. Edges only is cheap and always on. 2x and 4x shade several rays per pixel (slower). 4x when paused or export keeps playback fast and gives clean stills and files.',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'edges', label: 'Edges only' },
+      { value: 'x2', label: '2x supersampling' },
+      { value: 'x4', label: '4x supersampling' },
+      { value: 'best', label: '4x when paused or export' },
+    ],
+  },
+} satisfies ParamSchema;
+
+/** Rays per pixel and whether the near-miss edge estimate runs, for an Anti-aliasing setting. `fullQuality` = export or a paused full-size frame. */
+export function aaPlan(mode: string | undefined, quality: string, fullQuality: boolean): { samples: number; edges: boolean } {
+  const base = quality === 'high' ? 4 : 1;
+  switch (mode) {
+    case 'off':
+      return { samples: 1, edges: false };
+    case 'x2':
+      return { samples: Math.max(2, base), edges: true };
+    case 'x4':
+      return { samples: 4, edges: true };
+    case 'best':
+      return { samples: fullQuality ? 4 : base, edges: true };
+    default:
+      return { samples: base, edges: true };
+  }
+}
+
 /** Move / scale / rotate / spin of the object plus the simple built-in camera: the same params and defaults as 3D Object. */
 export const XFORM_PARAMS = {
   posX: { type: 'number', default: 0, min: -20, max: 20, step: 0.01, scrubSpan: 8, label: 'Move X', group: 'Object', hint: 'Scene units (the object is about 2 wide). Wire a number here to move it.' },
@@ -200,7 +240,10 @@ export function marchUniforms(o: {
   alpha?: number;
   /** Smallest distance used to estimate normals (scene units): raise it to hide the lattice of a sampled field. */
   nEps?: number;
+  /** Anti-aliasing plan (`aaPlan`); absent = what the node always did. */
+  aaPlan?: { samples: number; edges: boolean };
 }): Record<string, UniformValue> {
+  const plan = o.aaPlan ?? aaPlan('edges', o.quality, false);
   return {
     light: [...o.light],
     ambient: o.p.ambient,
@@ -212,7 +255,8 @@ export function marchUniforms(o: {
     aoAmt: o.p.ao ?? 0,
     stepScale: o.stepScale,
     maxSteps: o.quality === 'draft' ? 56 : o.quality === 'high' ? 128 : 88,
-    aa: o.quality === 'high' ? 4 : 1,
+    aa: plan.samples,
+    edgeAA: plan.edges ? 1 : 0,
     depthMode: 0,
     alpha: o.alpha ?? 1,
     nEps: o.nEps ?? 0,
@@ -338,7 +382,7 @@ fn sampleAt(px: vec2f, tOut: ptr<function, f32>) -> vec4f {
   }
   // near miss: partial coverage, coloured from the closest approach
   let cov = clamp(0.5 - m.cone, 0.0, 0.5);
-  if (cov < 0.02 || u.depthMode > 0.5) { return vec4f(0.0); }
+  if (cov < 0.02 || u.depthMode > 0.5 || u.edgeAA < 0.5) { return vec4f(0.0); }
   let c = colourAt(ro, rd, m.tc);
   return vec4f(c.rgb, cov * c.a);
 }
@@ -353,6 +397,17 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     let s = sampleAt(px, &t);
     let a = s.a * u.alpha;
     return vec4f(s.rgb * a, a);
+  }
+  if (u.aa < 3.0) {
+    // 2x: a tilted pair of sub-pixel rays
+    let r0 = sampleAt(px + vec2f(-0.125, -0.375), &t);
+    let r1 = sampleAt(px + vec2f(0.125, 0.375), &t);
+    let sum2 = r0.a + r1.a;
+    if (sum2 < 0.01) { return vec4f(0.0); }
+    var col2 = (r0.rgb * r0.a + r1.rgb * r1.a) / sum2;
+    if (u.cel > 0.5) { col2 = select(r1.rgb, r0.rgb, r0.a > 0.5); }
+    let a2 = min(sum2 * 0.5, 1.0) * u.alpha;
+    return vec4f(col2 * a2, a2);
   }
   let s0 = sampleAt(px + vec2f(-0.375, -0.125), &t);
   let s1 = sampleAt(px + vec2f(0.125, -0.375), &t);

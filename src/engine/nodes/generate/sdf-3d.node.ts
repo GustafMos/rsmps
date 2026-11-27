@@ -1,6 +1,6 @@
 import { defineNode } from '../../define';
 import { spunRotation, rotationZYX } from '../../lib/gen-common';
-import { BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, isSpinning, LIGHT_PARAMS, lightVector, marchUniforms, QUALITY_PARAM, resolveCamera, run3d, SHADE_PARAMS, XFORM_PARAMS, type LightP, type XformP } from '../../lib/gen-3d';
+import { aaPlan, AA_PARAM, BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, isSpinning, LIGHT_PARAMS, lightVector, marchUniforms, QUALITY_PARAM, resolveCamera, run3d, SHADE_PARAMS, XFORM_PARAMS, type LightP, type XformP } from '../../lib/gen-3d';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformKey, deformStepScale, deformUniforms, deformWgsl, type DeformP } from '../../lib/gen-deform';
 import { SDF2D_WGSL } from '../../lib/gen-sdf2d';
 import { materialKey, materialTextures, materialUniforms } from '../../lib/gen-material';
@@ -108,6 +108,7 @@ interface P extends XformP, LightP, DeformP {
   ao: number;
   shadows: boolean;
   quality: string;
+  antiAlias?: string;
   [k: string]: unknown;
 }
 
@@ -162,6 +163,7 @@ export default defineNode({
     ...LIGHT_PARAMS,
     ...SHADE_PARAMS,
     ...QUALITY_PARAM,
+    ...AA_PARAM,
     ...DEFORM_PARAMS,
   },
   summary: (p) => {
@@ -331,7 +333,7 @@ fn surf(pw: vec3f, nw: vec3f, rd: vec3f) -> vec3f {
 
     const reps = repeat.filter(Boolean).length;
     const stepScale = Math.min(deformStepScale(p), 0.9) * (reps ? 0.8 : 1) * (usesPic ? 0.9 : 1) * (fold ? 0.8 : 1);
-    Object.assign(uniforms, marchUniforms({ light: lightVector(p), p, quality: p.quality, stepScale, nEps: usesPic ? 0.01 : 0 }));
+    Object.assign(uniforms, marchUniforms({ light: lightVector(p), p, quality: p.quality, stepScale, nEps: usesPic ? 0.01 : 0, aaPlan: aaPlan(p.antiAlias, p.quality, ctx.quality === 'final' && ctx.proxy >= 1) }));
 
     const key = `sdf-3d ${slots.map((s) => s.type[0] + s.type[1] + s.op[0]).join('')}${morph ? ' morph' : ''} r${repeat.map(Number).join('')} m${mirror.map(Number).join('')}${fold ? ' fold' : ''}${shell ? ' shell' : ''}${textured ? ' tex' : ''} ${deformKey(feat)} ${materialKey(mat)}`;
     if (mat) Object.assign(uniforms, materialUniforms(mat));

@@ -56,15 +56,32 @@ fn matTriW(nl: vec3f) -> vec3f {
   return w0 / (w0.x + w0.y + w0.z);
 }
 fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
+  // gFoot = size of one pixel on the surface in the object's own units (0 = no filtering: rasterised users). Maps that are shown smaller than
+  // their pixels are averaged over that footprint (3x3 taps) instead of read at one point, which would shimmer.
+  lines.push('var<private> gFoot: f32;');
   const lookup = (key: keyof MaterialValue['maps']): string => {
     const tex = TEX_NAMES[key];
-    const s = (uv: string) => `unpremul(textureSampleLevel(${tex}, smp, matUV(${uv}), 0.0))`;
+    const s = (uv: string) => `tap_${tex}(matUV(${uv}))`;
     return `fn tri_${tex}(pl: vec3f, nl: vec3f) -> vec4f {
   ${mesh ? `if (gMeshUv.z > 0.5) { return ${s('vec2f(gMeshUv.x, -gMeshUv.y)')}; }` : ''}
   ${tri ? `let w = matTriW(nl);\n  return ${s('vec2f(pl.z, -pl.y)')} * w.x + ${s('vec2f(pl.x, pl.z)')} * w.y + ${s('vec2f(pl.x, -pl.y)')} * w.z;` : `return ${s('vec2f(pl.x, -pl.y)')};`}
 }`;
   };
-  for (const k of ['colorMap', 'normalMap', 'roughnessMap', 'emissionMap'] as const) if (has(k)) lines.push(lookup(k));
+  for (const k of ['colorMap', 'normalMap', 'roughnessMap', 'emissionMap'] as const) {
+    if (!has(k)) continue;
+    const tex = TEX_NAMES[k];
+    lines.push(`fn tap_${tex}(uv: vec2f) -> vec4f {
+  let fp = gFoot * u.mD.x;
+  let dims = vec2f(textureDimensions(${tex}));
+  if (fp * max(dims.x, dims.y) <= 1.0) { return unpremul(textureSampleLevel(${tex}, smp, uv, 0.0)); }
+  var acc = vec4f(0.0);
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) { acc += unpremul(textureSampleLevel(${tex}, smp, uv + vec2f(f32(i), f32(j)) * (fp * 0.33), 0.0)); }
+  }
+  return acc / 9.0;
+}`);
+    lines.push(lookup(k));
+  }
 
   // --- environment -------------------------------------------------------------------------------------------------
   lines.push(
@@ -84,11 +101,11 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
     ${
       tri
         ? `let w = matTriW(nl);
-    let tx = unpremul(textureSampleLevel(matNormal, smp, matUV(vec2f(pl.z, -pl.y)), 0.0)).rgb * 2.0 - 1.0;
-    let ty = unpremul(textureSampleLevel(matNormal, smp, matUV(vec2f(pl.x, pl.z)), 0.0)).rgb * 2.0 - 1.0;
-    let tz = unpremul(textureSampleLevel(matNormal, smp, matUV(vec2f(pl.x, -pl.y)), 0.0)).rgb * 2.0 - 1.0;
+    let tx = tap_matNormal(matUV(vec2f(pl.z, -pl.y))).rgb * 2.0 - 1.0;
+    let ty = tap_matNormal(matUV(vec2f(pl.x, pl.z))).rgb * 2.0 - 1.0;
+    let tz = tap_matNormal(matUV(vec2f(pl.x, -pl.y))).rgb * 2.0 - 1.0;
     let pert = w.x * vec3f(0.0, tx.y, tx.x) + w.y * vec3f(ty.x, 0.0, ty.y) + w.z * vec3f(tz.x, tz.y, 0.0);`
-        : `let tz = unpremul(textureSampleLevel(matNormal, smp, matUV(vec2f(pl.x, -pl.y)), 0.0)).rgb * 2.0 - 1.0;
+        : `let tz = tap_matNormal(matUV(vec2f(pl.x, -pl.y))).rgb * 2.0 - 1.0;
     let pert = vec3f(tz.x, tz.y, 0.0);`
     }
     let nl2 = normalize(nl + pert * u.mF.z);
@@ -98,7 +115,7 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
   if (mesh && has('normalMap')) {
     // UV path: tangent-space normal from the model's own coordinates, applied on the world tangent / bitangent of the surface.
     normalCode = `if (gMeshUv.z > 0.5) {
-    let tm = unpremul(textureSampleLevel(matNormal, smp, matUV(vec2f(gMeshUv.x, -gMeshUv.y)), 0.0)).rgb * 2.0 - 1.0;
+    let tm = tap_matNormal(matUV(vec2f(gMeshUv.x, -gMeshUv.y))).rgb * 2.0 - 1.0;
     n = normalize(n + (gMeshT * tm.x + gMeshB * tm.y) * u.mF.z);
   } else ${normalCode}`;
   }
@@ -122,7 +139,7 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
   let f0 = mix(vec3f(0.04) * (0.25 + u.mA.z), alb, metal);
   let F = f0 + (vec3f(1.0) - f0) * pow(1.0 - vdh, 5.0);
   let a = rough * rough;
-  let a2 = a * a;
+  let a2 = min(a * a + gFoot * gFoot * 0.25, 1.0);
   let dd = ndh * ndh * (a2 - 1.0) + 1.0;
   let D = min(a2 / (PI * dd * dd), 40.0);
   var sp = F * (D * 0.25 / max(ndv, 0.25)) * diff;
@@ -145,9 +162,15 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
       break;
     case 'toon':
       model = `let st = max(u.mE.x, 2.0);
-  let band = min(floor(diff * st), st - 1.0) / (st - 1.0);
+  let bw = max(gFoot * 0.9, 1e-4);
+  var band = 0.0;
+  for (var bi = 1; bi < 8; bi++) {
+    if (f32(bi) >= st) { break; }
+    band += smoothstep(f32(bi) / st - bw, f32(bi) / st + bw, diff);
+  }
+  band = band / (st - 1.0);
   let H = normalize(L + V);
-  let hl = step(0.6, pow(max(dot(n, H), 0.0), 40.0)) * select(0.0, 1.0, diff > 0.0);
+  let hl = smoothstep(0.6 - bw, 0.6 + bw, pow(max(dot(n, H), 0.0), 40.0)) * select(0.0, 1.0, diff > 0.0);
   col = alb * (u.ambient * ao * ${ambCol} + (1.0 - u.ambient) * band) + vec3f(hl * u.mA.z);
   if (ndv < u.mE.y) { col = alb * 0.08; }`;
       break;
@@ -157,7 +180,8 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
       break;
     case 'hologram':
       model = `${banded}
-  let scan = 0.5 + 0.5 * sin(pl.y * u.mE.z * TAU - u.mD.w);
+  let scanFade = 1.0 - smoothstep(0.25, 0.5, gFoot * u.mE.z);
+  let scan = 0.5 + 0.5 * sin(pl.y * u.mE.z * TAU - u.mD.w) * scanFade;
   let fres = pow(1.0 - ndv, u.mF.x);
   col = alb * (0.25 + 0.75 * scan) * (0.55 + 0.45 * lit) + u.mC.rgb * fres * u.mC.w * 1.5;
   alpha = clamp((0.2 + 0.5 * scan + fres) * alpha, 0.0, 1.0);`;
@@ -174,7 +198,11 @@ fn matUV(q: vec2f) -> vec2f { return q * u.mD.x + vec2f(0.5) + u.mD.yz; }`);
       model = `${banded}
   let g = abs(fract(pl * u.mE.z) - 0.5);
   let k = 0.5 - max(g.x, max(g.y, g.z));
-  let line = 1.0 - smoothstep(0.0, max(u.mF.y, 0.002), k);
+  let lw = max(u.mF.y, 0.002);
+  let fpc = gFoot * u.mE.z * 1.2;
+  let lwe = max(lw, fpc);
+  var line = (1.0 - smoothstep(0.0, lwe, k)) * (lw / lwe);
+  line = mix(line, clamp(3.0 * lw, 0.0, 1.0), smoothstep(0.3, 0.7, fpc));
   col = alb * (0.55 + 0.45 * lit);
   alpha = alpha * line;`;
       break;
