@@ -9,6 +9,7 @@
 import { formatElapsed } from '../../io/elapsed';
 import type { WorldArHandle, WorldArViewState } from '../../io/world-ar/controller';
 import { GestureReader } from '../../io/world-ar/placement';
+import { lightReadout } from '../../io/world-ar/support';
 
 export interface ArOverlay {
   root: HTMLElement;
@@ -294,7 +295,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
         ...(rate ? [rate] : []),
         ...(f.cameraAccess ? [] : ['no zoom: this phone does not hand over the camera picture']),
         `render ${s.renderMs} ms · copy ${s.copyMs} ms (${s.route})`,
-        `${f.hitTest ? 'surfaces' : 'NO surfaces'} · ${s.anchored ? 'anchored' : f.anchors ? 'anchor pending' : 'no anchors'} · ${f.cameraAccess ? 'camera clip' : 'motion only'}`,
+        `${f.hitTest ? 'surfaces' : 'NO surfaces'} · ${s.anchored ? 'anchored' : f.anchors ? 'anchor pending' : 'no anchors'} · ${f.cameraAccess ? 'camera clip' : 'motion only'} · ${lightReadout(s.light === true)}`,
       ].join('\n');
       if (s.scan) scanUpdate(s, s.scan);
     },

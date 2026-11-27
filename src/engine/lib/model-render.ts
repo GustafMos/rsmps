@@ -5,6 +5,7 @@ import { parseModelBytes } from './gen-model-load';
 import { PRELUDE } from '../gpu/prelude';
 import { deformUniforms, type DeformFeat, type DeformP, deformFeatures } from './gen-deform';
 import { materialKey, materialRasterData, materialRasterGroup, materialRasterLayout, materialRasterWgsl, MATERIAL_RASTER_BYTES } from './gen-material';
+import { cameraUniforms, FRAME_WGSL, groundUniforms, RAY_WGSL, type GroundP } from './gen-3d';
 import type { CameraValue, Host, ImageValue, MaterialValue, NodeGpu, TimeInfo } from '../types';
 
 /**
@@ -519,7 +520,7 @@ function mat4(m: number[][]): number[] {
 }
 
 /** The params both `object-3d` (shape "Custom model…") and the legacy `model-3d` node feed to `renderModel`. */
-export interface ModelRenderParams {
+export interface ModelRenderParams extends GroundP {
   model: string[];
   autoFit: boolean;
   posX: number;
@@ -563,6 +564,91 @@ export interface ModelRenderCtx {
 
 const FLAG: Record<keyof DeformFeat, number> = { noise: 1, map: 2, cyl: 4, inflate: 8, twist: 16, bend: 32, taper: 64, morph: 128, melt: 256, explode: 512, lowfi: 1024 };
 
+/**
+ * Ground shadow of a rasterised model: its coverage seen from the light (an orthographic render, fitted to the model's bounding
+ * sphere, into a small picture) is looked up for every floor point the camera sees, along the light, and blurred by Softness. This is
+ * a projected ("blob") shadow: right shape and place, no contact darkening and no self shadow. The floor is invisible; the result is
+ * the model's picture with black, transparent shadow pixels added behind it.
+ */
+const GROUND_SHADOW_WGSL = /* wgsl */ `
+${RAY_WGSL}
+${FRAME_WGSL}
+fn fx(uv: vec2f, px: vec2f) -> vec4f {
+  let base = textureSampleLevel(src, smp, uv, 0.0);
+  var ro = vec3f(0.0);
+  var rd = vec3f(0.0, 0.0, 1.0);
+  if (!rayAt(px, &ro, &rd)) { return base; }
+  if (ro.y <= u.gY + 1e-5 || rd.y > -1e-5 || u.gStr <= 0.0) { return base; }
+  let t = (u.gY - ro.y) / rd.y;
+  let p = vec3f(ro.x + rd.x * t, u.gY, ro.z + rd.z * t);
+  let L = normalize(u.light);
+  let R = max(u.gR, 0.05);
+  let reach = 2.0 * R / max(L.y, 0.2);
+  let dc = length(p.xz - u.gC.xz);
+  let fade = 1.0 - smoothstep(1.5 * R + 0.6 * reach, 4.0 * R + 1.4 * reach, dc);
+  let lit = smoothstep(0.0, 0.12, L.y);
+  if (fade <= 0.0 || lit <= 0.0) { return base; }
+  let d = p - u.gC;
+  let c0 = vec2f(dot(d, u.lRight), dot(d, u.lUp)) / u.lSize;
+  let rad = (0.01 + 0.2 * u.gSoft * u.gSoft + 0.05 * u.gSoft) * R / u.lSize;
+  var cov = 0.0;
+  for (var i = 0; i < 24; i++) {
+    let fi = f32(i) + 0.5;
+    let r = sqrt(fi / 24.0);
+    let th = fi * 2.399963;
+    let o = vec2f(cos(th), sin(th)) * r * rad;
+    let q = vec2f(0.5 + c0.x + o.x, 0.5 - c0.y - o.y);
+    cov += textureSampleLevel(sh, smp, q, 0.0).a;
+  }
+  cov = cov / 24.0;
+  let a = clamp(u.gStr * cov * fade * lit, 0.0, 1.0);
+  return vec4f(base.rgb, base.a + a * (1.0 - base.a));
+}
+`;
+
+/** Add the ground shadow to the finished picture of a model (consumes `image`). */
+async function addGroundShadow(
+  ctx: ModelRenderCtx,
+  p: ModelRenderParams,
+  size: { width: number; height: number; unit?: number },
+  image: ImageValue,
+  cam: CameraValue,
+  g: { bottom: number; center: number[]; radius: number; light: number[] },
+  redo: (lightCam: CameraValue, side: number) => Promise<ImageValue>,
+  surface: CameraValue | null,
+): Promise<ImageValue> {
+  const L = g.light;
+  const lightCam: CameraValue = {
+    kind: 'camera',
+    projection: 'orthographic',
+    fov: 40,
+    orthoSize: 2 * g.radius * 1.12,
+    position: [g.center[0] + L[0] * g.radius * 4, g.center[1] + L[1] * g.radius * 4, g.center[2] + L[2] * g.radius * 4],
+    target: [g.center[0], g.center[1], g.center[2]],
+    roll: 0,
+    shift: [0, 0],
+  };
+  const lb = cameraBasis(lightCam);
+  const sh = await redo(lightCam, 256);
+  const out = ctx.gpu.pass({
+    label: 'model-3d ground shadow',
+    size,
+    uniforms: {
+      ...cameraUniforms(cam, size.width, size.height),
+      ...groundUniforms(p, surface, { bottom: g.bottom, center: g.center, radius: g.radius }),
+      light: L,
+      lRight: lb.right,
+      lUp: lb.up,
+      lSize: lightCam.orthoSize,
+    },
+    textures: { src: image, sh },
+    wgsl: GROUND_SHADOW_WGSL,
+  });
+  ctx.gpu.recycle(sh);
+  ctx.gpu.recycle(image);
+  return out;
+}
+
 /** The 24 floats appended to the frame uniform: deform state (all zero = no deform, the vertex shader takes its original path). */
 function deformFrame(deform: { p: DeformP; map: ImageValue | null } | null, p: ModelRenderParams, fit: number, c: number[], ctx: ModelRenderCtx): number[] {
   if (!deform) return new Array(24).fill(0);
@@ -600,6 +686,8 @@ export async function renderModel(
   textureOverride: ImageValue | null,
   deform: { p: DeformP; map: ImageValue | null } | null = null,
   material: MaterialValue | null = null,
+  /** Internal: this render is the light's view for a ground shadow (no ground shadow, no wireframe). */
+  lightView = false,
 ): Promise<ImageValue> {
   const out = ctx.gpu.alloc(size.width, size.height, size.unit ?? 1);
   const device = ctx.gpu.device;
@@ -686,6 +774,7 @@ export async function renderModel(
   const gpu = ctx.gpu;
   const pl = await getPipelines(device, gpu);
   const gm = uploadModel(gpu, bytes, model, p.wireframe);
+  const groundWanted = p.groundShadow === true && !lightView;
   const frameBuf = gpu.scratch(frame.byteLength, GPUBufferUsage.UNIFORM, 'model-3d frame');
   device.queue.writeBuffer(frameBuf, 0, frame);
   const frameBind = device.createBindGroup({
@@ -757,5 +846,12 @@ export async function renderModel(
   gpu.releaseScratchTexture(msaa);
   gpu.releaseScratchTexture(depth);
   for (const b of temp) gpu.releaseScratch(b);
+  if (groundWanted) {
+    // lowest world y of the model's bounding box: the floor of the shadow (a camera that knows the real floor overrides it)
+    let bottom = Infinity;
+    for (const cx of [min[0], max[0]]) for (const cy of [min[1], max[1]]) for (const cz of [min[2], max[2]]) bottom = Math.min(bottom, rows[1][0] * cx + rows[1][1] * cy + rows[1][2] * cz + t[1]);
+    const lp = { ...p, groundShadow: false, wireframe: false };
+    return addGroundShadow(ctx, p, { width: W, height: H, unit: size.unit }, out, cam, { bottom, center: centerW, radius: radiusW, light }, (lightCam, side) => renderModel(ctx, lp, { width: side, height: side, unit: 1 }, lightCam, textureOverride, deform, null, true), camera);
+  }
   return out;
 }

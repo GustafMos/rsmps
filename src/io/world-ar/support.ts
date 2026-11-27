@@ -84,3 +84,6 @@ export const noCameraPictureMessage = 'This phone does not hand the camera pictu
 
 /** What the scan view's readout says about depth sensing, so the owner can report it. */
 export const depthReadout = (granted: boolean): string => (granted ? 'depth: yes' : 'depth: no');
+
+/** What the AR view says about light estimation: "yes" once the phone has given an estimate, "no" when it was refused or has none. */
+export const lightReadout = (have: boolean): string => (have ? 'light: yes' : 'light: no');

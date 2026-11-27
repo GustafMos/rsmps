@@ -270,6 +270,14 @@ export class WorldArController implements WorldArApi {
           hitTestSource = null; // no surfaces: nothing can be placed; the hint keeps asking to find one, see `noSurfaces` below
         }
       }
+      let lightProbe: unknown = null;
+      if (features.lightEstimation && session.requestLightProbe) {
+        try {
+          lightProbe = (await session.requestLightProbe()) ?? null;
+        } catch {
+          lightProbe = null; // no estimate: the 3D nodes keep their own light
+        }
+      }
       const graph0 = o.graph();
       const layerMode = !o.scan && fedByWorldAr(graph0, o.node);
       // the scan view renders no picture of the graph at all (the phone's GPU is kept for the photos)
@@ -317,6 +325,7 @@ export class WorldArController implements WorldArApi {
         session,
         referenceSpace,
         hitTestSource,
+        lightProbe,
         layer: made.layer,
         features,
         painter: made.painter,

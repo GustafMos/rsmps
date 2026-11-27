@@ -8,9 +8,9 @@
  * which keeps materials and the bounding sphere in the object's own frame. The `sdf` output of the SDF Scene node wraps the same
  * transform around the tree (`sceneMove`), so a scene wired into another carries it.
  */
-import { BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, lightVector, marchUniforms, resolveCamera, run3d, type LightP, type XformP } from './gen-3d';
+import { applyCameraLight, BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, groundOn, groundUniforms, lightVector, marchUniforms, resolveCamera, run3d, type GroundP, type LightP, type XformP } from './gen-3d';
 import { spunRotation } from './gen-common';
-import { materialKey, materialTextures, materialUniforms } from './gen-material';
+import { materialKey, materialShadowFactor, materialTextures, materialUniforms } from './gen-material';
 import { SDF2D_WGSL } from './gen-sdf2d';
 import { materialShadeWgsl, preparePicture, SD_CALL, SD_FUNCS, SD_OPS_WGSL, TO_LOCAL_WGSL } from './sdf-prims';
 import { checkSdfSize, packSdf, repeatAxes, sdfBounds, sdfMove, sdfStepScale, sdfStructure, sdfUsesPicture, slotsOf } from './sdf-scene';
@@ -139,7 +139,7 @@ const hasMod = (root: SdfNode | null, mod: string): boolean => {
   return found;
 };
 
-export interface SdfRenderParams extends XformP, LightP {
+export interface SdfRenderParams extends XformP, LightP, GroundP {
   rim: number;
   ao: number;
   shadows: boolean;
@@ -149,10 +149,11 @@ export interface SdfRenderParams extends XformP, LightP {
 }
 
 /** The full WGSL of the tracing pass for a tree (a pure function of its structure and of `material` / `shadows`). */
-export function sdfShader(root: SdfNode | null, o: { material: MaterialValue | null; shadows: boolean; infinite: boolean }): string {
+export function sdfShader(root: SdfNode | null, o: { material: MaterialValue | null; shadows: boolean; infinite: boolean; ground?: boolean }): string {
   const kinds = shapeKinds(root);
   return build3dShader({
     shadows: o.shadows,
+    ground: o.ground,
     shade: o.material ? materialShadeWgsl(o.material) : undefined,
     map: /* wgsl */ `
 ${SD_OPS_WGSL}
@@ -200,7 +201,8 @@ export interface SdfRenderInput {
 
 /** Render the scene: image and (when asked) depth, in the conventions of SDF 3D (docs/ENGINE.md, "Depth encoding"). */
 export function renderSdf(gpu: NodeGpu, r: SdfRenderInput): { image: ImageValue; depth: ImageValue | null } {
-  const { value, p, size } = r;
+  const { value, size } = r;
+  const p = applyCameraLight(r.p, r.camera);
   checkFrame(gpu, size.width, size.height);
   const root = value.root;
   checkSdfSize(root);
@@ -226,6 +228,12 @@ export function renderSdf(gpu: NodeGpu, r: SdfRenderInput): { image: ImageValue;
     bsR: infinite ? 0 : b.radius * 1.02,
     farT: 80,
   };
+  if (groundOn(p)) {
+    // the floor is at the bottom of the bounding sphere (a scene that repeats forever: one unit under the object)
+    const rW = infinite ? 1.5 * objScale : b.radius * 1.02 * objScale;
+    const cW = uniforms.bsW as number[];
+    Object.assign(uniforms, groundUniforms(p, cam, { bottom: infinite ? p.posY - objScale : cW[1] - rW, center: cW, radius: rW, opacity: materialShadowFactor(r.material) }));
+  }
   const packed = packSdf(root);
   for (let i = 0; i < packed.length; i += 4) uniforms[`q${i / 4}`] = [packed[i], packed[i + 1], packed[i + 2], packed[i + 3]];
   let occ: ImageValue | null = null;
@@ -240,9 +248,9 @@ export function renderSdf(gpu: NodeGpu, r: SdfRenderInput): { image: ImageValue;
   const mat = r.material;
   if (mat) Object.assign(uniforms, materialUniforms(mat));
   // a picture shape without a picture would read an unbound field: such shapes are dropped by SDF Shape, so this holds
-  const wgsl = sdfShader(root, { material: mat, shadows: p.shadows, infinite });
+  const wgsl = sdfShader(root, { material: mat, shadows: p.shadows, infinite, ground: groundOn(p) });
   const out = run3d(gpu, {
-    label: `sdf-scene ${sdfStructure(root)} ${materialKey(mat)}`.slice(0, 200),
+    label: `sdf-scene${groundOn(p) ? ' ground' : ''} ${sdfStructure(root)} ${materialKey(mat)}`.slice(0, 200),
     wgsl,
     uniforms,
     textures: { fld, ...(mat ? materialTextures(mat) : {}) },
