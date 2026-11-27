@@ -153,6 +153,39 @@ export function paramBundles(def: AnyNodeDef): ParamBundle[] {
   return out;
 }
 
+/**
+ * The Motion socket: ONE `motion` input on every node with the standard transform params (posX/Y/Z and rotX/Y/Z, plus objectScale if
+ * present) that drives all of them together. Derived, so no node declares it.
+ * Precedence per component: a wire on the single param wins over a vector bundle wire, which wins over the Motion wire.
+ */
+export interface ParamMotion {
+  port: string;
+  label: string;
+  pos: [string, string, string];
+  rot: [string, string, string];
+  scale: string | null;
+}
+
+export const MOTION_PORT = 'xform@motion';
+const motionMemo = new WeakMap<object, ParamMotion | null>();
+
+export function paramMotion(def: AnyNodeDef): ParamMotion | null {
+  const params = def.params as Record<string, { type: string }>;
+  if (motionMemo.has(params)) return motionMemo.get(params) ?? null;
+  const pos = ['posX', 'posY', 'posZ'] as const;
+  const rot = ['rotX', 'rotY', 'rotZ'] as const;
+  const ok = [...pos, ...rot].every((k) => params[k]?.type === 'number') && !(MOTION_PORT in params) && !(MOTION_PORT in (def.inputs ?? {}));
+  const m: ParamMotion | null = ok ? { port: MOTION_PORT, label: 'Motion', pos: [...pos], rot: [...rot], scale: params.objectScale?.type === 'number' ? 'objectScale' : null } : null;
+  motionMemo.set(params, m);
+  return m;
+}
+
+/** The motion socket behind a port name, or null. */
+export function motionPort(def: AnyNodeDef, port: string): ParamMotion | null {
+  if (port !== MOTION_PORT) return null;
+  return paramMotion(def);
+}
+
 /** The bundle behind a port name, or null. */
 export function paramBundle(def: AnyNodeDef, port: string): ParamBundle | null {
   if (!port.endsWith(BUNDLE_SUFFIX)) return null;
@@ -165,7 +198,7 @@ export function paramBundle(def: AnyNodeDef, port: string): ParamBundle | null {
  */
 export function paramSocketType(def: AnyNodeDef, key: string): SocketType | null {
   const p = def.params[key];
-  if (!p) return paramBundle(def, key) ? 'vector' : null;
+  if (!p) return paramBundle(def, key) ? 'vector' : motionPort(def, key) ? 'motion' : null;
   if (p.type === 'number') return 'number';
   if (p.type === 'color') return 'color';
   if (p.type === 'palette') return 'palette';
@@ -178,6 +211,8 @@ export function paramSocketPorts(def: AnyNodeDef): { port: string; type: SocketT
   const bundles = paramBundles(def);
   const out: { port: string; type: SocketType; bundle: ParamBundle | null }[] = [];
   for (const key of Object.keys(def.params)) {
+    const mo = paramMotion(def);
+    if (mo && key === mo.pos[0]) out.push({ port: mo.port, type: 'motion', bundle: null });
     const b = bundles.find((x) => x.members[0] === key);
     if (b) out.push({ port: b.port, type: 'vector', bundle: b });
     const t = paramSocketType(def, key);
@@ -188,7 +223,7 @@ export function paramSocketPorts(def: AnyNodeDef): { port: string; type: SocketT
 
 /** Is `port` something a wire can end on: an input, a wireable param or a bundle? */
 export function isInputPort(def: AnyNodeDef, port: string): boolean {
-  return port in def.inputs || port in def.params || !!paramBundle(def, port);
+  return port in def.inputs || port in def.params || !!paramBundle(def, port) || !!motionPort(def, port);
 }
 
 /** Can an output of type `from` feed an input of type `to`? */

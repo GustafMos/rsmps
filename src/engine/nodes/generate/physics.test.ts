@@ -130,4 +130,23 @@ describe('physics node', () => {
     expect(again.pos1).toEqual(mid.pos1);
     expect(first.pos1).toEqual([0, 3, 0]);
   });
+  it('viewing a Physics node with nothing wired shows its preview, and Motion equals Position plus Rotation', T, async () => {
+    clearRuns();
+    const t = await H();
+    const g = mk([['p', 'physics', { bodies: [...ball(3), { shape: 'box', size: [1, 1, 1], pos: [1, 5, 0], rot: [10, 20, 30] }] }]], []);
+    // no port named: the node's own previewOutput (the picture), not its first output
+    const img = (await t.evalGraph(g, 'p', { seconds: 1 })) as ImageValue;
+    expect(img.width).toBeGreaterThan(0);
+    const px = await t.pixels(img);
+    let lit = 0;
+    for (let i = 0; i < px.data.length; i += 4) if (px.data[i] + px.data[i + 1] + px.data[i + 2] > 60) lit++;
+    expect(lit).toBeGreaterThan(50);
+    for (const s of [0, 1, 2]) {
+      const m1 = (await t.evalGraph(g, 'p', { seconds: s, port: 'motion1' })) as unknown as { pos: number[]; rot: number[] };
+      const m2 = (await t.evalGraph(g, 'p', { seconds: s, port: 'motion2' })) as unknown as { pos: number[]; rot: number[] };
+      expect(m1.pos).toEqual(await t.evalGraph(g, 'p', { seconds: s, port: 'pos1' }));
+      expect(m2.rot).toEqual(await t.evalGraph(g, 'p', { seconds: s, port: 'rot2' }));
+      expect(await t.evalGraph(g, 'p', { seconds: s, port: 'motion3' })).toBeNull();
+    }
+  });
 });

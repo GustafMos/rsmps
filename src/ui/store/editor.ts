@@ -3,6 +3,8 @@
  * GraphDoc references (the pure helpers in engine/graph share structure, so this is cheap).
  */
 import { driveWires } from '../../engine/lib/physics/wiring';
+import { addObjectTo, physicsOf, makePhysical, matchArFloor, removeBodyAt, removeBodyOf, startHere, tidyWiring, updateBody } from '../../engine/lib/physics/objects';
+import type { BodySpec } from '../../engine/lib/physics/types';
 import { createStore, type Store } from './createStore';
 import { withProcessResult } from '../../engine/process';
 import {
@@ -1141,6 +1143,84 @@ export class Editor {
     } catch (err) {
       this.toast(err instanceof Error ? err.message : 'Could not wire that.', 'error');
     }
+  }
+
+  /**
+   * Physics for one object, ONE undo step: 'falls' / 'fixed' (stays put) finds or creates the Physics node of this level, adds a body shaped
+   * like the object that starts where it is and wires it with one Motion wire; 'off' removes the body and the wire.
+   * Returns the Physics node's id (null for 'off' or on an error).
+   */
+  setObjectPhysics(objId: string, mode: 'off' | 'falls' | 'fixed'): string | null {
+    let physId: string | null = null;
+    try {
+      this.editLevel((g) => {
+        if (mode === 'off') return removeBodyOf(g, objId);
+        const r = makePhysical(g, this.registry, objId, mode);
+        physId = r.physId;
+        return r.graph;
+      }, undefined);
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : 'Could not set up physics.', 'error');
+    }
+    return physId;
+  }
+
+  /**
+   * The on-picture handles write an object's Move / Rotate here. For an object a Physics body moves, the same edit also moves the body's
+   * start pose (so dragging at the start puts it where it starts). Otherwise it is `setParams`.
+   */
+  setObjectPose(nodeId: string, patch: Record<string, unknown>, key?: string): void {
+    const g = this.level;
+    if (!g.nodes.some((n) => n.id === nodeId)) return;
+    let next: GraphDoc = { ...g, nodes: g.nodes.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, ...patch } } : n)) };
+    if (physicsOf(next, nodeId)) next = startHere(next, nodeId);
+    this.commitLevel(next, key ?? `ps:${nodeId}:${Object.keys(patch).join(',')}`);
+  }
+
+  /** Change settings of one Physics body (Bounciness, Grip, Weight, shape, size, start pose...) as one edit that coalesces while typing. */
+  setBody(physId: string, index: number, patch: Partial<BodySpec>): void {
+    this.editLevel((g) => updateBody(g, physId, index, patch), `body:${physId}:${index}:${Object.keys(patch).join(',')}`);
+  }
+
+  /** Physics panel: add an existing object to this Physics node. */
+  addObjectToPhysics(physId: string, objId: string): void {
+    try {
+      this.editLevel((g) => addObjectTo(g, this.registry, physId, objId));
+    } catch (err) {
+      this.toast(err instanceof Error ? err.message : 'Could not add that object.', 'error');
+    }
+  }
+
+  /** Physics panel: remove a body (and its wire); the wires of the bodies after it move down one place. */
+  removePhysicsBody(physId: string, index: number): void {
+    this.editLevel((g) => removeBodyAt(g, physId, index));
+  }
+
+  /** "Start here": the object's current Move / Rotate become the start pose of its body. */
+  startPhysicsHere(objId: string): void {
+    this.editLevel((g) => startHere(g, objId));
+  }
+
+  /** "Tidy wiring": 0.54 style Position + Rotation wires of each body become one Motion wire. Returns how many bodies changed. */
+  tidyPhysicsWiring(physId: string): number {
+    let count = 0;
+    this.editLevel((g) => {
+      const r = tidyWiring(g, this.registry, physId);
+      count = r.converted;
+      return r.graph;
+    });
+    return count;
+  }
+
+  /** "Match AR floor": Floor height = minus the World AR Camera's Lift. False when this level has no World AR Camera. */
+  matchPhysicsArFloor(physId: string): boolean {
+    let ok = false;
+    this.editLevel((g) => {
+      const r = matchArFloor(g, physId);
+      ok = !!r;
+      return r ?? g;
+    });
+    return ok;
   }
 
   /** Create a source node holding imported assets (all of one kind) at a position. */

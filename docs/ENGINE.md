@@ -536,6 +536,14 @@ where cache nodes go to bake a whole group.
 - **Process panels work on full path ids** (`ui/store/processes.ts`): `runProcess / cancelProcess / clearProcess` take the id the scheduler and the engine use (`group/inner`); a component holding a node of the SHOWN level converts it with
   `ed.fullId(levelId)`. `processSelection` maps the shown level's selection to paths and orders them on the flattened document; results are written with `withProcessResult` (one undo step), auto processes and the
   stash for other projects look nodes up by path, and job labels read "Group name › Node" (`processLabel`).
+- **Motion sockets: where an object is and how it is turned, on one wire.** Socket type `motion`, value `{ kind: 'motion', pos: [x, y, z], rot: [x, y, z] (degrees, the 3D nodes' Euler
+  convention), scale?: number }` (`MotionValue`). It connects only to `motion`. Every node with number params `posX/posY/posZ` and `rotX/rotY/rotZ` (plus `objectScale` if it has
+  one) automatically gets ONE input `xform@motion` ("Motion", derived by `paramMotion` in `define.ts`, no per-node declaration) that drives those params together. Precedence per
+  component: a wire on the single param wins over a vector bundle wire (`pos@xyz`, `rot@xyz`), which wins over the Motion wire (the kernel applies the Motion wire last and skips
+  every component another wire owns, even one carrying nothing). The Physics node has one `motion<N>` output per body and one `drive<N>` input per body moved by wires.
+- **Sockets that hide while unused.** `InputDef.visibleIf` / `OutputDef.visibleIf` (params -> boolean) hide a socket row on the node body until a wire is on it (the wire stays
+  and works); `NodeDef.portLabel` gives a row a settings-dependent label, `NodeDef.previewOutput` is the output shown when the node is viewed without naming one, and
+  `NodeDef.defaultPins` the settings shown on the node body before the user pins any (`[]` = a bare node).
 - **Vector sockets: three numbers on one wire.** Socket type `vector`, value a plain `[x, y, z]` triple (`VectorValue`; always three, 2D uses read x and y; no unit of its
   own: the socket it arrives at gives it meaning). A plain array of three is a vector and of four a colour (`checkOutputs`). It connects only to `vector` (no implicit
   number <-> vector conversion: Combine XYZ / Separate XYZ are the visible converters). Nodes in `nodes/math`: Vector, Combine XYZ, Separate XYZ, Vector Math; Smooth and

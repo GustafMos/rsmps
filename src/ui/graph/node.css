@@ -91,6 +91,7 @@
 .rs-sock--number { --sc: var(--sock-number); }
 .rs-sock--color { --sc: var(--sock-color); }
 .rs-sock--vector { --sc: var(--sock-vector); }
+.rs-sock--motion { --sc: var(--sock-motion); }
 .rs-sock--audio { --sc: var(--sock-audio); }
 .rs-sock--midi { --sc: var(--sock-midi); }
 .rs-sock--regions { --sc: var(--sock-regions); }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { AnyNodeDef, CameraValue } from '../../engine/types';
 import { trackPointer } from '../lib/drag';
+import { physicsOf } from '../../engine/lib/physics/objects';
 import { cameraOf, drivenParams, OBJECT_KEYS, OBJECT_RADIUS, patchIsNoop, resetPatch, transformOf, type ResetKind } from '../lib/xform3d';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { sdfPictureScene } from '../lib/sdf-view';
@@ -70,6 +71,7 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
   const { ed, io } = useApp();
   const node = useEd((s) => s.level.nodes.find((n) => n.id === nodeId));
   const edges = useEd((s) => s.level.edges);
+  const nodesHere = useEd((s) => s.level.nodes);
   const path = useEd((s) => s.path);
   const playing = usePlayer((s) => s.playing);
   // the paused playhead (the store for React leaves the clock out on purpose; while playing we do not follow it either, see below)
@@ -93,7 +95,13 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
     for (const [k, p] of Object.entries(def.params as Record<string, { default: unknown }>)) out[k] = node?.params[k] ?? p.default;
     return out;
   }, [def, node?.params]);
-  const wired = useMemo(() => drivenParams(def, edges.filter((e) => e.to.node === nodeId).map((e) => e.to.port)), [edges, nodeId, def]);
+  // A body of the Physics node moves this object: at the START (paused at the beginning) the handles edit where it starts, anywhere else they are locked
+  const physLink = useMemo(() => physicsOf({ edges, nodes: nodesHere } as never, nodeId), [edges, nodesHere, nodeId]);
+  const physAtStart = !!physLink && !playing && seconds <= (typeof physLink.phys.params.startAt === 'number' ? physLink.phys.params.startAt : 0) + 1e-6;
+  const wired = useMemo(() => {
+    const out = drivenParams(def, edges.filter((e) => e.to.node === nodeId && !(physAtStart && physLink?.how === 'motion' && e.to.port === 'xform@motion')).map((e) => e.to.port));
+    return out;
+  }, [edges, nodeId, def, physAtStart, physLink]);
   const camEdge = edges.find((e) => e.to.node === nodeId && e.to.port === 'camera');
 
   // Where the picture is on screen right now. Read every frame: the viewer pans and zooms without telling anyone.
@@ -199,9 +207,9 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
   const parentR = frame.R;
   const writePos = (w: V3, k: string) => {
     const p = isSdf ? toLocal(frame, w) : w;
-    ed.setParams(nodeId, Object.fromEntries(OBJECT_KEYS.pos.map((name, i) => [name, roundTo(clampTo(p[i], ...range(name)), 3)])), k);
+    ed.setObjectPose(nodeId, Object.fromEntries(OBJECT_KEYS.pos.map((name, i) => [name, roundTo(clampTo(p[i], ...range(name)), 3)])), k);
   };
-  const writeRot = (r: Euler, k: string) => ed.setParams(nodeId, Object.fromEntries(OBJECT_KEYS.rot.map((name, i) => [name, roundTo(clampTo(r[i], ...range(name)), 1)])), k);
+  const writeRot = (r: Euler, k: string) => ed.setObjectPose(nodeId, Object.fromEntries(OBJECT_KEYS.rot.map((name, i) => [name, roundTo(clampTo(r[i], ...range(name)), 1)])), k);
   const frameOf = (e: { clientX: number; clientY: number }) => {
     const r = stage.current!.getBoundingClientRect();
     return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
@@ -291,7 +299,11 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
       ))}
       {active && <span className="rs-giz__sep" />}
       {!active ? null : off[mode] ? (
-        <span className="rs-giz__note" title="This setting is driven by another node. Disconnect the wire in the inspector to set it by hand.">Driven by a wire</span>
+        physLink && !physAtStart && edges.some((e) => e.to.node === nodeId && e.to.port === 'xform@motion') ? (
+          <span className="rs-giz__note" title="Physics moves this object while the animation plays. Go to the start (time 0) to change where it starts.">Driven by Physics: go to the start to move it</span>
+        ) : (
+          <span className="rs-giz__note" title="This setting is driven by another node. Disconnect the wire in the inspector to set it by hand.">Driven by a wire</span>
+        )
       ) : (
         <button className="rs-btn rs-btn--ghost" title={active.resetTitle} disabled={patchIsNoop(params, resetNow)} onClick={() => ed.setParams(nodeId, resetNow, key('reset'))}>Reset</button>
       )}

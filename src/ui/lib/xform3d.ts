@@ -3,7 +3,7 @@
  * handles in the viewer (viewer/XformGizmo.tsx). Pure.
  */
 import { resolveCamera, type XformP } from '../../engine/lib/gen-3d';
-import { paramBundle } from '../../engine/define';
+import { paramBundle, paramMotion } from '../../engine/define';
 import type { AnyNodeDef, CameraValue } from '../../engine/types';
 
 export type ResetKind = 'position' | 'rotation' | 'size' | 'all';
@@ -83,6 +83,8 @@ export function drivenParams(def: AnyNodeDef, ports: Iterable<string>): Set<stri
     out.add(p);
     const b = paramBundle(def, p);
     if (b) for (const m of b.members) out.add(m);
+    const mo = paramMotion(def);
+    if (mo && p === mo.port) for (const m of [...mo.pos, ...mo.rot]) out.add(m);
   }
   return out;
 }

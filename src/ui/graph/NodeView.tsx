@@ -1,5 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { libraryAssetName, nodeDisplayName } from '../lib/nodeTitle';
+import { motionLabels } from '../lib/driveLabels';
+import { MOTION_PORT } from '../../engine/define';
 import { CATEGORIES } from '../../engine/types';
 import { defOf, GROUP_INPUT_TYPE, GROUP_TYPE, isBoundaryNode, NEW_PORT, PATH_SEP } from '../../engine/group';
 import type { AnyNodeDef, InputSchema, NodeInstance, OutputSchema, ParamDef, SocketType } from '../../engine/types';
@@ -21,7 +23,7 @@ import { missingCapabilities } from '../lib/requirements';
 import { PhoneChip, hasSessionParam } from '../inspector/PhonePanel';
 import { frameSize, hasFrameParams } from '../viewer/FrameControl';
 import { useKeyboardTarget } from '../playKeys';
-import { LAYER_H, inboundSignature, multiCounts, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row , isParamPort } from '../lib/layout';
+import { LAYER_H, inboundSignature, multiCounts, wiredIoOf, layoutNode, parsePortSignature, portSignature, HEAD_H, ROW_H, SUMMARY_H, type ParamRow, type Row , isParamPort } from '../lib/layout';
 import { useApp, useDef, useEd, usePlayer } from '../store/context';
 import { useSelector } from '../store/createStore';
 import { nodeViewStore, toggleExpanded } from '../store/nodeView';
@@ -71,7 +73,9 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   const pinned = useSelector(nodeViewStore, (s) => s.pins[node.id]);
   const expanded = useSelector(nodeViewStore, (s) => !!s.expanded[node.id]);
   const bundles = useSelector(nodeViewStore, (s) => s.bundles);
-  const view = useMemo(() => ({ pinned, expanded, wired: def ? [...wired].filter((k) => isParamPort(def, k)) : [], bundles }), [pinned, expanded, wired, def, bundles]);
+  const ioSig = useEd((s) => (def ? wiredIoOf(def, node.id, s.level.edges).join(',') : ''));
+  const labelSig = useEd((s) => (def && ioSig ? JSON.stringify(motionLabels(s.level.nodes, s.level.edges, node.id, io.registry, libraryAssetName(io.library))) : ''));
+  const view = useMemo(() => ({ pinned, expanded, wired: def ? [...wired].filter((k) => isParamPort(def, k)) : [], bundles, wiredIo: ioSig ? ioSig.split(',') : [], labels: labelSig ? (JSON.parse(labelSig) as Record<string, string>) : undefined }), [pinned, expanded, wired, def, bundles, ioSig, labelSig]);
   const layout = layoutNode(node, def, def ? undefined : parsePortSignature(portSig), hint, counts, view);
   const [renaming, setRenaming] = useState(false);
   const kbd = useKeyboardTarget() === node.id;
@@ -372,10 +376,11 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
   if (row.kind === 'bundle') {
     const b = row.bundle;
     const isWired = wired.has(b.port);
-    const axes = bundleAxes(b);
+    const isMotion = b.port === MOTION_PORT;
+    const axes = isMotion ? '' : bundleAxes(b);
     return (
-      <div className="rs-row rs-row--param rs-row--bundle" data-bundle-port={b.port} style={{ top: row.y, height: ROW_H }} title={`One vector wire sets ${b.label} ${axes.split('').join(', ')} together. A number wired into one of them still wins for that one.`}>
-        <Socket node={node.id} port={b.port} type="vector" dir="in" wired={isWired} />
+      <div className="rs-row rs-row--param rs-row--bundle" data-bundle-port={b.port} style={{ top: row.y, height: ROW_H }} title={isMotion ? 'One Motion wire sets Move and Rotate together. A wire on a single setting still wins for that one.' : `One vector wire sets ${b.label} ${axes.split('').join(', ')} together. A number wired into one of them still wins for that one.`}>
+        <Socket node={node.id} port={b.port} type={isMotion ? 'motion' : 'vector'} dir="in" wired={isWired} />
         {isWired ? (
           <div className="rs-row__wired">
             <span>{b.label} <span className="rs-row__axes">{axes}</span></span>

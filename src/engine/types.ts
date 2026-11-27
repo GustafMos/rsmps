@@ -13,7 +13,7 @@ import type { AudioKernel } from './audio/types';
 /* Sockets and values                                                       */
 /* ----------------------------------------------------------------------- */
 
-export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'vector' | 'regions' | 'camera' | 'material' | 'sdf' | 'audio' | 'midi';
+export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'vector' | 'motion' | 'regions' | 'camera' | 'material' | 'sdf' | 'audio' | 'midi';
 
 /**
  * A GPU image. RGBA8, sRGB-encoded, PREMULTIPLIED alpha, row 0 = top.
@@ -130,6 +130,14 @@ export type ColorValue = [number, number, number, number];
  */
 export type VectorValue = [number, number, number];
 
+/** A rigid motion: where an object is and how it is turned (degrees, the Euler convention of the 3D nodes), optionally its size factor. */
+export interface MotionValue {
+  kind: 'motion';
+  pos: [number, number, number];
+  rot: [number, number, number];
+  scale?: number;
+}
+
 /**
  * A signed-distance scene as pure data (docs/ENGINE.md, "SDF scenes"): a tree of shapes, combines, moves and modifiers whose numbers are
  * already resolved for the current frame. Made by SDF Shape / Combine / Move / Modify, rendered by SDF Scene. Ids are FLAT PATHS of the node
@@ -211,6 +219,7 @@ export interface SocketValueMap {
   number: number;
   color: ColorValue;
   vector: VectorValue;
+  motion: MotionValue;
   audio: AudioValue;
   regions: RegionsValue;
   camera: CameraValue;
@@ -247,11 +256,15 @@ export interface InputDef {
    * nodes are edited. `required` on a lazy input means "must be wired".
    */
   lazy?: boolean;
+  /** Show the socket only while this returns true (or while a wire is on it). Presentation only: hidden sockets still work. */
+  visibleIf?: (params: Record<string, unknown>) => boolean;
 }
 
 export interface OutputDef {
   type: SocketType;
   label?: string;
+  /** Show the socket only while this returns true (or while a wire leaves it). Presentation only: hidden outputs are still computed when wired. */
+  visibleIf?: (params: Record<string, unknown>) => boolean;
 }
 
 /**
@@ -1019,6 +1032,12 @@ export interface NodeDef<
    * The cache key includes which of them are wanted, so wiring one later re-renders the node once.
    */
   optionalOutputs?: readonly string[];
+  /** The output shown when this node is viewed without naming one, instead of the first output (for nodes whose first outputs are not pictures). */
+  previewOutput?: string;
+  /** The settings shown on the node body before the user pins any (default: the first few). `[]` = a bare node: title, sockets and summary only. */
+  defaultPins?: readonly string[];
+  /** A row label that depends on the node's settings ("Body 3 · box"), or null for the plain label. Presentation only. */
+  portLabel?: (dir: 'in' | 'out', port: string, params: Record<string, unknown>) => string | null;
   /** Set when `render` does heavy CPU work, so the UI can warn. */
   cpu?: boolean;
   /**
