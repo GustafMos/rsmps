@@ -4,6 +4,17 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.55.0] - 2026-11-27
+
+### Added
+- **Ground shadow.** SDF Scene, SDF 3D and 3D Object have a new "Ground shadow" group: a toggle with Shadow strength, Shadow softness and Ground height. The object casts a soft shadow onto an invisible floor, which darkens whatever is behind it (the camera picture in AR, a clip, another layer). Off by default, so existing projects are unchanged. Half-transparent materials such as the hologram cast a lighter shadow.
+- **World AR: the shadow lands on the real floor, and the light can match the room.** In the AR view the shadow's floor is the surface the object was placed on, also when the object is raised. Where the phone reports the room's light, "Match room light" on the World AR Camera (on by default) makes 3D objects with "Light from camera" follow its direction, and the light is recorded so saved videos match. The AR readout says "light: yes" or "light: no". Not yet tried on a real AR device.
+- **Anti-aliasing for SDF Scene and SDF 3D.** A new setting: Off, Edges only (as before, the default), 2x, 4x, and 4x when paused or export. Existing SDF Scenes show the new settings without being rebuilt.
+
+### Fixed
+- **Shimmering material patterns on SDF shapes.** Hologram scan lines, wire lines and toon bands were drawn without smoothing and flickered or formed moire when fine on screen; they now fade smoothly, and material pictures are filtered when small.
+- **Phone: the Presets dialog could not scroll.** The Presets, Plugins, Shortcuts, Blank sheets and Keymap dialogs were laid out taller than the screen with nothing to scroll, so most of their content and their buttons were out of reach.
+
 ## [0.54.0] - 2026-11-27
 
 ### Added
