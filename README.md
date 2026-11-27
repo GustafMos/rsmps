@@ -169,7 +169,7 @@ fix it, then remove `?safe`.
 ### Working in the graph
 
 - **Shift+Space** or **Shift+A**: search and add a node. With a node selected, the new node is inserted into its chain.
-- Drop a wire from one output onto another output to stack them in a Stack Layers node with the held one on top (dropping onto a Stack's output adds the held one as a new top layer).
+- Drop a wire from one output onto another output to join them in a new node (Stack Layers with the held one on top, Mixer for sound, SDF Combine for shapes); this also works onto a Stack, Mixer or Combine's output, so merges can be merged. Drop it on a node's body instead to add it to that node's list input (a new top layer, a Mixer input, an SDF Combine shape). On touch, tap an output, then tap another output (join) or a node (add).
 - Click a color to open the built-in picker; **Palettes** opens Palette Studio (harmony wheel, ramps, extract from image).
 - **L** arranges the graph, **F** frames it, **B** bypasses the selected nodes.
 - Shortcuts are listed under **?** and can be rebound; any node type can be given its own hotkey.

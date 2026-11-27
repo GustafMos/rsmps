@@ -121,6 +121,11 @@
 .rs-sock[data-merge='mix']::before { content: 'mix'; }
 .rs-sock[data-merge='combine']::before { content: 'combine'; }
 
+.rs-node[data-add-to] { outline: 2px solid var(--accent-hi); outline-offset: 2px; }
+.rs-node[data-add-to]::before {
+  content: '+ ' attr(data-add-to); position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5; padding: 2px 8px;
+  background: var(--accent); color: #fff; font: 600 12px var(--font-ui); border: 1px solid #000; white-space: nowrap; pointer-events: none;
+}
 .rs-node__kbd { position: absolute; left: 0; top: -22px; padding: 1px 6px; background: #2a2208; border: 1px solid var(--yellow); color: var(--yellow); font-size: var(--fs-xs); white-space: nowrap; pointer-events: none; }
 
 .rs-node.is-notexported > :not(.rs-node__head):not(.rs-node__off) { opacity: 0.4; }

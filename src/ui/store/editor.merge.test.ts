@@ -209,7 +209,7 @@ describe('mergeOutputs inserts a Stack Layers node into the chain', () => {
     expect(s.ed.state.selection).toEqual([joinOf(s).id]);
   });
 
-  it('dropping onto a Stack output adds the held output as a new top layer (no nesting)', () => {
+  it('dropping onto a Stack output makes a NEW Stack with the old one as its base (nesting)', () => {
     const s = setup();
     s.add('a', 'noise');
     s.add('b', 'noise');
@@ -219,21 +219,74 @@ describe('mergeOutputs inserts a Stack Layers node into the chain', () => {
     s.load();
     s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b));
     const st = joinOf(s);
-    const nodesBefore = s.graph().nodes.length;
-    (s.ed as unknown as { patch(p: object): void }).patch({ viewedNodeId: s.ids.c });
     expect(s.ed.mergeOutputs(out(s.ids.c), out(st.id))).toBe(true);
     const g = s.graph();
-    expect(g.nodes).toHaveLength(nodesBefore);
-    expect(g.nodes.filter((n) => n.type === 'stack')).toHaveLength(1);
-    expect(wiresInto(g, st.id, 'images').map((e) => e.from.node)).toEqual([s.ids.b, s.ids.a, s.ids.c]);
-    expect(feeds(g, st.id, s.ids.o)).toHaveLength(1);
-    expect(s.ed.state.selection).toEqual([st.id]);
-    expect(s.ed.state.viewedNodeId).toBe(st.id);
+    const stacks = g.nodes.filter((n) => n.type === 'stack');
+    expect(stacks).toHaveLength(2);
+    const st2 = stacks.find((n) => n.id !== st.id)!;
+    expect(wiresInto(g, st.id, 'images').map((e) => e.from.node)).toEqual([s.ids.b, s.ids.a]);
+    expect(wiresInto(g, st2.id, 'images').map((e) => e.from.node)).toEqual([st.id, s.ids.c]);
+    expect(feeds(g, st2.id, s.ids.o)).toHaveLength(1);
+    expect(s.ed.state.selection).toEqual([st2.id]);
     s.ed.undo();
-    expect(wiresInto(s.graph(), st.id, 'images')).toHaveLength(2);
+    expect(s.graph().nodes.filter((n) => n.type === 'stack')).toHaveLength(1);
   });
 
-  it('dropping onto a Stack with a loop-making held output is refused', () => {
+  it('dropping onto a Mixer output makes a new Mixer', () => {
+    const s = setup();
+    s.add('a', 'oscillator');
+    s.add('b', 'oscillator');
+    s.add('c', 'oscillator');
+    s.load();
+    const au = (id: string) => ({ node: id, port: 'audio' });
+    s.ed.mergeOutputs(au(s.ids.a), au(s.ids.b));
+    const mx = s.graph().nodes.find((n) => n.type === 'mixer')!;
+    expect(s.ed.mergeOutputs(au(s.ids.c), au(mx.id))).toBe(true);
+    expect(s.graph().nodes.filter((n) => n.type === 'mixer')).toHaveLength(2);
+    expect(wiresInto(s.graph(), mx.id, 'audio')).toHaveLength(2);
+  });
+
+  it('dropping onto a node body adds to a Stack (top layer), a Mixer, and another multi-input node; one undo; selected', () => {
+    const s = setup();
+    s.add('a', 'noise');
+    s.add('b', 'noise');
+    s.add('c', 'noise');
+    s.add('sw', 'switch');
+    s.add('o', 'image-out');
+    s.wire('b', 'o');
+    s.load();
+    s.ed.mergeOutputs(out(s.ids.a), out(s.ids.b));
+    const st = joinOf(s);
+    expect(s.ed.addToNode(out(s.ids.c), st.id)).toBe(true);
+    expect(wiresInto(s.graph(), st.id, 'images').map((e) => e.from.node)).toEqual([s.ids.b, s.ids.a, s.ids.c]);
+    expect(s.ed.state.selection).toEqual([st.id]);
+    s.ed.undo();
+    expect(wiresInto(s.graph(), st.id, 'images')).toHaveLength(2);
+    expect(s.ed.addToNode(out(s.ids.c), s.ids.sw)).toBe(true);
+    expect(wiresInto(s.graph(), s.ids.sw, 'images').map((e) => e.from.node)).toEqual([s.ids.c]);
+    const au = (id: string) => ({ node: id, port: 'audio' });
+    const s2 = setup();
+    s2.add('a', 'oscillator');
+    s2.add('b', 'oscillator');
+    s2.add('c', 'oscillator');
+    s2.load();
+    s2.ed.mergeOutputs(au(s2.ids.a), au(s2.ids.b));
+    const mx = s2.graph().nodes.find((n) => n.type === 'mixer')!;
+    expect(s2.ed.addToNode(au(s2.ids.c), mx.id)).toBe(true);
+    expect(wiresInto(s2.graph(), mx.id, 'audio')).toHaveLength(3);
+  });
+
+  it('a body drop on a node without a multi input does nothing here (the normal socket picker handles it)', () => {
+    const s = setup();
+    s.add('a', 'noise');
+    s.add('bl', 'blur');
+    s.load();
+    expect(s.ed.multiTarget(out(s.ids.a), s.ids.bl)).toBeNull();
+    expect(s.ed.addToNode(out(s.ids.a), s.ids.bl)).toBe(false);
+    expect(s.graph().edges).toHaveLength(0);
+  });
+
+  it('adding to a Stack with a loop-making held output is refused with a toast', () => {
     const s = setup();
     s.add('a', 'noise');
     s.add('st', 'stack');
@@ -241,8 +294,9 @@ describe('mergeOutputs inserts a Stack Layers node into the chain', () => {
     s.wire('a', 'st');
     s.wire('st', 'b');
     s.load();
-    expect(s.ed.mergeOutputs(out(s.ids.b), out(s.ids.st))).toBe(false);
+    expect(s.ed.addToNode(out(s.ids.b), s.ids.st)).toBe(false);
     expect(wiresInto(s.graph(), s.ids.st, 'images')).toHaveLength(1);
+    expect(s.ed.state.toasts.length).toBeGreaterThan(0);
   });
 
   it('an old project with a Merge is untouched by joining other outputs', () => {

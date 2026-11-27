@@ -117,4 +117,15 @@ describe('mergeOutputs: SDF shapes make an SDF Combine', () => {
     const gid = ed.addNodeAt('sdf-scene', { x: 0, y: 500 })!;
     expect(ed.mergeOutputs(sdf(gid), { node: a, port: 'image' })).toBe(false);
   });
+
+  it('dropping onto a node body adds a shape to a Combine as a last input', () => {
+    const { ed, shape2 } = inScene();
+    ed.mergeOutputs(sdf(shape2), sdf('shape1'));
+    const c = combines(ed)[0];
+    const shape3 = ed.addNodeAt('sdf-shape', { x: 0, y: 400 })!;
+    expect(ed.addToNode(sdf(shape3), c.id)).toBe(true);
+    expect(combines(ed)).toHaveLength(1);
+    expect(ed.state.level.edges.filter((e) => e.to.node === c.id).map((e) => e.from.node)).toEqual(['shape1', shape2, shape3]);
+    expect(ed.multiTarget(sdf(shape3), c.id)?.label).toBe('add shape');
+  });
 });
