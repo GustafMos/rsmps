@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.48.0] - 2026-11-27
+
+### Added
+- **Effects On Regions.** One node to put different effects on different regions. Wire in the original picture, the regions, and up to four processed versions of the picture (Effect A to D, for example one pixelated and one inverted): each region shows its effect and everything else stays original. **Give effects** decides which region gets which: all the same, take turns, by size, left to right, top to bottom, by label or id, or random but stable per region. Regions can be boxes, rounded boxes or ellipses, with Grow and Feather; Invert puts the effect everywhere except inside the regions; an optional shape mask limits the effect inside each box. It also outputs the affected area as a mask. Up to 64 regions in one pass. A new template, "Different effects on tracked regions", shows the wiring.
+
 ## [0.47.0] - 2026-11-27
 
 ### Added
