@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.54.0] - 2026-11-27
+
+### Added
+- **Physics.** A new **Physics** node simulates up to 16 rigid bodies (sphere, box, capsule, cylinder) that fall, collide, bounce and settle on a floor, with optional walls, gravity strength and direction, air drag and time scale. Each body can fall, be fixed in place, or be moved by wires so it shoves the others. The node outputs every body's position and rotation as vector wires; **Drive** in its inspector wires a body to a 3D node's Move XYZ and Rotate XYZ in one step, and Copy size matches the collider to an SDF Shape. Gravity XYZ can be wired (for example from Phone Motion), and Push now kicks the bodies when its input rises. A Physics node can sit inside an SDF Scene and drive its shapes directly; the new template "Falling shapes" shows this. The simulation gives exactly the same result every time, so scrubbing and export match what you saw, and it starts again at each loop. It uses the Rapier engine, loaded only when a Physics node is used. In AR, set Floor height to minus the World AR Camera's Lift so the physics floor is the real surface. There is no live, free-running mode yet. Not yet tried on a phone.
+
 ## [0.53.1] - 2026-11-27
 
 ### Fixed
