@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.51.0] - 2026-11-27
+
+### Added
+- **Move each SDF shape separately in the viewer.** Inside an SDF Scene, select an SDF Shape or SDF Move node and the viewer's Move, Turn and Size handles act on that node only, following the finger even when the shape sits under a rotated or scaled SDF Move or in a rotated scene. A dashed outline shows which shape the handles belong to. Selecting the scene node itself still moves the whole scene.
+- **Tap a shape to select it.** In the viewer, tap a shape in an SDF Scene's picture to select its node; tap the background to deselect. From outside, the first tap selects the scene and a second tap goes inside and selects the shape.
+- While you are inside an SDF Scene the viewer keeps showing the scene's picture, whichever inner node is viewed. The inspector's Reset position / rotation section is there for SDF Shape and SDF Move too.
+Under Mirror, Repeat, Twist or Bend the handles belong to the original, first copy. Tested in code and with simulated drags; not yet on a real graphics card in the browser or on a phone.
+
 ## [0.50.0] - 2026-11-27
 
 ### Added
