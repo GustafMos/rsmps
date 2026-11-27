@@ -358,7 +358,7 @@ html[data-vp='phone'] .rs-add__search .rs-kbd { display: none; }
 html[data-touch] .rs-add { max-height: calc(var(--vv-h, 100dvh) - 16px); }
 html[data-vp='phone'] .rs-add { max-height: none; }
 
-html[data-vp='phone'] .rs-dlg__scrim { left: 0; right: 0; top: var(--vv-top, 0px); bottom: auto; height: var(--vv-h, 100dvh); place-items: stretch; background-image: none; }
+html[data-vp='phone'] .rs-dlg__scrim { left: 0; right: 0; top: var(--vv-top, 0px); bottom: auto; height: var(--vv-h, 100dvh); place-items: stretch; grid-template: minmax(0, 1fr) / minmax(0, 1fr); background-image: none; }
 html[data-vp='phone'] .rs-dlg { width: 100% !important; max-width: none; height: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; padding-top: var(--safe-t); }
 html[data-vp='phone'] .rs-dlg__head { height: 56px; flex: none; }
 html[data-vp='phone'] .rs-dlg__title { font-size: var(--fs-lg); }
