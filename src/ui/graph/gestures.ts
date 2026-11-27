@@ -281,7 +281,7 @@ export function createGestures(app: AppCtx) {
       if (d !== 'out') return 'Drop on an output socket';
       return wireError(g, reg, { node: n, port: p }, { node: fixed.node, port: fixed.port });
     };
-    /** Dropping an output on another output joins them (image/mask -> Stack Layers, audio -> Mixer, sdf -> SDF Combine). */
+    /** Dropping an output on another output always makes a NEW node joining them (image/mask -> Stack Layers, audio -> Mixer, sdf -> SDF Combine). */
     const mergeTarget = (el: HTMLElement): boolean => {
       if (fixed.side !== 'out' || detached || el.dataset.dir !== 'out' || el.dataset.node === fixed.node) return false;
       const t = el.dataset.type as SocketType;
@@ -301,6 +301,8 @@ export function createGestures(app: AppCtx) {
     let hoverTimer: ReturnType<typeof setTimeout> | undefined;
     let mergeTo: HTMLElement | null = null;
     let moved = false;
+    let addEl: HTMLElement | null = null; // the node body the wire would be added to
+    const held = { node: fixed.node, port: fixed.port };
 
     const findTarget = (ev: PointerEvent): { el: HTMLElement; err: string | null; merge?: boolean } | null => {
       const hit = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
@@ -339,13 +341,20 @@ export function createGestures(app: AppCtx) {
             hoverId = nid;
             clearTimeout(hoverTimer);
             if (ed.state.socketPicker && ed.state.socketPicker.node !== nid) ed.openSocketPicker(null);
-            if (nid && nid !== fixed.node && !ed.state.socketPicker) {
+            if (nid && nid !== fixed.node && !ed.state.socketPicker && !(ed.multiTarget(held, nid) && !ed.multiTarget(held, nid)!.error)) {
               hoverTimer = setTimeout(() => {
                 if (compatibleSockets(ed.state.level, reg, nid, { node: fixed.node, port: fixed.port }).length) ed.openSocketPicker({ node: nid, from: fixed, x: ev.clientX + 14, y: ev.clientY + 14 });
               }, 500);
             }
           }
         }
+        // over a node body that has a multi-wire input: dropping adds to that node (a badge says so), unlike the join badge on an output socket
+        const bodyEl = fixed.side === 'out' && !detached && !found ? (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-node-id]') ?? null : null;
+        const add = bodyEl?.dataset.nodeId ? ed.multiTarget(held, bodyEl.dataset.nodeId) : null;
+        const addNext = add && !add.error ? bodyEl : null;
+        if (addEl && addEl !== addNext) addEl.removeAttribute('data-add-to');
+        addEl = addNext;
+        if (addEl && add) addEl.dataset.addTo = add.label;
         if (target && target !== found?.el) {
           delete target.dataset.ok;
           delete target.dataset.bad;
@@ -370,6 +379,7 @@ export function createGestures(app: AppCtx) {
       },
       (ev, cancelled) => {
         clearTimeout(hoverTimer);
+        addEl?.removeAttribute('data-add-to');
         sockets.forEach((s) => {
           delete s.dataset.dim;
           delete s.dataset.merge;
@@ -398,7 +408,7 @@ export function createGestures(app: AppCtx) {
         if (!moved) {
           if (fixed.side === 'out' && !detached) {
             ctl.pendingOut = { node: fixed.node, port: fixed.port };
-            ed.toast(fixed.type === 'sdf' ? 'Click another output to combine the two shapes.' : 'Click another output to stack the two (the first one ends up on top).', 'info');
+            ed.toast('Click another output to join the two, or a node to add this to it.', 'info');
           }
           return;
         }
@@ -412,6 +422,12 @@ export function createGestures(app: AppCtx) {
         }
         if (pk && hit?.closest('.rs-sp')) return;
         const bodyNode = hit?.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId;
+        // dropped on a node's body: it becomes one more wire of that node's multi input (Stack layer, Mixer input, ...). Nodes without one fall through.
+        if (!detached && fixed.side === 'out' && bodyNode && ed.multiTarget(held, bodyNode)) {
+          if (ed.state.socketPicker) ed.openSocketPicker(null);
+          ed.addToNode(held, bodyNode);
+          return;
+        }
         // dropped on the body of an open group's boundary: a new group port
         if (!detached && ((fixed.side === 'out' && bodyNode === GROUP_OUT) || (fixed.side === 'in' && bodyNode === GROUP_IN))) {
           if (fixed.side === 'out') ed.connect({ node: fixed.node, port: fixed.port }, { node: GROUP_OUT, port: NEW_PORT });
@@ -629,6 +645,11 @@ export function createGestures(app: AppCtx) {
         return;
       }
       const nodeEl = t.closest<HTMLElement>('[data-node-id]');
+      if (nodeEl && pend && nodeEl.dataset.nodeId !== pend.node && ed.multiTarget(pend, nodeEl.dataset.nodeId!)) {
+        e.preventDefault();
+        ed.addToNode(pend, nodeEl.dataset.nodeId!);
+        return;
+      }
       if (nodeEl) {
         e.preventDefault();
         startNodeDrag(e, nodeEl.dataset.nodeId!);

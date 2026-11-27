@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.53.0] - 2026-11-27
+
+### Changed
+- **One rule for joining wires, for pictures, sound and SDF shapes.** Dropping an output onto another node's **output** always makes a new combining node (Stack Layers, Mixer or SDF Combine), also when the target is already one, so merges can be merged again. Dropping an output onto the **node itself** adds it to that node: a new top layer on a Stack, a new input on a Mixer, a new shape on an SDF Combine, and likewise on other nodes that take several wires. While dragging, the output shows its join badge and the node shows "+ add layer", "+ add input" or "+ add shape". On touch: tap an output, then another output to join, or a node to add. This replaces dropping onto a Stack's output to add a layer.
+
+### Fixed
+- On touch, joining two outputs could press a button of the toolbar that appeared under the finger.
+
 ## [0.52.0] - 2026-11-27
 
 ### Added

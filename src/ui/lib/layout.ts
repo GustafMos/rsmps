@@ -47,6 +47,7 @@ export interface LayersRow {
   /** layer-panel order: the last wire is the top row, and the drop row is above it */
   topFirst?: boolean;
   firstNote?: string;
+  addLabel?: string;
 }
 export const LAYER_H = 24;
 /** Image and mask stacks are listed top layer first, like a layer panel; other types keep wire order. */
@@ -125,10 +126,10 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
   let y = HEAD_H + PAD_Y;
   let summaryY: number | null = null;
 
-  const inputs: { port: string; label: string; type: SocketType; multi?: boolean; topFirst?: boolean; firstNote?: string }[] = [];
+  const inputs: { port: string; label: string; type: SocketType; multi?: boolean; topFirst?: boolean; firstNote?: string; addLabel?: string }[] = [];
   const outputs: { port: string; label: string; type: SocketType }[] = [];
   if (def) {
-    for (const [port, d] of Object.entries(def.inputs as InputSchema)) inputs.push({ port, label: d.label ?? port, type: d.type, multi: !!d.multi, topFirst: d.order === 'top-first', firstNote: d.firstNote });
+    for (const [port, d] of Object.entries(def.inputs as InputSchema)) inputs.push({ port, label: d.label ?? port, type: d.type, multi: !!d.multi, topFirst: d.order === 'top-first', firstNote: d.firstNote, addLabel: d.addLabel });
     for (const [port, d] of Object.entries(def.outputs as OutputSchema)) outputs.push({ port, label: d.label ?? port, type: d.type });
   } else if (missing) {
     for (const port of missing.inputs) inputs.push({ port, label: port, type: 'image' });
@@ -166,7 +167,7 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
   for (const i of inputs) {
     if (!i.multi) continue;
     const n = counts[i.port] ?? 0;
-    rows.push({ kind: 'layers', y, port: i.port, type: i.type, count: n, topFirst: i.topFirst, firstNote: i.firstNote });
+    rows.push({ kind: 'layers', y, port: i.port, type: i.type, count: n, topFirst: i.topFirst, firstNote: i.firstNote, addLabel: i.addLabel });
     const lead = i.topFirst ? LAYER_H : 0; // top-first lists put the drop row above the top layer
     for (let k = 0; k < n; k++) sockets[`in:${i.port}#${k}`] = { x: 0, y: y + lead + layerRowIndex(k, n, !!i.topFirst) * LAYER_H + LAYER_H / 2 };
     sockets[`in:${i.port}`] = { x: 0, y: i.topFirst ? y + LAYER_H / 2 : y + n * LAYER_H + LAYER_H / 2 };

@@ -20,7 +20,7 @@ import {
   createGraph,
   withEffectiveDuration,
 } from '../../engine/graph';
-import type { Registry } from '../../engine/define';
+import { canConnect, type Registry } from '../../engine/define';
 import type { AssetInfo, Edge, FrameBox, GraphDoc, InputSchema, NodeInstance, OutputSchema, ProjectSettings, SocketType } from '../../engine/types';
 import type { Io, OpenProject } from '../../io/api';
 import { autoLayout, needsLayout } from '../lib/autolayout';
@@ -1002,9 +1002,53 @@ export class Editor {
   }
 
   /**
+   * The multi-wire input of `nodeId` that `held` would be appended to when dropped on the node itself: the first multi input whose type accepts it
+   * (preferring one that would not make a loop). `error` is why that wire is refused; `label` is the plain-words badge ("add layer").
+   */
+  multiTarget(held: Edge['from'], nodeId: string): { port: string; label: string; error: string | null } | null {
+    const g = this.level;
+    const node = g.nodes.find((n) => n.id === nodeId);
+    const def = node && this.registry.get(node.type);
+    const ft = outputType(g, this.registry, held.node, held.port);
+    if (!node || !def || !ft || held.node === nodeId) return null;
+    let found: { port: string; label: string; error: string | null } | null = null;
+    for (const [port, d] of Object.entries(def.inputs as InputSchema)) {
+      if (!d.multi || !canConnect(ft, d.type)) continue;
+      const error = connectError(g, this.registry, held, { node: nodeId, port });
+      const label = d.addLabel?.replace(/^\+\s*/, '') ?? (d.order === 'top-first' ? 'add layer' : 'add input');
+      if (!error) return { port, label, error };
+      found ??= { port, label, error };
+    }
+    return found;
+  }
+
+  /** Dropped on a node (not on a socket): the held output becomes one more wire of the node's first compatible multi input. One undo step. False when there is none (or a loop). */
+  addToNode(held: Edge['from'], nodeId: string): boolean {
+    const t = this.multiTarget(held, nodeId);
+    if (!t) return false;
+    if (t.error) {
+      this.toast(t.error, 'error');
+      return false;
+    }
+    this.editLevel((g) => connect(g, this.registry, held, { node: nodeId, port: t.port }));
+    const v = this.state.viewedNodeId;
+    this.patch({ selection: [nodeId], selectedFrame: null, ...(v === held.node ? { viewedNodeId: nodeId } : {}) });
+    return true;
+  }
+
+  /** Whether two outputs can be joined into a new combining node (Stack Layers / Mixer / SDF Combine). */
+  canJoin(held: Edge['from'], base: Edge['from']): boolean {
+    const ta = outputType(this.level, this.registry, held.node, held.port);
+    const tb = outputType(this.level, this.registry, base.node, base.port);
+    const visual = (t: SocketType | null) => t === 'image' || t === 'mask';
+    return held.node !== base.node && ((visual(ta) && visual(tb)) || (ta === 'audio' && tb === 'audio') || (ta === 'sdf' && tb === 'sdf'));
+  }
+
+  /**
    * Two outputs joined: the one you HELD goes on top, the one you dropped ONTO is the base (bottom).
-   * Images/masks make a Stack Layers node (base first wire, held second), audio makes a Mixer, SDF shapes make an SDF Combine (same order; only inside an SDF Scene). Dropping onto the output of a
-   * Stack (or SDF Combine) adds the held output as a new top layer of that Stack instead. One undo step. Returns false when the pair is not mergeable.
+   * Images/masks make a Stack Layers node (base first wire, held second), audio makes a Mixer, SDF shapes make an SDF Combine (same order; only inside an SDF Scene).
+   * Always a NEW node, even when the base is itself a Stack / Mixer / Combine (they nest, so each step keeps its own settings). Adding to an existing
+   * node is `addToNode`. One undo step. Returns false when the pair is not mergeable.
    */
   mergeOutputs(held: Edge['from'], base: Edge['from']): boolean {
     const g0 = this.level;
@@ -1026,20 +1070,6 @@ export class Editor {
         this.toast(problem, 'info');
         return false;
       }
-    }
-    const appendTo = kind === 'stack' && nodeB.type === 'stack' && base.port === 'image' ? 'images' : kind === 'sdf-combine' && nodeB.type === 'sdf-combine' && base.port === 'sdf' ? 'items' : null;
-    if (appendTo) {
-      // dropped onto a Stack's / SDF Combine's output: the held output becomes a new last input of it (no second node nested inside it)
-      const to = { node: base.node, port: appendTo };
-      const err = connectError(g0, this.registry, held, to);
-      if (err) {
-        this.toast(err, 'error');
-        return false;
-      }
-      this.editLevel((g) => connect(g, this.registry, held, to));
-      const v = this.state.viewedNodeId;
-      this.patch({ selection: [base.node], selectedFrame: null, ...(v === held.node ? { viewedNodeId: base.node } : {}) });
-      return true;
     }
     const wA = layoutFor(g0, nodeA, defOf(this.registry, nodeA)).width;
     const at = { x: Math.round(Math.max(nodeA.x, nodeB.x) + wA + 70), y: Math.round((nodeA.y + nodeB.y) / 2) };
