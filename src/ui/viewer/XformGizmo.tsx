@@ -3,6 +3,9 @@ import type { AnyNodeDef, CameraValue } from '../../engine/types';
 import { trackPointer } from '../lib/drag';
 import { cameraOf, drivenParams, OBJECT_KEYS, OBJECT_RADIUS, patchIsNoop, resetPatch, transformOf, type ResetKind } from '../lib/xform3d';
 import { useApp, useEd, usePlayer } from '../store/context';
+import { sdfPictureScene } from '../lib/sdf-view';
+import { chainOf, IDENTITY_FRAME, modHint, reachOf, toLocal, toWorld, composeFrames, frameOfPlace } from './sdfHandles';
+import { loadSdfView, type SdfView } from './sdfView';
 import {
   angleStep,
   axisTriad,
@@ -128,8 +131,35 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camFrom, graph, seconds, playing, busy]);
 
+  // An SDF Shape / SDF Move inside a scene: the scene's tree and camera for this moment (what is above the node, and how the picture looks)
+  const isSdf = def.id === 'sdf-shape' || def.id === 'sdf-transform';
+  const viewed = useEd((s) => s.viewedNodeId);
+  const [sdfView, setSdfView] = useState<SdfView | null | 'none'>(null);
+  useEffect(() => {
+    if (!isSdf) return;
+    if (dragging.current) return; // what is above the node does not change while it is dragged
+    const scene = sdfPictureScene(graph, viewed, ed.registry);
+    if (!scene) {
+      setSdfView('none');
+      return;
+    }
+    let dead = false;
+    loadSdfView(io, graph, scene, { seconds: io.player.getState().seconds, item: ed.state.item, width, height })
+      .then((v) => { if (!dead) setSdfView(v ?? 'none'); })
+      .catch(() => { if (!dead) setSdfView('none'); });
+    return () => { dead = true; };
+    // the clock stands still while playing on purpose (see the camera above)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSdf, graph, viewed, seconds, playing, busy, width, height]);
+  const fullId = [...path, nodeId].join('/');
+  const chain = useMemo(() => (isSdf && sdfView && sdfView !== 'none' ? chainOf(sdfView.root, fullId) : null), [isSdf, sdfView, fullId]);
+  const frame = chain?.frame ?? IDENTITY_FRAME;
+
   const camPending = !!camEdge && cam?.edge !== camFrom;
-  const lens: Lens | null = useMemo(() => (camPending ? null : lensOf(cameraOf(params, camEdge ? (cam?.value ?? null) : null, width, height), width, height)), [params, cam, camEdge, camPending, width, height]);
+  const lens: Lens | null = useMemo(() => {
+    if (isSdf) return sdfView && sdfView !== 'none' && chain ? lensOf(sdfView.camera, width, height) : null;
+    return camPending ? null : lensOf(cameraOf(params, camEdge ? (cam?.value ?? null) : null, width, height), width, height);
+  }, [isSdf, sdfView, chain, params, cam, camEdge, camPending, width, height]);
 
   // Alt + wheel over a handle (or the wheel while the object is held): push away / pull closer. Caught before the viewer's own zoom.
   const live = useRef<{ depth: (f: number) => void } | null>(null);
@@ -164,14 +194,20 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
   const off = { move: OBJECT_KEYS.pos.some((k) => wired.has(k)), turn: OBJECT_KEYS.rot.some((k) => wired.has(k)), size: wired.has(OBJECT_KEYS.scale), off: true };
   const key = (what: string) => `giz:${nodeId}:${what}`;
 
-  const writePos = (p: V3, k: string) => ed.setParams(nodeId, Object.fromEntries(OBJECT_KEYS.pos.map((name, i) => [name, roundTo(clampTo(p[i], ...range(name)), 3)])), k);
+  // `pos` is what the node's own numbers say (in the space of what is above it); the handle lives at `posW`, where the picture shows it
+  const posW: V3 = isSdf ? toWorld(frame, pos) : pos;
+  const parentR = frame.R;
+  const writePos = (w: V3, k: string) => {
+    const p = isSdf ? toLocal(frame, w) : w;
+    ed.setParams(nodeId, Object.fromEntries(OBJECT_KEYS.pos.map((name, i) => [name, roundTo(clampTo(p[i], ...range(name)), 3)])), k);
+  };
   const writeRot = (r: Euler, k: string) => ed.setParams(nodeId, Object.fromEntries(OBJECT_KEYS.rot.map((name, i) => [name, roundTo(clampTo(r[i], ...range(name)), 1)])), k);
   const frameOf = (e: { clientX: number; clientY: number }) => {
     const r = stage.current!.getBoundingClientRect();
     return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
   };
 
-  live.current = lens && !off.move ? { depth: (f) => writePos(dragDepth(lens, pos, f), key('depth')) } : null;
+  live.current = lens && !off.move ? { depth: (f) => writePos(dragDepth(lens, posW, f), key('depth')) } : null;
 
   /** Common start of every handle drag: the drag is ours alone, and all its edits are one undo step. */
   const begin = (e: React.PointerEvent, onMove: (ev: PointerEvent) => void, wheel?: (factor: number) => void) => {
@@ -190,7 +226,7 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
 
   const startMove = (e: React.PointerEvent) => {
     if (!lens || off.move) return;
-    const st = { p0: pos, grab: frameOf(e), now: frameOf(e), cur: pos };
+    const st = { p0: posW, grab: frameOf(e), now: frameOf(e), cur: posW };
     begin(
       e,
       (ev) => {
@@ -211,7 +247,7 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
   };
   const startDepth = (e: React.PointerEvent) => {
     if (!lens || off.move) return;
-    const p0 = pos;
+    const p0 = posW;
     const y0 = e.clientY;
     begin(e, (ev) => writePos(dragDepth(lens, p0, depthFactorForDrag(ev.clientY - y0)), key('move')));
   };
@@ -220,7 +256,7 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
     const [x0, y0] = [e.clientX, e.clientY];
     const st = { near: rot };
     begin(e, (ev) => {
-      st.near = turnTrackball(lens, rot, ev.clientX - x0, ev.clientY - y0, radius, st.near);
+      st.near = turnTrackball(lens, rot, ev.clientX - x0, ev.clientY - y0, radius, st.near, parentR);
       writeRot(st.near, key('turn'));
     });
   };
@@ -233,7 +269,7 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
       const a = at(ev);
       st.total += angleStep(st.last, a);
       st.last = a;
-      st.near = turnRoll(lens, rot, st.total, st.near);
+      st.near = turnRoll(lens, rot, st.total, st.near, parentR);
       writeRot(st.near, key('turn'));
     });
   };
@@ -246,6 +282,7 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
   };
 
   const active = MODES.find((m) => m.id === mode);
+  const sdfNote = !isSdf ? null : sdfView === 'none' ? 'The picture of the scene is not shown' : sdfView && !chain ? 'Not connected to the Scene Output' : chain ? modHint(chain.mods) : null;
   const resetNow = active ? resetPatch(t, active.reset, wired) : {};
   const bar = (
     <div className="rs-giz__bar rs-viewer__chip" data-nodrag onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
@@ -258,15 +295,27 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
       ) : (
         <button className="rs-btn rs-btn--ghost" title={active.resetTitle} disabled={patchIsNoop(params, resetNow)} onClick={() => ed.setParams(nodeId, resetNow, key('reset'))}>Reset</button>
       )}
+      {sdfNote && <span className="rs-giz__note" title={sdfNote}>{sdfNote}</span>}
     </div>
   );
 
   if (!rect || !lens) return <div ref={root} className="rs-giz">{bar}</div>;
 
-  const pr = projectPoint(lens, pos);
+  const pr = projectPoint(lens, posW);
   const shortPx = Math.min(rect.w, rect.h);
+  // What the node covers, in the world: a shape or an SDF Move reaches as far as its own sphere (its size is live: the tree is from before the drag)
+  let reach: { c: V3; r: number } | null = null;
+  if (isSdf && chain) {
+    const own = frameOfPlace({ pos, rot, scale: size });
+    const kids = chain.node.t === 'shape' ? reachOf({ ...chain.node, pos: [0, 0, 0], scale: 1 }) : reachOf(chain.node.t === 'move' ? { ...chain.node, pos: [0, 0, 0], rot: [0, 0, 0], matrix: undefined, scale: 1 } : chain.node);
+    const whole = composeFrames(frame, own);
+    reach = { c: toWorld(whole, kids.center), r: Number.isFinite(kids.radius) ? kids.radius * whole.s : OBJECT_RADIUS * whole.s };
+  }
   // the handle circle is as large as the object looks, but never too small for a finger nor larger than the pane
-  const R = clampTo(screenRadius(lens, pos, OBJECT_RADIUS * size) * shortPx, 40, Math.max(40, Math.min(rect.bw, rect.bh) * 0.4));
+  const R = clampTo(screenRadius(lens, reach ? reach.c : posW, reach ? reach.r : OBJECT_RADIUS * size) * shortPx, 40, Math.max(40, Math.min(rect.bw, rect.bh) * 0.4));
+  // the quiet outline that says which shape the handles belong to (as large as the shape really looks, down to a small dot)
+  const pc = reach ? projectPoint(lens, reach.c) : null;
+  const outline = reach && pc && pc.visible ? { x: clampTo(rect.l + pc.x * rect.w, -200, rect.bw + 200), y: clampTo(rect.t + pc.y * rect.h, -200, rect.bh + 200), r: Math.max(8, screenRadius(lens, reach.c, reach.r) * shortPx) } : null;
   // an object that has left the pane keeps its handle at the edge, so it can always be dragged back
   const cx = clampTo(rect.l + pr.x * rect.w, 24, Math.max(24, rect.bw - 24));
   const cy = clampTo(rect.t + pr.y * rect.h, 24, Math.max(24, rect.bh - 24));
@@ -274,10 +323,16 @@ export function XformGizmo({ nodeId, def, stage, width, height }: { nodeId: stri
   const hx = clampTo(cx + (R + TOUCH / 2 + 4) * diag, TOUCH / 2, rect.bw - TOUCH / 2);
   const hy = clampTo(cy + (R + TOUCH / 2 + 4) * diag, TOUCH / 2, rect.bh - TOUCH / 2);
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-  const triad = axisTriad(lens, rot);
+  const triad = axisTriad(lens, rot, parentR);
 
   return (
     <div ref={root} className={`rs-giz${busy ? ' is-busy' : ''}`} data-mode={mode} data-exact={isRectilinear(lens) ? 'yes' : 'no'}>
+      {outline && (
+        <svg className="rs-giz__svg rs-giz__svg--quiet" width={rect.bw} height={rect.bh} viewBox={`0 0 ${rect.bw} ${rect.bh}`} pointerEvents="none">
+          <circle className="rs-giz__pick rs-giz__pick--under" cx={outline.x} cy={outline.y} r={outline.r} />
+          <circle className="rs-giz__pick" cx={outline.x} cy={outline.y} r={outline.r} />
+        </svg>
+      )}
       {pr.visible && !off[mode] && (
         <svg className="rs-giz__svg" width={rect.bw} height={rect.bh} viewBox={`0 0 ${rect.bw} ${rect.bh}`}>
           {mode === 'move' && (

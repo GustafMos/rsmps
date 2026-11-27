@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { nodeAtPath } from '../../engine/group';
+import { defOf, nodeAtPath } from '../../engine/group';
 import { useSelector } from '../store/createStore';
 import { watchStore } from '../watchdog';
 import { batchCount } from '../../engine/graph';
@@ -8,6 +8,10 @@ import { Icon } from '../components/Icon';
 import { MenuPopup, type MenuItem } from '../components/Menu';
 import { missingCapabilities } from '../lib/requirements';
 import { trackPointer } from '../lib/drag';
+import { isTap } from '../graph-touch/pure';
+import { inSdfScene } from '../../engine/sdf-scene-group';
+import { planTap, sdfPictureScene } from '../lib/sdf-view';
+import { loadSdfView, pickShapeAt } from './sdfView';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { safetyStore } from '../safety';
 import { getLive } from '../store/live';
@@ -28,7 +32,7 @@ import './viewer.css';
 type Bg = 'checker' | 'dark' | 'light';
 
 export function Viewer() {
-  const { io, ed } = useApp();
+  const { io, ed, graphCtl } = useApp();
   const live = getLive({ io, ed });
   const outOpen = useSelector(live.output.store, (s) => s.open);
   const box = useRef<HTMLDivElement>(null);
@@ -187,10 +191,44 @@ export function Viewer() {
     };
   });
 
+  // Tap on a picture of an SDF Scene: pick the shape under the finger (see lib/sdf-view.ts `planTap` for the rules)
+  const sceneKey = useEd((s) => (sdfPictureScene(s.graph, s.viewedNodeId, io.registry) ?? []).join('/'));
+  const tapTimer = useRef(0);
+  const tapAt = (cx: number, cy: number) => {
+    const r = stage.current?.getBoundingClientRect();
+    if (!r || !r.width || !sceneKey) return;
+    const fx = (cx - r.left) / r.width;
+    const fy = (cy - r.top) / r.height;
+    if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return;
+    const scene = sceneKey.split('/');
+    void loadSdfView(io, ed.state.graph, scene, { seconds: io.player.getState().seconds, item: ed.state.item, width: iw, height: ih })
+      .then((sv) => {
+        const picked = sv ? pickShapeAt(sv, iw, ih, fx, fy) : null;
+        const plan = planTap({ path: ed.state.path, selection: ed.state.selection, picked, insideScene: inSdfScene(ed.state.graph, ed.state.path) });
+        if (plan.kind === 'deselect') ed.select([]);
+        else if (plan.kind === 'select') {
+          if (plan.enter) ed.selectIn([...plan.path, plan.node], plan.enter.inner ? [plan.enter.inner] : []);
+          else ed.selectIn(plan.path, [plan.node]);
+          const sel = ed.state.selection[0];
+          const n = sel ? ed.state.level.nodes.find((x) => x.id === sel) : undefined;
+          if (n) graphCtl.centerOn({ x: n.x + 80, y: n.y + 30 });
+          const hint = plan.hint === 'wired' ? 'That shape comes from a scene wired in here. Tap it again to open that scene.' : plan.hint === 'first' ? 'Tap the scene again to go inside and pick a shape.' : '';
+          const key = `rsmps.ui.sdfTapHint.${plan.hint ?? ''}`;
+          let seen = true;
+          try { seen = !!localStorage.getItem(key); if (hint && !seen) localStorage.setItem(key, '1'); } catch { /* storage unavailable */ }
+          if (hint && !seen) ed.toast(hint, 'info');
+        }
+      })
+      .catch(() => undefined);
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('[data-nodrag]')) return;
+    // a second tap in quick succession is the double-tap (Fit): the first one does not pick
+    if (tapTimer.current) { window.clearTimeout(tapTimer.current); tapTimer.current = 0; }
     if (e.button === 1 || e.button === 0) {
       const v = view.current;
+      const down = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, button: e.button };
       const x0 = e.clientX - v.x;
       const y0 = e.clientY - v.y;
       box.current?.classList.add('is-panning');
@@ -203,7 +241,14 @@ export function Viewer() {
           setFit(false);
           apply();
         },
-        () => box.current?.classList.remove('is-panning'),
+        (ev, cancelled) => {
+          box.current?.classList.remove('is-panning');
+          // the pinch gestures speak through a synthetic pointer (id 90001): never a tap
+          if (cancelled || down.button !== 0 || down.id === 90001 || !sceneKey || paint || pointsNode) return;
+          if (!isTap(ev.timeStamp - down.t, Math.hypot(ev.clientX - down.x, ev.clientY - down.y))) return;
+          const [x, y] = [ev.clientX, ev.clientY];
+          tapTimer.current = window.setTimeout(() => { tapTimer.current = 0; tapAt(x, y); }, 280);
+        },
       );
     }
   };
@@ -237,9 +282,9 @@ export function Viewer() {
     return n && ps?.points?.type === 'json' && ps?.closed?.type === 'bool' && n.params.mode !== 'curves' ? n : undefined;
   });
   // a node of the 3D family gets move / turn / size handles on the picture (which node: see gizmoTarget.ts)
-  const gizmoId = useEd((s) => gizmoTarget(s.level, s.selection, s.viewedNodeId, s.path, io.registry));
-  const gizmoType = useEd((s) => (gizmoId ? s.level.nodes.find((n) => n.id === gizmoId)?.type : undefined));
-  const gizmoDef = gizmoType ? io.registry.get(gizmoType) : undefined;
+  const gizmoId = useEd((s) => gizmoTarget(s.level, s.selection, s.viewedNodeId, s.path, io.registry, s.graph));
+  const gizmoNode = useEd((s) => (gizmoId ? s.level.nodes.find((n) => n.id === gizmoId) : undefined));
+  const gizmoDef = gizmoNode ? defOf(io.registry, gizmoNode) : undefined;
   // Once its picture has been seen the handles stay, even while the picture is briefly gone (a frame that failed, a slow re-render):
   // handles that blink away under the finger in the middle of a drag would be worse than handles over a picture that is a moment late.
   const gizmoSeen = useRef<string | null>(null);

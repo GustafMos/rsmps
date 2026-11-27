@@ -15,6 +15,7 @@ import { installLiveRecord } from './store/liveRecord';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { startUpdateCheck } from './updateNotice';
 import { NoWebGpu } from './responsive/NoWebGpu';
+import { sdfViewFallback } from './lib/sdf-view';
 
 /** A param edit whose render never finished last time (page reloaded within seconds): offer to revert it. */
 function offerRecovery(ed: Editor): void {
@@ -75,7 +76,7 @@ export function Root() {
           lastGraph = s.graph;
           lastView = s.viewedNodeId;
           lastItem = s.item;
-          pushView(io.player, { graph: s.graph, node: s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active, selection: s.selection }, paused);
+          pushView(io.player, { graph: s.graph, node: sdfViewFallback(s.graph, s.viewedNodeId, io.registry) ?? s.viewedNodeId, item: s.item, itemCount: batchCount(s.graph, io.registry), activeOutput: active, selection: s.selection }, paused);
           void graphChanged;
           if (edited && s.activeProject && !s.switching) {
             if (ed.skipSave) ed.skipSave = false;

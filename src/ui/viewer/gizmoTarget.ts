@@ -1,5 +1,8 @@
 import type { Registry } from '../../engine/define';
+import { defOf } from '../../engine/group';
+import { isSdfOnlyDef, isSdfSceneNode } from '../../engine/sdf-scene-group';
 import type { GraphDoc } from '../../engine/types';
+import { sceneHoldsPath, sdfPictureScene } from '../lib/sdf-view';
 import { transformOf } from '../lib/xform3d';
 
 /**
@@ -12,11 +15,23 @@ import { transformOf } from '../lib/xform3d';
  *
  * `level` is the graph level on screen (the inside of the open group), `viewed` the viewer's node, which may be a path into a group.
  * A bypassed node draws nothing of its own, so it gets no handles.
+ *
+ * SDF Scenes: an SDF Scene node counts as a 3D object (its exposed Move / Rotate / Size and camera settings are the standard ones), so selected
+ * from outside its handles move the whole scene. An SDF Shape or SDF Move inside a scene is a target only while the viewer shows the picture of a
+ * scene around it (`root` = the whole document tells which scene the viewer shows; without it the selection is trusted).
  */
-export function gizmoTarget(level: GraphDoc, selection: readonly string[], viewed: string | null, path: readonly string[], registry: Pick<Registry, 'get'>): string | null {
+export function gizmoTarget(level: GraphDoc, selection: readonly string[], viewed: string | null, path: readonly string[], registry: Pick<Registry, 'get'>, root?: GraphDoc): string | null {
   const is3d = (id: string): boolean => {
     const n = level.nodes.find((x) => x.id === id);
-    return !!n && !n.bypass && transformOf(registry.get(n.type))?.kind === 'object';
+    if (!n || n.bypass) return false;
+    const def = defOf(registry, n);
+    if (transformOf(def)?.kind !== 'object') return false;
+    // a shape or an SDF Move belongs to the scene the viewer is showing
+    if (isSdfOnlyDef(def) && !isSdfSceneNode(n) && root) {
+      const scene = sdfPictureScene(root, viewed, registry);
+      return !!scene && sceneHoldsPath(scene, path);
+    }
+    return true;
   };
   // the viewed node as an id of this level, when it lives here
   const prefix = path.length ? path.join('/') + '/' : '';
