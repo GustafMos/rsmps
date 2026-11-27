@@ -30,6 +30,11 @@ export interface WorldMoment {
    * the take stores the un-zoomed lens and this factor apart, because the recorded camera clip is the un-zoomed picture.
    */
   zoom?: number;
+  /**
+   * The live physics clock of the AR view: seconds since the objects were last placed or restarted (absent = none, the Physics node
+   * then follows the project's clock). A take records it, so the saved video shows the same fall.
+   */
+  physics?: number;
 }
 
 export interface WorldSample extends WorldMoment {
@@ -81,6 +86,8 @@ const CHANNELS: Record<string, Spec> = {
   // optional channels: only in a take that had a light estimate / a raised object
   lx: LIGHT, ly: LIGHT, lz: LIGHT, ls: LIGHT, la: LIGHT, lr: LIGHT, lg: LIGHT, lb: LIGHT, lo: FLAG,
   oh: POS,
+  // the live physics clock, -1 where there was none
+  pt: { step: 1e-3, tol: 4e-3 },
 };
 export const WORLD_CHANNELS = Object.keys(CHANNELS);
 const QUATS: [string, string, string, string][] = [
@@ -123,12 +130,13 @@ function rowOf(m: WorldMoment, last: Row | null): Row {
     lb: m.light ? m.light.ambientColor[2] : (last?.lb ?? 1),
     lo: m.light || last?.lo === 1 ? 1 : 0,
     oh: o ? (o.h ?? 0) : (last?.oh ?? 0),
+    pt: typeof m.physics === 'number' && m.physics >= 0 ? m.physics : -1,
   };
 }
 
 function blend(a: Row, b: Row, u: number): Row {
   const out: Row = {};
-  for (const n of WORLD_CHANNELS) out[n] = n === 'on' ? (u < 0.5 ? a[n] : b[n]) : a[n] + (b[n] - a[n]) * u;
+  for (const n of WORLD_CHANNELS) out[n] = n === 'on' || n === 'pt' ? (u < 0.5 ? a[n] : b[n]) : a[n] + (b[n] - a[n]) * u;
   for (const g of QUATS) {
     const q = qSlerp([a[g[0]], a[g[1]], a[g[2]], a[g[3]]], [b[g[0]], b[g[1]], b[g[2]], b[g[3]]], u);
     g.forEach((name, i) => (out[name] = q[i]));
@@ -212,12 +220,13 @@ export function buildWorldTake(samples: WorldSample[], opts: { fps: number }): W
     // a take without a light estimate or a raised object has none of those tracks, exactly like a take recorded before they existed
     if (LIGHT_CHANNELS.includes(n) && !ch.lo.some((v) => v >= 0.5)) continue;
     if (n === 'oh' && ch.oh.every((v) => Math.abs(v) < 1e-9)) continue;
+    if (n === 'pt' && ch.pt.every((v) => v < 0)) continue;
     tracks[n] = flat;
   }
   return { v: 1, kind: 'world-ar', fps, frames, tracks, clip: byFrame, ...(byFrame && first > 0 ? { clipFirst: first } : {}) };
 }
 
-const NEUTRAL: Row = { cx: 0, cy: 0, cz: 0, cqx: 0, cqy: 0, cqz: 0, cqw: 1, ox: 0, oy: 0, oz: 0, oqx: 0, oqy: 0, oqz: 0, oqw: 1, os: 1, on: 0, l0: 1, l5: 1, l8: 0, l9: 0, zm: 1, lx: 0, ly: 1, lz: 0, ls: 1, la: 0.35, lr: 1, lg: 1, lb: 1, lo: 0, oh: 0 };
+const NEUTRAL: Row = { cx: 0, cy: 0, cz: 0, cqx: 0, cqy: 0, cqz: 0, cqw: 1, ox: 0, oy: 0, oz: 0, oqx: 0, oqy: 0, oqz: 0, oqw: 1, os: 1, on: 0, l0: 1, l5: 1, l8: 0, l9: 0, zm: 1, lx: 0, ly: 1, lz: 0, ls: 1, la: 0.35, lr: 1, lg: 1, lb: 1, lo: 0, oh: 0, pt: -1 };
 
 function expand(take: WorldTake): Record<string, Float64Array> {
   const ch: Record<string, Float64Array> = {};
@@ -267,10 +276,12 @@ export function sampleWorldTake(take: WorldTake, seconds: number, loop = false):
   const on = (u < 0.5 ? c.on[i0] : c.on[i1]) >= 0.5;
   const zoom = num('zm');
   const hasLight = (u < 0.5 ? c.lo[i0] : c.lo[i1]) >= 0.5;
+  const pt = u < 0.5 ? c.pt[i0] : c.pt[i1];
   return {
     view: { p: [num('cx'), num('cy'), num('cz')], q: quat(QUATS[0]) },
     lens: [num('l0') * zoom, num('l5') * zoom, num('l8') * zoom, num('l9') * zoom],
     ...(zoom !== 1 ? { zoom } : {}),
+    ...(pt >= 0 ? { physics: pt } : {}),
     object: on ? { p: [num('ox'), num('oy'), num('oz')], q: quat(QUATS[1]), scale: num('os'), ...(c.oh.some((v) => v !== 0) ? { h: num('oh') } : {}) } : null,
     ...(hasLight ? { light: { dir: unitVec(num('lx'), num('ly'), num('lz')), strength: num('ls'), ambient: num('la'), ambientColor: [num('lr'), num('lg'), num('lb')] as [number, number, number] } } : {}),
   };

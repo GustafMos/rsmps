@@ -146,6 +146,12 @@ export class SimRun {
 }
 
 const runs = new Map<string, SimRun>();
+let started = 0;
+
+/** How many runs were ever started (a restart shows up as a new one): for tests and diagnostics. */
+export function runsStarted(): number {
+  return started;
+}
 let useClock = 0;
 
 /** The run for a signature (made when new). Old runs are freed, least recently used first. */
@@ -153,6 +159,7 @@ export function getRun(signature: string, bodies: BodySpec[], spec: WorldSpec, b
   let r = runs.get(signature);
   if (!r) {
     r = new SimRun(bodies, spec, backend, pushBody);
+    started++;
     runs.set(signature, r);
     while (runs.size > MAX_RUNS) {
       let oldest: [string, SimRun] | null = null;

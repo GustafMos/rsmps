@@ -52,7 +52,9 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
     return b;
   };
   const place = button('Place', 'Put it on the ring');
-  const reset = button('Reset', 'Pick it up and choose another spot');
+  const reset = button('Place again', 'Pick it up and choose another spot, for example a table. The floor is then that surface, and physics starts again from there.');
+  const restart = button('Restart physics', 'Put the falling objects back where they start and let them fall again');
+  restart.style.display = 'none';
   // the scan view has no Record button (a detached one keeps the rest of this file the same); its own buttons come in this order
   const record = opts.scan ? doc.createElement('button') : button('Record', 'Record the movement (and the camera picture where the browser hands it over)');
   const start = opts.scan ? button('Start', 'Start the walk: the dome stays where it is and photos are taken as you move round it') : null;
@@ -131,7 +133,11 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
   const heightStrip = makeStrip('right', 'Height', 'Drag up or down to raise or lower it. Double tap to put it back on the surface.', (dy) => handle?.gesture({ type: 'lift', dy }), () => handle?.gesture({ type: 'lift-reset' }));
   const zoomStrip = makeStrip('left', opts.scan ? 'Size' : 'Zoom', opts.scan ? 'Drag up to make the dome wider, down to make it smaller (0.1 to 5 metres). Double tap for 0.5 m. Pinching does the same.' : 'Drag up to zoom in, down to zoom out (1x to 4x). Double tap to go back to 1x. The recording keeps the full picture.', (dy) => handle?.gesture({ type: 'zoom', dy }), () => handle?.gesture({ type: 'zoom-reset' }));
   const strip = heightStrip.el;
-  root.append(touch, hint, badge, stats, strip, zoomStrip.el, bar);
+  const raised = doc.createElement('div');
+  raised.setAttribute('role', 'status');
+  raised.textContent = 'Raised: the objects drop from here.';
+  raised.style.cssText = 'position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 100px);padding:6px 10px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;font-size:13px;pointer-events:none;display:none;';
+  root.append(touch, hint, raised, badge, stats, strip, zoomStrip.el, bar);
   // the scan view's coverage box: one plain line and a small map (azimuth across, elevation up) of which directions have photos
   const box = opts.scan ? doc.createElement('div') : null;
   const map = opts.scan ? doc.createElement('canvas') : null;
@@ -177,6 +183,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
   const showHeight = (metres: number) => heightStrip.show(`${metres >= 0 ? '+' : '-'}${Math.round(Math.abs(metres) * 100)} cm`);
   place.addEventListener('click', () => handle?.place());
   reset.addEventListener('click', () => handle?.reset());
+  restart.addEventListener('click', () => handle?.restartPhysics());
   record.addEventListener('click', () => handle?.toggleRecord());
   exit.addEventListener('click', () => void handle?.close());
   start?.addEventListener('click', () => handle?.scan?.begin());
@@ -271,6 +278,13 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
       reset.disabled = s.phase !== 'placed';
       reset.style.opacity = reset.disabled ? '0.4' : '1';
       strip.style.display = s.phase === 'placed' ? 'flex' : 'none';
+      // physics runs live: a button to start the fall again, and a word about what raising does to it
+      restart.style.display = s.physics === true && s.phase === 'placed' ? '' : 'none';
+      // five buttons wrap into two rows: the small print moves up out of their way
+      const lift = s.physics === true && s.phase === 'placed' ? 128 : 62;
+      badge.style.bottom = `calc(max(16px,env(safe-area-inset-bottom)) + ${lift}px)`;
+      stats.style.bottom = `calc(max(16px,env(safe-area-inset-bottom)) + ${lift}px)`;
+      raised.style.display = s.physics === true && s.phase === 'placed' && s.height > 0.005 ? 'block' : 'none';
       strip.setAttribute('aria-valuenow', String(Math.round(s.height * 100)));
       // Zoom needs the camera picture (the page draws it larger itself); without it the strip is not shown and the readout says why
       zoomStrip.el.style.display = s.zoomAvailable === true ? 'flex' : 'none';

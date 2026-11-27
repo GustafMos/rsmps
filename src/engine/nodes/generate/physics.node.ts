@@ -68,14 +68,14 @@ export default defineNode({
   title: 'Physics',
   category: 'generate',
   description:
-    'Makes objects fall, bounce and pile up on a floor. The easy way: select a 3D object or an SDF shape and choose Falls under Physics in its settings. Each object gets one wire from this node. It starts again from the start pose every loop and gives the same result every time you scrub or export.',
+    'Makes objects fall, bounce and pile up on a floor. The easy way: select a 3D object or an SDF shape and choose Falls under Physics in its settings. Each object gets one wire from this node. It starts again from the start pose every loop and gives the same result every time you scrub or export. In the AR view it runs on in real time instead, from the moment you place the objects.',
   keywords: ['physics', 'gravity', 'fall', 'bounce', 'collide', 'collision', 'rigid body', 'simulation', 'drop', 'ragdoll', 'jolt', 'rapier', 'floor', 'ar', 'pile', 'rolling'],
   guide: {
     does: 'Makes objects fall and bounce. Wire the World AR Camera into this node and they land on the real floor.',
     steps: [
       'Select a 3D object or SDF shape and choose Falls under Physics in its settings. That adds this node and wires it for you.',
       'In the AR view, wire the World AR Camera into the AR camera socket: the objects use the real floor and stand where you placed them.',
-      'Press play. It starts again from the start pose every loop.',
+      'Press play. It starts again from the start pose every loop. In the AR view it keeps falling in real time: Restart physics in the AR view drops everything again, and raising the object drops it from that height onto the real floor.',
     ],
     seeAlso: ['world-ar', 'object-3d'],
   },
@@ -115,18 +115,21 @@ export default defineNode({
     floor: {
       type: 'enum',
       default: 'auto',
-      absent: 'custom',
-      legacy: (v) => (v === true ? 'custom' : v === false ? 'off' : v),
+      // Saved before Floor had Automatic (0.58.0): a fixed height in the object frame, which a raised object carried up with it.
+      // It is its own value so that a camera that knows the real floor can take over (an explicit Custom height never is).
+      absent: 'old',
+      legacy: (v) => (v === true ? 'old' : v === false ? 'off' : v),
       label: 'Floor',
       group: 'World',
-      hint: 'Automatic uses the floor of the connected camera (the AR camera knows where the real floor is), or -1 when there is none. Custom height uses the number below. Off lets things fall for ever. Things fall toward the real down of the placed object. If the real floor moves by more than 1 mm, the fall starts over.',
+      hint: 'Automatic uses the floor of the connected camera (the AR camera knows where the real floor is), or -1 when there is none. Custom height uses the number below. Old fixed height is how projects from before Automatic worked: with an AR camera connected it uses the real floor instead. Off lets things fall for ever. Things fall toward the real down of the placed object. If the real floor moves by more than 1 mm, the fall starts over.',
       options: [
         { value: 'auto', label: 'Automatic' },
         { value: 'custom', label: 'Custom height' },
+        { value: 'old', label: 'Old fixed height' },
         { value: 'off', label: 'Off' },
       ],
     },
-    floorHeight: { type: 'number', default: -1, min: -50, max: 50, step: 0.01, scrubSpan: 8, label: 'Floor height', group: 'World', visibleIf: (p) => p.floor === 'custom', hint: 'Up is positive. The default -1 is the bottom of a default 3D Object (2 units tall) and the surface the World AR Camera stands objects on.' },
+    floorHeight: { type: 'number', default: -1, min: -50, max: 50, step: 0.01, scrubSpan: 8, label: 'Floor height', group: 'World', visibleIf: (p) => p.floor === 'custom' || p.floor === 'old', hint: 'Up is positive. The default -1 is the bottom of a default 3D Object (2 units tall) and the surface the World AR Camera stands objects on.' },
     floorBounce: { type: 'number', default: 0.3, min: 0, max: 1.5, step: 0.01, label: 'Floor bounce', group: 'World', hint: 'How much the floor and walls bounce things back. It is averaged with each body\'s own Bounciness.' },
     floorGrip: { type: 'number', default: 0.6, min: 0, max: 5, step: 0.01, label: 'Floor grip', group: 'World', hint: 'Friction of the floor and walls. 0 is ice.' },
     walls: { type: 'bool', default: false, label: 'Walls', group: 'World', hint: 'Four walls around the floor so things stay in a box.' },
@@ -167,7 +170,10 @@ export default defineNode({
     // The floor: Automatic takes the real floor of the wired camera (the World AR Camera's `ground`), else the old default -1. It is rounded
     // to 1 mm so that noise in the value does not start the run over every frame; a change beyond that is a different run (see runSignature).
     const cam = (ctx.in.camera as CameraValue | null) ?? null;
-    const floorAt = p.floor === 'auto' ? (typeof cam?.ground === 'number' && Number.isFinite(cam.ground) ? Math.round(cam.ground * 1000) / 1000 : -1) : p.floorHeight;
+    // An old project (Floor "Old fixed height") whose camera knows the real floor uses it too: a fixed number would rise and fall with the
+    // object's Height in the AR view, which is not where the real surface is.
+    const real = typeof cam?.ground === 'number' && Number.isFinite(cam.ground) ? Math.round(cam.ground * 1000) / 1000 : null;
+    const floorAt = p.floor === 'auto' ? (real ?? -1) : p.floor === 'old' ? (real ?? p.floorHeight) : p.floorHeight;
     const world: WorldSpec = {
       gravity: [dir[0] * p.gravity, dir[1] * p.gravity, dir[2] * p.gravity],
       damping: p.drag,
@@ -186,8 +192,11 @@ export default defineNode({
     const sig = runSignature(bodies, world, `${wired}|${p.pushWho}`);
     const startFrame = Math.round(p.startAt * fps);
     // with Loop on the clock may run past the loop's end (an export, a scrub): every loop is the same, so wrap and start again
+    // In the AR view (and in a take recorded there) the camera carries a live clock: the fall then runs on in real time from the moment the
+    // objects were placed or restarted, never starting over at the project's loop. The clock reaches this node only through the wire.
+    const clock = typeof cam?.clock === 'number' && Number.isFinite(cam.clock) && cam.clock >= 0 ? cam.clock : null;
     const total = Math.max(1, Math.round(ctx.time.duration * fps));
-    const frame = ctx.time.loop ? ((ctx.time.frame % total) + total) % total : ctx.time.frame;
+    const frame = clock !== null ? Math.floor(clock * fps + 1e-6) : ctx.time.loop ? ((ctx.time.frame % total) + total) % total : ctx.time.frame;
     const k = Math.min(MAX_RUN_FRAMES, Math.max(0, frame - startFrame));
 
     const backend = await rapierBackend();
@@ -208,7 +217,7 @@ export default defineNode({
     } as FrameInputs);
     const wiredNames = new Set(Object.keys(inputs).filter((n) => n !== 'camera' && ctx.inputSignature(n as never) !== ''));
     const inputsAt = async (j: number): Promise<FrameInputs> => {
-      if (j === k) return current();
+      if (j === k && clock === null) return current();
       const at = { seconds: (startFrame + j) / fps };
       // (a pulled time inside the loop: j never exceeds the wrapped frame)
       const get = async (n: string): Promise<unknown> => (wiredNames.has(n) ? ctx.pull(n as never, at) : null);
