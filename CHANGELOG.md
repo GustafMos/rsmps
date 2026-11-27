@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.62.0] - 2026-11-27
+
+### Added
+- **World AR: move one object on its own.** A "Move: Everything / One object" switch appears in the AR view when there is a choice (several objects on the camera, a Physics node, or an SDF Scene with several shapes). In One object mode, tap an object in the picture to select it: the view names it ("Moving: 3D Object Cube") and marks it with a ring. Drag moves only that object along the surface, the Height strip or a two-finger vertical drag raises it, two fingers turn or resize it; each gesture is one undo step and the change stays after leaving AR. For an object under physics the gestures set where it starts: it is held while you move it and drops from there when you let go. An object moved by a wire says so and is left alone. The mode is switched off while recording, so saved videos match what was seen. Everything mode works as before. Tested with a simulated AR session and simulated touches only.
+
 ## [0.61.0] - 2026-11-27
 
 ### Fixed
