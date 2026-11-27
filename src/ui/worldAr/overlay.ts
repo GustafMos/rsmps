@@ -30,8 +30,11 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
 
   const touch = doc.createElement('div');
   touch.style.cssText = 'position:absolute;inset:0;touch-action:none;';
+  // the hint, the "Move" switch and the notes under it stand in one column, so a hint that wraps onto three lines pushes them down instead of overlapping them
+  const top = doc.createElement('div');
+  top.style.cssText = 'position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 40px);display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;';
   const hint = doc.createElement('div');
-  hint.style.cssText = 'position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 40px);padding:10px 12px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;pointer-events:none;';
+  hint.style.cssText = 'align-self:stretch;padding:10px 12px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;pointer-events:none;';
   hint.setAttribute('role', 'status');
   const badge = doc.createElement('div');
   badge.textContent = 'Experimental';
@@ -64,7 +67,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
   const exit = button('Exit', opts.scan ? 'Done: saves the photos and leaves the AR view' : 'Leave the AR view');
   // Two slim, full-reach strips (at least 44 px wide, clear of the notch and the gesture bar): Height on the right edge, Zoom on the left.
   // Each has its own finger, never a tap or drag on the room. Travel up the screen raises / zooms in; a quick double tap resets.
-  const makeStrip = (side: 'left' | 'right', name: string, title: string, move: (dy: number) => void, reset: () => void) => {
+  const makeStrip = (side: 'left' | 'right', name: string, title: string, move: (dy: number) => void, reset: () => void, done?: () => void) => {
     const el = doc.createElement('div');
     el.style.cssText = `position:absolute;${side}:max(8px,env(safe-area-inset-${side}));top:max(28%,calc(env(safe-area-inset-top,0px) + 140px));bottom:calc(max(16px,env(safe-area-inset-bottom)) + 120px);width:52px;display:none;flex-direction:column;align-items:center;justify-content:space-between;border-radius:26px;background:rgba(20,24,32,.55);border:1px solid rgba(255,255,255,.35);touch-action:none;font:600 12px system-ui,sans-serif;`;
     el.setAttribute('role', 'slider');
@@ -108,6 +111,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
       e.stopPropagation();
       if (y === null || e.pointerId !== id) return;
       y = null;
+      done?.();
       if (cancelled || moved >= 8) return;
       if (e.timeStamp - lastTap <= 400) {
         reset();
@@ -131,14 +135,42 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
     };
     return { el, show, stop };
   };
-  const heightStrip = makeStrip('right', 'Height', 'Drag up or down to raise or lower it. Double tap to put it back on the surface.', (dy) => handle?.gesture({ type: 'lift', dy }), () => handle?.gesture({ type: 'lift-reset' }));
+  const heightStrip = makeStrip('right', 'Height', 'Drag up or down to raise or lower it. Double tap to put it back on the surface.', (dy) => handle?.gesture({ type: 'lift', dy }), () => handle?.gesture({ type: 'lift-reset' }), () => oneMode && handle?.gesture({ type: 'edit-end' }));
   const zoomStrip = makeStrip('left', opts.scan ? 'Size' : 'Zoom', opts.scan ? 'Drag up to make the dome wider, down to make it smaller (0.1 to 5 metres). Double tap for 0.5 m. Pinching does the same.' : 'Drag up to zoom in, down to zoom out (1x to 4x). Double tap to go back to 1x. The recording keeps the full picture.', (dy) => handle?.gesture({ type: 'zoom', dy }), () => handle?.gesture({ type: 'zoom-reset' }));
   const strip = heightStrip.el;
   const raised = doc.createElement('div');
   raised.setAttribute('role', 'status');
   raised.textContent = 'Raised: the objects drop from here.';
-  raised.style.cssText = 'position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 100px);padding:6px 10px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;font-size:13px;pointer-events:none;display:none;';
-  root.append(touch, hint, raised, badge, stats, strip, zoomStrip.el, bar);
+  raised.style.cssText = 'align-self:stretch;padding:6px 10px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;font-size:13px;pointer-events:none;display:none;';
+  // "Move: Everything / One object": shown only when there is more than one thing to move. Two 44 px parts, thumb reachable, under the hint.
+  const modeRow = doc.createElement('div');
+  modeRow.setAttribute('role', 'group');
+  modeRow.setAttribute('aria-label', 'Move');
+  modeRow.style.cssText = 'display:none;align-items:center;gap:8px;pointer-events:auto;';
+  const modeWord = doc.createElement('span');
+  modeWord.textContent = 'Move';
+  modeWord.style.cssText = 'font:600 13px system-ui,sans-serif;text-shadow:0 1px 2px #000;';
+  const SEG = 'font:600 14px system-ui,sans-serif;min-height:44px;min-width:44px;padding:0 12px;border:1px solid rgba(255,255,255,.35);touch-action:manipulation;pointer-events:auto;';
+  const segAll = doc.createElement('button');
+  segAll.type = 'button';
+  segAll.textContent = 'Everything';
+  segAll.title = 'Every object on this camera moves together, as one frame.';
+  const segOne = doc.createElement('button');
+  segOne.type = 'button';
+  segOne.textContent = 'One object';
+  segOne.title = 'Tap an object, then drag, raise, turn or resize just that one.';
+  for (const b of [segAll, segOne]) for (const ev of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) b.addEventListener(ev, (e) => e.stopPropagation());
+  modeRow.append(modeWord, segAll, segOne);
+  const moving = doc.createElement('div');
+  moving.setAttribute('role', 'status');
+  moving.style.cssText = 'display:none;max-width:100%;padding:6px 12px;border-radius:12px;background:rgba(20,24,32,.72);text-align:center;font-size:14px;pointer-events:none;overflow-wrap:anywhere;';
+  const movingName = doc.createElement('div');
+  movingName.style.cssText = 'font-weight:600;';
+  const movingNote = doc.createElement('div');
+  movingNote.style.cssText = 'font-size:13px;color:#ffd27a;';
+  moving.append(movingName, movingNote);
+  top.append(hint, modeRow, moving, raised);
+  root.append(touch, top, badge, stats, strip, zoomStrip.el, bar);
   // the scan view's coverage box: one plain line and a small map (azimuth across, elevation up) of which directions have photos
   const box = opts.scan ? doc.createElement('div') : null;
   const map = opts.scan ? doc.createElement('canvas') : null;
@@ -165,7 +197,14 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
   const send = (list: ReturnType<GestureReader['down']>) => {
     for (const g of list) handle?.gesture(g);
   };
+  // fingers on the room, to tell when the last one lets go (the end of a gesture on one object)
+  const down = new Set<number>();
+  let oneMode = false;
+  const settle = () => {
+    if (!down.size && oneMode) handle?.gesture({ type: 'edit-end' });
+  };
   touch.addEventListener('pointerdown', (e) => {
+    down.add(e.pointerId);
     try {
       touch.setPointerCapture(e.pointerId); // a finger that slides onto a button keeps dragging the object
     } catch {
@@ -174,14 +213,24 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
     send(reader.down(e.pointerId, e.clientX, e.clientY, e.timeStamp));
   });
   touch.addEventListener('pointermove', (e) => send(reader.move(e.pointerId, e.clientX, e.clientY)));
-  touch.addEventListener('pointerup', (e) => send(reader.up(e.pointerId, e.timeStamp)));
-  touch.addEventListener('pointercancel', (e) => send(reader.cancel(e.pointerId)));
+  touch.addEventListener('pointerup', (e) => {
+    send(reader.up(e.pointerId, e.timeStamp));
+    down.delete(e.pointerId);
+    settle();
+  });
+  touch.addEventListener('pointercancel', (e) => {
+    send(reader.cancel(e.pointerId));
+    down.delete(e.pointerId);
+    settle();
+  });
   // The session would also report every tap as its own "select". The page handles the fingers itself, so that one is switched off
   // for the whole overlay (the DOM Overlays module's `beforexrselect`).
   root.addEventListener('beforexrselect', (e) => e.preventDefault());
   let shownHeight = 0;
   let shownZoom = 1;
   const showHeight = (metres: number) => heightStrip.show(`${metres >= 0 ? '+' : '-'}${Math.round(Math.abs(metres) * 100)} cm`);
+  segAll.addEventListener('click', () => handle?.setMoveMode('all'));
+  segOne.addEventListener('click', () => handle?.setMoveMode('one'));
   place.addEventListener('click', () => handle?.place());
   reset.addEventListener('click', () => handle?.reset());
   restart.addEventListener('click', () => handle?.restartPhysics());
@@ -265,6 +314,32 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
     ].join('\n');
   };
 
+  /** The "Move" switch, the name of the picked object and the sentence about a refused gesture. */
+  const editUpdate = (s: WorldArViewState) => {
+    const e = s.edit;
+    const show = !!e && e.available && s.phase === 'placed' && !s.scan;
+    oneMode = !!e && e.mode === 'one' && !e.locked;
+    modeRow.style.display = show ? 'flex' : 'none';
+    if (!e || !show) {
+      moving.style.display = 'none';
+      return;
+    }
+    const mark = (b: HTMLButtonElement, on: boolean, left: boolean) => {
+      b.style.cssText = SEG + (left ? 'border-radius:999px 0 0 999px;' : 'border-radius:0 999px 999px 0;') + (on ? 'background:#fff;color:#111;' : 'background:rgba(20,24,32,.72);color:#fff;') + (e.locked ? 'opacity:.4;' : '');
+      b.setAttribute('aria-pressed', String(on));
+      b.disabled = e.locked;
+    };
+    mark(segAll, e.mode === 'all', true);
+    mark(segOne, e.mode === 'one', false);
+    const note = e.locked ? 'Stop recording to move single objects.' : e.mode === 'one' ? e.note : null;
+    const picked = e.mode === 'one' && !e.locked && e.selected ? `Moving: ${e.selected}` : '';
+    movingName.textContent = picked;
+    movingName.style.display = picked ? '' : 'none';
+    movingNote.textContent = note ?? '';
+    movingNote.style.display = note ? '' : 'none';
+    moving.style.display = picked || note ? 'block' : 'none';
+  };
+
   return {
     root,
     attach(h) {
@@ -310,6 +385,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
         `${f.hitTest ? 'surfaces' : 'NO surfaces'} · ${s.anchored ? 'anchored' : f.anchors ? 'anchor pending' : 'no anchors'} · ${f.cameraAccess ? 'camera clip' : 'motion only'} · ${lightReadout(s.light === true)}`,
       ].join('\n');
       if (s.scan) scanUpdate(s, s.scan);
+      editUpdate(s);
     },
     remove() {
       heightStrip.stop();

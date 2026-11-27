@@ -188,6 +188,7 @@ export class ScanRig {
         header: () => scanSession.header(),
         place: () => loop.placeHere(),
         restartPhysics: () => undefined,
+        setMoveMode: () => undefined,
         reset: () => loop.reset(),
         gesture: (g) => loop.gesture(g),
         toggleRecord: () => undefined, // no recording in the scan view

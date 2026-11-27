@@ -45,10 +45,12 @@ function setup() {
   const { doc, all } = stubDocument();
   const ov = createArOverlay(doc);
   const gestures: Gesture[] = [];
-  ov.attach({ gesture: (g: Gesture) => gestures.push(g), place() {}, reset() {}, toggleRecord() {}, close: async () => undefined } as unknown as WorldArHandle);
+  const modes: string[] = [];
+  ov.attach({ gesture: (g: Gesture) => gestures.push(g), setMoveMode: (m: string) => modes.push(m), place() {}, reset() {}, toggleRecord() {}, close: async () => undefined } as unknown as WorldArHandle);
   const strip = (name: string) => all.find((e) => e.attrs['aria-label'] === name)!;
   const stats = () => all.find((e) => typeof e.style.cssText === 'string' && (e.style.cssText as string).includes('white-space:pre'))!;
-  return { ov, gestures, strip, stats, all };
+  const byText = (text: string) => all.find((e) => e.textContent === text)!;
+  return { ov, gestures, modes, strip, stats, all, byText };
 }
 
 describe('the Zoom strip of the AR overlay', () => {
@@ -102,5 +104,76 @@ describe('the Zoom strip of the AR overlay', () => {
     expect(t.stats().textContent).toContain('recording at 30 per second');
     expect(t.stats().textContent).toContain('60 was asked');
     t.ov.remove();
+  });
+});
+
+describe('the Move switch of the AR overlay', () => {
+  const edit = (o: Partial<NonNullable<WorldArViewState['edit']>> = {}) => ({ available: true, mode: 'all' as const, selected: null, note: null, locked: false, editing: false, ...o });
+
+  it('is shown only when there is more than one thing to move and the object is placed; Everything is the default', () => {
+    const t = setup();
+    const row = t.all.find((e) => e.attrs['aria-label'] === 'Move')!;
+    t.ov.update(state());
+    expect(row.style.display).toBe('none'); // no edit host: no switch
+    t.ov.update(state({ edit: edit({ available: false }) }));
+    expect(row.style.display).toBe('none');
+    t.ov.update(state({ phase: 'aiming', edit: edit() }));
+    expect(row.style.display).toBe('none');
+    t.ov.update(state({ edit: edit() }));
+    expect(row.style.display).toBe('flex');
+    expect(t.byText('Everything').attrs['aria-pressed']).toBe('true');
+    expect(t.byText('One object').attrs['aria-pressed']).toBe('false');
+  });
+
+  it('every part is at least 44 px tall and wide', () => {
+    const t = setup();
+    t.ov.update(state({ edit: edit() }));
+    for (const label of ['Everything', 'One object']) {
+      const css = t.byText(label).style.cssText as string;
+      expect(css).toContain('min-height:44px');
+      expect(css).toContain('min-width:44px');
+    }
+  });
+
+  it('pressing a part asks the view for that mode; the picked object is named, a refusal is said in words', () => {
+    const t = setup();
+    t.ov.update(state({ edit: edit() }));
+    for (const cb of t.byText('One object').listeners.get('click') ?? []) cb({});
+    for (const cb of t.byText('Everything').listeners.get('click') ?? []) cb({});
+    expect(t.modes).toEqual(['one', 'all']);
+    t.ov.update(state({ edit: edit({ mode: 'one', selected: '3D Object Cube' }) }));
+    expect(t.all.some((e) => e.textContent === 'Moving: 3D Object Cube' && e.style.display !== 'none')).toBe(true);
+    t.ov.update(state({ edit: edit({ mode: 'one', selected: '3D Object Cube', note: 'This one is moved by a wire.' }) }));
+    expect(t.all.some((e) => e.textContent === 'This one is moved by a wire.' && e.style.display !== 'none')).toBe(true);
+  });
+
+  it('while recording the switch is off and says why', () => {
+    const t = setup();
+    t.ov.update(state({ recording: true, edit: edit({ locked: true }) }));
+    expect(t.byText('One object').disabled).toBe(true);
+    expect(t.byText('Everything').disabled).toBe(true);
+    expect(t.all.some((e) => e.textContent === 'Stop recording to move single objects.' && e.style.display !== 'none')).toBe(true);
+  });
+
+  it('tells the view when the last finger lets go, only in One object mode (the end of one undo step)', () => {
+    const t = setup();
+    const touch = t.all.find((e) => e.listeners.has('pointerdown') && typeof e.style.cssText === 'string' && (e.style.cssText as string).includes('inset:0') && !(e.style.cssText as string).includes('z-index'))!;
+    const press = (id: number, up: boolean) => fire(touch, up ? 'pointerup' : 'pointerdown', { pointerId: id, clientX: 100, clientY: 100, timeStamp: 10 });
+    press(1, false);
+    press(1, true);
+    expect(t.gestures.some((g) => g.type === 'edit-end')).toBe(false); // Everything: nothing new is sent
+    t.ov.update(state({ edit: edit({ mode: 'one' }) }));
+    press(1, false);
+    press(2, false);
+    press(1, true);
+    expect(t.gestures.some((g) => g.type === 'edit-end')).toBe(false); // one finger is still down
+    press(2, true);
+    expect(t.gestures.filter((g) => g.type === 'edit-end')).toHaveLength(1);
+    // the Height strip too
+    const h = t.strip('Height');
+    fire(h, 'pointerdown', { clientY: 400, timeStamp: 0 });
+    fire(h, 'pointermove', { clientY: 380 });
+    fire(h, 'pointerup', { clientY: 380, timeStamp: 50 });
+    expect(t.gestures.filter((g) => g.type === 'edit-end')).toHaveLength(2);
   });
 });

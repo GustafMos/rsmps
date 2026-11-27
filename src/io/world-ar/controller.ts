@@ -21,6 +21,7 @@ import type { CardMode } from '../../engine/lib/xr-math';
 import type { AssetInfo, GraphDoc } from '../../engine/types';
 import { LiveRecorder } from '../live-record';
 import type { ArCameraFeed } from './camera-feed';
+import type { ArEditHost } from './edit-host';
 import { EnginePictureSource, fedByWorldAr, hasPhysics, probeCanvasCopy, type CopyRoute, type PictureTarget } from './engine-source';
 import { ArLoop, type ArClipRecorder, type ArLoopState, type ArPainter } from './loop';
 import { GlPainter, makeBrowserXrPainter } from './painter';
@@ -52,6 +53,8 @@ export interface WorldArOpen {
   onTake(take: WorldArTake): void;
   /** Present = open the 3D Scan view instead of showing an object in the room. */
   scan?: WorldArScanOpen;
+  /** Present = the view offers "Move: Everything / One object": the editor side of moving one object (see edit-host.ts). */
+  edit?: ArEditHost;
 }
 
 /** Opening the scan view (the 3D Scan node): the same AR session, a different mode. */
@@ -118,6 +121,8 @@ export interface WorldArHandle {
   /** Restart physics: the objects go back to where they start and fall again. */
   restartPhysics(): void;
   gesture(g: Gesture): void;
+  /** "Move: Everything" (default) or "One object": the fingers then move the object picked by a tap. */
+  setMoveMode(mode: 'all' | 'one'): void;
   /** Start recording, or stop and save. */
   toggleRecord(): void;
   /** Leave the AR view (a running recording is saved first). */
@@ -324,6 +329,7 @@ export class WorldArController implements WorldArApi {
       const scanSession = o.scan ? new ScanSession({ env: env.makeScanEnv?.() ?? browserScanEnv(), depth: depthGranted(session), auto: o.scan.auto }) : undefined;
       const loop = new ArLoop({
         scan: scanSession,
+        edit: o.scan ? undefined : o.edit,
         session,
         referenceSpace,
         hitTestSource,
@@ -438,6 +444,7 @@ export class WorldArController implements WorldArApi {
         reset: () => loop.reset(),
         restartPhysics: () => loop.restartPhysics(),
         gesture: (g) => loop.gesture(g),
+        setMoveMode: (m) => loop.setMoveMode(m),
         toggleRecord: () => {
           if (saving) return;
           if (loop.isRecording) {

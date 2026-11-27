@@ -20,8 +20,10 @@ import { qConj, qExp, qLog, qMul, qNorm, type Quat, type Vec3 } from '../../engi
 import { FEED_MAX_SIDE } from './camera-feed';
 import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
 import { readLightEstimate, smoothLight, type WorldLight } from '../../engine/lib/xr-light';
-import { cardCorners, clampZoom, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, viewMatrix, viewRay, zoomLens, zoomProjection, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
+import { cardCorners, clampZoom, depthOf, layerCorners, lensAspect, lensOf, mat4Mul, placementQuat, poseInv, poseMul, rayPlane, reticleCorners, sceneToWorld, viewMatrix, viewRay, zoomLens, zoomProjection, type CardMode, type Corners, type Lens, type Placement, type XrPose } from '../../engine/lib/xr-math';
 import { rotate } from '../../engine/lib/motion-math';
+import { metresPerUnit, worldDeltaToScene, worldRayToScene } from '../../engine/lib/ar-pick';
+import type { ArEditHost, ArSelected } from './edit-host';
 import { hintFor, initialPlaceState, liftedPlacement, placeStep, type Gesture, type PlaceState } from './placement';
 import { SCAN_MAX_SIDE, type DepthMap } from '../../engine/lib/scan-data';
 import { DEFAULT_RADIUS } from '../../engine/lib/scan-data';
@@ -113,6 +115,23 @@ export interface ArLoopState {
   scan?: ScanViewState;
   /** Physics runs live in this view (the graph has a Physics node): the overlay offers Restart physics. */
   physics: boolean;
+  /** Moving one object at a time (only when the view was opened with an edit host). */
+  edit?: ArEditState;
+}
+
+/** The "Move: Everything / One object" switch and what it has picked. */
+export interface ArEditState {
+  /** The switch is shown: there is more than one thing to move. */
+  available: boolean;
+  mode: 'all' | 'one';
+  /** The name of the picked object, or null. */
+  selected: string | null;
+  /** A plain sentence about a gesture that did nothing (a wire decides it), or null. */
+  note: string | null;
+  /** The switch is off while recording, so the saved video matches what was seen. */
+  locked: boolean;
+  /** A finger is moving the picked object right now. */
+  editing: boolean;
 }
 
 export interface ArLoopDeps {
@@ -144,6 +163,8 @@ export interface ArLoopDeps {
   /** Render the object's picture for where the phone will be when it arrives (default true). False only to measure what that gains. */
   predictPose?: boolean;
   now(): number;
+  /** Moves one object at a time ("Move: One object"). Absent = the switch does not exist. */
+  edit?: ArEditHost;
   /** `new XRRigidTransform(position, orientation)`; absent in browsers without it (then a moved object is not re-anchored). */
   makeTransform?: (p: Vec3, q: Quat) => unknown;
   /** Size of the screen in CSS pixels, to turn a finger position into a point of the view. */
@@ -232,6 +253,13 @@ export class ArLoop {
   private physKey = '';
   private physRestart = false;
   private lastView: { pose: XrPose; lens: Lens } | null = null;
+  /** "Move: One object": which object is picked, the gesture in progress on it, and the last sentence about a refused gesture. */
+  private moveMode: 'all' | 'one' = 'all';
+  private sel: ArSelected | null = null;
+  private editNote: string | null = null;
+  private session: { c0: ArSelected['centre']; hit0: Vec3 | null; lift: number; turn: number; scale: number } | null = null;
+  private pickGen = 0;
+  private lastMoment: WorldMoment | null = null;
   /** The room's light, smoothed over time; holds its last value while the phone has no estimate. */
   private light: WorldLight | null = null;
   private lightAt = -1;
@@ -282,6 +310,17 @@ export class ArLoop {
     this.physRestart = true;
   }
 
+  /** The "Move" switch: everything together (default), or one picked object. Cleared by recording (the take records the placement, not the objects). */
+  setMoveMode(mode: 'all' | 'one'): void {
+    if (mode === this.moveMode || !this.d.edit || this.recording || this.d.scan) return;
+    this.endEdit();
+    this.pickGen++;
+    this.sel = null;
+    this.editNote = null;
+    this.moveMode = mode;
+    this.emit(true);
+  }
+
   /** The Place button (or a tap while aiming). */
   placeHere(): void {
     this.actions.push({ type: 'place' });
@@ -330,6 +369,11 @@ export class ArLoop {
   /** Start noting poses. `clip` records the camera picture alongside when the session hands it over; null = motion only. */
   startRecording(clip: ArClipRecorder | null, rate?: { fps: number; asked: number; clamped: boolean }): void {
     if (this.recording || this.ended) return;
+    this.endEdit();
+    this.pickGen++;
+    this.moveMode = 'all'; // the take keeps the placement and the clock, not what a finger does to one object
+    this.sel = null;
+    this.editNote = null;
     this.recording = { t0: -1, samples: [], clip, withClip: null };
     this.rateUsed = rate ?? this.recordRateFor(this.projectFps);
     this.emit(true);
@@ -438,6 +482,7 @@ export class ArLoop {
     const actions = this.actions;
     this.actions = [];
     for (const a of actions) this.act(a, frame, pose, lens);
+    this.refreshPicked();
     if (this.reanchor && !this.drag) this.makeAnchor(frame, null);
 
     // 4. draw
@@ -450,6 +495,7 @@ export class ArLoop {
     const base = this.place.placement;
     const pl = base ? liftedPlacement(base) : null; // where the object really stands: the surface point plus its height
     if (this.place.phase !== 'placed' && this.place.reticle) d.painter.ring(reticleCorners(this.place.reticle, RING_RADIUS), viewProjection);
+    this.drawPicked(viewProjection, base, pl);
     // the scan view: the coverage dome around the target instead of a picture of an object
     const scanTarget = d.scan && pl ? { center: pl.p, up: rotate(pl.q, [0, 1, 0]) as Vec3, h: base?.h ?? 0 } : null;
     if (d.scan && d.painter.mesh) {
@@ -461,9 +507,10 @@ export class ArLoop {
     // the live physics clock: starts when the object is placed and starts over when it is raised or resized (the fall begins from there)
     // or when the user asks. Without an object it does not run.
     let physics: number | undefined;
+    const holding = !!this.session && !!this.sel?.physics; // a finger holds a falling object: it shows where it starts, and the fall begins when the finger lets go
     if (d.physics && pl && base && !d.scan) {
       const key = `${(base.h ?? 0).toFixed(4)}|${base.scale.toFixed(4)}`;
-      if (this.physT0 === null || key !== this.physKey || this.physRestart) {
+      if (this.physT0 === null || key !== this.physKey || this.physRestart || holding) {
         this.physT0 = now;
         this.physKey = key;
         this.physRestart = false;
@@ -474,6 +521,7 @@ export class ArLoop {
       this.physKey = '';
     }
     const moment: WorldMoment = { view: pose, lens: zlens, ...(physics !== undefined ? { physics } : {}), ...(zoom !== 1 ? { zoom } : {}), object: pl ? { p: pl.p, q: placementQuat(pl), scale: pl.scale, ...(base?.h ? { h: base.h } : {}) } : null, ...(this.light ? { light: this.light } : {}) };
+    this.lastMoment = moment;
     const pic = d.source.latest();
     if (pic && pic.seq !== this.lastSeq) {
       this.lastSeq = pic.seq;
@@ -504,7 +552,7 @@ export class ArLoop {
       // The picture arrives about `behindMs` late, so it is rendered for where the phone (and the falling objects) will be by then:
       // the phone's speed carried on for that long. What is drawn then needs hardly any correction, whatever the depth of the content.
       const ahead = this.predict(pose, d.predictPose === false ? 0 : this.behindMs);
-      const asked: WorldMoment = { ...moment, view: ahead.pose, ...(physics !== undefined ? { physics: physics + ahead.seconds } : {}) };
+      const asked: WorldMoment = { ...moment, view: ahead.pose, ...(physics !== undefined ? { physics: holding ? physics : physics + ahead.seconds } : {}) };
       if (d.source.request({ moment: asked, depth: pl ? Math.max(0.05, depthOf(ahead.pose, pl.p)) : depth, size: pictureSize(zlens, d.maxSide), seconds: d.seconds() })) this.requestedAt.set(asked, now);
     }
 
@@ -554,6 +602,9 @@ export class ArLoop {
     }
     if (scan?.phase === 'capture' && (a.type === 'reset' || a.type === 'place')) return; // the dome is fixed once the walk has begun
     if (a.type === 'reset') {
+      this.endEdit();
+      this.sel = null;
+      this.pickGen++;
       this.dropAnchor();
       this.drag = null;
       this.place = placeStep(this.place, { type: 'reset' });
@@ -579,6 +630,8 @@ export class ArLoop {
       this.zoom = 1;
       return;
     }
+    if (g.type === 'edit-end') return this.endEdit();
+    if (this.oneActive()) return this.actOne(g, pose, lens);
     if (g.type === 'tap') {
       if (this.place.phase !== 'placed' && scan?.phase !== 'capture') this.placeNow(frame, pose);
       return;
@@ -619,6 +672,142 @@ export class ArLoop {
     const to: Vec3 = [this.drag.p0[0] + h[0] - this.drag.h0[0], this.drag.p0[1] + h[1] - this.drag.h0[1], this.drag.p0[2] + h[2] - this.drag.h0[2]];
     this.place = placeStep(this.place, { type: 'move', to });
     this.relocal();
+  }
+
+  /* ---------------------------------------------------------- one object at a time */
+
+  /** Gestures act on one picked object: the switch is on, the object is placed, and no recording is running. */
+  private oneActive(): boolean {
+    return !!this.d.edit && this.moveMode === 'one' && !this.recording && this.place.phase === 'placed' && !!this.place.placement;
+  }
+
+  /** The picked object with its numbers of right now; it is dropped when it is gone (deleted, or its wire changed). */
+  private refreshPicked(): void {
+    if (!this.sel || !this.d.edit) return;
+    const now = this.d.edit.selected(this.sel.id);
+    if (!now) {
+      this.endEdit();
+      this.sel = null;
+    } else this.sel = now;
+  }
+
+  /** The ring on the floor under the picked object and a small ring at its middle. */
+  private drawPicked(viewProjection: Float32Array, base: Placement | null, pl: Placement | null): void {
+    const sel = this.sel;
+    const host = this.d.edit;
+    if (!sel || !host || !base || !pl || !this.oneActive()) return;
+    const fit = host.fit();
+    const c = sceneToWorld(sel.centre, pl, fit);
+    const up = rotate(pl.q, [0, 1, 0]) as Vec3;
+    const above = (c[0] - base.p[0]) * up[0] + (c[1] - base.p[1]) * up[1] + (c[2] - base.p[2]) * up[2];
+    const foot: Vec3 = [c[0] - up[0] * above, c[1] - up[1] * above, c[2] - up[2] * above];
+    this.d.painter.ring(reticleCorners({ p: foot, q: pl.q }, Math.max(0.07, sel.radius * metresPerUnit(pl, fit) * 1.15)), viewProjection);
+    this.d.painter.ring(reticleCorners({ p: c, q: pl.q }, 0.03), viewProjection);
+  }
+
+  private beginEdit(sel: ArSelected): void {
+    if (this.session) return;
+    this.d.edit?.begin(sel.id);
+    this.session = { c0: sel.centre, hit0: null, lift: 0, turn: 0, scale: 1 };
+    this.editNote = null;
+  }
+
+  /** The finger lets go: the edit is one undo step, and a falling object starts its fall from where it was put. */
+  private endEdit(): void {
+    if (!this.session) return;
+    const sel = this.sel;
+    this.session = null;
+    if (sel) this.d.edit?.end(sel.id);
+    if (sel?.physics) this.physRestart = true;
+  }
+
+  private actOne(g: Gesture, pose: XrPose, lens: Lens): void {
+    const host = this.d.edit!;
+    const base = this.place.placement!;
+    const pl = liftedPlacement(base);
+    const fit = host.fit();
+    const scr = this.d.screen();
+    const zs = this.zoomShown;
+    const ray = (x: number, y: number) => viewRay(pose, lens, ((x / Math.max(1, scr.width)) * 2 - 1) / zs, (1 - (y / Math.max(1, scr.height)) * 2) / zs);
+    if (g.type === 'tap') {
+      this.endEdit();
+      const gen = ++this.pickGen;
+      const moment = this.lastMoment;
+      if (!moment) return;
+      void host.pick(worldRayToScene(ray(g.x, g.y), pl, fit), moment, this.d.seconds()).then(
+        (r) => {
+          if (gen !== this.pickGen || this.ended) return;
+          this.sel = r;
+          this.editNote = null;
+          this.emit(true);
+        },
+        () => undefined, // a pick that failed leaves the choice as it was
+      );
+      return;
+    }
+    if (g.type === 'zoom' || g.type === 'zoom-reset') return;
+    const sel = this.sel;
+    if (!sel) {
+      if (g.type === 'drag-start' || g.type === 'lift' || g.type === 'twist' || g.type === 'pinch') this.editNote = 'Tap an object to move it.';
+      return;
+    }
+    const lock = (what: keyof ArSelected['locked']): boolean => {
+      if (!sel.locked[what]) return false;
+      this.editNote = 'This one is moved by a wire.';
+      return true;
+    };
+    const centreWorld = (): Vec3 => sceneToWorld(this.session?.c0 ?? sel.centre, pl, fit);
+    if (g.type === 'drag-end') return this.endEdit();
+    if (g.type === 'lift' || g.type === 'lift-reset') {
+      if (lock('move')) return;
+      this.beginEdit(sel);
+      const s = this.session!;
+      if (g.type === 'lift-reset') {
+        // back onto the floor: its lowest point on the surface (a guess for the shape)
+        const floor = -fit.lift - (base.h ?? 0) / metresPerUnit(pl, fit);
+        host.apply(sel.id, { move: [s.c0[0], floor + sel.half, s.c0[2]] });
+        return;
+      }
+      // finger travel up the screen maps to metres at the object's distance, so it follows the fingers 1 to 1 on screen
+      const dist = Math.max(0.2, depthOf(pose, centreWorld()));
+      s.lift += (g.dy * 2 * dist) / (Math.max(1e-6, lens[1] * zs) * Math.max(1, scr.height)) / metresPerUnit(pl, fit);
+      host.apply(sel.id, { move: [s.c0[0], s.c0[1] + s.lift, s.c0[2]] });
+      return;
+    }
+    if (g.type === 'twist' || g.type === 'pinch') {
+      if (lock(g.type === 'twist' ? 'turn' : 'size')) return;
+      this.beginEdit(sel);
+      const s = this.session!;
+      if (g.type === 'twist') {
+        s.turn += g.deg;
+        host.apply(sel.id, { turn: s.turn });
+      } else if (g.factor > 0) {
+        s.scale *= g.factor;
+        host.apply(sel.id, { scale: s.scale });
+      }
+      return;
+    }
+    if (g.type !== 'drag-start' && g.type !== 'drag') return;
+    if (lock('move')) return;
+    // where the finger's ray meets the level plane through the object's middle: the object follows the finger on the real surface
+    const r = ray(g.x, g.y);
+    const up = rotate(pl.q, [0, 1, 0]) as Vec3;
+    const fresh = g.type === 'drag-start' || !this.session;
+    if (fresh) this.endEdit();
+    const h = rayPlane(r.origin, r.dir, fresh ? sceneToWorld(sel.centre, pl, fit) : centreWorld(), up);
+    if (!h) return;
+    if (fresh) {
+      this.beginEdit(sel);
+      this.session!.hit0 = h;
+      return;
+    }
+    const s = this.session!;
+    if (!s.hit0) {
+      s.hit0 = h;
+      return;
+    }
+    const d = worldDeltaToScene([h[0] - s.hit0[0], h[1] - s.hit0[1], h[2] - s.hit0[2]], pl, fit);
+    host.apply(sel.id, { move: [s.c0[0] + d[0], s.c0[1] + d[1], s.c0[2] + d[2]] });
   }
 
   private placeNow(frame: XrFrameLike, pose: XrPose): void {
@@ -748,11 +937,12 @@ export class ArLoop {
     const r = this.recording;
     const sourceError = this.d.source.error();
     const scan = this.d.scan;
+    const oneHint = this.oneActive() ? this.oneHint() : null;
     return {
       ...(scan ? { scan: scan.state() } : {}),
       phase: this.place.phase,
       tracking: this.place.tracking,
-      hint: scan ? scan.hint(this.place, { gestures: this.d.features.domOverlay, paused: this.paused }) : sourceError ? renderFailHint(sourceError) : hintFor(this.place, { gestures: this.d.features.domOverlay, recording: !!r, paused: this.paused }),
+      hint: scan ? scan.hint(this.place, { gestures: this.d.features.domOverlay, paused: this.paused }) : sourceError ? renderFailHint(sourceError) : oneHint && !this.paused && this.place.tracking ? oneHint : hintFor(this.place, { gestures: this.d.features.domOverlay, recording: !!r, paused: this.paused }),
       recording: !!r,
       recSeconds: r && r.t0 >= 0 ? (this.d.now() - r.t0) / 1000 : 0,
       fps: this.rate(this.frameTimes),
@@ -768,9 +958,17 @@ export class ArLoop {
       cameraFps: this.cameraFps,
       light: !!this.light,
       physics: !!this.d.physics && !this.d.scan,
+      ...(this.d.edit && !scan ? { edit: { available: this.d.edit.available(), mode: this.moveMode, selected: this.sel?.name ?? null, note: this.editNote, locked: !!r, editing: !!this.session } } : {}),
       error: this.error,
       ended: this.ended,
     };
+  }
+
+  /** The sentence under the buttons while one object is being moved. */
+  private oneHint(): string {
+    const s = this.sel;
+    if (!s) return 'Tap an object to move it.';
+    return s.physics ? 'Drag to put it somewhere else. It drops from where you let go. Height sets how high it drops from.' : 'Drag to move it. Two fingers up or down, or the Height strip, to raise it. Two fingers to turn or resize it.';
   }
 
   private emit(force: boolean): void {

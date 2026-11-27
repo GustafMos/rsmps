@@ -116,7 +116,9 @@ export type Gesture =
   /** The Zoom strip moved up the screen by `dy` CSS pixels (negative = down): zoom in / out. */
   | { type: 'zoom'; dy: number }
   /** Double tap on the Zoom strip: back to 1x. */
-  | { type: 'zoom-reset' };
+  | { type: 'zoom-reset' }
+  /** Every finger is off the screen (or the Height strip): a gesture on ONE object is over. Only the overlay sends it, only in "One object" mode. */
+  | { type: 'edit-end' };
 
 /** A two-finger gesture is a lift or a turn/resize once the fingers have travelled this far (CSS pixels); until then nothing happens. */
 export const MULTI_DEAD = 8;
