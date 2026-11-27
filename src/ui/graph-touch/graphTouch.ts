@@ -101,6 +101,7 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
     if (same) return setPending(null);
     if (p.side === 'out' && el.dataset.dir === 'out' && ed.canJoin(p, { node: el.dataset.node!, port: el.dataset.port! })) {
       setPending(null);
+      swallowNextClick();
       ed.mergeOutputs(p, { node: el.dataset.node!, port: el.dataset.port! }); // two outputs: a new Stack / Mixer / Combine
       return;
     }
@@ -115,6 +116,15 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
     const to = p.side === 'out' ? { node: el.dataset.node!, port: el.dataset.port! } : { node: p.node, port: p.port };
     setPending(null);
     ed.connect(from, to, slot);
+  };
+  /** A join / add selects the new node and its toolbar can pop up under the finger: the tap's own click must not press it. */
+  const swallowNextClick = () => {
+    const stop = (ev: Event) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+    };
+    window.addEventListener('click', stop, true);
+    setTimeout(() => window.removeEventListener('click', stop, true), 450);
   };
   const dropMergeToast = () => {
     for (const t of ed.state.toasts) if (t.text.startsWith('Click another output to ')) ed.dismissToast(t.id);
@@ -300,6 +310,7 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
       const pend = wireStore.get().pending;
       if (e.type === 'pointerup' && pend && pend.side === 'out' && n.id !== pend.node && isTap(e.timeStamp - n.t, Math.hypot(e.clientX - n.x, e.clientY - n.y)) && ed.multiTarget(pend, n.id)) {
         setPending(null);
+        swallowNextClick();
         ed.addToNode(pend, n.id); // a tap on a node body: add the pending output to it
       } else if (e.type === 'pointerup' && n.ok && isTap(e.timeStamp - n.t, Math.hypot(e.clientX - n.x, e.clientY - n.y))) {
         const node = ed.state.level.nodes.find((x) => x.id === n.id);
