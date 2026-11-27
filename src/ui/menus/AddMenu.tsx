@@ -9,6 +9,7 @@ import { NODE_PREFIX, bindingsOf, eventToBinding, owners, setBindings, useKeymap
 import { allCommandIds, commandLabel, nodeCommandId } from '../shortcuts';
 import { useApp, useDefs, useEd } from '../store/context';
 import { groupDefOf } from '../../engine/group';
+import { isSdfOnlyDef, SDF_HINT } from '../../engine/sdf-scene-group';
 import type { NodePreset } from '../../io/node-presets';
 import './menus.css';
 
@@ -66,14 +67,17 @@ function AddMenuInner() {
   const input = useRef<HTMLInputElement>(null);
   const link = req.link;
 
+  // SDF nodes only go inside an SDF Scene: elsewhere the menu shows just the SDF Scene and says why
+  const inScene = ed.inSdfScene();
   const allowed = useMemo(
     () =>
       defs.filter((d) => {
         if (d.hidden) return false;
+        if (!inScene && isSdfOnlyDef(d)) return false;
         if (!link) return true;
         return link.side === 'out' ? inputsAccepting(d, link.type).length > 0 : outputsFeeding(d, link.type).length > 0;
       }),
-    [defs, link],
+    [defs, link, inScene],
   );
 
   const groups: Group[] = useMemo(() => {
@@ -101,6 +105,10 @@ function AddMenuInner() {
   }, [allowed, query]);
 
   const searching = query.trim().length > 0;
+  const sdfHidden = useMemo(() => {
+    const tokens = fold(query).split(/\s+/).filter(Boolean);
+    return !inScene && tokens.length > 0 && defs.some((d) => !d.hidden && isSdfOnlyDef(d) && score(d, tokens) > 0);
+  }, [defs, inScene, query]);
   const items = searching ? results : (groups[cat]?.defs ?? []);
 
   useLayoutEffect(() => {
@@ -256,6 +264,7 @@ function AddMenuInner() {
         )}
         <div className="rs-add__items">
           {items.length === 0 && <div className="rs-add__none">{searching ? `No node matches "${query}"` : 'No compatible nodes'}</div>}
+          {!inScene && (searching ? sdfHidden : groups[cat]?.key === 'sdf') && <div className="rs-add__none" data-testid="sdf-hint">{SDF_HINT}</div>}
           {items.map((d, i) => (
             <button
               key={d.id}

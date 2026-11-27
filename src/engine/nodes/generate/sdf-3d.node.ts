@@ -2,9 +2,10 @@ import { defineNode } from '../../define';
 import { spunRotation, rotationZYX } from '../../lib/gen-common';
 import { BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, isSpinning, LIGHT_PARAMS, lightVector, marchUniforms, QUALITY_PARAM, resolveCamera, run3d, SHADE_PARAMS, XFORM_PARAMS, type LightP, type XformP } from '../../lib/gen-3d';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformKey, deformStepScale, deformUniforms, deformWgsl, type DeformP } from '../../lib/gen-deform';
-import { gridFor, occupancy, SDF2D_WGSL, signedField } from '../../lib/gen-sdf2d';
-import { materialKey, materialTextures, materialUniforms, materialWgsl } from '../../lib/gen-material';
-import type { ColorValue, ParamSchema } from '../../types';
+import { SDF2D_WGSL } from '../../lib/gen-sdf2d';
+import { materialKey, materialTextures, materialUniforms } from '../../lib/gen-material';
+import { materialShadeWgsl, preparePicture, SD_CALL, SD_FUNCS, SD_OPS_WGSL, shapeExtent, TO_LOCAL_WGSL } from '../../lib/sdf-prims';
+import type { ColorValue, ImageValue, ParamSchema } from '../../types';
 
 /**
  * SDF 3D. A small scene of up to 8 primitives, combined with union / subtract / intersect and smooth blends, sphere-traced in one
@@ -110,67 +111,7 @@ interface P extends XformP, LightP, DeformP {
   [k: string]: unknown;
 }
 
-const SD_FUNCS: Record<string, string> = {
-  sphere: 'fn sdSphere(q: vec3f, s: vec4f) -> f32 { return length(q) - s.x; }',
-  box: 'fn sdBoxS(q: vec3f, s: vec4f) -> f32 { let d = abs(q) - s.xyz; return length(max(d, vec3f(0.0))) + min(max(d.x, max(d.y, d.z)), 0.0); }',
-  rbox: 'fn sdRBox(q: vec3f, s: vec4f) -> f32 { let r = 0.25 * min(s.x, min(s.y, s.z)); let d = abs(q) - s.xyz + vec3f(r); return length(max(d, vec3f(0.0))) + min(max(d.x, max(d.y, d.z)), 0.0) - r; }',
-  torus: 'fn sdTorus(q: vec3f, s: vec4f) -> f32 { return length(vec2f(length(q.xz) - s.x, q.y)) - s.y; }',
-  capsule: 'fn sdCapsule(q: vec3f, s: vec4f) -> f32 { return length(vec3f(q.x, q.y - clamp(q.y, -s.y, s.y), q.z)) - s.x; }',
-  cylinder: 'fn sdCyl(q: vec3f, s: vec4f) -> f32 { let d = vec2f(length(q.xz) - s.x, abs(q.y) - s.y); return min(max(d.x, d.y), 0.0) + length(max(d, vec2f(0.0))); }',
-  cone: `fn sdConeS(pin: vec3f, s: vec4f) -> f32 {
-  let h = 2.0 * s.y;
-  let c = normalize(vec2f(s.x, h));
-  let p = pin - vec3f(0.0, s.y, 0.0);
-  let q = h * vec2f(c.x / c.y, -1.0);
-  let w = vec2f(length(p.xz), p.y);
-  let a = w - q * clamp(dot(w, q) / dot(q, q), 0.0, 1.0);
-  let b = w - q * vec2f(clamp(w.x / q.x, 0.0, 1.0), 1.0);
-  let k = sign(q.y);
-  let d = min(dot(a, a), dot(b, b));
-  let sg = max(k * (w.x * q.y - w.y * q.x), k * (w.y - q.y));
-  return sqrt(d) * sign(sg);
-}`,
-  plane: 'fn sdPlaneS(q: vec3f, s: vec4f) -> f32 { return q.y; }',
-  octa: `fn sdOctaS(pin: vec3f, s: vec4f) -> f32 {
-  let p = abs(pin);
-  let m = p.x + p.y + p.z - s.x;
-  var q = vec3f(0.0);
-  if (3.0 * p.x < m) { q = p; }
-  else if (3.0 * p.y < m) { q = p.yzx; }
-  else if (3.0 * p.z < m) { q = p.zxy; }
-  else { return m * 0.57735027; }
-  let k = clamp(0.5 * (q.z - q.y + s.x), 0.0, s.x);
-  return length(vec3f(q.x, q.y - s.x + k, q.z - k));
-}`,
-  image2d: `fn sdPic(q: vec3f, s: vec4f) -> f32 {
-  let pc = vec2f(q.x / (2.0 * u.pic.x * s.x) + 0.5, 0.5 - q.y / (2.0 * u.pic.y * s.x)) * u.grid;
-  let w = vec2f(sd2(pc) * u.cellW * s.x, abs(q.z) - s.y);
-  return min(max(w.x, w.y), 0.0) + length(max(w, vec2f(0.0)));
-}`,
-};
-const SD_CALL: Record<string, string> = { sphere: 'sdSphere', box: 'sdBoxS', rbox: 'sdRBox', torus: 'sdTorus', capsule: 'sdCapsule', cylinder: 'sdCyl', cone: 'sdConeS', plane: 'sdPlaneS', octa: 'sdOctaS', image2d: 'sdPic' };
-
-function extent(s: Slot): number {
-  const [a, b, c] = s.size;
-  switch (s.type) {
-    case 'sphere':
-    case 'octa':
-      return a;
-    case 'box':
-    case 'rbox':
-      return Math.hypot(a, b, c);
-    case 'torus':
-    case 'capsule':
-      return a + b;
-    case 'cylinder':
-    case 'cone':
-      return Math.hypot(a, b);
-    case 'image2d':
-      return Math.hypot(1.0 * a * 1.42, b);
-    default:
-      return Infinity;
-  }
-}
+const extent = (s: Slot): number => shapeExtent(s.type, s.size);
 
 export default defineNode({
   id: 'sdf-3d',
@@ -284,36 +225,13 @@ export default defineNode({
 
     const code = build3dShader({
       shadows: p.shadows,
-      shade: mat
-        ? `${materialWgsl(mat)}
-fn shadeSurf(base: vec3f, n: vec3f, rd: vec3f, ao: f32, sh: f32, p: vec3f) -> vec4f {
-  let pl = toLocal(p);
-  let nl = vec3f(dot(u.t0, n), dot(u.t1, n), dot(u.t2, n));
-  return matShade(base, n, rd, ao, sh, pl, nl, gScr);
-}`
-        : undefined,
+      shade: mat ? materialShadeWgsl(mat) : undefined,
       map: /* wgsl */ `
-struct Sd { d: f32, c: vec3f };
-fn opUnion(a: Sd, b: Sd, k: f32) -> Sd {
-  let h = max(k - abs(a.d - b.d), 0.0) / k;
-  return Sd(min(a.d, b.d) - h * h * k * 0.25, mix(a.c, b.c, clamp(0.5 + 0.5 * (a.d - b.d) / k, 0.0, 1.0)));
-}
-fn opSub(a: Sd, b: Sd, k: f32) -> Sd {
-  let nb = -b.d;
-  let h = max(k - abs(a.d - nb), 0.0) / k;
-  return Sd(max(a.d, nb) + h * h * k * 0.25, mix(a.c, b.c, clamp(0.5 + 0.5 * (nb - a.d) / k, 0.0, 1.0)));
-}
-fn opInter(a: Sd, b: Sd, k: f32) -> Sd {
-  let h = max(k - abs(a.d - b.d), 0.0) / k;
-  return Sd(max(a.d, b.d) + h * h * k * 0.25, mix(a.c, b.c, clamp(0.5 + 0.5 * (b.d - a.d) / k, 0.0, 1.0)));
-}
+${SD_OPS_WGSL}
 ${usesPic ? SDF2D_WGSL(false) : ''}
 ${types.map((t) => SD_FUNCS[t]).join('\n')}
 ${hasDf ? deformWgsl(feat) : 'fn dfPoint(p: vec3f) -> vec3f { return p; }\nfn dfDist(p0: vec3f, p1: vec3f, d: f32) -> f32 { return d; }'}
-fn toLocal(pw: vec3f) -> vec3f {
-  let q = pw - u.objPos;
-  return vec3f(dot(u.t0, q), dot(u.t1, q), dot(u.t2, q)) / u.objScale;
-}
+${TO_LOCAL_WGSL}
 fn scene(pin: vec3f) -> Sd {
   var p = pin;
   ${domain.join('\n  ')}
@@ -402,16 +320,13 @@ fn surf(pw: vec3f, nw: vec3f, rd: vec3f) -> vec3f {
     });
 
     // the 2D shape input: a small signed field (jump flooding), made once per render
-    let occ = null as ReturnType<typeof occupancy> | null;
-    let fld = null as ReturnType<typeof signedField> | null;
+    let occ = null as ImageValue | null;
+    let fld = null as ImageValue | null;
     if (usesPic && pic) {
-      const grid = gridFor(pic, 0, 192);
-      occ = occupancy(ctx.gpu, pic, grid, { threshold: Math.max(0.001, p.shape2dThreshold), fromBrightness: p.shape2dFrom === 'brightness', nearest: false });
-      fld = signedField(ctx.gpu, occ, true);
-      const long = Math.max(pic.width, pic.height);
-      uniforms.grid = [grid.gw, grid.gh];
-      uniforms.cellW = 2 / Math.max(grid.gw, grid.gh);
-      uniforms.pic = [pic.width / long, pic.height / long];
+      const prep = preparePicture(ctx.gpu, pic, { from: p.shape2dFrom, threshold: p.shape2dThreshold });
+      occ = prep.occ;
+      fld = prep.fld;
+      Object.assign(uniforms, prep.uniforms);
     }
 
     const reps = repeat.filter(Boolean).length;

@@ -96,6 +96,7 @@
 .rs-sock--regions { --sc: var(--sock-regions); }
 .rs-sock--camera { --sc: var(--sock-camera); }
 .rs-sock--material { --sc: var(--sock-material); }
+.rs-sock--sdf { --sc: var(--sock-sdf); }
 .rs-sock[data-dim] { opacity: 0.18; filter: grayscale(1); pointer-events: auto; }
 .rs-sock[data-ok] { transform: scale(1.5); box-shadow: 0 0 0 2px var(--select); }
 .rs-sock[data-bad] { box-shadow: 0 0 0 2px var(--danger); }

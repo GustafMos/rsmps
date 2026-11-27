@@ -129,6 +129,7 @@ export const ROWS: Row[] = [
   { id: 'object-3d', note: 'hologram scan 3', params: { shape: 'sphere' }, input: 'size', lengths: [24, 37], exact: true, extra: () => ({ material: { node: 'material', params: { model: 'hologram', holoCycles: 3 } } }) },
   { id: 'sdf-3d', note: 'spin 2 alone', params: { shape1: 'sphere', shape2: 'off', size1: 0.8, spinY: 2 }, input: 'size', lengths: [24, 37], exact: true },
   { id: 'sdf-3d', note: 'deform noise 3 alone', params: { shape1: 'sphere', shape2: 'off', size1: 0.8, dNoise: 0.25, dNoiseCycles: 3 }, input: 'size', lengths: [24, 37], exact: true },
+  { id: 'sdf-render', note: 'box spin 2 alone (the SDF Scene output)', params: { spinY: 2, scale: 0.4 }, input: 'size', lengths: [24, 37], exact: true, extra: () => ({ scene: { node: 'sdf-shape', params: { shape: 'box', sizeX: 1.6, sizeY: 0.8, sizeZ: 0.8 } } }) },
   { id: 'image-to-3d', note: 'spin 1 / 2', params: { spinY: 1, spinZ: 2 }, input: 'img', lengths: [24, 37], exact: true },
   { id: 'array-3d', note: 'travel 3 orbit 1', params: { layout: 'grid', countX: 3, countY: 3, countZ: 5, travel: 3, orbit: 1 }, input: 'img', lengths: [24, 37], exact: true },
   { id: 'array-3d', note: 'tunnel travel 1, colour by card, 7 rings', params: { layout: 'tunnel', countX: 4, countZ: 7, radius: 1.5, travel: 1, colourBy: 'card', tintMode: 'multiply', hueStep: 40 }, input: 'img', lengths: [24, 37] },
@@ -260,6 +261,7 @@ export const ROWS: Row[] = [
 
 /** Nodes that animate or read the clock but cannot or need not auto-loop here. */
 export const OUT_OF_SCOPE: Record<string, string> = {
+  'sdf-modify': 'its output is a scene description, not a picture, so loopCheck cannot measure it; Displace by noise turns a whole number of cycles per loop (wholeCycles x phase) and nodes/sdf/sdf-scene.test.ts renders frame 0, half a loop and frame N and compares them exactly',
   'phone-motion': 'live sensor input (and a recorded take with its own loop blend)',
   'phone-camera': 'live phone camera',
   'ar-camera': 'live sensor input: a camera that follows the phone (and a recorded take with its own loop blend)',
