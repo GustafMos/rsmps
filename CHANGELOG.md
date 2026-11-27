@@ -4,6 +4,17 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.57.0] - 2026-11-27
+
+### Added
+- **Regions, set up in one step.** Right-click (long-press on a phone) a picture node, or use the Regions button at the top of the Add menu: "Effect on moving things", "Effect on bright or colored things", "Boxes and labels on things" and "Blur everything except the things" each build and wire the whole chain after that node, in one undo step.
+- **Built-in effects in Effects On Regions.** Each effect has a dropdown: Pixelate, Blur, Invert, Black and white, Tint, Brighten, Darken, Outline, Hide, Solid color, with one amount slider, so no extra effect branch is needed. A new node pixelates straight away; wiring your own picture into an effect still takes over. Effects B to D appear as you use them. Existing projects render the same.
+- **"How to use" on nodes.** The inspector shows in one sentence what a node does, lists what is still missing, and offers a button to fix each gap (for example "Regions is empty: Add Detect Blobs"). On the node, an empty input that is needed is marked "needed", and the summary line says what is missing. All region nodes have this, as do Recorder, Stop Motion, Marker Camera, Stabilize, Fake 360, Sweep 360, SDF Combine and Media Timeline.
+- A new template, "Boxes on moving things"; "Different effects on tracked regions" now uses the built-in effects.
+
+### Changed
+- Clearer socket names on the region nodes, such as "Picture", "Regions (boxes)" and "Regions to follow".
+
 ## [0.56.0] - 2026-11-27
 
 ### Changed
