@@ -257,6 +257,7 @@ function setup(o: { features?: string[]; show?: 'layer' | 'card'; reportFeatures
     show: o.show === 'card' ? { kind: 'card', mode: 'upright', width: 0.5 } : { kind: 'layer' },
     maxSide: 960,
     seconds: () => clock / 1000,
+    predictPose: false, // these tests read back the exact pose and clock of each request; ar-swim.test.ts covers the prediction
     now: () => clock,
     makeTransform: fakeTransform,
     screen: () => ({ width: 360, height: 640 }),

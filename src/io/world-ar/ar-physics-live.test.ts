@@ -56,6 +56,7 @@ function setup(physics: boolean) {
     maxSide: 960,
     seconds: () => (clock / 1000) % 4, // the project clock: wraps at the 4 s project
     physics,
+    predictPose: false, // these tests read back the exact pose and clock of each request; ar-swim.test.ts covers the prediction
     now: () => clock,
     makeTransform: fakeTransform,
     screen: () => ({ width: 360, height: 640 }),

@@ -19,7 +19,7 @@ export interface ArOverlay {
   remove(): void;
 }
 
-const BTN = 'font:600 15px system-ui,sans-serif;color:#fff;background:rgba(20,24,32,.72);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:12px 16px;min-width:64px;touch-action:manipulation;';
+const BTN = 'font:600 15px system-ui,sans-serif;color:#fff;background:rgba(20,24,32,.72);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:0 14px;min-height:44px;min-width:64px;touch-action:manipulation;';
 
 export function createArOverlay(doc: Document = document, opts: { scan?: boolean } = {}): ArOverlay {
   const root = doc.createElement('div');
@@ -35,17 +35,18 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
   hint.setAttribute('role', 'status');
   const badge = doc.createElement('div');
   badge.textContent = 'Experimental';
-  badge.style.cssText = 'position:absolute;left:12px;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 62px);font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(180,120,0,.8);pointer-events:none;';
+  badge.style.cssText = 'position:absolute;left:12px;top:calc(env(safe-area-inset-top,0px) + 12px);font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(180,120,0,.8);pointer-events:none;';
   const stats = doc.createElement('div');
-  stats.style.cssText = 'position:absolute;right:12px;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 62px);font:11px ui-monospace,monospace;opacity:.8;text-shadow:0 1px 2px #000;pointer-events:none;text-align:right;white-space:pre;';
+  // between the two strips, above the button rows: nothing else is drawn there
+  stats.style.cssText = 'position:absolute;left:calc(max(8px,env(safe-area-inset-left)) + 60px);right:calc(max(8px,env(safe-area-inset-right)) + 60px);bottom:calc(max(16px,env(safe-area-inset-bottom)) + 104px);font:11px ui-monospace,monospace;opacity:.85;text-shadow:0 1px 2px #000;pointer-events:none;text-align:center;white-space:pre-wrap;overflow-wrap:anywhere;';
   const bar = doc.createElement('div');
-  bar.style.cssText = 'position:absolute;left:0;right:0;bottom:max(16px,env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:0 8px;';
+  bar.style.cssText = 'position:absolute;left:0;right:0;bottom:max(16px,env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:0 8px;pointer-events:none;';
   const button = (label: string, title: string): HTMLButtonElement => {
     const b = doc.createElement('button');
     b.type = 'button';
     b.textContent = label;
     b.title = title;
-    b.style.cssText = BTN;
+    b.style.cssText = BTN + 'pointer-events:auto;';
     // a press on a button is not a tap on the room
     for (const ev of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) b.addEventListener(ev, (e) => e.stopPropagation());
     bar.appendChild(b);
@@ -53,7 +54,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
   };
   const place = button('Place', 'Put it on the ring');
   const reset = button('Place again', 'Pick it up and choose another spot, for example a table. The floor is then that surface, and physics starts again from there.');
-  const restart = button('Restart physics', 'Put the falling objects back where they start and let them fall again');
+  const restart = button('Restart', 'Put the falling objects back where they start and let them fall again');
   restart.style.display = 'none';
   // the scan view has no Record button (a detached one keeps the rest of this file the same); its own buttons come in this order
   const record = opts.scan ? doc.createElement('button') : button('Record', 'Record the movement (and the camera picture where the browser hands it over)');
@@ -65,7 +66,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
   // Each has its own finger, never a tap or drag on the room. Travel up the screen raises / zooms in; a quick double tap resets.
   const makeStrip = (side: 'left' | 'right', name: string, title: string, move: (dy: number) => void, reset: () => void) => {
     const el = doc.createElement('div');
-    el.style.cssText = `position:absolute;${side}:max(8px,env(safe-area-inset-${side}));top:28%;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 120px);width:52px;display:none;flex-direction:column;align-items:center;justify-content:space-between;border-radius:26px;background:rgba(20,24,32,.55);border:1px solid rgba(255,255,255,.35);touch-action:none;font:600 12px system-ui,sans-serif;`;
+    el.style.cssText = `position:absolute;${side}:max(8px,env(safe-area-inset-${side}));top:max(28%,calc(env(safe-area-inset-top,0px) + 140px));bottom:calc(max(16px,env(safe-area-inset-bottom)) + 120px);width:52px;display:none;flex-direction:column;align-items:center;justify-content:space-between;border-radius:26px;background:rgba(20,24,32,.55);border:1px solid rgba(255,255,255,.35);touch-action:none;font:600 12px system-ui,sans-serif;`;
     el.setAttribute('role', 'slider');
     el.setAttribute('aria-label', name);
     el.title = title;
@@ -280,10 +281,6 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
       strip.style.display = s.phase === 'placed' ? 'flex' : 'none';
       // physics runs live: a button to start the fall again, and a word about what raising does to it
       restart.style.display = s.physics === true && s.phase === 'placed' ? '' : 'none';
-      // five buttons wrap into two rows: the small print moves up out of their way
-      const lift = s.physics === true && s.phase === 'placed' ? 128 : 62;
-      badge.style.bottom = `calc(max(16px,env(safe-area-inset-bottom)) + ${lift}px)`;
-      stats.style.bottom = `calc(max(16px,env(safe-area-inset-bottom)) + ${lift}px)`;
       raised.style.display = s.physics === true && s.phase === 'placed' && s.height > 0.005 ? 'block' : 'none';
       strip.setAttribute('aria-valuenow', String(Math.round(s.height * 100)));
       // Zoom needs the camera picture (the page draws it larger itself); without it the strip is not shown and the readout says why
@@ -309,6 +306,7 @@ export function createArOverlay(doc: Document = document, opts: { scan?: boolean
         ...(rate ? [rate] : []),
         ...(f.cameraAccess ? [] : ['no zoom: this phone does not hand over the camera picture']),
         `render ${s.renderMs} ms · copy ${s.copyMs} ms (${s.route})`,
+        ...(typeof s.pictureBehindMs === 'number' && s.pictureBehindMs > 0 ? [`object picture is ${s.pictureBehindMs} ms behind`] : []),
         `${f.hitTest ? 'surfaces' : 'NO surfaces'} · ${s.anchored ? 'anchored' : f.anchors ? 'anchor pending' : 'no anchors'} · ${f.cameraAccess ? 'camera clip' : 'motion only'} · ${lightReadout(s.light === true)}`,
       ].join('\n');
       if (s.scan) scanUpdate(s, s.scan);
