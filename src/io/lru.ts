@@ -7,6 +7,8 @@
 export class ByteLru<K, V> {
   private map = new Map<K, { value: V; bytes: number }>();
   private total = 0;
+  /** Chooses what to evict instead of "least recently used": gets every key (the entry just inserted included). */
+  pickVictim: ((keys: K[]) => K | undefined) | null = null;
 
   constructor(
     public maxBytes: number,
@@ -60,6 +62,13 @@ export class ByteLru<K, V> {
   /** Evict oldest entries until within budget. `keep` is never evicted (the entry just inserted). */
   private trim(keep?: K): void {
     if (this.total <= this.maxBytes) return;
+    if (this.pickVictim) {
+      while (this.total > this.maxBytes && this.map.size > 0) {
+        const key = this.pickVictim([...this.map.keys()]);
+        if (key === undefined || !this.delete(key)) break;
+      }
+      return;
+    }
     for (const key of [...this.map.keys()]) {
       if (this.total <= this.maxBytes) break;
       if (key === keep) continue;

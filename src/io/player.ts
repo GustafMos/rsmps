@@ -17,6 +17,8 @@ import type { GraphDoc, ImageValue, MaskValue } from '../engine/types';
 import type { Player, PlayerState } from './api';
 import type { AudioBridge } from './audio-bridge';
 import { ProxyController, frameAtTime } from './clock';
+import { PerfAggregator, perf, resetPerf, setPerfEnabled, type PerfSnapshot } from './perf';
+import { playbackProxyCap, type ViewerTarget } from './proxy-target';
 import { OffscreenPresenter, presentToBlob } from './encode';
 import { RenderedFrameCache } from './frame-cache';
 import { isLossy, packFrame, unpackBytes, unpackToBitmap, type CacheQuality, type Packed } from './pixel-codec';
@@ -188,6 +190,15 @@ export class PlayerImpl implements Player {
   private timings: ReadonlyMap<string, number> = EMPTY_ERRORS as unknown as ReadonlyMap<string, number>;
   private lostMessage: string | null = null;
 
+  /** Performance panel (off by default): nothing below is measured while it is off. */
+  private perfOn = false;
+  private agg = new PerfAggregator();
+  private lastPerfFrame = -1;
+  private lastDrawMs = 0;
+  private saveBase = { captured: 0, captureMs: 0 };
+  /** How big the picture is on the screen (set by the viewer): decides how fine the playback preview needs to be. */
+  private viewerTarget: ViewerTarget | null = null;
+
   private fpsRing = new Float64Array(FPS_RING);
   private fpsHead = 0;
   private fpsCount = 0;
@@ -276,6 +287,14 @@ export class PlayerImpl implements Player {
     this.signalEvent('play');
     if (this.audioNeeded && !this.deps.audio.running) this.deps.audio.start().then(() => this.markChanged(), () => undefined);
     this.playing = true;
+    this.deps.library.playing = true;
+    this.updateCeiling();
+    if (this.perfOn) {
+      resetPerf();
+      this.agg.clear();
+      this.lastPerfFrame = -1;
+      this.saveBase = { captured: this.cacheStats.captured, captureMs: this.cacheStats.captureMs };
+    }
     this.updateLive(this.view);
     this.fullReq = null;
     this.ctl.warmup();
@@ -290,6 +309,7 @@ export class PlayerImpl implements Player {
   pause(): void {
     if (!this.playing) return;
     this.playing = false;
+    this.deps.library.playing = false;
     if (this.view) this.updateLive(this.view);
     if (this.hasShoot) this.dirty = true;
     cancelAnimationFrame(this.raf);
@@ -307,6 +327,7 @@ export class PlayerImpl implements Player {
   seek(seconds: number): void {
     const fps = this.fps();
     this.frame = Math.min(this.totalFrames - 1, Math.max(0, Math.round(seconds * fps)));
+    this.lastPerfFrame = -1;
     this.signalEvent('seek');
     if (this.playing) this.anchorClock();
     this.syncTransport();
@@ -377,6 +398,59 @@ export class PlayerImpl implements Player {
     this.dirty = true;
     this.kick();
     this.markChanged();
+  }
+
+  setViewerTarget(target: ViewerTarget | null): void {
+    this.viewerTarget = target;
+    if (this.updateCeiling() && this.playing) {
+      this.dirty = true;
+      this.kick();
+    }
+  }
+
+  /** Playback never renders finer than the screen can show (see playbackProxyCap). Returns true when the ceiling moved. */
+  private updateCeiling(): boolean {
+    const full = this.size ?? this.view?.graph.project;
+    const cap = full ? playbackProxyCap(this.viewerTarget, full) : 1;
+    const before = this.ctl.proxy;
+    this.ctl.setCeiling(cap);
+    return this.ctl.proxy !== before;
+  }
+
+  setPerf(on: boolean): void {
+    if (on === this.perfOn) return;
+    this.perfOn = on;
+    setPerfEnabled(on);
+    this.agg.clear();
+    this.lastPerfFrame = -1;
+    this.saveBase = { captured: this.cacheStats.captured, captureMs: this.cacheStats.captureMs };
+  }
+
+  perfSnapshot(): PerfSnapshot | null {
+    if (!this.perfOn) return null;
+    const now = performance.now();
+    const w = this.agg.summary(now);
+    const adapter = (this.gpu.device as unknown as { adapterInfo?: { vendor?: string; architecture?: string; description?: string } }).adapterInfo;
+    const gpuName = adapter ? [adapter.vendor, adapter.architecture, adapter.description].filter(Boolean).join(' ') : '';
+    const saved = this.cacheStats.captured - this.saveBase.captured;
+    const d = perf.decode;
+    return {
+      playing: this.playing,
+      projectFps: this.fps(),
+      window: w,
+      skipped: this.agg.skipped,
+      rendered: this.rendered,
+      full: this.size,
+      scale: this.shown ? this.shownProxy : this.currentProxy(),
+      cachedFrames: this.cache.frames.size,
+      totalFrames: this.totalFrames,
+      decode: { requests: d.requests, sequential: d.sequential, seeks: d.seeks, browser: d.browser, repeats: d.repeats, ahead: d.ahead, waitMs: d.waitMs },
+      uploads: { count: perf.uploads.count, pixels: perf.uploads.pixels, sizes: [...perf.uploads.sizes] },
+      saving: { saved, msEach: saved > 0 ? (this.cacheStats.captureMs - this.saveBase.captureMs) / saved : 0 },
+      gpuName,
+      deviceMemoryGB: (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? null,
+      gpuTimeMeasured: false,
+    };
   }
 
   renderFullFrame(): boolean {
@@ -649,6 +723,7 @@ export class PlayerImpl implements Player {
           return presentToBlob(this.capturePresenter, { texture: job.texture, width: job.width, height: job.height }, alpha ? 'image/webp' : 'image/jpeg', alpha ? 0.9 : 0.92);
         };
         const packed = await packFrame(raw, job.width, job.height, this.cacheQuality, lossy);
+        this.cache.setPlayhead(this.frame, this.totalFrames, this.playing);
         if (job.key === this.key && this.cache.put(job.frame, packed, job.proxy, packed.bytes)) {
           this.cacheStats.captured++;
           this.cacheStats.rawBytes += raw.byteLength;
@@ -971,6 +1046,7 @@ export class PlayerImpl implements Player {
     this.settledFrame = job.frame;
     this.settledProxy = job.proxy;
     const live = this.liveSignals() || this.hasLive || (this.hasShoot && !this.playing);
+    this.cache.setPlayhead(this.frame, this.totalFrames, this.playing);
     const cached = live || job.final ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
     if (cached) {
       const img = await this.restore(cached.image);
@@ -980,11 +1056,13 @@ export class PlayerImpl implements Player {
           return;
         }
         this.show(img, job, cached.proxy, job.frameSpec.pixelSize ? 1 : cached.proxy);
+        if (this.perfOn) this.notePerf(job, { evalMs: 0, decodeMs: 0, gpuWaitMs: 0, cached: true });
         return;
       }
       this.cache.clear(); // undecodable: render it again
     }
     const started = performance.now();
+    const decodeBefore = this.perfOn ? perf.decode.waitMs : 0;
     let res: EvalResult;
     try {
       res = await this.deps.gate.evaluateHeld({
@@ -1006,6 +1084,9 @@ export class PlayerImpl implements Player {
     }
     this.errors = res.errors;
     this.timings = res.timings;
+    const evalMs = this.perfOn ? performance.now() - started : 0;
+    const decodeMs = this.perfOn ? Math.min(evalMs, perf.decode.waitMs - decodeBefore) : 0;
+    let gpuWaitMs = 0;
     try {
     const stale = this.keyDirty || job.key !== this.key;
     const v = res.value;
@@ -1034,10 +1115,13 @@ export class PlayerImpl implements Player {
       }
       if (this.playing && this.proxyMode === 'auto' && !job.frameSpec.pixelSize) {
         // Wait for the GPU so the measurement is real and the queue cannot run away.
+        const waitFrom = this.perfOn ? performance.now() : 0;
         await this.gpu.device.queue.onSubmittedWorkDone().catch(() => undefined);
+        if (this.perfOn) gpuWaitMs = performance.now() - waitFrom;
         const budget = 1000 / job.graph.project.fps;
         this.ctl.report(performance.now() - started, budget, performance.now());
       }
+      if (this.perfOn && this.playing && !job.final) this.notePerf(job, { evalMs, decodeMs, gpuWaitMs, nodes: res.timings, cached: false });
     } else if (!stale) {
       if (job.final) this.fullReq = null;
       this.clearOutput();
@@ -1055,7 +1139,10 @@ export class PlayerImpl implements Player {
     this.rendered = { width: image.width, height: image.height };
     if (sizeProxy >= 0.999) this.fullReal = this.rendered;
     const full = this.fullReal ?? { width: Math.max(1, Math.round(image.width / sizeProxy)), height: Math.max(1, Math.round(image.height / sizeProxy)) };
-    if (!this.size || this.size.width !== full.width || this.size.height !== full.height) this.size = full;
+    if (!this.size || this.size.width !== full.width || this.size.height !== full.height) {
+      this.size = full;
+      this.updateCeiling();
+    }
     if (!this.present(image)) return;
     this.setShown(image);
     this.shownKey = job.key;
@@ -1065,6 +1152,18 @@ export class PlayerImpl implements Player {
     this.fpsHead = (this.fpsHead + 1) % FPS_RING;
     this.fpsCount = Math.min(FPS_RING, this.fpsCount + 1);
     this.markChanged();
+  }
+
+  /** One frame was shown while playing: add it to the readout and count the frames the clock passed over. */
+  private notePerf(job: Job, m: { evalMs: number; decodeMs: number; gpuWaitMs: number; nodes?: ReadonlyMap<string, number>; cached: boolean }): void {
+    if (!this.playing) return;
+    const n = this.totalFrames;
+    if (this.lastPerfFrame >= 0 && n > 0) {
+      const gap = (((job.frame - this.lastPerfFrame) % n) + n) % n;
+      if (gap > 1) this.agg.skipped += gap - 1;
+    }
+    this.lastPerfFrame = job.frame;
+    this.agg.add({ at: performance.now(), evalMs: m.evalMs, decodeMs: m.decodeMs, drawMs: this.lastDrawMs, gpuWaitMs: m.gpuWaitMs, nodes: m.nodes, cached: m.cached });
   }
 
   private setShown(img: Shown | null): void {
@@ -1088,7 +1187,9 @@ export class PlayerImpl implements Player {
         canvas.style.width = `${this.size.width}px`;
         canvas.style.height = `${this.size.height}px`;
       }
+      const from = this.perfOn ? performance.now() : 0;
       this.gpu.blit(img, ctx.getCurrentTexture(), true);
+      if (this.perfOn) this.lastDrawMs = performance.now() - from;
       return true;
     } catch (err) {
       this.errors = new Map([['canvas', errorMessage(err)]]);
@@ -1117,6 +1218,7 @@ export class PlayerImpl implements Player {
   private onDeviceLost(message: string): void {
     this.lostMessage = `The GPU device was lost (${message || 'unknown reason'}). Reload the page to continue.`;
     this.playing = false;
+    this.deps.library.playing = false;
     cancelAnimationFrame(this.raf);
     this.errors = new Map([['device', this.lostMessage]]);
     this.markChanged();

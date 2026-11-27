@@ -14,6 +14,7 @@ import { getLive } from '../store/live';
 import { recordLabel, recorderForViewer, recorderSettings } from '../store/recorder';
 import { countdown, stopMotionForSelection } from '../store/stopMotion';
 import { PaintOverlay } from './PaintOverlay';
+import { PerfOverlay, perfStore, setPerfPanel } from './PerfOverlay';
 import { PointsOverlay } from './PointsOverlay';
 import { XformGizmo } from './XformGizmo';
 import { gizmoTarget } from './gizmoTarget';
@@ -101,11 +102,16 @@ export function Viewer() {
     if (canvas.current) canvas.current.style.imageRendering = v.zoom >= 1 ? 'pixelated' : 'auto';
     const pct = Math.round(v.zoom * 100);
     setZoomPct((p) => (p === pct ? p : pct));
-  }, [iw, ih]);
+    // tell the player how big the picture really is on the screen: playback does not render finer than that
+    io.player.setViewerTarget({ cssWidth: iw * v.zoom, cssHeight: ih * v.zoom, dpr: window.devicePixelRatio || 1 });
+  }, [iw, ih, io]);
 
   useEffect(() => {
     io.player.setCanvas(canvas.current);
-    return () => io.player.setCanvas(null);
+    return () => {
+      io.player.setCanvas(null);
+      io.player.setViewerTarget(null);
+    };
   }, [io]);
 
   useEffect(() => {
@@ -265,7 +271,9 @@ export function Viewer() {
   const [more, setMore] = useState<{ x: number; y: number } | null>(null);
   const frameItems = useFrameMenuItems({ frame: level >= 2, pix: level >= 1 });
   const openOutput = (x: number, y: number) => live.ui.set((s) => ({ ...s, outputMenu: { x, y } }));
-  const moreItems: MenuItem[] = [];
+  const perfOn = useSelector(perfStore, (st) => st.on);
+  // First in the list, so it is reachable on a phone where this menu is long: the Performance readout (off by default)
+  const moreItems: MenuItem[] = [{ label: `${perfOn ? '✓ ' : ''}Performance readout`, onClick: () => setPerfPanel(io, !perfOn) }];
   if (level >= 5) {
     moreItems.push(
       { head: 'Render' },
@@ -390,6 +398,7 @@ export function Viewer() {
         <canvas ref={canvas} className="rs-viewer__canvas" style={{ width: iw, height: ih }} />
         <CompareOverlay stage={stage} box={box} />
       </div>
+      <PerfOverlay />
       <ViewerRecordButton />
       <ViewerStopMotionButtons />
 
