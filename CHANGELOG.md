@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.49.0] - 2026-11-27
+
+### Changed
+- **Smoother playback on phones.** While playing, the picture is no longer rendered finer than the viewer can show: a 1080 x 1920 clip in a phone-sized viewer now plays at half size instead of full size through every effect (paused frames and exports stay full size). The saved-frame cache now keeps the frames the playhead needs next instead of throwing out the oldest, so a clip longer than the cache no longer recomputes everything on every loop. The next video frame is decoded ahead while playing. Region Overlay draws in one pass when glow is off.
+
+### Added
+- **Performance readout.** Off by default; turn it on from the viewer's "..." menu or the More tab. While playing it shows frames per second against the project rate, time waiting for video frames, time in effects with the slowest nodes named, the size being rendered, how many frames are saved, frames skipped, and how the video is decoded. **Copy performance report** copies these as text for bug reports. The times are estimates measured on the processor side.
+
 ## [0.48.0] - 2026-11-27
 
 ### Added

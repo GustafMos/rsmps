@@ -7,6 +7,8 @@
  * the source, through a 2D canvas).
  */
 
+import { noteUpload, perf } from './perf';
+
 export type ExternalSource = ImageBitmap | HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | OffscreenCanvas | VideoFrame;
 type Kind = 'frame' | 'video' | 'other';
 
@@ -42,6 +44,7 @@ export async function uploadExternal(
   natural?: { width: number; height: number },
 ): Promise<void> {
   const dest = { texture, premultipliedAlpha: true };
+  if (perf.enabled) noteUpload(width, height);
   const kind = kindOf(source);
   const resize = !!natural && (natural.width !== width || natural.height !== height);
   if (!resize && !(kind !== 'other' && rejected.has(kind))) {

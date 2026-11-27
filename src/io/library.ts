@@ -31,6 +31,7 @@ import type { SignalRouter } from './signals';
 import { uploadExternal } from './upload';
 import { ElementPool, ElementVideo, codecLabel, snapTime, unsupportedHint, unsupportedMessage } from './video-element';
 import { TimedFrameStore } from './lru';
+import { noteDecoded, perf } from './perf';
 import { cssFont, wrapLines } from './text';
 import { errorMessage, uniqueId } from './util';
 
@@ -177,7 +178,7 @@ class VideoReader {
   }
 
   /** The decoded sample covering `t`, plus the time range it is valid for. Must run inside `run`. */
-  async sampleAt(t: number): Promise<{ sample: VideoSample; start: number; end: number } | null> {
+  async sampleAt(t: number): Promise<{ sample: VideoSample; start: number; end: number; seeked: boolean } | null> {
     await this.init();
     const cursorOk = this.iter && this.cur && t >= this.cur.timestamp && t - this.cur.timestamp <= SEEK_AHEAD_SECONDS;
     if (!cursorOk) this.seek(t);
@@ -223,7 +224,7 @@ class VideoReader {
     }
     const nominal = cur.duration > 0 ? cur.duration : 1 / this.fps;
     const end = this.exhausted ? Infinity : Math.max(this.nextStart, cur.timestamp + nominal * 0.5);
-    return { sample: cur, start: cur.timestamp, end };
+    return { sample: cur, start: cur.timestamp, end, seeked: !cursorOk };
   }
 
   private seek(t: number): void {
@@ -720,7 +721,37 @@ export class Library implements MediaLibrary {
       }
       return p;
     }
-    return this.decodeVideoFrame(info, size, group, t);
+    this.readAheadVideo(info, size, group, t);
+    if (!perf.enabled) return this.decodeVideoFrame(info, size, group, t);
+    const began = performance.now();
+    return this.decodeVideoFrame(info, size, group, t).finally(() => {
+      perf.decode.waitMs += performance.now() - began;
+    });
+  }
+
+  /** True while the player is playing: video frames are then decoded a little ahead (see `readAheadVideo`). Set by the player. */
+  playing = false;
+  /** The clip time each video was last asked for, to see a steady forward step. */
+  private lastAsk = new Map<string, number>();
+
+  /**
+   * While playing, the frame after the one just asked for is decoded and uploaded in the background (the step is the one between the
+   * last two requests, so a project frame rate that differs from the clip's is followed). The next evaluation then finds it in the store
+   * instead of waiting for the decoder; a request that arrives while it is still being decoded waits for the same decode (the decoder
+   * queue is in order and re-checks the store). Skipped for exports, jumps, looping back, the last frame and files the browser's own
+   * player has to show (it could only seek).
+   */
+  private readAheadVideo(info: AssetInfo, size: { bucket: number; width: number; height: number }, group: string, t: number): void {
+    const prev = this.lastAsk.get(info.id);
+    this.lastAsk.set(info.id, t);
+    if (!this.playing || this.exact || prev === undefined) return;
+    const step = t - prev;
+    if (!(step > 1e-6) || step > 0.25) return;
+    const next = t + step;
+    if (next >= info.duration - 1e-3 || this.frames.find(group, next)) return;
+    if (this.elementAssets.has(info.id) || this.forceElement || this.isHap(info)) return;
+    if (perf.enabled) perf.decode.ahead++;
+    void this.decodeVideoFrame(info, size, group, next).catch(() => undefined);
   }
 
   private takeTexture(width: number, height: number): GPUTexture {
@@ -826,6 +857,12 @@ export class Library implements MediaLibrary {
       if (again) return again;
       const got = await r.sampleAt(t);
       if (!got) return null;
+      if (perf.enabled) {
+        perf.decode.requests++;
+        if (got.seeked) perf.decode.seeks++;
+        else perf.decode.sequential++;
+        noteDecoded(`${group}@${Math.round(got.start * 1000)}`);
+      }
       const texture = this.takeTexture(size.width, size.height);
       try {
         await r.upload(got.sample, size.width, size.height, texture, this.gpu.device);
@@ -993,6 +1030,7 @@ export class Library implements MediaLibrary {
     });
     if (!frame) return null;
     const f: Frame = frame;
+    if (perf.enabled) perf.decode.browser++;
     if (this.infos.has(info.id)) this.frames.put(wasExact ? group : approxGroup, snapped, end, this.bytesOf(f), f);
     return f;
   }

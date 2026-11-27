@@ -7,6 +7,7 @@ import type { Engine } from '../engine/engine';
 import type { AudioDevice, PcmAudio, RecordedTake, RecordingState } from '../engine/audio/api';
 import type { Registry } from '../engine/define';
 import type { CameraInfo } from './live';
+import type { PerfSnapshot } from './perf';
 import type { AssetInfo, CameraControls, GraphDoc, Host, LiveSource, ProcessLive, ProcessResult, Value } from '../engine/types';
 import type { PendingProcess, ProcessStatus } from '../engine/process';
 import type { BlankSheetOptions } from './print/blank';
@@ -134,6 +135,15 @@ export interface Player {
   step(frames: number): void;
   /** Proxy policy: 'auto' lowers resolution while playing to hold the project fps; a number forces it. */
   setProxy(mode: 'auto' | number): void;
+  /**
+   * How big the picture is on the screen (CSS pixels, after zoom) and the screen's pixel ratio. While playing, the preview is never
+   * rendered finer than that (see playbackProxyCap); a paused frame is still rendered at full size. null = unknown.
+   */
+  setViewerTarget(target: { cssWidth: number; cssHeight: number; dpr: number } | null): void;
+  /** The Performance panel: while on, playback is measured (see perf.ts); off, nothing is timed. */
+  setPerf(on: boolean): void;
+  /** What the Performance panel shows, or null while it is off. */
+  perfSnapshot(): PerfSnapshot | null;
   /**
    * `performance.now()` at which the evaluation that is in flight right now began, or null when nothing is being rendered. One
    * evaluation is one frame of the viewed node. For the watchdog: a number that stays the same for many seconds is a frame that
