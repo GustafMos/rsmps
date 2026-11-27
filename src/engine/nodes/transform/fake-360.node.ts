@@ -147,6 +147,18 @@ export default defineNode({
   category: 'transform',
   description: 'Fakes a 360 degree panorama from one or two ordinary pictures, for example a phone front and back camera. It is a fake: real pixels only exist where the cameras looked, and the rest is filled in by stretching, mirroring or blurring the edges. Shows it as a 2:1 panorama, a tiny planet or a look-around view.',
   keywords: ['360', 'fake 360', 'panorama', 'equirectangular', 'sphere', 'spherical', 'tiny planet', 'little planet', 'look around', 'vr', 'front back camera', 'selfie camera', 'ultrawide', 'reproject', 'photosphere', 'fill gaps', 'fake'],
+  guide: {
+    does: 'Fakes a 360 degree panorama from one or two ordinary pictures, for example the front and back camera of a phone.',
+    steps: [
+      'Wire the front picture into Front.',
+      'Wire the back picture into Back if you have one.',
+      'Pick how it is shown: a 2:1 panorama, a tiny planet or a look-around view.',
+    ],
+    needs: [
+      { input: 'front', hint: 'The main picture. The panorama is built around it.' },
+    ],
+    seeAlso: ['sweep-360', 'stabilize'],
+  },
   inputs: {
     front: { type: 'image', required: true, label: 'Front' },
     back: { type: 'image', label: 'Back' },

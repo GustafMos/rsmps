@@ -7,7 +7,19 @@ export default defineNode({
   category: 'track',
   description: 'Grows, shrinks, moves and reshapes the boxes of regions: scale them, add padding, offset them, force an aspect ratio, and keep them inside the frame.',
   keywords: ['grow', 'shrink', 'expand', 'pad', 'offset', 'aspect', 'square', 'clamp', 'box', 'region'],
-  inputs: { regions: { type: 'regions', required: true, label: 'Regions' } },
+  guide: {
+    does: 'Makes the region boxes bigger, smaller, moved or a different shape.',
+    steps: [
+      'Wire regions into Regions to change.',
+      'Set Scale, padding or offset.',
+      'Wire the result into the node that uses the boxes.',
+    ],
+    needs: [
+      { input: 'regions', hint: 'The regions whose boxes you want to change.' },
+    ],
+    seeAlso: ['region-filter', 'region-fx'],
+  },
+  inputs: { regions: { type: 'regions', required: true, label: 'Regions to change' } },
   outputs: { regions: { type: 'regions', label: 'Regions' } },
   params: {
     scale: { type: 'number', default: 1, min: 0.05, max: 10, step: 0.01, label: 'Scale', hint: '1 keeps the size, 1.5 is half again as big.' },

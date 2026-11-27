@@ -11,7 +11,19 @@ export default defineNode({
     'Finds areas of one picked color, such as a tracking marker or a colored prop, and outputs them as regions. Colors are compared the way the eye sees them (OKLab), so the tolerance feels even across hues.',
   keywords: ['detect', 'color', 'colour', 'marker', 'track', 'prop', 'find', 'key', 'detect color'],
   cpu: true,
-  inputs: { image: { type: 'image', required: true, label: 'Image' } },
+  guide: {
+    does: 'Finds the places that have one color you pick, and gives you their boxes (regions).',
+    steps: [
+      'Wire a picture into Picture to search.',
+      'Pick the color in Color to find, then widen Tolerance until the whole object is found.',
+      'Wire Regions into Track, then into Effects On Regions or Region Overlay.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The picture to search for the color.' },
+    ],
+    seeAlso: ['track', 'region-fx', 'region-overlay', 'detect-blobs'],
+  },
+  inputs: { image: { type: 'image', required: true, label: 'Picture to search' } },
   outputs: { regions: { type: 'regions', label: 'Regions' }, mask: { type: 'mask', label: 'Detected pixels' } },
   params: {
     color: { type: 'color', default: [1, 0.15, 0.1, 1], label: 'Color to find' },

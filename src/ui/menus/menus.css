@@ -66,3 +66,8 @@
 .rs-add__ctx { display: flex; gap: var(--s-1); padding: var(--s-1) var(--s-2); border-top: 1px solid var(--line); }
 .rs-add__ctx .rs-btn { flex: 1; justify-content: center; gap: var(--s-1); }
 .rs-add__stack { flex: none; color: var(--text-dim); }
+
+/* Regions: ready-made chains offered when a picture node is selected */
+.rs-add__setups { padding: 0 var(--s-2) var(--s-2); border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1)); }
+.rs-add__setuprow { display: flex; flex-wrap: wrap; gap: 6px; }
+.rs-add__setup { min-height: 34px; font-size: var(--fs-sm); text-align: left; }

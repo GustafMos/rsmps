@@ -19,7 +19,7 @@ export const MAX_PARAM_ROWS = 6;
 export interface IoRow {
   kind: 'io';
   y: number;
-  input?: { port: string; label: string; type: SocketType; multi?: boolean };
+  input?: { port: string; label: string; type: SocketType; multi?: boolean; required?: boolean; hint?: string };
   output?: { port: string; label: string; type: SocketType };
 }
 export interface ParamRow {
@@ -130,7 +130,7 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
   let y = HEAD_H + PAD_Y;
   let summaryY: number | null = null;
 
-  const inputs: { port: string; label: string; type: SocketType; multi?: boolean; topFirst?: boolean; firstNote?: string; addLabel?: string }[] = [];
+  const inputs: { port: string; label: string; type: SocketType; multi?: boolean; required?: boolean; hint?: string; topFirst?: boolean; firstNote?: string; addLabel?: string }[] = [];
   const outputs: { port: string; label: string; type: SocketType }[] = [];
   if (def) {
     const wiredIo = new Set(view.wiredIo ?? []);
@@ -149,7 +149,7 @@ export function layoutNode(node: NodeInstance, def: AnyNodeDef | undefined, miss
       } catch { /* a broken label must not break the node */ }
       return view.labels?.[`${dir}:${port}`] ?? own ?? d.label ?? port;
     };
-    for (const [port, d] of Object.entries(def.inputs as InputSchema)) if (shown('in', port, d)) inputs.push({ port, label: labelOf('in', port, d), type: d.type, multi: !!d.multi, topFirst: d.order === 'top-first', firstNote: d.firstNote, addLabel: d.addLabel });
+    for (const [port, d] of Object.entries(def.inputs as InputSchema)) if (shown('in', port, d)) inputs.push({ port, label: labelOf('in', port, d), type: d.type, multi: !!d.multi, required: !!d.required, hint: (d as { hint?: string }).hint, topFirst: d.order === 'top-first', firstNote: d.firstNote, addLabel: d.addLabel });
     for (const [port, d] of Object.entries(def.outputs as OutputSchema)) if (shown('out', port, d)) outputs.push({ port, label: labelOf('out', port, d), type: d.type });
   } else if (missing) {
     for (const port of missing.inputs) inputs.push({ port, label: port, type: 'image' });

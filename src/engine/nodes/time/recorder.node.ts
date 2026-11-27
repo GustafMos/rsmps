@@ -25,6 +25,18 @@ export default defineNode({
   category: 'time',
   description: 'Records the picture wired into it, live, with the sound wired into it (or the sound that is playing), into a clip in Media. Passes the picture on unchanged, so it can sit anywhere in a chain. Press Record in its settings.',
   keywords: ['record', 'capture', 'live', 'take', 'performance', 'jam', 'screen record', 'save clip', 'recorder output', 'endless', 'run on'],
+  guide: {
+    does: 'Records the picture (and sound) that go through it into a clip in Media, and passes the picture on unchanged.',
+    steps: [
+      'Wire the picture you want to record into Image. The node can sit anywhere in a chain.',
+      'Wire a sound into Sound, or leave it empty to record the sound that is playing.',
+      'Open its settings and press Record. The finished clip appears in Media.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The picture to record.' },
+    ],
+    seeAlso: ['media-in', 'image-out'],
+  },
   inputs: { image: { type: 'image', required: true, label: 'Image' }, audio: { type: 'audio', label: 'Sound' } },
   outputs: { image: { type: 'image', label: 'Image' }, audio: { type: 'audio', label: 'Sound' } },
   params: {

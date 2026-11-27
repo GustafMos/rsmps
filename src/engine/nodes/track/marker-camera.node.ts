@@ -158,6 +158,18 @@ export default defineNode({
     'Anchors 3D objects in the room with a printed square marker. Print the marker (button below), lay it flat, and point the camera at it: this node finds it in the picture and outputs a 3D camera that stands exactly where your phone is, so a 3D Object wired to it stands on the marker and stays there while you walk round it. Wire a Webcam (back camera) or a filmed clip into Picture in; wire Camera into the 3D Object; merge the object over this node\'s Picture output.',
   keywords: ['ar', 'augmented reality', 'marker', 'fiducial', 'aruco', 'anchor', 'grounded', 'pose', 'tracking', 'camera', '3d', 'phone', 'walk', 'room', 'table', 'print', 'qr', 'match move', 'camera tracking'],
   cpu: true,
+  guide: {
+    does: 'Finds a printed square marker in the camera picture and gives you a 3D camera that stays fixed to the room.',
+    steps: [
+      'Print the marker from its settings and lay it flat.',
+      'Wire the live camera picture into Picture in.',
+      'Wire Camera into the camera socket of your 3D scene so 3D objects stand on the marker.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The live camera picture that can see the marker.' },
+    ],
+    seeAlso: ['world-ar', 'region-overlay'],
+  },
   inputs: {
     image: { type: 'image', required: true, lazy: true, label: 'Picture in' },
     sticker: { type: 'image', label: 'Flat picture' },

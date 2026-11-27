@@ -8,6 +8,7 @@ import { downloadText, nodeFileName } from '../dialogs/GroupDialogs';
 import { processSelection } from '../store/processes';
 import { bindingsOf } from '../keymap';
 import { familyMembers } from '../lib/convert';
+import { REGIONS_SETUPS, regionsSetupAvailable } from '../lib/regions-setup';
 
 export function NodeContextMenu() {
   const app = useApp();
@@ -67,6 +68,13 @@ export function NodeContextMenu() {
           { sep: true } as MenuItem,
           { head: 'Convert to…' } as MenuItem,
           ...family.map((m): MenuItem => ({ label: m.title, disabled: m.id === node!.type, onClick: () => ed.convertNodeType(node!.id, m.id) })),
+        ]
+      : []),
+    ...(!multi && node && !boundary && !isGroup && regionsSetupAvailable(ed.level, ed.registry, node.id)
+      ? [
+          { sep: true } as MenuItem,
+          { head: 'Regions: set up in one step' } as MenuItem,
+          ...REGIONS_SETUPS.map((s): MenuItem => ({ label: s.label, onClick: () => ed.addRegionsSetup(node.id, s.id) })),
         ]
       : []),
     { sep: true },

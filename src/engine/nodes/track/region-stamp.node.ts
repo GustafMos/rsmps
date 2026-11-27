@@ -12,10 +12,24 @@ export default defineNode({
   description:
     'Places a sprite (an image, flare, emoji, logo...) on every region. Fit it to each box or give it a fixed size, rotate it, and wire several images into Sprites to give different objects different pictures.',
   keywords: ['stamp', 'sprite', 'sticker', 'emoji', 'flare', 'attach', 'overlay', 'place', 'decorate', 'regions'],
+  guide: {
+    does: 'Sticks a picture (an emoji, a logo, a flare) onto every region.',
+    steps: [
+      'Wire your picture into Picture.',
+      'Wire regions into Regions (boxes).',
+      'Wire the sticker picture into Sprites (stickers). Wire several to give different things different stickers.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The picture to stick things onto.' },
+      { input: 'regions', hint: 'Where to stick them.' },
+      { input: 'sprites', hint: 'The sticker pictures. Nothing is drawn without one.' },
+    ],
+    seeAlso: ['track', 'detect-motion', 'region-overlay'],
+  },
   inputs: {
-    image: { type: 'image', required: true, label: 'Image' },
-    regions: { type: 'regions', required: true, label: 'Regions' },
-    sprites: { type: 'image', multi: true, label: 'Sprites' },
+    image: { type: 'image', required: true, label: 'Picture' },
+    regions: { type: 'regions', required: true, label: 'Regions (boxes)' },
+    sprites: { type: 'image', multi: true, label: 'Sprites (stickers)' },
   },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: false,

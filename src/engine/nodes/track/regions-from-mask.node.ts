@@ -10,7 +10,18 @@ export default defineNode({
     'Turns any mask into regions: every separate white island becomes a region with a box. This makes every mask node (subject, color key, painted mask...) a detector you can track and decorate.',
   keywords: ['mask', 'regions', 'detect', 'blobs', 'islands', 'connected', 'components', 'boxes', 'subject'],
   cpu: true,
-  inputs: { mask: { type: 'mask', required: true, label: 'Mask' } },
+  guide: {
+    does: 'Turns every separate white area of a mask into a region (a box you can track and decorate).',
+    steps: [
+      'Wire any mask into Mask (white parts): a subject cut-out, a color key, a painted mask.',
+      'Wire Regions into Track, then into Effects On Regions or Region Overlay.',
+    ],
+    needs: [
+      { input: 'mask', hint: 'The mask whose white areas become regions.' },
+    ],
+    seeAlso: ['track', 'region-fx', 'detect-blobs'],
+  },
+  inputs: { mask: { type: 'mask', required: true, label: 'Mask (white parts)' } },
   outputs: { regions: { type: 'regions', label: 'Regions' } },
   params: {
     threshold: { type: 'number', default: 0.5, min: 0.01, max: 0.99, step: 0.01, label: 'Threshold', hint: 'Mask values above this count as inside.' },

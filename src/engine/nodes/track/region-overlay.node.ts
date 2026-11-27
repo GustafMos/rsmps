@@ -73,9 +73,22 @@ export default defineNode({
   description:
     'Draws a detection HUD over the image: boxes, rounded boxes, corner brackets, ellipses or crosshairs, with optional glow, fill, center dot and text labels. Turn on "Overlay only" to get just the HUD on transparent so it can be exported with alpha.',
   keywords: ['hud', 'box', 'brackets', 'label', 'glow', 'detection', 'overlay', 'bounding', 'draw', 'stardetect', 'crosshair'],
+  guide: {
+    does: 'Draws boxes, brackets and labels on the regions, on top of your picture.',
+    steps: [
+      'Wire your picture into Picture.',
+      'Wire the Regions of a Detect node (through Track, so each box keeps its number) into Regions (boxes).',
+      'Pick a Style, a color and whether to show labels.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The picture to draw on.' },
+      { input: 'regions', hint: 'The things to draw boxes around: they come from a Detect node.' },
+    ],
+    seeAlso: ['detect-motion', 'detect-blobs', 'track', 'region-fx'],
+  },
   inputs: {
-    image: { type: 'image', required: true, label: 'Image' },
-    regions: { type: 'regions', required: true, label: 'Regions' },
+    image: { type: 'image', required: true, label: 'Picture' },
+    regions: { type: 'regions', required: true, label: 'Regions (boxes)' },
   },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: false,
