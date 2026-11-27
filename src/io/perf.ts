@@ -121,10 +121,20 @@ export interface PerfWindow {
 export class PerfAggregator {
   private samples: FrameSample[] = [];
   skipped = 0;
+  /** Saved frames shown, and how many of them were not the size the viewer wanted. */
+  cachedShown = 0;
+  cachedWrongSize = 0;
+  /** Pictures that came out of order (a frame older than the one before it, not a loop wrap). */
+  orderErrors = 0;
+  /** Longest wait between two new pictures (ms). */
+  longestGapMs = 0;
+  private lastAt = -1;
 
   constructor(private windowMs = 2000) {}
 
   add(s: FrameSample): void {
+    if (this.lastAt >= 0) this.longestGapMs = Math.max(this.longestGapMs, s.at - this.lastAt);
+    this.lastAt = s.at;
     this.samples.push(s);
     const cut = s.at - this.windowMs * 2;
     let i = 0;
@@ -135,6 +145,11 @@ export class PerfAggregator {
   clear(): void {
     this.samples = [];
     this.skipped = 0;
+    this.cachedShown = 0;
+    this.cachedWrongSize = 0;
+    this.orderErrors = 0;
+    this.longestGapMs = 0;
+    this.lastAt = -1;
   }
 
   summary(now: number, top = 3): PerfWindow {
@@ -194,6 +209,10 @@ export interface PerfSnapshot {
   /** Share of full size (1 = full). */
   scale: number;
   cachedFrames: number;
+  cachedShown: number;
+  cachedWrongSize: number;
+  orderErrors: number;
+  longestGapMs: number;
   totalFrames: number;
   decode: DecodeStats & { repeats: number; ahead: number; waitMs: number };
   uploads: { count: number; pixels: number; sizes: string[] };
@@ -262,6 +281,9 @@ export function buildReport(r: ReportInput): string {
   lines.push(`Frames shown per second: ${f1(w.shownPerSecond)} of ${f0(s.projectFps)} wanted; skipped: ${s.skipped}`);
   if (s.rendered && s.full) lines.push(`Rendering at ${s.rendered.width} x ${s.rendered.height} (${scaleWords(s.scale)}); full size is ${s.full.width} x ${s.full.height}`);
   lines.push(`Saved frames: ${s.cachedFrames} of ${s.totalFrames}; frames shown straight from them: ${f0(w.cachedShare * 100)}%`);
+  lines.push(`Cached frames shown: ${s.cachedShown}, of which ${s.cachedWrongSize} at a different size than the viewer wants`);
+  lines.push(`Frame order errors: ${s.orderErrors}`);
+  lines.push(`Longest gap between new pictures: ${f0(s.longestGapMs)} ms`);
   lines.push('');
   lines.push(`Waiting for video frames: ${f1(w.decodeAvg)} ms per frame`);
   lines.push(`Effects (whole graph): ${f1(w.evalAvg)} ms average, ${f1(w.evalP95)} ms slowest 1 in 20`);

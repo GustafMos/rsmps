@@ -75,19 +75,26 @@ export class RenderedFrameCache<I> {
     return this.lru.maxBytes;
   }
 
-  /** The cached frame if it is at least as sharp as `minProxy`. */
-  get(frame: number, minProxy: number): CachedFrame<I> | undefined {
+  /**
+   * The cached frame if it is at least as sharp as `minProxy` and, when `maxProxy` is given, not sharper than that. Playback passes
+   * the same value for both: a loop made of pictures of different sizes breathes (every size change resizes the canvas and re-filters
+   * the picture), so only frames of exactly the size being rendered are replayed.
+   */
+  get(frame: number, minProxy: number, maxProxy = Infinity): CachedFrame<I> | undefined {
     const e = this.lru.peek(frame);
-    if (!e || e.proxy < minProxy - 1e-6) return undefined;
+    if (!e || e.proxy < minProxy - 1e-6 || e.proxy > maxProxy + 1e-6) return undefined;
     this.lru.get(frame);
     return e;
   }
 
-  /** Returns false (and does not keep `image`) when a sharper frame is already cached. */
-  put(frame: number, image: I, proxy: number, bytes: number): boolean {
+  /**
+   * Returns false (and does not keep `image`) when a sharper frame is already cached, unless `replaceSharper` (playing: the sharper
+   * one would not be replayed at this size anyway, so the frame of the size in use takes its place).
+   */
+  put(frame: number, image: I, proxy: number, bytes: number, replaceSharper = false): boolean {
     const old = this.lru.peek(frame);
     // Never replace a sharper frame with a blurrier one.
-    if (old && old.proxy > proxy + 1e-6) return false;
+    if (old && old.proxy > proxy + 1e-6 && !replaceSharper) return false;
     this.lru.set(frame, { image, proxy }, bytes);
     if (!this.lru.has(frame)) return false; // the new frame is the one needed last: it gave way to frames that come sooner
     this.frames.add(frame);

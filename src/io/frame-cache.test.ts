@@ -51,6 +51,17 @@ describe('RenderedFrameCache eviction by distance from the playhead', () => {
     for (const f of [1, 50, 99]) cache.put(f, f, 1, 10);
     expect([...cache.frames].sort((a, b) => a - b)).toEqual([1, 99]);
   });
+  it('replays only frames of the size being rendered while playing; the right size replaces a sharper one', () => {
+    const cache = new RenderedFrameCache<number>(100, () => undefined);
+    cache.put(3, 1, 0.5, 10);
+    expect(cache.get(3, 1, 1)).toBeUndefined(); // blurrier than wanted
+    expect(cache.get(3, 0.5, 0.5)?.proxy).toBe(0.5);
+    cache.put(4, 1, 1, 10);
+    expect(cache.get(4, 0.5, 0.5)).toBeUndefined(); // sharper: would change the picture size mid-loop
+    expect(cache.put(4, 2, 0.5, 10)).toBe(false);
+    expect(cache.put(4, 2, 0.5, 10, true)).toBe(true);
+    expect(cache.get(4, 0.5, 0.5)?.image).toBe(2);
+  });
   it('does not replace a sharper frame with a blurrier one', () => {
     const cache = new RenderedFrameCache<number>(100, () => undefined);
     cache.put(1, 1, 1, 10);

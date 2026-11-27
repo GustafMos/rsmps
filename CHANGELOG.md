@@ -4,6 +4,11 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.53.1] - 2026-11-27
+
+### Fixed
+- **Animations no longer wobble once cached.** While playing, the preview size adjusts itself during the first loop, and frames were saved at whatever size was in use at that moment. From the second loop on, saved frames of different sizes were replayed next to each other, so the picture jumped in size and sharpness from frame to frame. Playback now only replays saved frames of exactly the size currently in use, and a frame of that size replaces a sharper one. Saved frames are also stored at higher quality. The copied performance report has three new lines to tell remaining problems apart: saved frames shown at a different size, frame order errors, and the longest gap between new pictures.
+
 ## [0.53.0] - 2026-11-27
 
 ### Changed

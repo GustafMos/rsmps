@@ -78,6 +78,10 @@ describe('report', () => {
     full: { width: 1080, height: 1920 },
     scale: 0.5,
     cachedFrames: 412,
+    cachedShown: 30,
+    cachedWrongSize: 2,
+    orderErrors: 0,
+    longestGapMs: 41,
     totalFrames: 772,
     decode: { requests: 300, sequential: 290, seeks: 10, browser: 0, repeats: 2, ahead: 100, waitMs: 3000 },
     uploads: { count: 300, pixels: 155_520_000, sizes: ['540x960'] },
@@ -105,9 +109,23 @@ describe('report', () => {
     expect(text).toContain('Rendering at 540 x 960 (half size); full size is 1080 x 1920');
     expect(text).toContain('Saved frames: 412 of 772');
     expect(text).toContain('Media In: 14.0');
+    expect(text).toContain('Cached frames shown: 30, of which 2 at a different size than the viewer wants');
+    expect(text).toContain('Frame order errors: 0');
+    expect(text).toContain('Longest gap between new pictures: 41 ms');
     expect(text).toContain('media-in > detect-blobs > track > region-overlay > output');
     expect(text).toContain('GPU time is not measured');
     expect(text).toContain('sequential (fast)');
     expect(text.split('\n').length).toBeLessThan(40);
+  });
+});
+
+describe('cadence', () => {
+  it('tracks the longest gap between new pictures', () => {
+    const a = new PerfAggregator();
+    const base = { evalMs: 1, decodeMs: 0, drawMs: 0, gpuWaitMs: 0, cached: false };
+    for (const at of [0, 16, 32, 90, 106]) a.add({ at, ...base });
+    expect(a.longestGapMs).toBe(58);
+    a.clear();
+    expect(a.longestGapMs).toBe(0);
   });
 });
