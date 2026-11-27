@@ -16,7 +16,7 @@
  * object's distance (xr-math `layerCorners`): turning the phone keeps the object exactly in place, and walking keeps its middle in
  * place while its perspective is a frame or two old.
  */
-import type { Quat, Vec3 } from '../../engine/lib/motion-math';
+import { qConj, qExp, qLog, qMul, qNorm, type Quat, type Vec3 } from '../../engine/lib/motion-math';
 import { FEED_MAX_SIDE } from './camera-feed';
 import type { WorldMoment, WorldSample } from '../../engine/lib/world-take';
 import { readLightEstimate, smoothLight, type WorldLight } from '../../engine/lib/xr-light';
@@ -90,6 +90,8 @@ export interface ArLoopState {
   /** Camera frames per second, and finished pictures of the object per second. */
   fps: number;
   pictureFps: number;
+  /** How old the pose of the object's picture is when it is drawn, in milliseconds (averaged). 0 = no picture yet. */
+  pictureBehindMs: number;
   /** How far the object is raised above its surface, metres (0 = on it). */
   height: number;
   /** The object is held by a browser anchor (false = a fixed pose in the room). */
@@ -139,6 +141,8 @@ export interface ArLoopDeps {
    * walk and never starts over at the project's loop. The clock is part of the take.
    */
   physics?: boolean;
+  /** Render the object's picture for where the phone will be when it arrives (default true). False only to measure what that gains. */
+  predictPose?: boolean;
   now(): number;
   /** `new XRRigidTransform(position, orientation)`; absent in browsers without it (then a moved object is not re-anchored). */
   makeTransform?: (p: Vec3, q: Quat) => unknown;
@@ -241,6 +245,10 @@ export class ArLoop {
   private frameTimes: number[] = [];
   private pictureTimes: number[] = [];
   private lastSeq = -1;
+  /** When each picture's moment was asked for, how fast the phone is moving, and how old pictures are when drawn (averaged). */
+  private requestedAt = new WeakMap<WorldMoment, number>();
+  private motion: { t: number; pose: XrPose; v: Vec3; w: Vec3 } | null = null;
+  private behindMs = 0;
   private lastStateAt = -1e9;
   private readonly onEnd = () => this.finish(null);
   private readonly onVisibility = () => {
@@ -388,12 +396,14 @@ export class ArLoop {
       this.place = placeStep(this.place, { type: 'frame', hit: null, tracking: false });
       this.actions = this.actions.filter((a) => a.type !== 'place'); // a tap on a lost room places nothing later
       this.drag = null;
+      this.motion = null;
       this.emit(false);
       return;
     }
     const pose = poseOf(view.transform);
     const lens = lensOf(view.projectionMatrix);
     this.lastView = { pose, lens };
+    this.trackMotion(now, pose);
     const tracking = vp.emulatedPosition !== true;
 
     // 1b. the room's light (jitters from frame to frame: smoothed over about a third of a second)
@@ -472,6 +482,8 @@ export class ArLoop {
     if (pl && pic && !d.scan) {
       if (d.show.kind === 'layer') {
         // only a picture rendered WITH a placement shows the object; one from before the tap is empty
+        const asked = this.requestedAt.get(pic.moment);
+        if (asked !== undefined) this.behindMs = this.behindMs ? this.behindMs * 0.9 + (now - asked) * 0.1 : now - asked;
         if (pic.moment.object) d.painter.picture(layerCorners(pic.moment.view, pic.moment.lens, pic.depth), viewProjection, 1);
       } else d.painter.picture(cardCorners(pl, d.show.mode, d.show.width, pic.width / Math.max(1, pic.height), pose.p), viewProjection, 1);
     }
@@ -489,7 +501,11 @@ export class ArLoop {
     // 5. the next picture, for this pose
     if (!this.paused && !d.scan && (pl || d.show.kind === 'card')) {
       const depth = pl ? Math.max(0.05, depthOf(pose, pl.p)) : 1;
-      d.source.request({ moment, depth, size: pictureSize(zlens, d.maxSide), seconds: d.seconds() });
+      // The picture arrives about `behindMs` late, so it is rendered for where the phone (and the falling objects) will be by then:
+      // the phone's speed carried on for that long. What is drawn then needs hardly any correction, whatever the depth of the content.
+      const ahead = this.predict(pose, d.predictPose === false ? 0 : this.behindMs);
+      const asked: WorldMoment = { ...moment, view: ahead.pose, ...(physics !== undefined ? { physics: physics + ahead.seconds } : {}) };
+      if (d.source.request({ moment: asked, depth: pl ? Math.max(0.05, depthOf(ahead.pose, pl.p)) : depth, size: pictureSize(zlens, d.maxSide), seconds: d.seconds() })) this.requestedAt.set(asked, now);
     }
 
     // 6. the take
@@ -694,6 +710,36 @@ export class ArLoop {
     times.push(now);
     while (times.length > 1 && now - times[0] > 1000) times.shift();
   }
+  /** The phone's speed (metres and turn per second, smoothed over a few frames) from the poses of the last frames. */
+  private trackMotion(now: number, pose: XrPose): void {
+    const m = this.motion;
+    const dt = m ? (now - m.t) / 1000 : 0;
+    if (!m || dt < 0.002 || dt > 0.3) {
+      this.motion = { t: now, pose, v: [0, 0, 0], w: [0, 0, 0] };
+      return;
+    }
+    const k = 0.5;
+    const turn = qLog(qNorm(qMul(qNorm(pose.q), qConj(qNorm(m.pose.q)))));
+    const v = [0, 1, 2].map((i) => m.v[i] * (1 - k) + ((pose.p[i] - m.pose.p[i]) / dt) * k) as Vec3;
+    const w = [0, 1, 2].map((i) => m.w[i] * (1 - k) + ((2 * turn[i]) / dt) * k) as Vec3;
+    this.motion = { t: now, pose, v, w };
+  }
+
+  /** The pose `ms` milliseconds on at the current speed; the step is limited (half a metre, 40 degrees, a quarter second) so a jolt cannot fling it. */
+  private predict(pose: XrPose, ms: number): { pose: XrPose; seconds: number } {
+    const m = this.motion;
+    const s = Math.min(0.25, Math.max(0, ms / 1000));
+    if (!m || s < 0.005) return { pose, seconds: s };
+    const step = (v: Vec3, max: number): Vec3 => {
+      const d = [v[0] * s, v[1] * s, v[2] * s] as Vec3;
+      const n = Math.hypot(d[0], d[1], d[2]);
+      return n > max ? ([d[0] * (max / n), d[1] * (max / n), d[2] * (max / n)] as Vec3) : d;
+    };
+    const dp = step(m.v, 0.5);
+    const dw = step(m.w, (40 * Math.PI) / 180);
+    return { pose: { p: [pose.p[0] + dp[0], pose.p[1] + dp[1], pose.p[2] + dp[2]], q: qNorm(qMul(qExp([dw[0] / 2, dw[1] / 2, dw[2] / 2]), qNorm(pose.q))) }, seconds: s };
+  }
+
   private rate(times: number[]): number {
     return times.length < 2 ? 0 : Math.round(((times.length - 1) * 1000) / Math.max(1, times[times.length - 1] - times[0]));
   }
@@ -711,6 +757,7 @@ export class ArLoop {
       recSeconds: r && r.t0 >= 0 ? (this.d.now() - r.t0) / 1000 : 0,
       fps: this.rate(this.frameTimes),
       pictureFps: this.rate(this.pictureTimes),
+      pictureBehindMs: Math.round(this.behindMs),
       height: this.place.placement?.h ?? 0,
       anchored: !!this.anchor,
       clip: r?.withClip === true,
