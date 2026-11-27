@@ -57,6 +57,7 @@ export default defineNode({
     objectScale: { type: 'number', default: 1, min: 0.01, max: 20, step: 0.01, scrubSpan: 4, label: 'Scale', group: 'Place', hint: 'Makes the whole shape bigger or smaller about its own position.' },
     color: { type: 'color', default: [0.8, 0.8, 0.85, 1], label: 'Color', group: 'Look' },
   },
+  titleSuffix: (p) => (p.shape === 'image2d' ? 'Picture' : String(p.shape).replace('rbox', 'Rounded box').replace('octa', 'Octahedron').replace(/^./, (c) => c.toUpperCase())),
   summary: (p) => String(p.shape).replace('rbox', 'rounded box').replace('octa', 'octahedron').replace('image2d', 'picture'),
   render(ctx) {
     const p = ctx.params as Record<string, unknown> & { shape: SdfShapeKind; radius: number; sizeX: number; sizeY: number; sizeZ: number; tube: number; objectScale: number; color: ColorValue };

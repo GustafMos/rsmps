@@ -59,6 +59,7 @@ export default defineNode({
     noiseScale: { type: 'number', default: 2, min: 0.1, max: 20, step: 0.05, label: 'Noise size', hint: 'Bumps per scene unit.', visibleIf: is('displace') },
     loops: { type: 'number', default: 0, min: -8, max: 8, step: 1, integer: true, unit: 'cycles', label: 'Animate', hint: 'Whole times the noise cycles back to where it started per loop. 0 = still.', visibleIf: is('displace') },
   },
+  titleSuffix: (p) => String(p.modifier).replace(/^./, (c) => c.toUpperCase()),
   summary: (p) => String(p.modifier),
   render(ctx) {
     const v = ctx.in.scene;

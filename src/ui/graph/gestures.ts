@@ -281,12 +281,13 @@ export function createGestures(app: AppCtx) {
       if (d !== 'out') return 'Drop on an output socket';
       return wireError(g, reg, { node: n, port: p }, { node: fixed.node, port: fixed.port });
     };
-    /** Dropping an output on another output joins them (image/mask -> Stack Layers, audio -> Mixer). */
+    /** Dropping an output on another output joins them (image/mask -> Stack Layers, audio -> Mixer, sdf -> SDF Combine). */
     const mergeTarget = (el: HTMLElement): boolean => {
       if (fixed.side !== 'out' || detached || el.dataset.dir !== 'out' || el.dataset.node === fixed.node) return false;
       const t = el.dataset.type as SocketType;
       const vis = (x: SocketType) => x === 'image' || x === 'mask';
       if (vis(fixed.type) && vis(t)) return !!reg.get('stack');
+      if (fixed.type === 'sdf' && t === 'sdf') return !!reg.get('sdf-combine');
       return fixed.type === 'audio' && t === 'audio' && !!reg.get('mixer');
     };
     for (const s of sockets) if (errorFor(s) && !mergeTarget(s)) s.dataset.dim = '1';
@@ -351,7 +352,7 @@ export function createGestures(app: AppCtx) {
         }
         mergeTo?.removeAttribute('data-merge');
         mergeTo = found?.merge ? found.el : null;
-        if (mergeTo) mergeTo.dataset.merge = fixed.type === 'audio' ? 'mix' : 'stack';
+        if (mergeTo) mergeTo.dataset.merge = fixed.type === 'audio' ? 'mix' : fixed.type === 'sdf' ? 'combine' : 'stack';
         target = found && !found.err ? found.el : null;
         if (found?.el && !found.merge) {
           if (found.err) found.el.dataset.bad = '1';
@@ -397,7 +398,7 @@ export function createGestures(app: AppCtx) {
         if (!moved) {
           if (fixed.side === 'out' && !detached) {
             ctl.pendingOut = { node: fixed.node, port: fixed.port };
-            ed.toast('Click another output to stack the two (the first one ends up on top).', 'info');
+            ed.toast(fixed.type === 'sdf' ? 'Click another output to combine the two shapes.' : 'Click another output to stack the two (the first one ends up on top).', 'info');
           }
           return;
         }

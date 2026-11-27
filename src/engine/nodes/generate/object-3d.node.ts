@@ -4,7 +4,7 @@ import { RAY_WGSL } from '../../lib/gen-3d';
 import { materialKey, materialTextures, materialUniforms, materialWgsl } from '../../lib/gen-material';
 import { DEFORM_PARAMS, deformAnimated, deformFeatures, deformGrow, deformUniforms, deformWgsl, deformStepScale, deformAny, type DeformP } from '../../lib/gen-deform';
 import { SPIN_AROUND_PARAM, spunRotation, rgba, rotationZYX } from '../../lib/gen-common';
-import { modelFilesSummary, renderModel } from '../../lib/model-render';
+import { modelFilesSummary, modelNameSuffix, renderModel } from '../../lib/model-render';
 import type { CameraValue } from '../../types';
 
 const SHAPES = { cube: 0, sphere: 1, cylinder: 2, cone: 3, torus: 4, pyramid: 5, capsule: 6, octahedron: 7 } as const;
@@ -109,6 +109,7 @@ export default defineNode({
     celSteps: { type: 'number', default: 3, min: 2, max: 8, step: 1, integer: true, label: 'Shading bands', group: 'Lighting', visibleIf: (p) => p.cel === true },
     ...DEFORM_PARAMS,
   },
+  titleSuffix: (p, { assetName }) => (p.shape === 'custom' ? modelNameSuffix(p.model, assetName) : String(p.shape).replace(/^./, (c) => c.toUpperCase())),
   summary: (p) => `${p.shape === 'custom' ? modelFilesSummary(p) : p.shape} · ${p.cameraType}${p.cel ? ` · ${p.celSteps}-band cel` : ''}${p.spinX || p.spinY || p.spinZ ? ' · spinning' : ''}`,
   async render(ctx) {
     const p = ctx.params;

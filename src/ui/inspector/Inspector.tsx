@@ -1,4 +1,5 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { libraryAssetName, nodeDisplayName } from '../lib/nodeTitle';
 import { CATEGORIES, type AnyNodeDef, type InputSchema, type NodeInstance, type ParamDef } from '../../engine/types';
 import { Icon } from '../components/Icon';
 import { NumberField } from '../components/NumberField';
@@ -188,7 +189,7 @@ function NodePanel({ id }: { id: string }) {
           </div>
         )}
         <FamilySelect node={node} large />
-        <TextField large value={node.label ?? ''} placeholder={def.title} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
+        <TextField large value={node.label ?? ''} placeholder={nodeDisplayName({ ...node, label: undefined }, def, libraryAssetName(io.library))} onChange={(v) => ed.setNode(id, { label: v || undefined }, `label:${id}`)} />
         <Description key={id} text={def.description} />
         <div className="rs-insp__actions">
           <button className={`rs-btn${viewed ? ' is-on' : ''}`} onClick={() => ed.setViewed(fullId)} title="Show this node in the viewer">

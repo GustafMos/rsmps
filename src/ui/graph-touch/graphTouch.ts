@@ -10,6 +10,7 @@
  *  - Long press on a parameter row opens the node menu for that parameter.
  *  - Dragging a node, a wire or a frame toward the edge of the panel pans the view (the drag follows).
  */
+import { libraryAssetName, nodeDisplayName } from '../lib/nodeTitle';
 import { connectError } from '../../engine/graph';
 import { showBundleSockets } from '../store/nodeView';
 import { GROUP_TYPE } from '../../engine/group';
@@ -91,7 +92,7 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
   const describe = (el: HTMLElement): PendingWire => {
     const n = ed.state.level.nodes.find((x) => x.id === el.dataset.node);
     const def = n && reg.get(n.type);
-    const title = n?.label || def?.title || n?.type || '';
+    const title = n ? nodeDisplayName(n, def, libraryAssetName(io.library)) : '';
     return { side: el.dataset.dir === 'out' ? 'out' : 'in', node: el.dataset.node!, port: el.dataset.port!, type: (el.dataset.type ?? 'image') as SocketType, label: `${title} · ${el.dataset.port}` };
   };
   /** A tap on a socket while a wire is pending. */
@@ -111,7 +112,7 @@ export function installGraphTouch(app: AppCtx, opts: GraphTouchOptions): () => v
     ed.connect(from, to, slot);
   };
   const dropMergeToast = () => {
-    for (const t of ed.state.toasts) if (t.text.startsWith('Click another output to stack')) ed.dismissToast(t.id);
+    for (const t of ed.state.toasts) if (t.text.startsWith('Click another output to ')) ed.dismissToast(t.id);
   };
 
   /* ------------------------------ edge auto-pan ------------------------------ */
