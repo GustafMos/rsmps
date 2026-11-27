@@ -12,6 +12,7 @@
  * Contract: docs/ENGINE.md, Pending rules ("Group nodes", "Repeat groups", "Bake a group").
  */
 import { isInputPort, type Registry } from './define';
+import { SDF_SCENE_PARAMS } from './lib/sdf-scene-params';
 import { stableStringify } from './lib/stable-json';
 import {
   CATEGORIES,
@@ -88,6 +89,8 @@ export interface GroupData {
   inputs: GroupPort[];
   outputs: GroupPort[];
   exposed: GroupExposed[];
+  /** An SDF Scene: a group whose inside holds SDF nodes around a Scene Output node (lib/sdf-scene-group.ts). Only in an SDF Scene can SDF nodes be added. */
+  sdfScene?: boolean;
   /** Repeat only. */
   count?: number;
   mode?: RepeatMode;
@@ -98,7 +101,7 @@ export interface GroupData {
 }
 
 /** Params of a group node that are not exposed values. Exposed ids must not use these. */
-export const GROUP_KEYS: readonly string[] = ['kind', 'title', 'color', 'icon', 'description', 'nodes', 'edges', 'inputs', 'outputs', 'exposed', 'count', 'mode', 'blend', 'opacity', 'ui', PROCESS_PARAM];
+export const GROUP_KEYS: readonly string[] = ['kind', 'title', 'color', 'icon', 'description', 'nodes', 'edges', 'inputs', 'outputs', 'exposed', 'sdfScene', 'count', 'mode', 'blend', 'opacity', 'ui', PROCESS_PARAM];
 
 export const REPEAT_BLENDS = [
   { value: 'normal', label: 'Normal' },
@@ -111,7 +114,7 @@ export const REPEAT_BLENDS = [
   { value: 'difference', label: 'Difference' },
 ] as const;
 
-const SOCKETS: readonly SocketType[] = ['image', 'mask', 'palette', 'number', 'color', 'vector', 'regions', 'camera', 'material', 'audio', 'midi'];
+const SOCKETS: readonly SocketType[] = ['image', 'mask', 'palette', 'number', 'color', 'vector', 'regions', 'camera', 'material', 'sdf', 'audio', 'midi'];
 
 export const isGroupNode = (n: { type: string } | undefined | null): boolean => !!n && n.type === GROUP_TYPE;
 export const isBoundaryNode = (n: { type: string } | undefined | null): boolean => !!n && (n.type === GROUP_INPUT_TYPE || n.type === GROUP_OUTPUT_TYPE);
@@ -136,6 +139,7 @@ export function groupData(node: Pick<NodeInstance, 'params'>): GroupData {
     inputs: arr<GroupPort>(p.inputs),
     outputs: arr<GroupPort>(p.outputs),
     exposed: arr<GroupExposed>(p.exposed),
+    sdfScene: p.sdfScene === true ? true : undefined,
     count: typeof p.count === 'number' ? p.count : undefined,
     mode: p.mode === 'accumulate' ? 'accumulate' : p.mode === 'chain' ? 'chain' : undefined,
     blend: typeof p.blend === 'string' ? p.blend : undefined,
@@ -197,13 +201,18 @@ export function groupDefOf(node: Pick<NodeInstance, 'params' | 'type'>): AnyNode
   for (const p of data.outputs) outputs[p.id] = { type: SOCKETS.includes(p.type) ? p.type : 'image', label: p.name };
   const params: Record<string, ParamDef> = {};
   if (data.kind === 'repeat') Object.assign(params, REPEAT_PARAMS);
-  for (const x of data.exposed) if (x.def && typeof x.def === 'object' && !(x.id in inputs) && !GROUP_KEYS.includes(x.id)) params[x.id] = cleanParamDef(x.def, x.label);
-  const title = data.title || (data.kind === 'repeat' ? 'Repeat' : 'Group');
+  for (const x of data.exposed) {
+    if (!x.def || typeof x.def !== 'object' || x.id in inputs || GROUP_KEYS.includes(x.id)) continue;
+    // an SDF Scene shows its render settings with their groups and conditions (the plain snapshot drops both)
+    const full = data.sdfScene && x.param === x.id ? (SDF_SCENE_PARAMS as Record<string, ParamDef>)[x.id] : undefined;
+    params[x.id] = full ? ({ ...full, label: x.label } as ParamDef) : cleanParamDef(x.def, x.label);
+  }
+  const title = data.title || (data.sdfScene ? 'SDF Scene' : data.kind === 'repeat' ? 'Repeat' : 'Group');
   const def: AnyNodeDef = {
     id: GROUP_TYPE,
     title,
-    category: data.color ?? 'math',
-    description: data.description || (data.kind === 'repeat' ? 'Applies the nodes inside several times, each pass on the result of the one before.' : 'Nodes bundled into one. Double-click to open it.'),
+    category: data.color ?? (data.sdfScene ? 'sdf' : 'math'),
+    description: data.description || (data.sdfScene ? 'A place to model with SDF shapes. Double-click to open it, add shapes inside, and wire them to the Scene Output. It renders the scene and can also be wired into another SDF Scene.' : data.kind === 'repeat' ? 'Applies the nodes inside several times, each pass on the result of the one before.' : 'Nodes bundled into one. Double-click to open it.'),
     inputs,
     outputs,
     params,

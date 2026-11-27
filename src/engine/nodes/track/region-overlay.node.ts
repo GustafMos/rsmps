@@ -72,7 +72,7 @@ export default defineNode({
         let slot = slots.get(text);
         if (slot === undefined) {
           if (slots.size >= MAX_LABELS) return;
-          const bmp = raster({ text, font: 'sans-serif', sizePx: p.labelSize, weight: 600, italic: false, align: 'left', lineHeight: 1.2, maxWidthPx: Math.max(64, img.width) });
+          const bmp = raster({ text, font: 'sans-serif', sizePx: p.labelSize, weight: 600, italic: false, align: 'left', lineHeight: 1.2, maxWidthPx: 0 });
           if (!bmp || bmp.width < 1 || bmp.height < 1) return;
           slot = bitmaps.length;
           slots.set(text, slot);
@@ -125,6 +125,8 @@ fn fx(uv: vec2f, px: vec2f) -> vec4f {
     let hs = max((b.zw - b.xy) * 0.5, vec2f(1.0));
     let p = px - c;
     let lw = u.lw;
+    // Most pixels are nowhere near this box: skip the shape maths there (the margin covers the stroke, its anti-aliasing and the dot).
+    if (any(abs(p) > hs + vec2f(lw + 3.0 + u.dotR))) { continue; }
     var line = 0.0;
     var fill = 0.0;
     if (u.style < 0.5) {

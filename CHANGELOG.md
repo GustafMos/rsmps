@@ -4,6 +4,14 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.47.0] - 2026-11-27
+
+### Added
+- **SDF Scene: modelling from separate shapes.** A new **SDF Scene** node is a group you open by double-clicking. Inside, every shape is its own node: **SDF Shape** (sphere, box, rounded box, torus, capsule, cylinder, cone, plane, octahedron, extruded picture) with its own position, rotation, size and colour; **SDF Combine** (union, subtract, intersect, with smoothness); **SDF Move** to move a set of shapes together; and **SDF Modify** (mirror, repeat, round, shell, twist, bend, displace by noise). SDF nodes can only be added inside an SDF Scene. A scene has a shape output as well as its picture and depth, so one scene can be wired into another and combined there. Up to 96 shapes per scene instead of 8. The scene carries the camera, light, shadow and quality settings, and a single sphere renders exactly as in SDF 3D. The existing SDF 3D node is unchanged. Moving single shapes with the viewer handles comes next.
+
+### Changed
+- **Region Overlay labels are cheaper.** Label text is no longer redrawn every frame at the full width of the picture.
+
 ## [0.46.2] - 2026-11-26
 
 ### Changed

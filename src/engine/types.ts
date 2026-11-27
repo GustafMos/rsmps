@@ -13,7 +13,7 @@ import type { AudioKernel } from './audio/types';
 /* Sockets and values                                                       */
 /* ----------------------------------------------------------------------- */
 
-export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'vector' | 'regions' | 'camera' | 'material' | 'audio' | 'midi';
+export type SocketType = 'image' | 'mask' | 'palette' | 'number' | 'color' | 'vector' | 'regions' | 'camera' | 'material' | 'sdf' | 'audio' | 'midi';
 
 /**
  * A GPU image. RGBA8, sRGB-encoded, PREMULTIPLIED alpha, row 0 = top.
@@ -119,6 +119,70 @@ export type ColorValue = [number, number, number, number];
  */
 export type VectorValue = [number, number, number];
 
+/**
+ * A signed-distance scene as pure data (docs/ENGINE.md, "SDF scenes"): a tree of shapes, combines, moves and modifiers whose numbers are
+ * already resolved for the current frame. Made by SDF Shape / Combine / Move / Modify, rendered by SDF Scene. Ids are FLAT PATHS of the node
+ * that produced each tree node (`scene/shape`, `outer/inner/shape`), so a picked surface point can be mapped back to a node.
+ * The only non-data part is an optional picture (for Extruded picture shapes): the kernel keeps it alive like a material's pictures.
+ * Helpers: lib/sdf-scene.ts.
+ */
+export type SdfShapeKind = 'sphere' | 'box' | 'rbox' | 'torus' | 'capsule' | 'cylinder' | 'cone' | 'plane' | 'octa' | 'image2d';
+export type SdfModKind = 'mirror' | 'repeat' | 'round' | 'shell' | 'twist' | 'bend' | 'displace';
+export type Vec3 = [number, number, number];
+export interface SdfShapeNode {
+  t: 'shape';
+  id: string;
+  shape: SdfShapeKind;
+  /** Position, scene units. */
+  pos: Vec3;
+  /** Rotation about x, y, z in degrees (Rz * Ry * Rx, as 3D Object). */
+  rot: Vec3;
+  /** Half sizes, `lib/sdf-prims.ts` (a = radius or half width, b = half height or tube radius, c = half depth). */
+  size: Vec3;
+  /** Uniform scale about the shape's own position. */
+  scale: number;
+  /** Straight sRGB 0..1. */
+  color: Vec3;
+}
+export interface SdfCombineNode {
+  t: 'combine';
+  id: string;
+  op: 'union' | 'subtract' | 'intersect';
+  /** Blend radius, 0 = hard. Subtract removes every later child from the first. */
+  smooth: number;
+  children: SdfNode[];
+}
+export interface SdfMoveNode {
+  t: 'move';
+  id: string;
+  pos: Vec3;
+  rot: Vec3;
+  scale: number;
+  /** Row-major 3 x 3 rotation that replaces `rot` when present (a spinning scene). */
+  matrix?: number[];
+  child: SdfNode;
+}
+export interface SdfModNode {
+  t: 'mod';
+  id: string;
+  mod: SdfModKind;
+  /** mirror: which axes. */
+  axes: [boolean, boolean, boolean];
+  /** twist / bend: the axis (0 x, 1 y, 2 z). */
+  axis: 0 | 1 | 2;
+  /** Eight numbers; meaning per kind in lib/sdf-scene.ts (`MOD_NUMBERS`). */
+  v: number[];
+  child: SdfNode;
+}
+export type SdfNode = SdfShapeNode | SdfCombineNode | SdfMoveNode | SdfModNode;
+export interface SdfValue {
+  kind: 'sdf';
+  /** null = an empty scene. */
+  root: SdfNode | null;
+  /** The picture Extruded picture shapes use (one per scene). */
+  picture?: ImageValue | null;
+}
+
 /** Audio and MIDI values live in the stream domain; see src/engine/audio/types.ts. */
 export interface AudioValue {
   kind: 'audio';
@@ -140,6 +204,7 @@ export interface SocketValueMap {
   regions: RegionsValue;
   camera: CameraValue;
   material: MaterialValue;
+  sdf: SdfValue;
   midi: MidiValue;
 }
 export type Value = SocketValueMap[SocketType];
@@ -374,6 +439,7 @@ export const CATEGORIES = {
   time: { title: 'Time', color: '#b08968' },
   math: { title: 'Math & Utility', color: '#7f8c9b' },
   'audio-source': { title: 'Audio Source', color: '#2ec4b6' },
+  sdf: { title: 'SDF Modelling', color: '#7ad0b5' },
   'audio-fx': { title: 'Audio Effects', color: '#20a39e' },
   synth: { title: 'Synth & MIDI', color: '#ff9f1c' },
 } as const;
@@ -649,6 +715,8 @@ export interface RenderCtx<P extends ParamSchema, I extends InputSchema> {
   readonly quality: 'preview' | 'final';
   /** Deterministic per-node seed base (stable across frames and sessions). */
   readonly nodeId: string;
+  /** The node's full flat path id (`group/inner`). Reading it makes the result depend on the path (two copies of a node no longer share a cache entry). */
+  readonly path: string;
   /** Playback proxy scale (1 = full resolution). Only source nodes need it, to decode smaller frames. */
   readonly proxy: number;
   /** Texels per unit pixel for a fresh image of this size. Source and generator nodes use it to stamp `unit`. */

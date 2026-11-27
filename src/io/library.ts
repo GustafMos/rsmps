@@ -1177,8 +1177,29 @@ export class Library implements MediaLibrary {
   /** The player's present, in project seconds. Set by createIo. */
   liveNow: (() => number) | null = null;
 
+  /**
+   * Rasterised labels of the built-in generic fonts, by spec (most recently used last). A HUD redraws the same few strings every frame;
+   * a custom font may finish loading after the first call, so only generic families are remembered. Callers only read the bitmap.
+   */
+  private textMemo = new Map<string, { data: Uint8ClampedArray; width: number; height: number } | null>();
+
   rasterizeText(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null {
     if (typeof OffscreenCanvas === 'undefined') return null;
+    if (!/^(sans-serif|serif|monospace)$/.test(spec.font) || spec.text.length > 80) return this.rasterizeTextNow(spec);
+    const key = `${spec.font}|${spec.sizePx}|${spec.weight}|${spec.italic ? 1 : 0}|${spec.align}|${spec.lineHeight}|${spec.maxWidthPx}|${spec.text}`;
+    const hit = this.textMemo.get(key);
+    if (hit !== undefined) {
+      this.textMemo.delete(key);
+      this.textMemo.set(key, hit);
+      return hit;
+    }
+    const bmp = this.rasterizeTextNow(spec);
+    this.textMemo.set(key, bmp);
+    if (this.textMemo.size > 256) this.textMemo.delete(this.textMemo.keys().next().value as string);
+    return bmp;
+  }
+
+  private rasterizeTextNow(spec: TextSpec): { data: Uint8ClampedArray; width: number; height: number } | null {
     const probe = (this.textCanvas ??= new OffscreenCanvas(8, 8));
     const mctx = probe.getContext('2d', { willReadFrequently: true })!;
     const font = cssFont(spec);
