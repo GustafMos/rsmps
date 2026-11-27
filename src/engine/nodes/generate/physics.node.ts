@@ -1,10 +1,11 @@
 import { defineNode } from '../../define';
 import { rapierBackend } from '../../lib/physics/rapier';
-import { defaultCamera, drawPhysics } from '../../lib/physics/debug-view';
+import { drawPhysics, fitCamera } from '../../lib/physics/debug-view';
 import { MAX_RUN_FRAMES, getRun, normalizeBodies, runSignature } from '../../lib/physics/sim';
 import type { FrameInputs, WorldSpec } from '../../lib/physics/types';
+import { MAX_BODIES } from '../../lib/physics/types';
 import type { Vec3 } from '../../lib/physics/rotation';
-import type { CameraValue, OutputDef } from '../../types';
+import type { CameraValue, InputDef, MotionValue, OutputDef } from '../../types';
 
 /**
  * Physics: a small real-time physics world. Bodies (balls, boxes, capsules, cylinders) fall, bounce, slide and pile up on a floor, and
@@ -23,26 +24,39 @@ const KIN_SLOTS = 4;
 
 const slot = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 
-const outputs: Record<string, OutputDef> = {};
-for (const i of slot(PHYSICS_SLOTS)) {
-  outputs[`pos${i}`] = { type: 'vector', label: `Position ${i}` };
-  outputs[`rot${i}`] = { type: 'vector', label: `Rotation ${i}` };
-}
-outputs.posExtra = { type: 'vector', label: 'Position of extra body' };
-outputs.rotExtra = { type: 'vector', label: 'Rotation of extra body' };
-outputs.moving = { type: 'number', label: 'Moving' };
-outputs.hits = { type: 'number', label: 'Hits' };
-outputs.image = { type: 'image', label: 'Preview' };
+const bodyCount = (p: Record<string, unknown>): number => normalizeBodies(p.bodies).length;
+const bodyAt = (p: Record<string, unknown>, i: number) => normalizeBodies(p.bodies)[i - 1];
+const advOut = (p: Record<string, unknown>): boolean => p.advOut === true;
+const advIn = (p: Record<string, unknown>): boolean => p.advIn === true;
 
-const inputs: Record<string, { type: 'vector' | 'number' | 'camera'; label: string; hint?: string }> = {
-  gravityVec: { type: 'vector', label: 'Gravity XYZ', hint: 'Which way is down, as a vector (its length does not matter, Gravity sets the strength). Wire a tilt here to make things slide with the phone.' },
-  push: { type: 'vector', label: 'Push', hint: 'How hard and which way to kick. Applied when Push now rises above 0.' },
-  pushNow: { type: 'number', label: 'Push now', hint: 'Kicks the bodies by Push at the moment this rises above 0. Wire a tap, a jolt or a beat here.' },
-  camera: { type: 'camera', label: 'Camera' },
-};
+/** The ports of body `i` (1-based) that carry its motion: one wire holds position and rotation together. */
+export const motionOut = (i: number): string => `motion${i}`;
+export const motionIn = (i: number): string => `drive${i}`;
+
+// One Motion output per body, shown only for the bodies that exist (or are wired). The older Position / Rotation vectors, Moving, Hits and
+// Preview stay (saved projects use them) but are hidden until wired or until "Advanced outputs" is on.
+const outputs: Record<string, OutputDef> = {};
+for (const i of slot(MAX_BODIES)) outputs[motionOut(i)] = { type: 'motion', label: `Body ${i}`, visibleIf: (p) => bodyCount(p) >= i };
+outputs.image = { type: 'image', label: 'Preview', visibleIf: advOut };
+outputs.moving = { type: 'number', label: 'Moving', visibleIf: advOut };
+outputs.hits = { type: 'number', label: 'Hits', visibleIf: advOut };
+for (const i of slot(PHYSICS_SLOTS)) {
+  outputs[`pos${i}`] = { type: 'vector', label: `Position ${i}`, visibleIf: advOut };
+  outputs[`rot${i}`] = { type: 'vector', label: `Rotation ${i}`, visibleIf: advOut };
+}
+outputs.posExtra = { type: 'vector', label: 'Position of extra body', visibleIf: advOut };
+outputs.rotExtra = { type: 'vector', label: 'Rotation of extra body', visibleIf: advOut };
+
+const inputs: Record<string, InputDef> = {};
+// one Motion input per body, only for bodies that are "Moved by wires"
+for (const i of slot(MAX_BODIES)) inputs[motionIn(i)] = { type: 'motion', label: `Body ${i} follows`, visibleIf: (p) => bodyAt(p, i)?.kind === 'kinematic', };
+inputs.gravityVec = { type: 'vector', label: 'Gravity XYZ', visibleIf: advIn };
+inputs.push = { type: 'vector', label: 'Push', visibleIf: advIn };
+inputs.pushNow = { type: 'number', label: 'Push now', visibleIf: advIn };
+inputs.camera = { type: 'camera', label: 'Camera', visibleIf: advIn };
 for (const i of slot(KIN_SLOTS)) {
-  inputs[`move${i}`] = { type: 'vector', label: `Move body ${i}`, hint: `Where body ${i} is, when its Kind is "Moved by wires". Anything it touches is shoved.` };
-  inputs[`turn${i}`] = { type: 'vector', label: `Turn body ${i}`, hint: `How body ${i} is turned (degrees), when its Kind is "Moved by wires".` };
+  inputs[`move${i}`] = { type: 'vector', label: `Move body ${i}`, visibleIf: advIn };
+  inputs[`turn${i}`] = { type: 'vector', label: `Turn body ${i}`, visibleIf: advIn };
 }
 
 const DOWN: Record<string, Vec3> = { down: [0, -1, 0], up: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0], away: [0, 0, 1], toward: [0, 0, -1] };
@@ -54,11 +68,21 @@ export default defineNode({
   title: 'Physics',
   category: 'generate',
   description:
-    'Things that fall, bounce and pile up. Add balls, boxes, capsules and cylinders, give them a floor and a push, and wire each one\'s Position and Rotation into the Move XYZ and Rotate XYZ of a 3D node or an SDF shape inside an SDF Scene. It starts again from the start pose every loop and gives the same result every time you scrub or export.',
+    'Makes objects fall, bounce and pile up on a floor. The easy way: select a 3D object or an SDF shape and choose Falls under Physics in its settings. Each object gets one wire from this node. It starts again from the start pose every loop and gives the same result every time you scrub or export.',
   keywords: ['physics', 'gravity', 'fall', 'bounce', 'collide', 'collision', 'rigid body', 'simulation', 'drop', 'ragdoll', 'jolt', 'rapier', 'floor', 'ar', 'pile', 'rolling'],
   inputs,
   outputs,
   optionalOutputs: ['image'],
+  previewOutput: 'image',
+  defaultPins: [],
+  portLabel: (dir, port, p) => {
+    if (dir === 'out') {
+      const m = /^motion(\d+)$/.exec(port);
+      const b = m ? bodyAt(p, Number(m[1])) : undefined;
+      return b ? `Body ${m![1]} · ${b.shape}` : null;
+    }
+    return null;
+  },
   cpu: true,
   params: {
     bodies: { type: 'json', default: [{ shape: 'sphere', size: [0.5, 1, 1], pos: [0, 2, 0] }], label: 'Bodies', visibleIf: () => false },
@@ -86,8 +110,8 @@ export default defineNode({
     walls: { type: 'bool', default: false, label: 'Walls', group: 'World', hint: 'Four walls around the floor so things stay in a box.' },
     roomWidth: { type: 'number', default: 8, min: 0.5, max: 100, step: 0.1, label: 'Room width', group: 'World', visibleIf: (p) => p.walls === true },
     roomDepth: { type: 'number', default: 8, min: 0.5, max: 100, step: 0.1, label: 'Room depth', group: 'World', visibleIf: (p) => p.walls === true },
-    timeScale: { type: 'number', default: 1, min: 0.05, max: 4, step: 0.05, label: 'Time scale', group: 'Time', hint: '1 is real time. 0.25 is slow motion.' },
-    substeps: { type: 'number', default: 1, min: 1, max: 8, step: 1, integer: true, label: 'Substeps', group: 'Time', hint: 'Smaller steps inside each frame: steadier stacks and fast bodies, a little slower.' },
+    timeScale: { type: 'number', default: 1, min: 0.05, max: 4, step: 0.05, label: 'Speed', group: 'World', hint: '1 is real time. 0.25 is slow motion.' },
+    substeps: { type: 'number', default: 1, min: 1, max: 8, step: 1, integer: true, label: 'Substeps', group: 'Advanced', hint: 'Smaller steps inside each frame: steadier stacks and fast bodies, a little slower.' },
     startAt: {
       type: 'number',
       default: 0,
@@ -97,19 +121,21 @@ export default defineNode({
       step: 0.01,
       unit: 's',
       label: 'Start at',
-      group: 'Time',
+      group: 'Advanced',
       hint: 'When the simulation begins, in seconds. Before this the bodies wait at their start poses. Every loop starts again from there: the simulation cannot carry on across the loop point, because every frame has to look the same each time you play, scrub or export.',
     },
-    pushWho: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, label: 'Push who', group: 'Time', hint: '0 pushes every falling body, 1 to 16 only that body.' },
-    hitLimit: { type: 'number', default: 1.5, min: 0, max: 50, softMax: 10, step: 0.1, label: 'Hit limit', group: 'Time', hint: 'Hits only reports knocks that change a body\'s speed by more than this (units per second).' },
-    extraBody: { type: 'number', default: 9, min: 1, max: 16, step: 1, integer: true, label: 'Extra body', group: 'Outputs', hint: 'Which body Position of extra body and Rotation of extra body report. The outputs 1 to 8 are fixed.' },
+    pushWho: { type: 'number', default: 0, min: 0, max: 16, step: 1, integer: true, label: 'Push who', group: 'Advanced', hint: '0 pushes every falling body, 1 to 16 only that body.' },
+    hitLimit: { type: 'number', default: 1.5, min: 0, max: 50, softMax: 10, step: 0.1, label: 'Hit limit', group: 'Advanced', hint: 'Hits only reports knocks that change a body\'s speed by more than this (units per second).' },
+    extraBody: { type: 'number', default: 9, min: 1, max: 16, step: 1, integer: true, label: 'Extra body', group: 'Advanced', hint: 'Which body Position of extra body and Rotation of extra body report. The outputs 1 to 8 are fixed.' },
     viewTurn: { type: 'number', default: 25, min: -180, max: 180, step: 1, unit: 'deg', label: 'View turn', group: 'Preview', hint: 'Where the preview looks from (used when no Camera is wired).' },
     viewTilt: { type: 'number', default: 20, min: -80, max: 80, step: 1, unit: 'deg', label: 'View tilt', group: 'Preview' },
-    viewDistance: { type: 'number', default: 9, min: 1, max: 100, softMax: 30, step: 0.1, label: 'View distance', group: 'Preview' },
+    viewDistance: { type: 'number', default: 9, min: 1, max: 100, softMax: 30, step: 0.1, label: 'View distance', group: 'Preview', visibleIf: () => false, hint: 'Not used any more: the preview frames the bodies by itself.' },
+    advIn: { type: 'bool', default: false, label: 'Advanced inputs', group: 'Advanced', hint: 'Shows the Gravity, Push, Camera and old Move / Turn sockets on the node.' },
+    advOut: { type: 'bool', default: false, label: 'Advanced outputs', group: 'Advanced', hint: 'Shows Preview, Moving, Hits and the plain Position / Rotation numbers on the node.' },
   },
   summary: (p) => {
     const n = normalizeBodies(p.bodies).length;
-    return `${n} ${n === 1 ? 'body' : 'bodies'}${p.floor ? ' · floor' : ''}`;
+    return `${n} ${n === 1 ? 'object' : 'objects'}${p.floor ? ' · floor on' : ' · no floor'}`;
   },
   async render(ctx) {
     const p = ctx.params;
@@ -130,7 +156,7 @@ export default defineNode({
       substeps: Math.max(1, Math.round(p.substeps)),
       fps,
     };
-    const wired = ['gravityVec', 'push', 'pushNow', ...slot(KIN_SLOTS).flatMap((i) => [`move${i}`, `turn${i}`])].map((n) => `${n}=${ctx.inputSignature(n as never)}`).join('|');
+    const wired = ['gravityVec', 'push', 'pushNow', ...slot(KIN_SLOTS).flatMap((i) => [`move${i}`, `turn${i}`]), ...slot(bodies.length).map(motionIn)].map((n) => `${n}=${ctx.inputSignature(n as never)}`).join('|');
     const sig = runSignature(bodies, world, `${wired}|${p.pushWho}`);
     const startFrame = Math.round(p.startAt * fps);
     // with Loop on the clock may run past the loop's end (an export, a scrub): every loop is the same, so wrap and start again
@@ -142,12 +168,17 @@ export default defineNode({
     const run = getRun(sig, bodies, world, backend, p.pushWho);
 
     // the values on the wires of simulated frame j: the current frame's come in as inputs, earlier ones are asked for at their own time
+    const asMotion = (v: unknown): MotionValue | null => {
+      const m = v as MotionValue | null;
+      return m && typeof m === 'object' && asVec(m.pos) ? m : null;
+    };
+    // a Motion wire on a body moves and turns it; the older Move / Turn vector wires still work and win nothing over it
     const current = (): FrameInputs => ({
       gravityDir: asVec(ctx.in.gravityVec),
       push: asVec(ctx.in.push),
       pushNow: typeof ctx.in.pushNow === 'number' ? ctx.in.pushNow : 0,
-      move: slot(bodies.length).map((i) => (i <= KIN_SLOTS ? asVec((ctx.in as Record<string, unknown>)[`move${i}`]) : null)),
-      turn: slot(bodies.length).map((i) => (i <= KIN_SLOTS ? asVec((ctx.in as Record<string, unknown>)[`turn${i}`]) : null)),
+      move: slot(bodies.length).map((i) => asVec(asMotion((ctx.in as Record<string, unknown>)[motionIn(i)])?.pos) ?? (i <= KIN_SLOTS ? asVec((ctx.in as Record<string, unknown>)[`move${i}`]) : null)),
+      turn: slot(bodies.length).map((i) => asVec(asMotion((ctx.in as Record<string, unknown>)[motionIn(i)])?.rot) ?? (i <= KIN_SLOTS ? asVec((ctx.in as Record<string, unknown>)[`turn${i}`]) : null)),
     } as FrameInputs);
     const wiredNames = new Set(Object.keys(inputs).filter((n) => n !== 'camera' && ctx.inputSignature(n as never) !== ''));
     const inputsAt = async (j: number): Promise<FrameInputs> => {
@@ -160,13 +191,17 @@ export default defineNode({
         gravityDir: asVec(await get('gravityVec')),
         push: asVec(await get('push')),
         pushNow: typeof num === 'number' ? num : 0,
-        move: await Promise.all(slot(bodies.length).map(async (i) => (i <= KIN_SLOTS ? asVec(await get(`move${i}`)) : null))),
-        turn: await Promise.all(slot(bodies.length).map(async (i) => (i <= KIN_SLOTS ? asVec(await get(`turn${i}`)) : null))),
+        move: await Promise.all(slot(bodies.length).map(async (i) => asVec(asMotion(await get(motionIn(i)))?.pos) ?? (i <= KIN_SLOTS ? asVec(await get(`move${i}`)) : null))),
+        turn: await Promise.all(slot(bodies.length).map(async (i) => asVec(asMotion(await get(motionIn(i)))?.rot) ?? (i <= KIN_SLOTS ? asVec(await get(`turn${i}`)) : null))),
       };
     };
     const at = await run.ensure(k, inputsAt);
 
     const out: Record<string, unknown> = {};
+    for (const i of slot(MAX_BODIES)) {
+      const b = i <= bodies.length ? run.body(at, i - 1) : null;
+      out[motionOut(i)] = b ? ({ kind: 'motion', pos: b.pos, rot: b.rot } satisfies MotionValue) : null;
+    }
     for (const i of slot(PHYSICS_SLOTS)) {
       const b = run.body(at, i - 1);
       out[`pos${i}`] = b ? b.pos : null;
@@ -183,7 +218,7 @@ export default defineNode({
       const scale = Math.min(1, 1024 / Math.max(ctx.canvas.width, ctx.canvas.height));
       const w = Math.max(16, Math.round(ctx.canvas.width * scale));
       const h = Math.max(16, Math.round(ctx.canvas.height * scale));
-      const cam = (ctx.in.camera as CameraValue | null) ?? defaultCamera({ turn: p.viewTurn, tilt: p.viewTilt, distance: p.viewDistance });
+      const cam = (ctx.in.camera as CameraValue | null) ?? fitCamera(bodies, world, { turn: p.viewTurn, tilt: p.viewTilt, aspect: w / h });
       const draw = bodies.map((spec, i) => {
         const b = run.body(at, i)!;
         return { spec, pos: b.pos, rot: b.rot, asleep: b.asleep };

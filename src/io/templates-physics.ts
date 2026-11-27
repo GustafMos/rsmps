@@ -1,6 +1,6 @@
 /**
  * The "Falling shapes" template: an SDF Scene (a group) holding five shapes and a floor slab, driven by a Physics node that lives inside the
- * same scene. Built by hand because a template is plain data (no registry at hand): the group has the same shape `newSdfScene` makes
+ * same scene, one Motion wire per shape. Built by hand because a template is plain data (no registry at hand): the group has the same shape `newSdfScene` makes
  * (src/engine/sdf-scene-group.ts), with the Physics node, five shapes, a Combine and the Scene Output inside.
  */
 import { GROUP_IN, GROUP_OUT, GROUP_TYPE, snapshotParamDef, type GroupExposed, type GroupPort } from '../engine/group';
@@ -25,8 +25,13 @@ const SHAPE_PARAMS: Record<string, unknown>[] = [
 /** The scene node (id `scene`) of the template. */
 export function fallingShapesScene(at: { x: number; y: number }): NodeInstance {
   const nodes: NodeInstance[] = [
-    { id: 'phys', type: 'physics', x: 40, y: 20, params: { bodies: BODIES, floor: true, floorHeight: -1, floorBounce: 0.3, walls: true, roomWidth: 8, roomDepth: 8, drag: 0.5 }, label: 'Physics: bodies 1 to 5' },
-    ...SHAPE_PARAMS.map((params, i) => ({ id: `shape${i + 1}`, type: 'sdf-shape', x: 360, y: 20 + i * 150, params })),
+    { id: 'phys', type: 'physics', x: 40, y: 20, params: { bodies: BODIES, floor: true, floorHeight: -1, floorBounce: 0.3, walls: true, roomWidth: 8, roomDepth: 8, drag: 0.5 }, label: 'Physics' },
+    // each shape's own Move / Rotate are its start pose (what "Start here" would copy), the Motion wire takes over from there
+    ...SHAPE_PARAMS.map((params, i) => {
+      const b = BODIES[i] as { pos: number[]; rot?: number[] };
+      const [rx, ry, rz] = b.rot ?? [0, 0, 0];
+      return { id: `shape${i + 1}`, type: 'sdf-shape', x: 360, y: 20 + i * 150, params: { ...params, posX: b.pos[0], posY: b.pos[1], posZ: b.pos[2], rotX: rx, rotY: ry, rotZ: rz } };
+    }),
     { id: 'floor', type: 'sdf-shape', x: 360, y: 20 + 5 * 150, params: { shape: 'box', sizeX: 9, sizeY: 0.4, sizeZ: 9, posY: -1.2, color: [0.55, 0.57, 0.62, 1] }, label: 'Floor' },
     { id: 'comb', type: 'sdf-combine', x: 680, y: 40, params: {} },
     { id: SDF_RENDER_ID, type: SDF_RENDER_TYPE, x: 960, y: 40, params: {} },
@@ -41,8 +46,7 @@ export function fallingShapesScene(at: { x: number; y: number }): NodeInstance {
   const wire = (from: Edge['from'], to: Edge['to']): Edge => ({ id: `e${++n}`, from, to });
   const edges: Edge[] = [];
   for (let i = 0; i < 5; i++) {
-    edges.push(wire({ node: 'phys', port: `pos${i + 1}` }, { node: `shape${i + 1}`, port: 'pos@xyz' }));
-    edges.push(wire({ node: 'phys', port: `rot${i + 1}` }, { node: `shape${i + 1}`, port: 'rot@xyz' }));
+    edges.push(wire({ node: 'phys', port: `motion${i + 1}` }, { node: `shape${i + 1}`, port: 'xform@motion' }));
     edges.push(wire({ node: `shape${i + 1}`, port: 'sdf' }, { node: 'comb', port: 'items' }));
   }
   edges.push(wire({ node: 'floor', port: 'sdf' }, { node: 'comb', port: 'items' }));

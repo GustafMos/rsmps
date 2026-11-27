@@ -4,7 +4,7 @@
  * from its type, resolved params and the signatures of its inputs. A node is
  * re-rendered per frame only if it (or something upstream) actually read the clock.
  */
-import { Registry, canConnect, paramBundles, paramSocketType } from './define';
+import { Registry, canConnect, paramBundles, paramMotion, paramSocketType } from './define';
 import { Gpu } from './gpu/gpu';
 import { clampProxy, proxySize } from './lib/proxy-size';
 import { stableStringify } from './lib/stable-json';
@@ -20,6 +20,7 @@ import type {
   ImageValue,
   MaskValue,
   MaterialValue,
+  MotionValue,
   SdfValue,
   NodeGpu,
   NodeInstance,
@@ -440,7 +441,7 @@ export class Engine {
     const node = target && target.node ? scope.nodes.get(target.node) : undefined;
     let made: { result: NodeResult; port: string } | null = null;
     scope.rootNode = node?.id;
-    scope.rootPort = target?.port ?? (node ? Object.keys(defOf(this.registry, node)?.outputs ?? {})[0] : undefined);
+    scope.rootPort = target?.port ?? (node ? (defOf(this.registry, node)?.previewOutput ?? Object.keys(defOf(this.registry, node)?.outputs ?? {})[0]) : undefined);
     let value: Value | null = null;
     if (!node) {
       // A group output with nothing wired to it inside is simply empty.
@@ -449,7 +450,7 @@ export class Engine {
       const def = defOf(this.registry, node);
       const result = await this.evalNode(node.id, scope);
       if (def && result) {
-        const port = target?.port ?? Object.keys(def.outputs)[0];
+        const port = target?.port ?? def.previewOutput ?? Object.keys(def.outputs)[0];
         value = port ? (result.outputs[port] ?? null) : null;
         if (port) made = { result, port };
         // Output-category nodes have no outputs: hand back what arrives on their first input.
@@ -1057,6 +1058,25 @@ export class Engine {
           if (typeof n === 'number') wiredParams[key] = n;
           if (tvPorts.has(b.port)) tvPorts.add(key);
         });
+      }
+
+      // The Motion socket (one wire for position and rotation): fills in what no other wire decides. A wire on the single param or on a
+      // vector bundle that holds the param wins over it, even while that wire carries nothing.
+      const motion = paramMotion(def);
+      if (motion) {
+        const mv = wiredParams[motion.port] as unknown as MotionValue | undefined;
+        delete wiredParams[motion.port];
+        if (mv && typeof mv === 'object') {
+          const taken = (key: string) => edges.some((e) => e.to.port === key || !!paramBundles(def).find((b) => b.port === e.to.port && b.members.includes(key)));
+          const set = (key: string, n: unknown) => {
+            if (typeof n !== 'number' || !Number.isFinite(n) || taken(key)) return;
+            wiredParams[key] = n;
+            if (tvPorts.has(motion.port)) tvPorts.add(key);
+          };
+          motion.pos.forEach((k, i) => set(k, mv.pos?.[i]));
+          motion.rot.forEach((k, i) => set(k, mv.rot?.[i]));
+          if (motion.scale) set(motion.scale, mv.scale);
+        }
       }
 
       // 2. Bypass: pass the first input through to the first output of a compatible type.
