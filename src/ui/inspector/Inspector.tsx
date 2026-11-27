@@ -41,6 +41,7 @@ import { CameraControlsPanel } from './CameraControlsPanel';
 import { FastCopyPanel } from './FastCopyPanel';
 import { RecorderPanel } from './RecorderPanel';
 import { StopMotionPanel } from './StopMotionPanel';
+import { SdfConvertPanel } from './SdfConvertPanel';
 import { isLivePictureType } from '../../engine/lib/live-source';
 import { CodecSelect, REGISTRY_PARAMS, hasFfmpegOptions } from './CodecSelect';
 import { missingCapabilities } from '../lib/requirements';
@@ -248,6 +249,7 @@ function NodePanel({ id }: { id: string }) {
       {isLivePictureType(node.type) && !missing.length && <LiveRecordPanel fullId={fullId} />}
       {node.type === 'recorder' && <RecorderPanel fullId={fullId} params={node.params} />}
       {node.type === 'stop-motion' && <StopMotionPanel id={id} params={node.params} />}
+      {node.type === 'sdf-3d' && <SdfConvertPanel id={id} />}
       {def.playable && (
         <div className="rs-insp__sec">
           <div className="rs-caps">Keyboard</div>
