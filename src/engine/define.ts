@@ -34,6 +34,10 @@ export function validateDef(def: AnyNodeDef): string[] {
     }
   }
   if (Object.keys(def.outputs ?? {}).length === 0 && def.category !== 'output') problems.push('no outputs');
+  if (def.guide) {
+    if (!def.guide.does || !def.guide.steps?.length) problems.push('guide: needs "does" and at least one step');
+    for (const n of def.guide.needs ?? []) if (!inputs.includes(n.input)) problems.push(`guide: needs "${n.input}" is not an input`);
+  }
   if (def.process) {
     const pr = def.process;
     if (!pr.title) problems.push('process: missing title');

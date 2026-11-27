@@ -12,7 +12,19 @@ export default defineNode({
     'Finds the areas that move, by comparing the current frame with the frame a few frames earlier. Works best with a steady camera. In a looping project the comparison wraps around the loop.',
   keywords: ['detect', 'motion', 'movement', 'difference', 'moving', 'track', 'find'],
   cpu: true,
-  inputs: { image: { type: 'image', required: true, label: 'Image' } },
+  guide: {
+    does: 'Finds the parts of a video that are moving, and gives you their boxes (regions).',
+    steps: [
+      'Wire a video or picture sequence into Picture to search. A still picture has no motion.',
+      'Lower Change needed if moving things are missed, raise it if too much is found.',
+      'Wire Regions into Track, then into Effects On Regions or Region Overlay.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The video to look for movement in.' },
+    ],
+    seeAlso: ['track', 'region-fx', 'region-overlay'],
+  },
+  inputs: { image: { type: 'image', required: true, label: 'Picture to search' } },
   outputs: { regions: { type: 'regions', label: 'Regions' }, mask: { type: 'mask', label: 'Moving pixels' } },
   params: {
     frames: { type: 'number', default: 2, min: 1, max: 30, step: 1, integer: true, label: 'Frames back', hint: 'Larger values catch slow movement but make boxes lag.' },

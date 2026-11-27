@@ -36,7 +36,19 @@ export default defineNode({
     'Gives every detected region a stable id that follows it from frame to frame, with optional smoothing and hold-over when a detection blinks out. Ids are stable within a look-back window, not globally.',
   keywords: ['track', 'id', 'follow', 'identity', 'smooth', 'stabilise', 'stabilize', 'hold'],
   cpu: true,
-  inputs: { regions: { type: 'regions', required: true, lazy: true, label: 'Regions' } },
+  guide: {
+    does: 'Makes each region keep the same id from frame to frame, so one thing stays one thing (and its box moves smoothly).',
+    steps: [
+      'Wire the Regions of a Detect node into Regions to follow.',
+      'Wire Tracked regions into Effects On Regions, Region Overlay or any other region node.',
+      'For a long clip press Analyze clip once so it is instant and the same in the export.',
+    ],
+    needs: [
+      { input: 'regions', hint: 'The regions to follow: they come from a Detect node.' },
+    ],
+    seeAlso: ['detect-motion', 'detect-blobs', 'region-fx'],
+  },
+  inputs: { regions: { type: 'regions', required: true, lazy: true, label: 'Regions to follow' } },
   outputs: { regions: { type: 'regions', label: 'Tracked regions' } },
   params: {
     memory: { type: 'number', default: 8, min: 1, max: 60, step: 1, integer: true, label: 'Look-back', hint: 'Extra frames looked at before the start of the id window, so matching and smoothing are warmed up.' },

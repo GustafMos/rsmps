@@ -88,6 +88,18 @@ export default defineNode({
   description:
     "Paints a live camera picture into a 360 panorama as you turn, like a photo sphere. Wire the camera picture and the phone's Yaw, Pitch and Roll (Phone Motion with Sensors from: This device). The part in view is live and everything painted earlier stays. It relies on the phone's motion sensors, so it drifts over time and seams are only as good as the sensors. Only the area currently pointed at is live, the rest is an old snapshot. The canvas is built frame by frame, so jumping in time starts it empty.",
   keywords: ['360', 'panorama', 'photo sphere', 'photosphere', 'sweep', 'gyro', 'equirectangular', 'phone', 'camera', 'stitch', 'tiny planet', 'look around', 'live', 'paint', 'accumulate'],
+  guide: {
+    does: 'Paints a live camera picture into a 360 panorama while you turn the phone.',
+    steps: [
+      'Wire the camera picture into Image.',
+      'Wire Phone Motion Yaw, Pitch and Roll into the Yaw, Pitch and Roll settings (Phone Motion with Sensors from: This device).',
+      'Turn slowly: the part in view is live and what you painted earlier stays.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The live camera picture.' },
+    ],
+    seeAlso: ['fake-360', 'phone-motion'],
+  },
   inputs: { image: { type: 'image', required: true, label: 'Image' } },
   outputs: { image: { type: 'image', label: 'Image' } },
   usesPrevious: true,

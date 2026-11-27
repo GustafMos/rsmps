@@ -8,9 +8,22 @@ export default defineNode({
   description:
     'Cuts the image down to one region and outputs it at a fixed size: a "follow cam" that stays on a tracked subject, or a way to extract a subject as its own picture. Put Track before it for smooth movement.',
   keywords: ['crop', 'follow', 'cam', 'zoom', 'extract', 'subject', 'region', 'frame', 'reframe'],
+  guide: {
+    does: 'Cuts the picture down to one region and keeps it at a fixed size, like a camera that follows one thing.',
+    steps: [
+      'Wire your picture into Picture.',
+      'Wire regions into Regions (boxes), through Track so the box moves smoothly.',
+      'Choose which region with Region number or Or region with id.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The picture to cut from.' },
+      { input: 'regions', hint: 'The boxes to cut out.' },
+    ],
+    seeAlso: ['track', 'detect-blobs', 'region-filter'],
+  },
   inputs: {
-    image: { type: 'image', required: true, label: 'Image' },
-    regions: { type: 'regions', required: true, label: 'Regions' },
+    image: { type: 'image', required: true, label: 'Picture' },
+    regions: { type: 'regions', required: true, label: 'Regions (boxes)' },
   },
   outputs: { image: { type: 'image', label: 'Image' } },
   params: {

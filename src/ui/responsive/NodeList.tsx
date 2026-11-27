@@ -6,6 +6,7 @@ import { Icon } from '../components/Icon';
 import { evaluationOrder } from '../graph-touch/pure';
 import { useApp, useEd, usePlayer } from '../store/context';
 import { showTab } from './shellStore';
+import { missingInputs, summaryLine } from '../lib/guide';
 
 /**
  * The graph as a list: nodes in evaluation order with their one-line summaries. For when wiring is not the task: tap selects, the
@@ -32,12 +33,14 @@ export function NodeList() {
   const summaryOf = (id: string): string => {
     const n = nodes.find((x) => x.id === id);
     const def = n && defOf(io.registry, n);
-    if (!n || !def?.summary) return '';
+    if (!n || !def) return '';
+    const wiredSet = wiredOf.get(id) ?? new Set<string>();
+    if (!def.summary && !missingInputs(def, wiredSet).length) return '';
     try {
       const params: Record<string, unknown> = {};
       for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = n.params[k] ?? p.absent ?? p.default;
       const frames = Math.max(1, Math.round(project.duration * project.fps));
-      return def.summary(params, wiredOf.get(id) ?? new Set<string>(), { loop: !!project.loop, frames, fps: project.fps });
+      return summaryLine(def, params, wiredSet, { loop: !!project.loop, frames, fps: project.fps });
     } catch {
       return '';
     }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { assignEffects, matchesList } from '../../lib/region-fx-assign';
 import { regionsSource } from '../../lib/track-testutil';
 import { harness, type Harness } from '../../testing';
+import { regionFxSummary } from './region-fx.node';
 import type { ImageValue, MaskValue, Region } from '../../types';
 
 const R = (id: number, box: [number, number, number, number], label = 'blob'): Region => ({ id, label, score: 0.9, box });
@@ -101,9 +102,9 @@ describe('region-fx (GPU)', () => {
   it('works with unwired effects (only C wired, none wired)', async () => {
     const { t, base, c } = await setup();
     list = [R(1, [0.1, 0.1, 0.4, 0.4])];
-    const px = await t.pixels((await fxRun(t, { give: 'all' }, { image: base, fx3: c })).image as ImageValue);
+    const px = await t.pixels((await fxRun(t, { give: 'all', fxA: 'wire' }, { image: base, fx3: c })).image as ImageValue);
     expect(rgb(px, 16, 16)).toEqual([0, 0, 255]);
-    const bare = await t.pixels((await fxRun(t, { give: 'all' }, { image: base })).image as ImageValue);
+    const bare = await t.pixels((await fxRun(t, { give: 'all', fxA: 'wire' }, { image: base })).image as ImageValue);
     expect(rgb(bare, 16, 16)).toEqual([100, 100, 100]);
   });
 
@@ -217,5 +218,123 @@ describe('region-fx (GPU)', () => {
     const px = await t.pixels((await fxRun(t, {}, { image: base, fx1: small })).image as ImageValue);
     expect(rgb(px, 40, 30)).toEqual([0, 255, 0]);
     expect(rgb(px, 20, 30)).toEqual([100, 100, 100]);
+  });
+});
+
+describe('built-in effects (GPU)', () => {
+  const OLD = { fxA: 'wire', fxB: 'wire', fxC: 'wire', fxD: 'wire' };
+  const BOX = [0.25, 0.25, 0.75, 0.75] as const; // texels 16..48 of 64
+  // a scene with detail: stripes of color so every built-in has something to change
+  const scene = (t: Harness) => t.fromFn(SIZE, SIZE, (x, y) => [(((x >> 1) + (y >> 1)) % 2) * 255, (y * 4) % 256, (x * 4) % 256, 255]);
+  const inside = (px: { at(x: number, y: number): number[] }, ref: { at(x: number, y: number): number[] }) => {
+    let d = 0;
+    for (let y = 20; y < 44; y += 3) for (let x = 20; x < 44; x += 3) for (let c = 0; c < 3; c++) d += Math.abs(px.at(x, y)[c] - ref.at(x, y)[c]);
+    return d;
+  };
+  const same = (px: { at(x: number, y: number): number[] }, ref: { at(x: number, y: number): number[] }) => {
+    let d = 0;
+    for (const [x, y] of [[2, 2], [60, 5], [5, 60], [58, 58], [32, 6], [12, 32]]) for (let c = 0; c < 4; c++) d += Math.abs(px.at(x, y)[c] - ref.at(x, y)[c]);
+    return d;
+  };
+
+  it('every built-in changes the inside of the region and leaves the outside untouched', async () => {
+    const { t } = await setup();
+    const img = scene(t);
+    list = [R(1, [...BOX])];
+    const ref = await t.pixels(img);
+    for (const kind of ['pixelate', 'blur', 'invert', 'bw', 'tint', 'brighten', 'darken', 'outline', 'hide', 'solid']) {
+      const px = await t.pixels((await fxRun(t, { fxA: kind, colA: [0, 1, 0, 1], amtA: 1 }, { image: img })).image as ImageValue);
+      expect(inside(px, ref), kind).toBeGreaterThan(100);
+      expect(same(px, ref), `${kind} outside`).toBe(0);
+    }
+  });
+
+  it('specific looks: invert flips, solid fills, hide clears, black and white has no color', async () => {
+    const { t, base } = await setup();
+    list = [R(1, [...BOX])];
+    const at = async (params: Record<string, unknown>, img = base) => t.pixels((await fxRun(t, params, { image: img })).image as ImageValue);
+    expect(rgb(await at({ fxA: 'invert' }), 32, 32)).toEqual([155, 155, 155]);
+    expect(rgb(await at({ fxA: 'solid', colA: [0, 0, 1, 1] }), 32, 32)).toEqual([0, 0, 255]);
+    expect((await at({ fxA: 'hide' })).at(32, 32)[3]).toBe(0);
+    const bw = await at({ fxA: 'bw' }, t.solid(SIZE, SIZE, [200, 40, 40, 255]));
+    const [r, g, b] = rgb(bw, 32, 32);
+    expect(Math.abs(r - g)).toBeLessThan(3);
+    expect(Math.abs(g - b)).toBeLessThan(3);
+    const dark = await at({ fxA: 'darken', amtA: 1 });
+    expect(dark.at(32, 32)[0]).toBeLessThan(25);
+    const bright = await at({ fxA: 'brighten', amtA: 1 });
+    expect(bright.at(32, 32)[0]).toBeGreaterThan(200);
+  });
+
+  it('amount 0 leaves the picture as it was', async () => {
+    const { t } = await setup();
+    const img = scene(t);
+    list = [R(1, [...BOX])];
+    const ref = await t.pixels(img);
+    for (const kind of ['pixelate', 'blur', 'invert', 'bw', 'brighten', 'darken', 'outline']) {
+      const px = await t.pixels((await fxRun(t, { fxA: kind, amtA: 0 }, { image: img })).image as ImageValue);
+      expect(inside(px, ref) / 96, kind).toBeLessThan(3);
+    }
+  });
+
+  it('a wired picture takes over from the built-in effect', async () => {
+    const { t, base, a } = await setup();
+    list = [R(1, [...BOX])];
+    const px = await t.pixels((await fxRun(t, { fxA: 'invert' }, { image: base, fx1: a })).image as ImageValue);
+    expect(rgb(px, 32, 32)).toEqual([255, 0, 0]);
+  });
+
+  it('built-ins B and C are shared out like wired pictures', async () => {
+    const { t, base } = await setup();
+    list = [R(1, [0.1, 0.1, 0.4, 0.4]), R(2, [0.6, 0.6, 0.9, 0.9])];
+    const px = await t.pixels((await fxRun(t, { give: 'cycle', fxA: 'invert', fxB: 'solid', colB: [0, 1, 0, 1] }, { image: base })).image as ImageValue);
+    expect(rgb(px, 16, 16)).toEqual([155, 155, 155]);
+    expect(rgb(px, 48, 48)).toEqual([0, 255, 0]);
+  });
+
+  it('invert uses the first built-in effect outside the regions', async () => {
+    const { t, base } = await setup();
+    list = [R(1, [...BOX])];
+    const px = await t.pixels((await fxRun(t, { fxA: 'solid', colA: [1, 0, 0, 1], invert: true }, { image: base })).image as ImageValue);
+    expect(rgb(px, 4, 4)).toEqual([255, 0, 0]);
+    expect(rgb(px, 32, 32)).toEqual([100, 100, 100]);
+  });
+
+  it('an old node (every effect by wire, nothing stored for the new params) renders as before', async () => {
+    const { t, base, a, b } = await setup();
+    list = [R(1, [0.1, 0.1, 0.4, 0.4]), R(2, [0.6, 0.6, 0.9, 0.9])];
+    // 0.48.0 form: no fxA..fxD, amtA.. stored at all: the engine reads `absent` ('wire')
+    const out = await t.run('region-fx', { give: 'cycle' }, { regions: { node: 'fx-test-regions' }, image: base, fx1: a, fx2: b } as never);
+    const px = await t.pixels(out.image as ImageValue);
+    expect(rgb(px, 16, 16)).toEqual([255, 0, 0]);
+    expect(rgb(px, 48, 48)).toEqual([0, 255, 0]);
+    const bare = await t.pixels((await fxRun(t, OLD, { image: base })).image as ImageValue);
+    expect(rgb(bare, 16, 16)).toEqual([100, 100, 100]);
+  });
+
+  it('switching built-ins compiles no new shader variant', async () => {
+    const { t } = await setup();
+    const img = scene(t);
+    list = [R(1, [...BOX])];
+    const count = () => t.gpu.stats().pipelineVariants['region-fx'] ?? 0;
+    await fxRun(t, { fxA: 'pixelate' }, { image: img });
+    const before = count();
+    expect(before).toBeGreaterThan(0);
+    for (const kind of ['blur', 'invert', 'bw', 'tint', 'brighten', 'darken', 'outline', 'hide', 'solid']) await fxRun(t, { fxA: kind, amtA: 0.5 }, { image: img });
+    await fxRun(t, { fxA: 'blur', fxB: 'solid', give: 'cycle' }, { image: img });
+    expect(count()).toBe(before);
+  });
+});
+
+describe('region-fx summary', () => {
+  const base = { give: 'all', fxA: 'pixelate', fxB: 'off', fxC: 'off', fxD: 'off', invert: false };
+  it('says what is missing, then what happens', () => {
+    expect(regionFxSummary(base, new Set(['image']))).toMatch(/No regions yet: wire a Detect node into Regions/);
+    expect(regionFxSummary(base, new Set())).toMatch(/Needs a picture/);
+    expect(regionFxSummary(base, new Set(['image', 'regions']))).toBe('A pixelate');
+    expect(regionFxSummary({ ...base, fxB: 'blur', give: 'cycle' }, new Set(['image', 'regions']))).toBe('A pixelate, B blur · take turns by region');
+    expect(regionFxSummary({ ...base, fxA: 'off' }, new Set(['image', 'regions']))).toMatch(/No effect chosen/);
+    expect(regionFxSummary({ ...base, fxA: 'wire' }, new Set(['image', 'regions', 'fx1']))).toBe('A your picture');
+    expect(regionFxSummary({ ...base, invert: true }, undefined)).toBe('A pixelate · everything except the regions');
   });
 });

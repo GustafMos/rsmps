@@ -297,6 +297,8 @@ export interface EnumParam<T extends string = string> extends ParamBase {
   type: 'enum';
   default: T;
   options: readonly { value: T; label: string }[];
+  /** A plain one-line explanation (with an example) of each option, shown under the dropdown for the option that is picked. */
+  optionHints?: Readonly<Partial<Record<T, string>>>;
 }
 export interface ColorParam extends ParamBase {
   type: 'color';
@@ -965,6 +967,18 @@ export interface ProcessDef<P extends ParamSchema = ParamSchema> {
   };
 }
 
+/** A short "How to use" for a node, shown in the inspector. See src/ui/lib/guide.ts. Plain words for first-time users. */
+export interface NodeGuide {
+  /** One plain sentence: what the node does for the picture. */
+  does: string;
+  /** 2 to 4 short steps: what to wire where. */
+  steps: string[];
+  /** Inputs that must be wired for the node to do anything: each is listed as a to-do (with a fix button where one exists) until it is wired. `input` is an input port name. */
+  needs?: { input: string; hint: string }[];
+  /** Ids of related nodes. */
+  seeAlso?: string[];
+}
+
 export interface NodeDef<
   P extends ParamSchema = ParamSchema,
   I extends InputSchema = InputSchema,
@@ -977,6 +991,8 @@ export interface NodeDef<
   description: string;
   /** Extra search words. */
   keywords?: string[];
+  /** Plain "How to use" help shown in the inspector (what it does, what to wire where, which inputs are needed). */
+  guide?: NodeGuide;
   inputs: I;
   outputs: O;
   params: P;

@@ -43,7 +43,19 @@ export default defineNode({
   description:
     'Keeps only some of the regions: by label, minimum score, id, or position in the list (for example only the largest, or only region number 3).',
   keywords: ['filter', 'select', 'keep', 'largest', 'label', 'id', 'score', 'only', 'pick'],
-  inputs: { regions: { type: 'regions', required: true, label: 'Regions' } },
+  guide: {
+    does: 'Keeps only some of the regions, for example only the biggest one or only the ones called "person".',
+    steps: [
+      'Wire regions into Regions to filter.',
+      'Choose what to keep: label, score, id or position in the list.',
+      'Wire the result into any region node.',
+    ],
+    needs: [
+      { input: 'regions', hint: 'The list of regions to pick from.' },
+    ],
+    seeAlso: ['track', 'region-transform'],
+  },
+  inputs: { regions: { type: 'regions', required: true, label: 'Regions to filter' } },
   outputs: { regions: { type: 'regions', label: 'Regions' } },
   params: {
     label: { type: 'string', default: '', label: 'Label contains', hint: 'Comma-separated words, e.g. "person, car". Put ! in front to exclude: "!blob". Empty = any.' },

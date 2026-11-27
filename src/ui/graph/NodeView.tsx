@@ -29,14 +29,15 @@ import { bakeStatusOf } from '../lib/bake';
 import { frozenIds, statusDeps } from '../store/bake';
 import { isActiveJob, processBadge } from '../lib/process';
 import { jobOf, processStore } from '../store/processes';
+import { missingInputs, socketHint, summaryLine } from '../lib/guide';
 import './node.css';
 import './bake.css';
 import '../layers.css';
 
 const catColor = (def: AnyNodeDef | undefined) => (def ? (CATEGORIES[def.category]?.color ?? '#7f8c9b') : '#ff5c6c');
 
-function Socket({ node, port, type, dir, wired }: { node: string; port: string; type: SocketType; dir: 'in' | 'out'; wired?: boolean }) {
-  return <span className={`rs-sock rs-sock--${type} rs-sock--${dir}${wired ? ' is-wired' : ''}`} data-sock data-node={node} data-port={port} data-dir={dir} data-type={type} />;
+function Socket({ node, port, type, dir, wired, title }: { node: string; port: string; type: SocketType; dir: 'in' | 'out'; wired?: boolean; title?: string }) {
+  return <span className={`rs-sock rs-sock--${type} rs-sock--${dir}${wired ? ' is-wired' : ''}`} data-sock data-node={node} data-port={port} data-dir={dir} data-type={type} title={title} />;
 }
 
 /** Full path id of a node of the shown level (what the viewer, the engine and processes use). */
@@ -96,12 +97,12 @@ export const NodeView = memo(function NodeView({ node }: { node: NodeInstance })
   // Loop snapping: a summary can say when the loop switch changed a typed value ("speed 2 → 3 to loop"); it gets the project's loop / length / rate.
   const clockKey = useEd((st) => `${st.level.project.loop ? 1 : 0}|${Math.max(1, Math.round(st.level.project.duration * st.level.project.fps))}|${st.level.project.fps}`);
   const summary = useMemo(() => {
-    if (!def?.summary) return '';
+    if (!def?.summary && !missingInputs(def, wired).length) return '';
     try {
       const params: Record<string, unknown> = {};
-      for (const [k, p] of Object.entries(def.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.absent ?? p.default;
+      for (const [k, p] of Object.entries(def!.params as Record<string, ParamDef>)) params[k] = node.params[k] ?? p.absent ?? p.default;
       const [lp, fr, fp] = clockKey.split('|').map(Number);
-      return def.summary(params, wired, { loop: lp === 1, frames: fr, fps: fp });
+      return summaryLine(def, params, wired, { loop: lp === 1, frames: fr, fps: fp });
     } catch {
       return '';
     }
@@ -321,8 +322,9 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
       <div className="rs-row rs-row--io" style={{ top: row.y, height: ROW_H }}>
         {row.input && (
           <>
-            {!row.input.multi && <Socket node={node.id} port={row.input.port} type={row.input.type} dir="in" wired={wired.has(row.input.port)} />}
-            <span className="rs-row__label" title={row.input.label}>{row.input.label}</span>
+            {!row.input.multi && <Socket node={node.id} port={row.input.port} type={row.input.type} dir="in" wired={wired.has(row.input.port)} title={row.input.hint ? `${row.input.label}: ${row.input.hint}` : undefined} />}
+            <span className="rs-row__label" title={row.input.hint ? `${row.input.label}: ${row.input.hint}` : row.input.label}>{row.input.label}</span>
+            {row.input.required && !wired.has(row.input.port) && <span className="rs-row__need" title={`${row.input.label} is empty: this node does nothing until a ${row.input.type === 'image' ? 'picture' : row.input.type} is wired in`}>{socketHint(row.input.type)}</span>}
           </>
         )}
         {row.output && (

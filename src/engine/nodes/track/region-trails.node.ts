@@ -19,9 +19,22 @@ export default defineNode({
   description:
     'Draws motion trails behind tracked regions: a fading line, dots or ghost boxes through where each region was over the last few frames. Use Track first so each object keeps one id and one color. In a looping project the trail wraps around the loop.',
   keywords: ['trail', 'path', 'motion', 'history', 'streak', 'ghost', 'regions', 'follow'],
+  guide: {
+    does: 'Draws a fading trail behind each tracked region, showing where it has been.',
+    steps: [
+      'Wire your picture into Picture.',
+      'Wire tracked regions (a Detect node, then Track) into Regions (boxes): Track gives each thing one color and one trail.',
+      'Set how long the trail is.',
+    ],
+    needs: [
+      { input: 'image', hint: 'The picture to draw the trails on.' },
+      { input: 'regions', hint: 'Tracked regions: from a Detect node and Track.' },
+    ],
+    seeAlso: ['track', 'detect-motion', 'region-overlay'],
+  },
   inputs: {
-    image: { type: 'image', required: true, label: 'Size from' },
-    regions: { type: 'regions', required: true, label: 'Regions' },
+    image: { type: 'image', required: true, label: 'Picture' },
+    regions: { type: 'regions', required: true, label: 'Regions (boxes)' },
   },
   outputs: { image: { type: 'image', label: 'Image' } },
   maskable: false,

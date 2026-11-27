@@ -668,16 +668,35 @@ A clip has width, height and time. **Frame Array** (Time) shows time as a third 
 6. *Pane opacity* below 1 with *Blend* **Add** turns a stack into layers of light. *Dim other panes* and *Fade with distance* keep the present frame the brightest.
 7. Cost: every pane makes whatever feeds the node render once more per frame (a still picture costs nothing extra), so keep *Panes* low on a heavy chain, or freeze the chain in front first (see "Freeze a finished part of the graph").
 
-## Different effects on different tracked regions (Effects On Regions)
+## Pixelate the moving things, or put effects on tracked regions (Effects On Regions)
 
-You have found things in a clip (Detect Blobs, Detect Color, Detect Motion, then Track so each one keeps its identity) and want each one to look different.
+You want an effect on only some things in a clip: the things that move, the bright spots, one color. Three parts do it: a **detector** (Detect Motion, Detect Blobs, Detect Color) finds the things and gives their boxes ("regions"), **Track** makes each box keep its number from frame to frame, and **Effects On Regions** applies the effect inside the boxes.
 
-1. Wire the clip into a detector, and the detector's regions into **Track**. The quickest start is the template **Different effects on tracked regions**.
-2. Make the effects the ordinary way, each as its own branch from the same clip: clip into **Pixelate**, clip into **Invert**, clip into a blur, and so on.
-3. Add **Effects On Regions** (Track). Wire the clip into *Original*, the tracked regions into *Regions*, and the branches into *Effect A*, *Effect B*, *Effect C*, *Effect D*. The picture shows the original everywhere, and inside each region the effect that region was given.
-4. *Give effects* decides who gets what. **All regions get A**; **Take turns by region** (A, B, C, D in order of the tracked ids, so a region keeps its effect while it lives); **By size** (largest gets A); **Left to right**; **Top to bottom**; **By label or id** (type labels or ids per effect, like `person, 12`); **Random per region** (stable per region; change *Seed* for another draw). Effects you did not wire are skipped, and a region that gets no effect shows the original.
-5. *Shape* is Box, Rounded box or Ellipse. *Grow* makes the areas bigger (or smaller with a negative number), in percent of each region's own size. *Feather* softens the edge. *Invert* turns it round: the effect shows everywhere except inside the regions (only Effect A is used). *Mix* fades all effects in and out together.
-6. Where regions overlap, the smallest region wins, so a small region inside a large one keeps its own effect.
-7. Optional: wire a mask into *Shape mask* to get a precise outline. The effect then shows only where the mask is white and inside a region's box. The *Affected area* output is a mask of everything that got an effect, to drive other nodes.
+### The quick way: one step
+
+Select the node that makes your picture (your clip, a camera, any picture node), right-click it and pick **Regions**, or open the Add menu with it selected and use the **Regions** buttons at the top:
+
+- **Effect on moving things**: Detect Motion, Track, Effects On Regions. Pixelates whatever moves.
+- **Effect on bright or colored things**: the same with Detect Blobs.
+- **Boxes and labels on things**: Detect Motion, Track, Region Overlay.
+- **Blur everything except the things**: keeps the moving things sharp and blurs the rest (Invert on).
+
+The whole chain is added and wired after your node in one undo step, and you see the result at once. Everything that used to come out of your node now comes out of the new last node.
+
+### Built-in effects, no wiring
+
+Each of the four effects (A to D) is a dropdown: **Pixelate**, **Blur**, **Invert**, **Black and white**, **Tint**, **Brighten**, **Darken**, **Outline**, **Hide, see through**, **Solid color**, each with one *amount* slider (and a color for Tint and Solid color). A new node starts with Effect A = Pixelate and the others off. Choose a second effect and the *Give effects* choice appears, which decides who gets what.
+
+For a look that is not built in, make it the ordinary way (clip into Pixelate, Invert, a blur, any chain) and wire it into *Effect A picture* (or B, C, D). A wired picture always takes over from the built-in effect of its slot. Older projects whose effects were all wired render exactly as before.
+
+### Sharing the effects out
+
+*Give effects* decides who gets what. **All regions get A**; **Take turns by region** (A, B, C, D in order of the tracked ids, so a region keeps its effect while it lives); **By size** (largest gets A); **Left to right**; **Top to bottom**; **By label or id** (type labels or ids per effect, like `person, 12`); **Random per region** (stable per region; change *Seed* for another draw). Effects that are not in use are skipped, and a region that gets no effect shows the original. The line under the dropdown explains the choice with an example.
+
+*Shape* is Box, Rounded box or Ellipse. *Grow* makes the areas bigger (or smaller with a negative number), in percent of each region's own size. *Feather* softens the edge. *Invert* turns it round: the effect shows everywhere except inside the regions (only Effect A is used). *Mix* fades all effects in and out together. Where regions overlap, the smallest region wins, so a small region inside a large one keeps its own effect. Optionally wire a mask into *Shape mask* to get a precise outline: the effect then shows only where the mask is white and inside a region's box. The *Area* output is a mask of everything that got an effect, to drive other nodes.
+
+### When a node says it needs something
+
+A node with an empty required socket (no picture, no regions) shows a small "needs ..." tag beside that socket and says what is missing on its summary line. Select it: the **How to use** box at the top of the inspector lists what is still empty, with a button that fixes it (for example "Add Detect Blobs" adds a detector fed by the same picture and wires it in). The **?** button shows or hides the steps. Many other nodes have the same box (every region node, Recorder, Stop Motion, Marker Camera, Stabilize, Fake 360, Sweep 360, SDF Combine, Media Timeline). The templates **Different effects on tracked regions** and **Boxes on moving things** are ready-made starting points.
 
 To keep only some regions first (the largest few, one label, a list of ids) use **Filter Regions** in front.
