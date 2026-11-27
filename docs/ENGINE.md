@@ -555,3 +555,23 @@ where cache nodes go to bake a whole group.
   and on every node while a vector wire is being placed by tapping (touch). Dropping a vector wire on a node body offers the bundles in the socket picker. The inspector
   shows one slim row per bundle above its members (a drop target like every wireable row); members driven by the bundle read "from <node>". Test: `__tests__/vector-sockets.test.ts`,
   `ui/lib/bundle-sockets.test.ts`.
+
+- **SDF scenes (`sdf` socket, category `sdf`, `lib/sdf-scene.ts`, `lib/sdf-render.ts`).** Modelling with signed distance fields is a tree of plain data on a wire: `SdfValue { kind: 'sdf', root, picture? }`,
+  where a tree node is a `shape` (kind, position, rotation, half sizes, scale, colour), a `combine` (union / subtract / intersect, smoothness, ordered children), a `move` (position, rotation, scale) or a
+  `mod` (mirror, repeat, round, shell, twist, bend, displace). Numbers are already resolved for the frame. The nodes are SDF Shape, SDF Combine, SDF Move (`sdf-transform`), SDF Modify and, inside every
+  scene, Scene Output (`sdf-render`); none of them draws anything but the Scene Output.
+  - **Ids are flat paths.** Every tree node carries `ctx.path` of the node that made it (`scene/shape1`, `outer/scene2/shape1`). Reading `ctx.path` makes the result depend on the path (kernel seam in
+    `engine.ts`: one more flag next to `time` and `item`, the cache key then contains the node's path), so two copies of a node never share a cached value with the other copy's id. A scene wired into
+    another arrives as ONE `move` node whose id is its Scene Output's path (it carries the scene's own Move / Rotate / Scale); `sdfPathTo(root, id)` lists the scenes a shape sits in.
+  - **Structure vs numbers.** `sdfStructure` (kinds, operators, modifier kinds, tree shape, which repeat axes are on, picture used) selects the generated WGSL (`sdfSceneFn`); `packSdf` is every number as vec4
+    slots in pre-order (shape 6, combine 1, move 4, mod 2), read as `u.q0 .. u.qN`. Dragging a slider compiles nothing (test: `pipelinesCreated` stays put).
+  - **Limits**: at most 96 shapes per scene and 4096 copies after repeats and mirrors (`SDF_MAX_SHAPES`, `SDF_MAX_COPIES`); above them the Scene Output says so in plain words. One picture per scene
+    (Extruded picture shapes share the first one wired); a shape of that kind without a picture is simply not there.
+  - **Exactness.** Mirror, Repeat (copies that stay inside their cell), Round, Shell and Move keep exact distances; Twist, Bend and Displace do not, so the tracer multiplies its step by 0.6 / 0.6 / 0.7
+    (`sdfStepScale`), Repeat by 0.85, Extruded picture by 0.9.
+  - **Shared with SDF 3D** (`lib/sdf-prims.ts`): distance functions, combine operators with colour blending, the object frame (`toLocal`), the Material shade hook and the picture-to-field preparation, on top of
+    `lib/gen-3d.ts` (camera, march, light, AO, shadows, depth, quality). SDF 3D renders exactly what it did.
+  - **SDF Scene = a group** (`sdf-scene-group.ts`): a `group` node with `sdfScene: true` whose inside holds SDF nodes around a Scene Output called `render`. The scene's render settings are the exposed params of
+    that node (shown with their groups and conditions: `lib/sdf-scene-params.ts`), camera / material / size are ports, outputs are `image`, `depth` and `sdf`. A scene wired into another scene's inside
+    through a group input of type `sdf` ("SDF In") is combined there. **Placement rule**: SDF nodes can only be added inside an SDF Scene; the editor refuses add, paste and ungroup elsewhere with a toast
+    (`sdfPlacementProblem`), the add menu hides them outside, and the engine tolerates a stray one (it only makes an `sdf` value nobody draws).

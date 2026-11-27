@@ -20,6 +20,7 @@ import type {
   ImageValue,
   MaskValue,
   MaterialValue,
+  SdfValue,
   NodeGpu,
   NodeInstance,
   ParamDef,
@@ -208,12 +209,21 @@ function texturesOf(v: unknown): GPUTexture[] {
     for (const m of Object.values((v as MaterialValue).maps)) if (m && !out.includes(m.texture)) out.push(m.texture);
     return out;
   }
+  if (v && typeof v === 'object' && (v as { kind?: string }).kind === 'sdf') {
+    const pic = (v as SdfValue).picture;
+    return pic ? [pic.texture] : [];
+  }
   return [];
 }
 
 function valueSig(v: Value | Value[] | null, sourceKey: string): string {
   if (v === null) return 'null';
   if (!Array.isArray(v) && (v as { kind?: string }).kind === 'material') return `m:${sourceKey}`;
+  // an SDF scene is plain numbers (resolved per frame) plus at most one picture: the numbers are the identity, the picture is the producing node's key
+  if (!Array.isArray(v) && (v as { kind?: string }).kind === 'sdf') {
+    const { picture, ...rest } = v as SdfValue;
+    return `s:${stableStringify(rest)}${picture ? `|${sourceKey}` : ''}`;
+  }
   if (Array.isArray(v) && v.length && isTextured(v[0])) return sourceKey;
   if (isTextured(v)) return sourceKey;
   return stableStringify(v);
@@ -286,7 +296,7 @@ export class Engine {
   private cache = new Map<string, Entry>();
   private cacheBytes = 0;
   /** What a node read last time under a given static signature: decides whether time/item enter its key. */
-  private reads = new Map<string, { time: boolean; item: boolean }>();
+  private reads = new Map<string, { time: boolean; item: boolean; path?: boolean }>();
   private lite = new Map<string, LiteEntry>();
   /** `usesPrevious` nodes: "<structure>@<frame>" -> cache key of that frame's result (see RenderCtx.previous). Bounded. */
   private selfIndex = new Map<string, string>();
@@ -1103,8 +1113,8 @@ export class Engine {
       );
       const readsKey = `${id}|${staticSig}`;
       const known = this.reads.get(readsKey);
-      const fullKey = (r: { time: boolean; item: boolean }) =>
-        staticSig + (r.time ? `@${scope.frame}/${scope.graph.project.fps}/${scope.graph.project.duration}/${scope.graph.project.loop}` : '') + (r.item ? `#${scope.item}/${scope.itemCount}` : '');
+      const fullKey = (r: { time: boolean; item: boolean; path?: boolean }) =>
+        staticSig + (r.path ? `^${id}` : '') + (r.time ? `@${scope.frame}/${scope.graph.project.fps}/${scope.graph.project.duration}/${scope.graph.project.loop}` : '') + (r.item ? `#${scope.item}/${scope.itemCount}` : '');
       if (known) {
         // Most recently used last: the pruning in evict() then drops what no frame asks for any more, never the static nodes in use.
         this.reads.delete(readsKey);
@@ -1119,7 +1129,7 @@ export class Engine {
       }
 
       // 6. Render.
-      const used = { time: false, item: false };
+      const used = { time: false, item: false, path: false };
       const project = scope.graph.project;
       const totalFrames = Math.max(1, Math.round(project.duration * project.fps));
       const time: TimeInfo = {
@@ -1167,6 +1177,10 @@ export class Engine {
         quality: scope.quality,
         // Seed base: the id the node has in its own level, so grouping a node never changes its look (docs/ENGINE.md, "Group nodes").
         nodeId: localId(id),
+        get path() {
+          used.path = true;
+          return id;
+        },
         proxy: scope.proxy,
         wants: (output: string) => !optional.includes(output) || wantedSet.has(output),
         unitFor: (w: number, h: number) => this.unitFor(scope.graph, w, h, scope.proxy),

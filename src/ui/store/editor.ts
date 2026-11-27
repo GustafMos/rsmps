@@ -66,6 +66,7 @@ import {
   withoutProcessResults,
   type GroupKind,
 } from '../../engine/group';
+import { inSdfScene, isSdfSceneNode, newSdfScene, sdfPlacementProblem, SDF_SCENE_TYPE } from '../../engine/sdf-scene-group';
 import { processParamsPatch } from '../../engine/process';
 import type { AnyNodeDef } from '../../engine/types';
 
@@ -273,6 +274,10 @@ export class Editor {
   }
   get state(): EditorState {
     return this.store.get();
+  }
+  /** True when the shown level is inside an SDF Scene: the only place SDF nodes can be added. */
+  inSdfScene(): boolean {
+    return inSdfScene(this.state.graph, this.state.path);
   }
   /** The graph shown in the node editor (top level, or the inside of the open group). */
   get level(): GraphDoc {
@@ -731,6 +736,13 @@ export class Editor {
     params = motionNodeParams(type, isHandheld(), params); // motion nodes read this device's own sensors on a phone
     const def = this.registry.get(type);
     if (!def) return null;
+    // SDF nodes live inside an SDF Scene only; the SDF Scene itself is added as a group, pre-filled with one sphere
+    const sdfProblem = sdfPlacementProblem(this.state.graph, this.state.path, [{ type, params: {} }], this.registry);
+    if (sdfProblem) {
+      this.toast(sdfProblem, 'info');
+      return null;
+    }
+    if (type === SDF_SCENE_TYPE) return this.addGroupNode(newSdfScene(this.registry, 'new', at), at, link);
     let id = '';
     this.editLevel((g) => {
       const { graph, node } = addNode(g, this.registry, type, at, params);
@@ -1175,6 +1187,11 @@ export class Editor {
   paste(at?: { x: number; y: number }): void {
     const clip = this.clip;
     if (!clip || !clip.nodes.length) return;
+    const sdfProblem = sdfPlacementProblem(this.state.graph, this.state.path, clip.nodes, this.registry);
+    if (sdfProblem) {
+      this.toast(sdfProblem, 'info');
+      return;
+    }
     const minX = Math.min(...clip.nodes.map((n) => n.x));
     const minY = Math.min(...clip.nodes.map((n) => n.y));
     const off = at ? { x: at.x - minX, y: at.y - minY } : { x: 32, y: 32 };
@@ -1247,6 +1264,10 @@ export class Editor {
     if (!groups.length) {
       if (this.state.selectedFrame) this.ungroup(this.state.selectedFrame);
       else this.toast('Select a group node to ungroup it.', 'info');
+      return [];
+    }
+    if (!inSdfScene(this.state.graph, this.state.path) && groups.some((gid) => isSdfSceneNode(this.level.nodes.find((n) => n.id === gid)))) {
+      this.toast('An SDF Scene cannot be ungrouped: SDF shapes can only live inside an SDF Scene.', 'info');
       return [];
     }
     const out: string[] = [];
@@ -1344,6 +1365,11 @@ export class Editor {
     const problems = validateGroupNode(group, this.registry);
     if (problems.length) {
       this.toast(`This group cannot be added: ${problems[0]}.`, 'error');
+      return null;
+    }
+    const sdfProblem = sdfPlacementProblem(this.state.graph, this.state.path, [group], this.registry);
+    if (sdfProblem) {
+      this.toast(sdfProblem, 'info');
       return null;
     }
     const id = uid('g');
