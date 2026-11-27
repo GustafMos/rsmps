@@ -4,6 +4,12 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.52.0] - 2026-11-27
+
+### Added
+- **Joining two SDF outputs makes an SDF Combine.** Inside an SDF Scene, dragging one SDF output onto another creates an SDF Combine between them, the way two pictures make a Stack. The shape you drop onto is input 1 (the base) and the one you pulled is input 2, so with Subtract the pulled shape is cut out. It starts as Union and is selected, with its Operation dropdown on the node. Dropping another SDF output onto a Combine's output adds it as one more input.
+- **Node names say what they are.** SDF Shape and 3D Object show their shape ("SDF Shape Torus", "3D Object Torus"); a 3D Object or Model 3D showing an imported model shows the first 7 letters of the model's file name; SDF Combine shows its operation and SDF Modify its modifier. The name updates on the node, in the inspector, in the viewer and in the phone's List view. A node you renamed yourself keeps your name.
+
 ## [0.51.0] - 2026-11-27
 
 ### Added
