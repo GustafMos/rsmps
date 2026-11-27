@@ -274,6 +274,14 @@ export function eulerZYX(m: M3, near: Euler = [0, 0, 0], limit = 360): Euler {
   return fa.cost <= fb.cost ? fa.e : fb.e;
 }
 
+const IDENTITY3: M3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const transposeM = (m: M3): M3 => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
+/**
+ * Rotate X / Y / Z of an object whose WORLD rotation is `world`, when it sits inside a parent turned by `parent` (an SDF Move or a scene):
+ * its own angles are written in the parent's space, so the parent's turn is taken off first. No parent = `eulerZYX`.
+ */
+export const localEuler = (world: M3, parent: M3, near: Euler): Euler => eulerZYX(parent === IDENTITY3 ? world : mul3(transposeM(parent), world), near);
+
 /** The object's rotation matrix for its Rotate X / Y / Z (object space to scene). */
 export const matrixOf = (rot: Euler): M3 => rotationZYX(rot[0], rot[1], rot[2]);
 
@@ -283,18 +291,18 @@ export const matrixOf = (rot: Euler): M3 => rotationZYX(rot[0], rot[1], rot[2]);
  * (a drag to the right turns the front of the object to the right). `rot0` = the rotation when the finger went down; the result is
  * the same wherever the finger wandered in between, so coming back to the start restores the start exactly.
  */
-export function turnTrackball(l: Pick<Lens, 'right' | 'up' | 'fwd'>, rot0: Euler, dxPx: number, dyPx: number, radiusPx: number, near: Euler = rot0): Euler {
+export function turnTrackball(l: Pick<Lens, 'right' | 'up' | 'fwd'>, rot0: Euler, dxPx: number, dyPx: number, radiusPx: number, near: Euler = rot0, parent: M3 = IDENTITY3): Euler {
   const dUp = -dyPx;
   const d = Math.hypot(dxPx, dUp);
   if (d < 1e-9) return rot0;
   // the axis lies in the screen, across the drag: axis x (towards the camera) must point along the drag
   const axis = add(mulS(l.right, dUp), mulS(l.up, -dxPx));
-  return eulerZYX(mul3(axisAngle(axis, d / Math.max(1, radiusPx)), matrixOf(rot0)), near);
+  return localEuler(mul3(axisAngle(axis, d / Math.max(1, radiusPx)), mul3(parent, matrixOf(rot0))), parent, near);
 }
 
 /** Turn about the line of sight by `rad` (positive = counter-clockwise as seen on screen): the outer ring of the gizmo. */
-export function turnRoll(l: Pick<Lens, 'fwd'>, rot0: Euler, rad: number, near: Euler = rot0): Euler {
-  return eulerZYX(mul3(axisAngle(l.fwd, rad), matrixOf(rot0)), near);
+export function turnRoll(l: Pick<Lens, 'fwd'>, rot0: Euler, rad: number, near: Euler = rot0, parent: M3 = IDENTITY3): Euler {
+  return localEuler(mul3(axisAngle(l.fwd, rad), mul3(parent, matrixOf(rot0))), parent, near);
 }
 
 /** Angle of a screen point about a centre, counter-clockwise, y down on screen. */
@@ -314,8 +322,8 @@ export function dragScale(s0: number, d0: number, d1: number, min = 0.01, max = 
 }
 
 /** Where the object's own X / Y / Z axes point on screen (unit length 1 = in the screen plane; shorter = towards or away from you). */
-export function axisTriad(l: Pick<Lens, 'right' | 'up'>, rot: Euler): [number, number][] {
-  const m = matrixOf(rot);
+export function axisTriad(l: Pick<Lens, 'right' | 'up'>, rot: Euler, parent: M3 = IDENTITY3): [number, number][] {
+  const m = mul3(parent, matrixOf(rot));
   return [0, 1, 2].map((i) => {
     const col: V3 = [m[i], m[3 + i], m[6 + i]];
     return [dot(col, l.right), -dot(col, l.up)] as [number, number];

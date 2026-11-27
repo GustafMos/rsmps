@@ -1308,6 +1308,13 @@ export class Editor {
     return out;
   }
 
+  /** Show the level at `path` (group ids from the top) and select `nodes` there. Used by tapping a shape in the viewer's picture. */
+  selectIn(path: readonly string[], nodes: readonly string[]): void {
+    const same = path.length === this.state.path.length && path.every((id, i) => id === this.state.path[i]);
+    this.patch({ path: [...path], selection: [...nodes], selectedFrame: null, addMenu: null, contextMenu: null, socketPicker: null });
+    if (!same) this.syncHeights();
+  }
+
   /** Open a group node of the shown level (double-click, Tab): the graph view shows its inside. */
   enterGroup(id: string): void {
     const n = this.level.nodes.find((x) => x.id === id);
