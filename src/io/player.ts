@@ -443,6 +443,10 @@ export class PlayerImpl implements Player {
       full: this.size,
       scale: this.shown ? this.shownProxy : this.currentProxy(),
       cachedFrames: this.cache.frames.size,
+      cachedShown: this.agg.cachedShown,
+      cachedWrongSize: this.agg.cachedWrongSize,
+      orderErrors: this.agg.orderErrors,
+      longestGapMs: this.agg.longestGapMs,
       totalFrames: this.totalFrames,
       decode: { requests: d.requests, sequential: d.sequential, seeks: d.seeks, browser: d.browser, repeats: d.repeats, ahead: d.ahead, waitMs: d.waitMs },
       uploads: { count: perf.uploads.count, pixels: perf.uploads.pixels, sizes: [...perf.uploads.sizes] },
@@ -673,7 +677,7 @@ export class PlayerImpl implements Player {
   /** Remember the frame on screen for later: it is read back and packed when nothing else is going on. Latest wins. */
   private queueCapture(frame: number, image: Shown, proxy: number, key: string): void {
     if (this.cache.maxBytes <= 0) return;
-    const have = this.cache.get(frame, proxy);
+    const have = this.playing ? this.cache.get(frame, proxy, proxy) : this.cache.get(frame, proxy);
     if (have) return;
     if (this.pendingCaptures.some((c) => c.frame === frame && c.key === key && c.proxy >= proxy)) return;
     this.gpu.retain(image.texture);
@@ -720,11 +724,11 @@ export class PlayerImpl implements Player {
         // Lossy packing draws the texture into a canvas and lets the browser encode it: no pixel loops on the main thread.
         const lossy = async (alpha: boolean) => {
           this.capturePresenter ??= new OffscreenPresenter(this.gpu, false);
-          return presentToBlob(this.capturePresenter, { texture: job.texture, width: job.width, height: job.height }, alpha ? 'image/webp' : 'image/jpeg', alpha ? 0.9 : 0.92);
+          return presentToBlob(this.capturePresenter, { texture: job.texture, width: job.width, height: job.height }, alpha ? 'image/webp' : 'image/jpeg', 0.97);
         };
         const packed = await packFrame(raw, job.width, job.height, this.cacheQuality, lossy);
         this.cache.setPlayhead(this.frame, this.totalFrames, this.playing);
-        if (job.key === this.key && this.cache.put(job.frame, packed, job.proxy, packed.bytes)) {
+        if (job.key === this.key && this.cache.put(job.frame, packed, job.proxy, packed.bytes, this.playing)) {
           this.cacheStats.captured++;
           this.cacheStats.rawBytes += raw.byteLength;
           this.markChanged(); // the "cached frames" bar
@@ -1047,7 +1051,7 @@ export class PlayerImpl implements Player {
     this.settledProxy = job.proxy;
     const live = this.liveSignals() || this.hasLive || (this.hasShoot && !this.playing);
     this.cache.setPlayhead(this.frame, this.totalFrames, this.playing);
-    const cached = live || job.final ? undefined : this.cache.get(job.frame, this.playing ? 0 : job.proxy);
+    const cached = live || job.final ? undefined : this.playing ? this.cache.get(job.frame, job.proxy, job.proxy) : this.cache.get(job.frame, job.proxy);
     if (cached) {
       const img = await this.restore(cached.image);
       if (img) {
@@ -1161,8 +1165,13 @@ export class PlayerImpl implements Player {
     if (this.lastPerfFrame >= 0 && n > 0) {
       const gap = (((job.frame - this.lastPerfFrame) % n) + n) % n;
       if (gap > 1) this.agg.skipped += gap - 1;
+      if (gap > n / 2) this.agg.orderErrors++; // went backwards
     }
     this.lastPerfFrame = job.frame;
+    if (m.cached) {
+      this.agg.cachedShown++;
+      if (Math.abs(this.shownProxy - job.proxy) > 1e-6) this.agg.cachedWrongSize++;
+    }
     this.agg.add({ at: performance.now(), evalMs: m.evalMs, decodeMs: m.decodeMs, drawMs: this.lastDrawMs, gpuWaitMs: m.gpuWaitMs, nodes: m.nodes, cached: m.cached });
   }
 
