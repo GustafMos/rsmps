@@ -43,3 +43,18 @@ Rules that follow from it (apply them in every brief to a coding agent):
 - Before reporting, the agent must open the feature in a real page at desktop and phone size, screenshot it, and judge
   the screenshot as a newcomer would. Reviewing those screenshots is part of the top-tier model's review.
 - When reporting to the owner, say how to use the feature in steps, not how it works inside.
+
+## Wires are the only connections (owner's standing rule, 2026-11-27)
+
+A node is affected only by what is wired into it, directly or through the nodes upstream of it. This is the contract in
+docs/ENGINE.md ("A node … knows nothing else: not the graph, not other nodes") and the owner relies on it: several
+cameras, each with its own objects, field of view and light, layered freely. When a proposal made the World AR Camera
+apply to every 3D object automatically, the owner rejected it: "use only on all 3d objects somehow wired through this
+camera", "this should be the rule because of the downstream node rules we set up early on."
+
+- Never add implicit or global behaviour (a default camera, a scene-wide light, a node that changes others it is not
+  wired to). No hidden connections.
+- To save the user from dragging wires, make REAL wires for them: tick lists, dropdowns and one-step setups that create
+  or move visible wires in one undo step.
+- Values that always travel together ride on one wire (the camera carries its light and floor; a Motion wire carries
+  the Physics camera), so the effect still follows the wiring.
