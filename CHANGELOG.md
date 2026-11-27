@@ -4,6 +4,16 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.58.0] - 2026-11-27
+
+### Fixed
+- **Physics in AR: objects stand on the real floor, at the placed spot.** Wiring the World AR Camera into the Physics node and Physics into a 3D Object left the object floating in front of the phone, because the camera only steered the Physics preview and never reached the object. A camera wired into Physics is now passed on to every object it drives (an object's own camera wire still wins), so the object uses the placed spot, the real up direction, the room light and the ground shadow.
+
+### Changed
+- **The physics floor is automatic.** Floor is now Automatic, Custom height or Off. Automatic uses the real surface from the AR camera, also after the object is raised, and the old made-up floor otherwise. Existing projects keep their floor.
+- Choosing Falls or Stays put on an object that already has a camera also connects that camera to Physics. If the graph has an AR camera that Physics does not use, the Physics panel and the object's Physics section say so with a **Use the AR camera** button. The Physics node's camera socket is now called "AR camera" and is shown by default, and the node has a "How to use" guide.
+Checked with simulated AR frames: a falling ball comes to rest with its bottom on the placed surface, at the tapped spot. Not yet tried on a real AR device.
+
 ## [0.57.0] - 2026-11-27
 
 ### Added
