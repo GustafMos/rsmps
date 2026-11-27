@@ -8,7 +8,7 @@
  * which keeps materials and the bounding sphere in the object's own frame. The `sdf` output of the SDF Scene node wraps the same
  * transform around the tree (`sceneMove`), so a scene wired into another carries it.
  */
-import { BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, lightVector, marchUniforms, resolveCamera, run3d, type LightP, type XformP } from './gen-3d';
+import { aaPlan, BOX_BOUNDS_WGSL, build3dShader, cameraUniforms, checkFrame, lightVector, marchUniforms, resolveCamera, run3d, type LightP, type XformP } from './gen-3d';
 import { spunRotation } from './gen-common';
 import { materialKey, materialTextures, materialUniforms } from './gen-material';
 import { SDF2D_WGSL } from './gen-sdf2d';
@@ -144,6 +144,7 @@ export interface SdfRenderParams extends XformP, LightP {
   ao: number;
   shadows: boolean;
   quality: string;
+  antiAlias?: string;
   shape2dFrom: 'alpha' | 'brightness';
   shape2dThreshold: number;
 }
@@ -196,6 +197,8 @@ export interface SdfRenderInput {
   /** Clock phase 0..1 (only read when the scene spins). */
   phase: number;
   wantDepth: boolean;
+  /** Export or a paused full-size frame (ctx.quality 'final' at proxy 1): the Anti-aliasing setting may then spend more rays. */
+  fullQuality?: boolean;
 }
 
 /** Render the scene: image and (when asked) depth, in the conventions of SDF 3D (docs/ENGINE.md, "Depth encoding"). */
@@ -236,7 +239,7 @@ export function renderSdf(gpu: NodeGpu, r: SdfRenderInput): { image: ImageValue;
     fld = prep.fld;
     Object.assign(uniforms, prep.uniforms);
   }
-  Object.assign(uniforms, marchUniforms({ light: lightVector(p), p, quality: p.quality, stepScale: 0.9 * sdfStepScale(root), nEps: usesPic ? 0.01 : 0 }));
+  Object.assign(uniforms, marchUniforms({ light: lightVector(p), p, quality: p.quality, stepScale: 0.9 * sdfStepScale(root), nEps: usesPic ? 0.01 : 0, aaPlan: aaPlan(p.antiAlias, p.quality, !!r.fullQuality) }));
   const mat = r.material;
   if (mat) Object.assign(uniforms, materialUniforms(mat));
   // a picture shape without a picture would read an unbound field: such shapes are dropped by SDF Shape, so this holds

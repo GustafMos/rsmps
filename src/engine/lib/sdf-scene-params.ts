@@ -2,7 +2,7 @@
  * The render settings of an SDF Scene, in one place: the inner Scene Output node (`sdf-render`) declares them, and the scene's group node
  * shows them (group.ts `groupDefOf` uses this schema, with its groups and conditions, instead of the plain snapshot other exposed params get).
  */
-import { LIGHT_PARAMS, QUALITY_PARAM, SHADE_PARAMS, XFORM_PARAMS } from './gen-3d';
+import { AA_PARAM, LIGHT_PARAMS, QUALITY_PARAM, SHADE_PARAMS, XFORM_PARAMS } from './gen-3d';
 import type { InputDef, ParamSchema } from '../types';
 
 /** Id of the Scene Output node inside every SDF Scene (its group's marker `sdfScene` and the wiring rely on it). */
@@ -17,6 +17,7 @@ export const SDF_SCENE_PARAMS = {
   ...LIGHT_PARAMS,
   ...SHADE_PARAMS,
   ...QUALITY_PARAM,
+  ...AA_PARAM,
   shape2dFrom: {
     type: 'enum',
     default: 'alpha',
