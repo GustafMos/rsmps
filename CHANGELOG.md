@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.61.0] - 2026-11-27
+
+### Fixed
+- **World AR: objects slide less while you move.** The object's picture is always drawn a little late, and the correction for that treated everything in it as being at the distance of the placed spot, so anything raised, falling or away from the spot slid across the room as the phone moved. The picture is now rendered for where the phone is about to be, judged from its recent movement and how late pictures are arriving, which removes most of the slide at any distance. In a simulated walk with pictures a tenth of a second late, the error fell from up to 14 pixels to under 4. Saved videos were never affected and are unchanged.
+- **World AR view layout on phones.** The readout and the Experimental badge no longer sit on top of the Zoom and Height strips, and the buttons no longer run under them.
+
+### Added
+- The AR readout shows "object picture is N ms behind", so the delay on a real phone can be reported.
+
 ## [0.60.0] - 2026-11-27
 
 ### Fixed
