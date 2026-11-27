@@ -12,7 +12,7 @@ export default defineNode({
   category: 'sdf',
   description: 'Joins shapes: Union adds them, Subtract cuts every later shape out of the first one, Intersect keeps only the overlap. Smoothness rounds the join and blends the colors.',
   keywords: ['sdf', 'union', 'subtract', 'intersect', 'boolean', 'smooth union', 'merge', 'cut', 'blend', 'metaball', 'model'],
-  inputs: { items: { type: 'sdf', multi: true, label: 'Shapes', firstNote: 'base' } },
+  inputs: { items: { type: 'sdf', multi: true, label: 'Shapes', firstNote: 'base', addLabel: '+ add shape' } },
   outputs: { sdf: { type: 'sdf', label: 'Combined' } },
   params: {
     operation: {

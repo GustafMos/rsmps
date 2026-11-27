@@ -358,7 +358,7 @@ function RowView({ row, node, wired }: { row: Row; node: NodeInstance; wired: Se
   if (row.kind === 'layers') {
     return (
       <div className="rs-row rs-row--layers" style={{ top: row.y, height: (row.count + 1) * LAYER_H }}>
-        <LayerList nodeId={node.id} port={row.port} type={row.type} variant="node" topFirst={row.topFirst} firstNote={row.firstNote} />
+        <LayerList nodeId={node.id} port={row.port} type={row.type} variant="node" topFirst={row.topFirst} firstNote={row.firstNote} addLabel={row.addLabel} />
       </div>
     );
   }

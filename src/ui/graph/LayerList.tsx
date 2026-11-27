@@ -10,7 +10,7 @@ import { shallowArrayEqual } from '../store/createStore';
  * Every wire into a `multi` input as its own row. An input marked `order: 'top-first'` (a layer stack) lists the top layer
  * first, like a layer panel, labelled Top / 2 / Bottom; others keep wire order, numbered 1, 2, 3. In the graph each row owns a socket so wires end at their row.
  */
-export function LayerList({ nodeId, port, type, variant, topFirst = false, firstNote }: { nodeId: string; port: string; type: SocketType; variant: 'node' | 'inspector'; topFirst?: boolean; firstNote?: string }) {
+export function LayerList({ nodeId, port, type, variant, topFirst = false, firstNote, addLabel }: { nodeId: string; port: string; type: SocketType; variant: 'node' | 'inspector'; topFirst?: boolean; firstNote?: string; addLabel?: string }) {
   const { ed, io } = useApp();
   const edges = useEd((s) => wiresInto(s.level, nodeId, port), shallowArrayEqual);
   const names = useEd(
@@ -35,7 +35,7 @@ export function LayerList({ nodeId, port, type, variant, topFirst = false, first
   const dropRow = (
     <div className="rs-layer rs-layer--drop">
       <span className={`rs-sock rs-sock--in rs-sock--${type}`} data-sock data-node={nodeId} data-port={port} data-dir="in" data-type={type} />
-      <span className="rs-layer__hint">{topFirst ? '+ add on top' : '+ drop wire here'}</span>
+      <span className="rs-layer__hint">{addLabel ?? (topFirst ? '+ add on top' : '+ drop wire here')}</span>
     </div>
   );
 

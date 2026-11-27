@@ -1003,8 +1003,8 @@ export class Editor {
 
   /**
    * Two outputs joined: the one you HELD goes on top, the one you dropped ONTO is the base (bottom).
-   * Images/masks make a Stack Layers node (base first wire, held second), audio makes a Mixer, SDF shapes make an SDF Combine (same order; only inside an SDF Scene). Dropping onto the output of a
-   * Stack (or SDF Combine) adds the held output as a new top layer of that Stack instead. One undo step. Returns false when the pair is not mergeable.
+   * Images/masks make a Stack Layers node (base first wire, held second), audio makes a Mixer, SDF shapes make an SDF Combine (same order; only inside an SDF Scene; always a NEW Combine, so each step has its own operation). Dropping onto the output of a
+   * Stack adds the held output as a new top layer of that Stack instead. One undo step. Returns false when the pair is not mergeable.
    */
   mergeOutputs(held: Edge['from'], base: Edge['from']): boolean {
     const g0 = this.level;
@@ -1027,9 +1027,9 @@ export class Editor {
         return false;
       }
     }
-    const appendTo = kind === 'stack' && nodeB.type === 'stack' && base.port === 'image' ? 'images' : kind === 'sdf-combine' && nodeB.type === 'sdf-combine' && base.port === 'sdf' ? 'items' : null;
+    const appendTo = kind === 'stack' && nodeB.type === 'stack' && base.port === 'image' ? 'images' : null;
     if (appendTo) {
-      // dropped onto a Stack's / SDF Combine's output: the held output becomes a new last input of it (no second node nested inside it)
+      // dropped onto a Stack's output: the held output becomes a new last input of it (no second node nested inside it)
       const to = { node: base.node, port: appendTo };
       const err = connectError(g0, this.registry, held, to);
       if (err) {

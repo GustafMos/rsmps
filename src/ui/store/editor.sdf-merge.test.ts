@@ -47,30 +47,46 @@ describe('mergeOutputs: SDF shapes make an SDF Combine', () => {
     expect(ed.state.selection).toEqual([c.id]);
   });
 
-  it('dropping onto an existing Combine adds an input; dropping onto a shape makes a new Combine', () => {
+  it('dropping onto an existing Combine makes a NEW Combine; the old one is untouched', () => {
     const { ed, shape2 } = inScene();
     ed.mergeOutputs(sdf(shape2), sdf('shape1'));
     const c = combines(ed)[0];
+    const oldIns = ed.state.level.edges.filter((e) => e.to.node === c.id).map((e) => [e.from.node, e.to.port]);
     const shape3 = ed.addNodeAt('sdf-shape', { x: 0, y: 400 })!;
     expect(ed.mergeOutputs(sdf(shape3), sdf(c.id))).toBe(true);
-    expect(combines(ed)).toHaveLength(1);
-    expect(ed.state.level.edges.filter((e) => e.to.node === c.id)).toHaveLength(3);
-    expect(ed.state.level.edges.some((e) => e.from.node === shape3 && e.to.node === c.id)).toBe(true);
-    const shape4 = ed.addNodeAt('sdf-shape', { x: 0, y: 500 })!;
-    expect(ed.mergeOutputs(sdf(shape4), sdf(shape3))).toBe(true);
     expect(combines(ed)).toHaveLength(2);
+    const c2 = combines(ed).find((n) => n.id !== c.id)!;
+    expect(ed.state.level.edges.filter((e) => e.to.node === c.id).map((e) => [e.from.node, e.to.port])).toEqual(oldIns);
+    expect(ed.state.level.edges.filter((e) => e.to.node === c2.id).map((e) => [e.from.node, e.to.port])).toEqual([[c.id, 'items'], [shape3, 'items']]);
+    expect(ed.state.level.edges.filter((e) => e.to.node === 'render' && e.to.port === 'scene').map((e) => e.from.node)).toEqual([c2.id]);
+    expect(ed.state.selection).toEqual([c2.id]);
   });
 
-  it('a loop is refused with a toast', () => {
+  it('combine onto combine makes a new Combine, and undo restores in one step', () => {
+    const { ed, shape2 } = inScene();
+    ed.mergeOutputs(sdf(shape2), sdf('shape1'));
+    const shape3 = ed.addNodeAt('sdf-shape', { x: 0, y: 400 })!;
+    const shape4 = ed.addNodeAt('sdf-shape', { x: 0, y: 500 })!;
+    ed.mergeOutputs(sdf(shape4), sdf(shape3));
+    const [c, d] = combines(ed);
+    const edges = ed.state.level.edges.length;
+    expect(ed.mergeOutputs(sdf(d.id), sdf(c.id))).toBe(true);
+    expect(combines(ed)).toHaveLength(3);
+    ed.undo();
+    expect(combines(ed)).toHaveLength(2);
+    expect(ed.state.level.edges.length).toBe(edges);
+  });
+
+  it('a wire that would make a loop stays where it is', () => {
     const { ed, shape2 } = inScene();
     ed.mergeOutputs(sdf(shape2), sdf('shape1'));
     const c = combines(ed)[0];
     const mv = ed.addNodeAt('sdf-transform', { x: 0, y: 300 })!;
     ed.connect(sdf(c.id), { node: mv, port: 'sdf' });
-    const before = ed.state.level.edges.length;
-    expect(ed.mergeOutputs(sdf(mv), sdf(c.id))).toBe(false);
-    expect(ed.state.level.edges.length).toBe(before);
-    expect(ed.state.toasts.length).toBeGreaterThan(0);
+    expect(ed.mergeOutputs(sdf(mv), sdf(c.id))).toBe(true);
+    const c2 = combines(ed).find((n) => n.id !== c.id)!;
+    expect(ed.state.level.edges.some((e) => e.from.node === c.id && e.to.node === mv)).toBe(true);
+    expect(ed.state.level.edges.some((e) => e.from.node === c2.id && e.to.node === mv)).toBe(false);
   });
 
   it('is one undo step', () => {

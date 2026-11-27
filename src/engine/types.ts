@@ -227,6 +227,8 @@ export interface InputDef {
   order?: 'top-first';
   /** What the first wire does, shown after its row label: "Bottom · note" with `order: 'top-first'`, else "1 · note". E.g. "sets size". */
   firstNote?: string;
+  /** Text of the drop row of a `multi` input, instead of the default ('+ add on top' / '+ drop wire here'). E.g. '+ add shape'. */
+  addLabel?: string;
   /**
    * Do not evaluate this input automatically: `ctx.in` holds null and the node fetches it with `ctx.pull`.
    * Use it for analysis that should run ONCE on a fixed frame (e.g. extracting a palette from the first frame of a

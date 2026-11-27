@@ -266,7 +266,7 @@ function NodePanel({ id }: { id: string }) {
         <div key={port} className="rs-insp__sec">
           <div className="rs-caps">{/^layers/i.test(d.label ?? '') ? d.label : `${isLayerType(d.type) ? 'Layers' : 'Inputs'}: ${d.label ?? port}`}</div>
           <p className="rs-insp__hint">{d.order === 'top-first' ? 'The top row is drawn on top, the bottom row sits underneath. Drag rows or use the arrows to reorder.' : 'Drag rows or use the arrows to reorder.'}</p>
-          <LayerList nodeId={id} port={port} type={d.type} variant="inspector" topFirst={d.order === 'top-first'} firstNote={d.firstNote} />
+          <LayerList nodeId={id} port={port} type={d.type} variant="inspector" topFirst={d.order === 'top-first'} firstNote={d.firstNote} addLabel={d.addLabel} />
         </div>
       ))}
       <TransformReset node={node} def={def} wired={wired} />
