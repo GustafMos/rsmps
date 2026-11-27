@@ -38,6 +38,15 @@ export default defineNode({
   category: 'generate',
   description:
     'A lit 3D object that can spin in a perfect loop: a primitive (cube, sphere, cylinder, cone, torus, pyramid, capsule, octahedron) or your own model (choose "Custom model…" in Shape, then add a .glb, .gltf or .obj file). Transparent background.',
+  guide: {
+    does: 'A lit 3D object with a transparent background. A camera only affects the objects wired to it, and you can use several cameras.',
+    steps: [
+      'Pick a shape (or your own model) and set its size and turn.',
+      'To see it in your room, open its Camera section and press Show in AR: it adds a World AR Camera and wires this object to it.',
+      'Then press Start AR (Android Chrome) and tap the floor to place it. Another object joins with its Camera dropdown: no wire to drag.',
+    ],
+    seeAlso: ['world-ar', 'camera', 'physics'],
+  },
   keywords: ['cube', 'sphere', 'cylinder', 'cone', 'torus', 'donut', 'pyramid', 'capsule', 'octahedron', '3d', 'model', 'spin', 'rotate', 'raymarch', 'cel', 'toon', 'glb', 'gltf', 'obj', 'mesh', 'import', 'upload', 'custom', 'wavefront', 'low poly', 'displace 3d', 'morph', 'melt', 'wobble', 'deform', 'twist', 'bend', 'explode', 'depth', 'material'],
   inputs: { size: { type: 'image', label: 'Size from' }, camera: { type: 'camera', label: 'Camera' }, displaceMap: { type: 'image', label: 'Displace map' }, material: { type: 'material', label: 'Material' } },
   outputs: { image: { type: 'image', label: 'Image' }, depth: { type: 'image', label: 'Depth' } },

@@ -1,4 +1,5 @@
 import { MenuPopup, type MenuItem } from '../components/Menu';
+import { canShowInAr } from '../../engine/lib/ar-setup';
 import { useApp, useEd } from '../store/context';
 import { setPin } from '../store/nodeView';
 import { effectivePins } from '../lib/layout';
@@ -19,7 +20,9 @@ export function NodeContextMenu() {
   if (req.edgeId) {
     const edgeId = req.edgeId;
     const e = ed.state.level.edges.find((x) => x.id === edgeId);
-    const items: MenuItem[] = [
+    // the selected 3D objects: all of them are wired to one World AR Camera in one undo step
+  const arIds = sel.filter((id) => canShowInAr(ed.level.nodes.find((n) => n.id === id), ed.registry));
+  const items: MenuItem[] = [
       { label: 'Insert node…', icon: 'plus', onClick: () => e && ed.openAddMenu({ clientX: req.clientX, clientY: req.clientY, world: graphCtl.toWorld(req.clientX, req.clientY), insertEdge: edgeId }) },
       { sep: true },
       { label: 'Delete wire', icon: 'trash', onClick: () => ed.disconnect(edgeId) },
@@ -33,6 +36,8 @@ export function NodeContextMenu() {
   const boundary = isBoundaryNode(node);
   const multi = sel.length > 1;
   const family = node && !multi ? familyMembers(ed.registry, node.type) : [];
+  // the selected 3D objects: all of them are wired to one World AR Camera in one undo step
+  const arIds = sel.filter((id) => canShowInAr(ed.level.nodes.find((n) => n.id === id), ed.registry));
   const items: MenuItem[] = [
     ...(req.paramKey && node && def
       ? [
@@ -69,6 +74,9 @@ export function NodeContextMenu() {
           { head: 'Convert to…' } as MenuItem,
           ...family.map((m): MenuItem => ({ label: m.title, disabled: m.id === node!.type, onClick: () => ed.convertNodeType(node!.id, m.id) })),
         ]
+      : []),
+    ...(arIds.length
+      ? [{ sep: true } as MenuItem, { head: 'AR' } as MenuItem, { label: 'AR: show this in the room', onClick: () => ed.showInAr(arIds) } as MenuItem]
       : []),
     ...(!multi && node && !boundary && !isGroup && regionsSetupAvailable(ed.level, ed.registry, node.id)
       ? [
