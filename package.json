@@ -1,6 +1,6 @@
 {
   "name": "ripscorpy-media-processing-suite",
-  "version": "0.53.1",
+  "version": "0.54.0",
   "private": false,
   "description": "RipScorpy Media Processing Suite (RSMPS) — a GPU node graph for batch image, video and audio processing: pixel art, palettes, dithering, masks, parallax, tracking, synths and effects.",
   "bin": {
@@ -53,6 +53,7 @@
     "desktop:smoke:addons": "node desktop/scripts/smoke.mjs --smoke-addons"
   },
   "dependencies": {
+    "@dimforge/rapier3d-deterministic-compat": "^0.21.0",
     "fflate": "^0.8.2",
     "mediabunny": "^1.65.2",
     "onnxruntime-web": "1.31.1",

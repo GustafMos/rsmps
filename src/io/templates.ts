@@ -3,6 +3,7 @@
  * graphs that need no media; the rest reuse the built-in presets (a Media In shows its "Drop your clip here" label while it is empty).
  * Every template is evaluated at frame 0 against the real registry by templates.test.ts, so they cannot rot.
  */
+import { fallingShapesScene } from './templates-physics';
 import { DEFAULT_PROJECT, type Edge, type GraphDoc, type NodeInstance, type ProjectSettings } from '../engine/types';
 
 export const TEMPLATE_GROUPS = ['Pixel art', 'Video art', '3D', 'Paper & scan', 'Audio-reactive', 'Color', 'Film', 'Captions'] as const;
@@ -232,6 +233,21 @@ export const TEMPLATES: Template[] = [
       ],
       ['logo>lit', 'mat.material>lit.material', 'bg>comp.background', 'lit>comp.foreground', 'comp>out'],
     ),
+  }),
+
+  make({
+    id: 'falling-shapes',
+    title: 'Falling shapes',
+    group: '3D',
+    description: 'Five shapes drop onto a floor, bounce and settle, all in one SDF Scene. Open the scene and click the Physics node to change them.',
+    graph: {
+      schema: 'rsmps/graph',
+      version: 2,
+      name: 'Falling shapes',
+      project: { ...PROJECT, width: 960, height: 720, duration: 4, loop: true },
+      nodes: [fallingShapesScene({ x: 0, y: 0 }), { id: 'out', type: 'image-out', x: 300, y: 0, params: {} }],
+      edges: [{ id: 'e1', from: { node: 'scene', port: 'image' }, to: { node: 'out', port: 'image' } }],
+    },
   }),
 
   make({
