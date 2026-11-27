@@ -240,7 +240,8 @@ export function defaultParams(def: AnyNodeDef): Record<string, unknown> {
 
 function coerceParam(p: ParamDef, value: unknown): unknown {
   // A node saved before this param existed (see `ParamBase.absent`).
-  const raw = value === undefined && p.absent !== undefined ? p.absent : value;
+  let raw = value === undefined && p.absent !== undefined ? p.absent : value;
+  if (p.legacy && raw !== undefined) raw = p.legacy(raw);
   switch (p.type) {
     case 'number': {
       let n = typeof raw === 'number' && Number.isFinite(raw) ? raw : p.default;
@@ -1076,6 +1077,15 @@ export class Engine {
           motion.pos.forEach((k, i) => set(k, mv.pos?.[i]));
           motion.rot.forEach((k, i) => set(k, mv.rot?.[i]));
           if (motion.scale) set(motion.scale, mv.scale);
+          // A camera that travels on the Motion wire (Physics got it on its Camera input) stands in for an unwired Camera input: the node
+          // renders exactly as if that camera were wired into it. The node's own Camera wire wins, even while it carries nothing.
+          const cam = mv.camera;
+          const camDef = (def.inputs as Record<string, { type: string; multi?: boolean }>).camera;
+          if (cam && typeof cam === 'object' && cam.kind === 'camera' && camDef?.type === 'camera' && !camDef.multi && !edges.some((e) => e.to.port === 'camera')) {
+            inputs.camera = cam;
+            sigs.push(`camera=${valueSig(cam, '')}`);
+            if (tvPorts.has(motion.port)) tvPorts.add('camera');
+          }
         }
       }
 

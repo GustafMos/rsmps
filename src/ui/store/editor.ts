@@ -3,7 +3,7 @@
  * GraphDoc references (the pure helpers in engine/graph share structure, so this is cheap).
  */
 import { driveWires } from '../../engine/lib/physics/wiring';
-import { addObjectTo, physicsOf, makePhysical, matchArFloor, removeBodyAt, removeBodyOf, startHere, tidyWiring, updateBody } from '../../engine/lib/physics/objects';
+import { addObjectTo, physicsOf, makePhysical, matchArFloor, wireArCamera, removeBodyAt, removeBodyOf, startHere, tidyWiring, updateBody } from '../../engine/lib/physics/objects';
 import type { BodySpec } from '../../engine/lib/physics/types';
 import { createStore, type Store } from './createStore';
 import { withProcessResult } from '../../engine/process';
@@ -1249,7 +1249,18 @@ export class Editor {
     return count;
   }
 
-  /** "Match AR floor": Floor height = minus the World AR Camera's Lift. False when this level has no World AR Camera. */
+  /** "Use the AR camera": wire the World AR Camera into the Physics node's Camera input, so the real floor is used and the objects it moves are drawn with that camera. */
+  useArCameraForPhysics(physId: string): boolean {
+    let ok = false;
+    this.editLevel((g) => {
+      const r = wireArCamera(g, this.registry, physId);
+      ok = !!r;
+      return r ?? g;
+    });
+    return ok;
+  }
+
+  /** "Match AR floor" (Floor: Custom height): Floor height = minus the World AR Camera's Lift. False when this level has no World AR Camera. */
   matchPhysicsArFloor(physId: string): boolean {
     let ok = false;
     this.editLevel((g) => {

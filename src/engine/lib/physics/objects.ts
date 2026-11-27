@@ -4,6 +4,7 @@
  * graph level (the editor runs them as one undo step each).
  */
 import { MOTION_PORT, paramMotion, type Registry } from '../../define';
+import { GROUP_IN } from '../../group';
 import { addNode, connect, setParam, uid } from '../../graph';
 import type { Edge, GraphDoc, NodeInstance } from '../../types';
 import { DEFAULT_BODY, normalizeBodies } from './sim';
@@ -150,7 +151,81 @@ export function physicsOf(g: GraphDoc, objId: string): { phys: NodeInstance; ind
 
 const setBodies = (g: GraphDoc, physId: string, bodies: BodySpec[]): GraphDoc => setParam(g, physId, 'bodies', bodies);
 
-const newBody = (obj: NodeInstance, kind: BodyKind): BodySpec => ({ ...DEFAULT_BODY, ...colliderFor(obj).spec, ...startPoseOf(obj), kind });
+/** How far the body reaches down from its centre when it stands upright. */
+function halfHeight(spec: Pick<BodySpec, 'shape' | 'size'>): number {
+  if (spec.shape === 'box') return spec.size[1] / 2;
+  if (spec.shape === 'sphere') return spec.size[0];
+  return spec.size[1] / 2 + (spec.shape === 'capsule' ? spec.size[0] : 0);
+}
+
+/**
+ * Where the real floor is expected to be when this object is set up (scene y), when its camera is a World AR Camera of this level
+ * (minus its Lift); null when that is not known here. Used only to keep the start pose from being below the floor.
+ */
+function floorGuess(g: GraphDoc, registry: Registry, obj: NodeInstance): number | null {
+  const src = cameraSourceFor(g, registry, obj);
+  const from = src ? g.nodes.find((x) => x.id === src.node) : undefined;
+  if (from?.type !== 'world-ar') return null;
+  return -(typeof from.params.lift === 'number' ? from.params.lift : 1);
+}
+
+/** The start pose is where the object is now, but never inside the real floor: then it starts just above it, at the same place. */
+function newBody(obj: NodeInstance, kind: BodyKind, floorY: number | null = null): BodySpec {
+  const spec = { ...DEFAULT_BODY, ...colliderFor(obj).spec, ...startPoseOf(obj), kind };
+  if (floorY !== null && kind === 'dynamic') {
+    const lowest = floorY + halfHeight(spec) + 0.02;
+    if (spec.pos[1] < lowest) spec.pos = [spec.pos[0], lowest, spec.pos[2]];
+  }
+  return spec;
+}
+
+/**
+ * The camera that draws `obj`: the wire into its own Camera input, or for an SDF shape inside an SDF Scene the scene's camera
+ * (the scene's Camera input inside the group). Null when there is none.
+ */
+export function cameraSourceFor(g: GraphDoc, registry: Registry, obj: NodeInstance): Edge['from'] | null {
+  const def = registry.get(obj.type);
+  if (def && 'camera' in def.inputs) return g.edges.find((e) => e.to.node === obj.id && e.to.port === 'camera')?.from ?? null;
+  const proxy = g.nodes.find((x) => x.id === GROUP_IN);
+  const ports = (proxy?.params as { ports?: { id: string; type: string }[] } | undefined)?.ports;
+  return ports?.some((q) => q.id === 'camera' && q.type === 'camera') ? { node: GROUP_IN, port: 'camera' } : null;
+}
+
+/** Wire the camera that draws `obj` into the Physics node's Camera input too (when that is empty), so its floor is the real one. */
+function wireCameraInto(g: GraphDoc, registry: Registry, physId: string, obj: NodeInstance): GraphDoc {
+  if (g.edges.some((e) => e.to.node === physId && e.to.port === 'camera')) return g;
+  const src = cameraSourceFor(g, registry, obj);
+  if (!src) return g;
+  try {
+    return connect(g, registry, src, { node: physId, port: 'camera' });
+  } catch {
+    return g;
+  }
+}
+
+/** What the Physics node still lacks for the real floor: an AR camera at this level that nothing connects to it (null when fine). */
+export function arCameraTodo(g: GraphDoc, physId: string): { ar: NodeInstance } | null {
+  const ar = findWorldAr(g);
+  if (!ar || g.edges.some((e) => e.to.node === physId && e.to.port === 'camera')) return null;
+  return { ar };
+}
+
+/** "Use the AR camera": wire the World AR Camera into the Physics node's Camera input (and so into every object it moves). */
+export function wireArCamera(g: GraphDoc, registry: Registry, physId: string): GraphDoc | null {
+  const todo = arCameraTodo(g, physId);
+  return todo ? connect(g, registry, { node: todo.ar.id, port: 'camera' }, { node: physId, port: 'camera' }) : null;
+}
+
+/** A 3D object moved by Physics that has no camera of its own, while a World AR Camera exists here and Physics got no camera either. */
+export function objectArTodo(g: GraphDoc, registry: Registry, objId: string): { phys: NodeInstance; ar: NodeInstance } | null {
+  const have = physicsOf(g, objId);
+  const obj = g.nodes.find((x) => x.id === objId);
+  const def = obj ? registry.get(obj.type) : undefined;
+  if (!have || !def || !('camera' in def.inputs)) return null;
+  if (g.edges.some((e) => e.to.node === objId && e.to.port === 'camera')) return null;
+  const todo = arCameraTodo(g, have.phys.id);
+  return todo ? { phys: have.phys, ar: todo.ar } : null;
+}
 
 /**
  * Give an object physics: find (or create, with a floor) the Physics node of this level, add a body shaped like the object and starting
@@ -169,14 +244,15 @@ export function makePhysical(g: GraphDoc, registry: Registry, objId: string, mod
   let next = g;
   let phys = findPhysics(next);
   if (!phys) {
-    const made = addNode(next, registry, PHYSICS_TYPE, { x: obj.x - 360, y: obj.y }, { bodies: [], floor: true });
+    const made = addNode(next, registry, PHYSICS_TYPE, { x: obj.x - 360, y: obj.y }, { bodies: [], floor: 'auto' });
     next = made.graph;
     phys = made.node;
   }
   const bodies = normalizeBodies(phys.params.bodies);
   if (bodies.length >= MAX_BODIES) throw new Error(`Physics holds at most ${MAX_BODIES} objects.`);
-  next = setBodies(next, phys.id, [...bodies, newBody(obj, kind)]);
+  next = setBodies(next, phys.id, [...bodies, newBody(obj, kind, floorGuess(next, registry, obj))]);
   next = connect(next, registry, { node: phys.id, port: motionPortOf(bodies.length) }, { node: objId, port: MOTION_PORT });
+  next = wireCameraInto(next, registry, phys.id, obj);
   return { graph: next, physId: phys.id, index: bodies.length };
 }
 
@@ -190,8 +266,9 @@ export function addObjectTo(g: GraphDoc, registry: Registry, physId: string, obj
   let next = current ? removeBodyOf(g, objId) : g;
   const bodies = normalizeBodies(next.nodes.find((x) => x.id === physId)!.params.bodies);
   if (bodies.length >= MAX_BODIES) throw new Error(`Physics holds at most ${MAX_BODIES} objects.`);
-  next = setBodies(next, physId, [...bodies, newBody(obj, mode === 'fixed' ? 'fixed' : 'dynamic')]);
-  return connect(next, registry, { node: physId, port: motionPortOf(bodies.length) }, { node: objId, port: MOTION_PORT });
+  next = setBodies(next, physId, [...bodies, newBody(obj, mode === 'fixed' ? 'fixed' : 'dynamic', floorGuess(next, registry, obj))]);
+  next = connect(next, registry, { node: physId, port: motionPortOf(bodies.length) }, { node: objId, port: MOTION_PORT });
+  return wireCameraInto(next, registry, physId, obj);
 }
 
 /** Remove body `index` of a Physics node and close the gap: the wires of later bodies move down one place. */
@@ -295,10 +372,10 @@ export function findWorldAr(g: GraphDoc): NodeInstance | undefined {
   return g.nodes.find((x) => x.type === 'world-ar');
 }
 
-/** "Match AR floor": Floor height = minus the World AR Camera's Lift (where the real surface is in its object frame). Null when there is none. */
+/** "Match AR floor" (for Floor: Custom height): Floor height = minus the World AR Camera's Lift (where the real surface is in its object frame). Null when there is none. */
 export function matchArFloor(g: GraphDoc, physId: string): GraphDoc | null {
   const ar = findWorldAr(g);
   if (!ar) return null;
   const lift = typeof ar.params.lift === 'number' ? ar.params.lift : 1;
-  return setParam(setParam(g, physId, 'floor', true), physId, 'floorHeight', -lift);
+  return setParam(setParam(g, physId, 'floor', 'custom'), physId, 'floorHeight', -lift);
 }

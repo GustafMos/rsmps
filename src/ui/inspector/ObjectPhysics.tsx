@@ -1,5 +1,5 @@
 import { MOTION_PORT } from '../../engine/define';
-import { canBePhysical, colliderFor, physicsOf } from '../../engine/lib/physics/objects';
+import { canBePhysical, colliderFor, objectArTodo, physicsOf } from '../../engine/lib/physics/objects';
 import { normalizeBodies } from '../../engine/lib/physics/sim';
 import type { BodyShape } from '../../engine/lib/physics/types';
 import type { NodeInstance } from '../../engine/types';
@@ -37,6 +37,7 @@ export function ObjectPhysics({ node }: { node: NodeInstance }) {
     if (m !== mode) ed.setObjectPhysics(node.id, m);
   };
   const note = body && have ? colliderFor(node).note : null;
+  const arTodo = have ? objectArTodo(level, ed.registry, node.id) : null;
   const physName = have ? nodeDisplayName(have.phys, ed.registry.get(have.phys.type)) : '';
   const set = (patch: Parameters<typeof ed.setBody>[2]) => {
     if (have) ed.setBody(have.phys.id, have.index, patch);
@@ -63,6 +64,14 @@ export function ObjectPhysics({ node }: { node: NodeInstance }) {
             <NumberField large label="Grip" min={0} max={5} softMax={2} step={0.05} value={body.friction} defaultValue={0.6} onChange={(v) => set({ friction: v })} />
             <NumberField large label="Weight" min={0.001} max={100000} softMax={100} step={0.1} value={body.mass} defaultValue={1} onChange={(v) => set({ mass: v })} />
           </div>
+          {arTodo && (
+            <div className="rs-objphys__todo" data-ar-todo>
+              <p className="rs-insp__hint">To do: this graph has an AR camera that this object does not use, so it floats in front of the phone instead of standing on the real floor.</p>
+              <button className="rs-btn rs-btn--primary" data-use-ar onClick={() => ed.useArCameraForPhysics(arTodo.phys.id)} title="Wires the World AR Camera into the Physics node. The object is then drawn with that camera and lands on the real floor.">
+                Use the AR camera
+              </button>
+            </div>
+          )}
           <div className="rs-insp__actions">
             <button className="rs-btn" data-physics-start-here title="Use where this object is now (its Move and Rotate) as the place it starts." onClick={() => ed.startPhysicsHere(node.id)}>
               Start here
