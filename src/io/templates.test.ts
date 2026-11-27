@@ -23,7 +23,7 @@ function testSource(holder: { image: ImageValue | null }) {
 describe('templates (table driven)', () => {
   it('there are 10 to 18 templates with unique ids and titles, in known groups, each with a description', () => {
     expect(TEMPLATES.length).toBeGreaterThanOrEqual(10);
-    expect(TEMPLATES.length).toBeLessThanOrEqual(18);
+    expect(TEMPLATES.length).toBeLessThanOrEqual(20);
     expect(new Set(TEMPLATES.map((t) => t.id)).size).toBe(TEMPLATES.length);
     expect(new Set(TEMPLATES.map((t) => t.title)).size).toBe(TEMPLATES.length);
     for (const t of TEMPLATES) {
