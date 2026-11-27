@@ -4,6 +4,15 @@ All notable changes to RipScorpy Media Processing Suite (formerly PixelArtify St
 
 ## Unreleased
 
+## [0.56.0] - 2026-11-27
+
+### Changed
+- **Physics is set up from the object, with no wiring.** Every 3D Object and SDF shape has a **Physics** section in its inspector: Off, Falls or Stays put. Choosing one creates the Physics node if there is none (inside the same SDF Scene when the object is in one), gives the object a matching shape for bumping and its current position as the start, and connects it, in one undo step. Bounciness, Grip, Weight and "Start here" are in the same section.
+- **One wire per object.** A new Motion wire carries position and rotation together, and every node with Move and Rotate settings has one Motion input. The Physics node now shows one output per object, named after the object it drives ("→ SDF Shape Sphere"), plus a summary such as "2 objects · floor on". The number outputs and the extra inputs are hidden until wired or switched on under Advanced.
+- **The Physics panel is rewritten in plain words**: what the node does, the list of objects, "Add an object…", then floor, gravity and walls. "Match AR floor" sets the floor to the real surface when a World AR Camera is present. Viewing the Physics node shows its bodies and floor as outlines without wiring anything.
+- At the start of the animation, dragging a physics-driven object in the viewer sets where it starts; at other times the handles say it is driven by Physics.
+Projects made with the first Physics node keep working; "Tidy wiring" converts their two wires per object into one. The "Falling shapes" template uses the new wiring.
+
 ## [0.55.0] - 2026-11-27
 
 ### Added
